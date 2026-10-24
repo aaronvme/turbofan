@@ -44,7 +44,7 @@ describe('SLAU2 reference flux (Kitamura & Shima 2013), f64', () => {
 
   it('keeps a stationary contact: no mass flux, the momentum flux is the pressure', () => {
     const f = slau2Flux(prim(1.5, 0, 0, 0, 120), prim(0.6, 0, 0, 0, 120), S, rf, ctx);
-    expect(Math.abs(f[0] ?? 1)).toBeLessThan(1e-12);
+    expect(Math.abs(f[0])).toBeLessThan(1e-12);
     expect(f[1]).toBeCloseTo(120 * S[0], 10);
     expect(f[2]).toBeCloseTo(120 * S[1], 10);
   });
@@ -54,7 +54,7 @@ describe('SLAU2 reference flux (Kitamura & Shima 2013), f64', () => {
     const R = prim(1.0, 650, 820, 0, -1000);
     const f = slau2Flux(L, R, S, rf, ctx);
     // mdot > 0, so the x-momentum flux is mdot * uL + p~ * Sx with p~ = p'L.
-    expect((f[1] ?? 0) - (f[0] ?? 0) * 600).toBeCloseTo(2000 * S[0], 6);
+    expect(f[1] - f[0] * 600).toBeCloseTo(2000 * S[0], 6);
   });
 
   it('is zero through a zero-area (axis) face', () => {

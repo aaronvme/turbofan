@@ -27,6 +27,8 @@ import { createDawnGpu } from './helpers/dawn';
 // computes what it claims: the real SLAU2, consistent halos/ghosts across tile shapes and
 // block splits, and freestream/quiescent preservation of the gauge formulation.
 
+type StateArrays = { a: Float32Array | Float64Array; b: Float32Array | Float64Array };
+
 const P_INF = 101325;
 const T_INF = 288.15;
 const GRID = { ni: 48, nj: 24, x0: -1, x1: 3, r1: 1.5, wiggle: 0.25 };
@@ -107,14 +109,19 @@ describe('spike (a) stage kernel on Dawn', () => {
   }
 
   /** Primitives of every logical cell, in logical (I, J) order. */
-  function prims(layout: Layout, state: { a: Float32Array; b: Float32Array }, ctx: GaugeContext) {
+  function prims(layout: Layout, state: StateArrays, ctx: GaugeContext) {
     const out: FluxPrim[] = [];
     for (let J = 0; J < GRID.nj; J++) {
       for (let I = 0; I < GRID.ni; I++) {
         const c = cellIndex(layout, I, J);
         const { rc } = cellMetrics(nodes, I, J);
         out.push(
-          consToPrim(state.a.subarray(4 * c, 4 * c + 4), state.b.subarray(4 * c, 4 * c + 4), rc, ctx),
+          consToPrim(
+            state.a.subarray(4 * c, 4 * c + 4),
+            state.b.subarray(4 * c, 4 * c + 4),
+            rc,
+            ctx,
+          ),
         );
       }
     }
@@ -182,7 +189,7 @@ describe('spike (a) stage kernel on Dawn', () => {
     expect(Math.max(...q.map((p) => Math.abs(p.pp)))).toBeLessThan(1);
   });
 
-  it('preserves an M 0.3 freestream on the same mesh (the gauge p\' against the radial source)', async () => {
+  it("preserves an M 0.3 freestream on the same mesh (the gauge p' against the radial source)", async () => {
     const layout = makeLayout(GRID.ni, GRID.nj, 4, 3);
     const { state, ctx, inf } = await run(layout, { x: 16, y: 8 }, 102, null, 10);
     const q = prims(layout, state, ctx);
@@ -236,10 +243,16 @@ describe('spike (a) stage kernel on Dawn', () => {
     for (const r of results.slice(1)) {
       let worst = 0;
       r.a.forEach((x, k) => {
-        worst = Math.max(worst, Math.abs(x - (ref.a[k] ?? Number.NaN)) / (1 + Math.abs(ref.a[k] ?? 0)));
+        worst = Math.max(
+          worst,
+          Math.abs(x - (ref.a[k] ?? Number.NaN)) / (1 + Math.abs(ref.a[k] ?? 0)),
+        );
       });
       r.b.forEach((x, k) => {
-        worst = Math.max(worst, Math.abs(x - (ref.b[k] ?? Number.NaN)) / (1 + Math.abs(ref.b[k] ?? 0)));
+        worst = Math.max(
+          worst,
+          Math.abs(x - (ref.b[k] ?? Number.NaN)) / (1 + Math.abs(ref.b[k] ?? 0)),
+        );
       });
       expect(worst).toBeLessThan(1e-6);
     }
