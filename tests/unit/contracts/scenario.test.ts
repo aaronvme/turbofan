@@ -51,7 +51,11 @@ const takeoffAccel: Scenario = {
   ],
 };
 
-const [O0, O1, O2] = takeoffAccel.outcomes as readonly [ExpectedOutcome, ExpectedOutcome, ExpectedOutcome];
+const [O0, O1, O2] = takeoffAccel.outcomes as readonly [
+  ExpectedOutcome,
+  ExpectedOutcome,
+  ExpectedOutcome,
+];
 
 function withCycle(patch: Partial<SimSnapshot['cycle']>): SimSnapshot {
   const s = sampleSnapshot();
@@ -67,7 +71,7 @@ describe('validateScenario', () => {
     [
       'steps out of time order',
       { ...takeoffAccel, timeline: [...takeoffAccel.timeline].reverse() },
-      /timeline\[1\].*not before/,
+      /timeline\[1\] at 1 s must not be before timeline\[0\]/,
     ],
     [
       'a negative step time',
@@ -190,7 +194,9 @@ describe('validateScenario', () => {
       ],
     };
     expect(validateScenario(takeoffAccel, sampleSnapshot())).toEqual([]);
-    expect(validateScenario(bad, sampleSnapshot()).join()).toMatch(/cycle\.thrustt does not resolve/);
+    expect(validateScenario(bad, sampleSnapshot()).join()).toMatch(
+      /cycle\.thrustt does not resolve/,
+    );
   });
 });
 
@@ -198,7 +204,9 @@ describe('predicates on snapshots', () => {
   const snap = sampleSnapshot();
 
   it('resolves array paths, including station ids that contain a dot', () => {
-    expect(resolvePath(snap, ['cycle', 'stations', '49.5', 'ttK'])).toBe(snap.cycle.stations['49.5'].ttK);
+    expect(resolvePath(snap, ['cycle', 'stations', '49.5', 'ttK'])).toBe(
+      snap.cycle.stations['49.5'].ttK,
+    );
     expect(resolvePath(snap, ['cycle', 'nothing'])).toBeUndefined();
     expect(resolvePath(snap, ['cycle', 'n1Rpm', 'deeper'])).toBeUndefined();
     expect(resolvePath(snap, ['scenario', 'outcomes', '0', 'id'])).toBe('reach-95');
@@ -238,7 +246,10 @@ describe('predicates on snapshots', () => {
       },
       true,
     ],
-    [{ kind: 'not', of: { kind: 'compare', path: ['cycle', 'n1Percent'], op: '>', value: 1 } }, false],
+    [
+      { kind: 'not', of: { kind: 'compare', path: ['cycle', 'n1Percent'], op: '>', value: 1 } },
+      false,
+    ],
   ])('%j -> %s', (predicate, expected) => {
     expect(evaluatePredicate(predicate, snap)).toBe(expected);
   });
@@ -299,7 +310,12 @@ describe('outcome tracking', () => {
     expect(r[0]?.verdict).toBe('pending');
     r = updateOutcomes(sc, r, withCycle({ egtDisplayedK: 1100 }), 8.02);
     expect(r[0]).toMatchObject({ verdict: 'passed', decidedAtS: 8.02 });
-    const hot = updateOutcomes(sc, initialOutcomeResults(sc), withCycle({ egtDisplayedK: 1300 }), 8);
+    const hot = updateOutcomes(
+      sc,
+      initialOutcomeResults(sc),
+      withCycle({ egtDisplayedK: 1300 }),
+      8,
+    );
     expect(hot[0]?.verdict).toBe('failed');
   });
 

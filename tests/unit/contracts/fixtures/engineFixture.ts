@@ -86,10 +86,30 @@ export function validEngine(): EngineDefinition {
     rotation: { lp: -1, hp: -1 },
     flowpath: {
       curves: {
-        spinner: { points: [{ x: -1, r: 0 }, { x: 0, r: 0.3 }] },
-        coreInner: { points: [{ x: 0, r: 0.3 }, { x: 10, r: 0.3 }] },
-        plug: { points: [{ x: 10, r: 0.3 }, { x: 12, r: 0 }] },
-        coreOuter: { points: [{ x: 1, r: 0.5 }, { x: 11, r: 0.5 }] },
+        spinner: {
+          points: [
+            { x: -1, r: 0 },
+            { x: 0, r: 0.3 },
+          ],
+        },
+        coreInner: {
+          points: [
+            { x: 0, r: 0.3 },
+            { x: 10, r: 0.3 },
+          ],
+        },
+        plug: {
+          points: [
+            { x: 10, r: 0.3 },
+            { x: 12, r: 0 },
+          ],
+        },
+        coreOuter: {
+          points: [
+            { x: 1, r: 0.5 },
+            { x: 11, r: 0.5 },
+          ],
+        },
         coreCowl: {
           points: [
             { x: 1, r: 0.5 },
@@ -97,7 +117,12 @@ export function validEngine(): EngineDefinition {
             { x: 11, r: 0.6 },
           ],
         },
-        nacelleInner: { points: [{ x: -2, r: 1 }, { x: 5, r: 1 }] },
+        nacelleInner: {
+          points: [
+            { x: -2, r: 1 },
+            { x: 5, r: 1 },
+          ],
+        },
         nacelleOuter: {
           points: [
             { x: -2, r: 1 },
@@ -149,7 +174,14 @@ export function validEngine(): EngineDefinition {
       },
     ],
     bleeds: [
-      { id: 'hpc9', name: 'HPC 9th stage', kind: 'customer', component: 'hpc', x: 3.9, maxFraction: 0.07 },
+      {
+        id: 'hpc9',
+        name: 'HPC 9th stage',
+        kind: 'customer',
+        component: 'hpc',
+        x: 3.9,
+        maxFraction: 0.07,
+      },
     ],
     designPoint: {
       ambient: { pressurePa: 101325, temperatureK: 288.15, machNumber: 0 },
@@ -173,7 +205,11 @@ export function validEngine(): EngineDefinition {
       netThrustN: 100_000,
       fuelFlowKgPerS: 1,
     },
-    ratings: { takeoffThrustN: 100_000, maxContinuousThrustN: 95_000, flatRatingTemperatureK: 303.15 },
+    ratings: {
+      takeoffThrustN: 100_000,
+      maxContinuousThrustN: 95_000,
+      flatRatingTemperatureK: 303.15,
+    },
     limits: {
       n1MaxRpm: 5200,
       n2MaxRpm: 15750,

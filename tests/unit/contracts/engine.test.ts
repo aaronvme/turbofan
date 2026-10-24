@@ -21,30 +21,42 @@ function first<T>(items: readonly T[]): T {
   return item;
 }
 
-const withCurve = (id: (typeof CURVE_IDS)[number], curve: Polyline): Mutator => (d) => ({
-  ...d,
-  flowpath: { ...d.flowpath, curves: { ...d.flowpath.curves, [id]: curve } },
-});
+const withCurve =
+  (id: (typeof CURVE_IDS)[number], curve: Polyline): Mutator =>
+  (d) => ({
+    ...d,
+    flowpath: { ...d.flowpath, curves: { ...d.flowpath.curves, [id]: curve } },
+  });
 
-const withComponent = (id: FlowComponent['id'], patch: Partial<FlowComponent>): Mutator => (d) => ({
-  ...d,
-  flowpath: {
-    ...d.flowpath,
-    components: d.flowpath.components.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-  },
-});
+const withComponent =
+  (id: FlowComponent['id'], patch: Partial<FlowComponent>): Mutator =>
+  (d) => ({
+    ...d,
+    flowpath: {
+      ...d.flowpath,
+      components: d.flowpath.components.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+    },
+  });
 
-const withRow = (id: string, patch: Partial<BladeRow>): Mutator => (d) => ({
-  ...d,
-  bladeRows: d.bladeRows.map((r) => (r.id === id ? { ...r, ...patch } : r)),
-});
+const withRow =
+  (id: string, patch: Partial<BladeRow>): Mutator =>
+  (d) => ({
+    ...d,
+    bladeRows: d.bladeRows.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+  });
 
 function problemsAfter(mutator: Mutator): string {
   return validateEngineDefinition(mutator(validEngine())).join('\n');
 }
 
 describe('curve helpers', () => {
-  const line: Polyline = { points: [{ x: 0, r: 1 }, { x: 2, r: 3 }, { x: 3, r: 3 }] };
+  const line: Polyline = {
+    points: [
+      { x: 0, r: 1 },
+      { x: 2, r: 3 },
+      { x: 3, r: 3 },
+    ],
+  };
 
   it('interpolates linearly inside the curve and returns null outside', () => {
     expect(radiusAt(line, 0)).toBe(1);
@@ -95,13 +107,29 @@ describe('validateEngineDefinition', () => {
     // curves
     [
       'x not increasing along a curve',
-      withCurve('coreInner', { points: [{ x: 0, r: 0.3 }, { x: 5, r: 0.3 }, { x: 5, r: 0.3 }, { x: 10, r: 0.3 }] }),
+      withCurve('coreInner', {
+        points: [
+          { x: 0, r: 0.3 },
+          { x: 5, r: 0.3 },
+          { x: 5, r: 0.3 },
+          { x: 10, r: 0.3 },
+        ],
+      }),
       /curve coreInner: x must increase strictly/,
     ],
-    ['a one-point curve', withCurve('plug', { points: [{ x: 10, r: 0.3 }] }), /curve plug: needs at least 2 points/],
+    [
+      'a one-point curve',
+      withCurve('plug', { points: [{ x: 10, r: 0.3 }] }),
+      /curve plug: needs at least 2 points/,
+    ],
     [
       'a negative radius',
-      withCurve('nacelleOuter', { points: [{ x: -2, r: 1 }, { x: 5, r: -1 }] }),
+      withCurve('nacelleOuter', {
+        points: [
+          { x: -2, r: 1 },
+          { x: 5, r: -1 },
+        ],
+      }),
       /curve nacelleOuter: .*r must be finite and >= 0/,
     ],
     [
@@ -109,49 +137,95 @@ describe('validateEngineDefinition', () => {
       (d) => {
         const curves: Record<string, Polyline> = { ...d.flowpath.curves };
         delete curves['coreCowl'];
-        return { ...d, flowpath: { ...d.flowpath, curves: curves as EngineDefinition['flowpath']['curves'] } };
+        return {
+          ...d,
+          flowpath: { ...d.flowpath, curves: curves as EngineDefinition['flowpath']['curves'] },
+        };
       },
       /curve coreCowl is missing/,
     ],
     [
       'a spinner that does not start on the axis',
-      withCurve('spinner', { points: [{ x: -1, r: 0.05 }, { x: 0, r: 0.3 }] }),
+      withCurve('spinner', {
+        points: [
+          { x: -1, r: 0.05 },
+          { x: 0, r: 0.3 },
+        ],
+      }),
       /spinner must start on the axis/,
     ],
     [
       'a plug that does not end on the axis',
-      withCurve('plug', { points: [{ x: 10, r: 0.3 }, { x: 12, r: 0.1 }] }),
+      withCurve('plug', {
+        points: [
+          { x: 10, r: 0.3 },
+          { x: 12, r: 0.1 },
+        ],
+      }),
       /plug must end on the axis/,
     ],
     [
       'a gap between spinner and core hub',
-      withCurve('spinner', { points: [{ x: -1, r: 0 }, { x: 0, r: 0.25 }] }),
+      withCurve('spinner', {
+        points: [
+          { x: -1, r: 0 },
+          { x: 0, r: 0.25 },
+        ],
+      }),
       /spinner must end where coreInner starts/,
     ],
     [
       'a splitter where the two sides do not meet',
-      withCurve('coreCowl', { points: [{ x: 1, r: 0.55 }, { x: 11, r: 0.6 }] }),
+      withCurve('coreCowl', {
+        points: [
+          { x: 1, r: 0.55 },
+          { x: 11, r: 0.6 },
+        ],
+      }),
       /splitter: coreOuter and coreCowl must start at the same point/,
     ],
     [
       'a nacelle lip that is not closed',
-      withCurve('nacelleOuter', { points: [{ x: -2.1, r: 1 }, { x: 5, r: 1.1 }] }),
+      withCurve('nacelleOuter', {
+        points: [
+          { x: -2.1, r: 1 },
+          { x: 5, r: 1.1 },
+        ],
+      }),
       /nacelle highlight/,
     ],
     [
       'a nacelle whose outer skin dips inside the inner one',
-      withCurve('nacelleOuter', { points: [{ x: -2, r: 1 }, { x: 2, r: 0.9 }, { x: 5, r: 1.1 }] }),
+      withCurve('nacelleOuter', {
+        points: [
+          { x: -2, r: 1 },
+          { x: 2, r: 0.9 },
+          { x: 5, r: 1.1 },
+        ],
+      }),
       /nacelleOuter is inside nacelleInner/,
     ],
     [
       'a core nozzle lip that does not line up',
-      withCurve('coreCowl', { points: [{ x: 1, r: 0.5 }, { x: 1.2, r: 0.6 }, { x: 11.5, r: 0.6 }] }),
+      withCurve('coreCowl', {
+        points: [
+          { x: 1, r: 0.5 },
+          { x: 1.2, r: 0.6 },
+          { x: 11.5, r: 0.6 },
+        ],
+      }),
       /core nozzle lip/,
     ],
     // components
     [
       'hub above casing',
-      withCurve('coreInner', { points: [{ x: 0, r: 0.3 }, { x: 3.5, r: 0.6 }, { x: 10, r: 0.3 }] }),
+      withCurve('coreInner', {
+        points: [
+          { x: 0, r: 0.3 },
+          { x: 3.5, r: 0.6 },
+          { x: 10, r: 0.3 },
+        ],
+      }),
       /component hpc: hub radius .* is not below casing/,
     ],
     [
@@ -164,7 +238,11 @@ describe('validateEngineDefinition', () => {
       withComponent('hpc', { xStart: 3.1 }),
       /component hpc: starts at x=3\.100 but its upstream transitionDuct ends at x=3\.000/,
     ],
-    ['an empty component', withComponent('combustor', { xEnd: 4 }), /component combustor: xStart must be < xEnd/],
+    [
+      'an empty component',
+      withComponent('combustor', { xEnd: 4 }),
+      /component combustor: xStart must be < xEnd/,
+    ],
     [
       'an unknown upstream',
       withComponent('lpt', { upstream: 'gearbox' as unknown as FlowComponent['id'] }),
@@ -177,12 +255,24 @@ describe('validateEngineDefinition', () => {
     ],
     [
       'a duplicated component',
-      (d) => ({ ...d, flowpath: { ...d.flowpath, components: [...d.flowpath.components, first(d.flowpath.components)] } }),
+      (d) => ({
+        ...d,
+        flowpath: {
+          ...d.flowpath,
+          components: [...d.flowpath.components, first(d.flowpath.components)],
+        },
+      }),
       /component inlet is defined more than once/,
     ],
     [
       'a missing component',
-      (d) => ({ ...d, flowpath: { ...d.flowpath, components: d.flowpath.components.filter((c) => c.id !== 'hpt') } }),
+      (d) => ({
+        ...d,
+        flowpath: {
+          ...d.flowpath,
+          components: d.flowpath.components.filter((c) => c.id !== 'hpt'),
+        },
+      }),
       /component hpt is missing/,
     ],
     // stations
@@ -198,12 +288,22 @@ describe('validateEngineDefinition', () => {
     ],
     [
       'stations out of stream order',
-      (d) => ({ ...d, stations: d.stations.map((s) => (s.id === '45' ? { ...s, x: 5.2, component: 'hpt' as const } : s)) }),
+      (d) => ({
+        ...d,
+        stations: d.stations.map((s) =>
+          s.id === '45' ? { ...s, x: 5.2, component: 'hpt' as const } : s,
+        ),
+      }),
       /station 45 .* upstream of station 41/,
     ],
     [
       'a station in the wrong stream',
-      (d) => ({ ...d, stations: d.stations.map((s) => (s.id === '13' ? { ...s, x: 1.5, component: 'booster' as const } : s)) }),
+      (d) => ({
+        ...d,
+        stations: d.stations.map((s) =>
+          s.id === '13' ? { ...s, x: 1.5, component: 'booster' as const } : s,
+        ),
+      }),
       /station 13 is a bypass station but component booster is core/,
     ],
     [
@@ -212,8 +312,16 @@ describe('validateEngineDefinition', () => {
       /station 49\.5 is missing/,
     ],
     // blade rows
-    ['a zero blade count', withRow('fan', { count: 0 }), /row fan: count must be a positive integer/],
-    ['a fractional blade count', withRow('fan', { count: 24.5 }), /row fan: count must be a positive integer/],
+    [
+      'a zero blade count',
+      withRow('fan', { count: 0 }),
+      /row fan: count must be a positive integer/,
+    ],
+    [
+      'a fractional blade count',
+      withRow('fan', { count: 24.5 }),
+      /row fan: count must be a positive integer/,
+    ],
     [
       'a duplicated row id',
       (d) => ({ ...d, bladeRows: [...d.bladeRows, first(d.bladeRows)] }),
@@ -255,13 +363,37 @@ describe('validateEngineDefinition', () => {
       }),
       /rows hpc-igv and hpc-r1 overlap/,
     ],
-    ['a chord shorter than the axial extent', withRow('fan', { chord: { hub: 0.2, mid: 0.45, tip: 0.5 } }), /row fan: chord\.hub/],
-    ['a metal angle beyond 90 deg', withRow('fan', { inletMetalAngle: { hub: 0.5, mid: 1.6, tip: 1 } }), /row fan: inletMetalAngle\.mid/],
-    ['a thickness ratio of zero', withRow('fan', { maxThicknessRatio: { hub: 0, mid: 0.05, tip: 0.03 } }), /row fan: maxThicknessRatio\.hub/],
+    [
+      'a chord shorter than the axial extent',
+      withRow('fan', { chord: { hub: 0.2, mid: 0.45, tip: 0.5 } }),
+      /row fan: chord\.hub/,
+    ],
+    [
+      'a metal angle beyond 90 deg',
+      withRow('fan', { inletMetalAngle: { hub: 0.5, mid: 1.6, tip: 1 } }),
+      /row fan: inletMetalAngle\.mid/,
+    ],
+    [
+      'a thickness ratio of zero',
+      withRow('fan', { maxThicknessRatio: { hub: 0, mid: 0.05, tip: 0.03 } }),
+      /row fan: maxThicknessRatio\.hub/,
+    ],
     ['a sweep not matching the leading edge', withRow('fan', { sweep: 0.2 }), /row fan: sweep/],
-    ['a stator on a spool', withRow('b-s1', { spool: 'lp' }), /row b-s1: a stator must have spool "none"/],
-    ['a rotor on the wrong spool', withRow('hpc-r1', { spool: 'lp' }), /row hpc-r1: rotor spool lp does not match component hpc \(hp\)/],
-    ['a VSV without a schedule', withRow('hpc-igv', { vsv: null }), /row hpc-igv: a VSV needs a schedule/],
+    [
+      'a stator on a spool',
+      withRow('b-s1', { spool: 'lp' }),
+      /row b-s1: a stator must have spool "none"/,
+    ],
+    [
+      'a rotor on the wrong spool',
+      withRow('hpc-r1', { spool: 'lp' }),
+      /row hpc-r1: rotor spool lp does not match component hpc \(hp\)/,
+    ],
+    [
+      'a VSV without a schedule',
+      withRow('hpc-igv', { vsv: null }),
+      /row hpc-igv: a VSV needs a schedule/,
+    ],
     [
       'a VSV with an unknown schedule',
       withRow('hpc-igv', { vsv: { scheduleId: 'nope', gain: 1 } }),
@@ -277,7 +409,15 @@ describe('validateEngineDefinition', () => {
       'a schedule with decreasing speed',
       (d) => ({
         ...d,
-        vsvSchedules: [{ id: 'hpc-vsv', points: [{ n2CorrectedPercent: 100, closure: 0 }, { n2CorrectedPercent: 50, closure: 0.6 }] }],
+        vsvSchedules: [
+          {
+            id: 'hpc-vsv',
+            points: [
+              { n2CorrectedPercent: 100, closure: 0 },
+              { n2CorrectedPercent: 50, closure: 0.6 },
+            ],
+          },
+        ],
       }),
       /VSV schedule hpc-vsv: n2CorrectedPercent must increase/,
     ],
@@ -286,27 +426,59 @@ describe('validateEngineDefinition', () => {
       (d) => ({ ...d, bleeds: [{ ...first(d.bleeds), x: 9 }] }),
       /bleed hpc9: x=9\.000 is outside component hpc/,
     ],
-    ['a bleed fraction of 1', (d) => ({ ...d, bleeds: [{ ...first(d.bleeds), maxFraction: 1 }] }), /bleed hpc9: maxFraction/],
+    [
+      'a bleed fraction of 1',
+      (d) => ({ ...d, bleeds: [{ ...first(d.bleeds), maxFraction: 1 }] }),
+      /bleed hpc9: maxFraction/,
+    ],
     // design point, ratings, limits, start
     [
       'an overall pressure ratio that is not the product',
-      (d) => ({ ...d, designPoint: { ...d.designPoint, pressureRatios: { ...d.designPoint.pressureRatios, overall: 32 } } }),
+      (d) => ({
+        ...d,
+        designPoint: {
+          ...d.designPoint,
+          pressureRatios: { ...d.designPoint.pressureRatios, overall: 32 },
+        },
+      }),
       /overall pressure ratio 32\.00 is not fanCore x booster x hpc = 30\.00/,
     ],
     [
       'an efficiency above 1',
-      (d) => ({ ...d, designPoint: { ...d.designPoint, efficiencies: { ...d.designPoint.efficiencies, hpc: 1.1 } } }),
+      (d) => ({
+        ...d,
+        designPoint: {
+          ...d.designPoint,
+          efficiencies: { ...d.designPoint.efficiencies, hpc: 1.1 },
+        },
+      }),
       /designPoint\.efficiencies\.hpc/,
     ],
     [
       'a pressure ratio below 1',
-      (d) => ({ ...d, designPoint: { ...d.designPoint, pressureRatios: { ...d.designPoint.pressureRatios, fanBypass: 0.9 } } }),
+      (d) => ({
+        ...d,
+        designPoint: {
+          ...d.designPoint,
+          pressureRatios: { ...d.designPoint.pressureRatios, fanBypass: 0.9 },
+        },
+      }),
       /designPoint\.pressureRatios\.fanBypass/,
     ],
-    ['a zero airflow', (d) => ({ ...d, designPoint: { ...d.designPoint, totalAirflowKgPerS: 0 } }), /totalAirflowKgPerS/],
+    [
+      'a zero airflow',
+      (d) => ({ ...d, designPoint: { ...d.designPoint, totalAirflowKgPerS: 0 } }),
+      /totalAirflowKgPerS/,
+    ],
     [
       'a bad design ambient',
-      (d) => ({ ...d, designPoint: { ...d.designPoint, ambient: { pressurePa: 0, temperatureK: 288, machNumber: 0 } } }),
+      (d) => ({
+        ...d,
+        designPoint: {
+          ...d.designPoint,
+          ambient: { pressurePa: 0, temperatureK: 288, machNumber: 0 },
+        },
+      }),
       /designPoint\.ambient/,
     ],
     [
@@ -314,7 +486,11 @@ describe('validateEngineDefinition', () => {
       (d) => ({ ...d, ratings: { ...d.ratings, maxContinuousThrustN: 120_000 } }),
       /ratings: maxContinuousThrustN must not exceed takeoffThrustN/,
     ],
-    ['an N1 limit below 100 %', (d) => ({ ...d, limits: { ...d.limits, n1MaxRpm: 4000 } }), /limits\.n1MaxRpm/],
+    [
+      'an N1 limit below 100 %',
+      (d) => ({ ...d, limits: { ...d.limits, n1MaxRpm: 4000 } }),
+      /limits\.n1MaxRpm/,
+    ],
     [
       'a start EGT limit above the redline',
       (d) => ({ ...d, limits: { ...d.limits, egtStartLimitK: 1300 } }),

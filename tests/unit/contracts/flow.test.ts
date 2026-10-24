@@ -40,7 +40,12 @@ function sample(overrides: Partial<FieldSample> = {}): FieldSample {
 describe('render texture layout', () => {
   it('uses rgba16float with the documented channel order', () => {
     expect(FIELD_TEXTURE_FORMAT).toBe('rgba16float');
-    expect([...STATE_CHANNELS]).toEqual(['pGaugeRatio', 'rhoGaugeRatio', 'temperatureK', 'fuelAirRatio']);
+    expect([...STATE_CHANNELS]).toEqual([
+      'pGaugeRatio',
+      'rhoGaugeRatio',
+      'temperatureK',
+      'fuelAirRatio',
+    ]);
     expect([...VELOCITY_CHANNELS]).toEqual(['uxMPerS', 'urMPerS', 'uthetaMPerS', 'fluidFraction']);
   });
 
@@ -203,7 +208,8 @@ describe('flowTargetsFromCycleState', () => {
     expect(t.n2RadPerS).toBeCloseTo((state.n2Rpm * 2 * Math.PI) / 60, 9);
     expect(t.fuelFlowKgPerS).toBe(state.fuelFlowKgPerS);
     expect(t.vsvClosureRad).toBe(state.vsvClosureRad);
-    expect(Object.keys(t.stations)).toEqual([...SOLVER_REDUCTION_STATIONS]);
+    // integer-like keys enumerate in numeric order, so compare as sets
+    expect(Object.keys(t.stations).sort()).toEqual([...SOLVER_REDUCTION_STATIONS].sort());
     expect(t.stations['4']).toEqual({
       ptPa: state.stations['4'].ptPa,
       ttK: state.stations['4'].ttK,

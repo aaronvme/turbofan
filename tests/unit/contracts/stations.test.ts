@@ -18,7 +18,17 @@ describe('ARP755 station list', () => {
   });
 
   it('reduces the solver at exactly 2, 13, 18, 25, 3, 4, 45, 5, 8', () => {
-    expect([...SOLVER_REDUCTION_STATIONS]).toEqual(['2', '13', '18', '25', '3', '4', '45', '5', '8']);
+    expect([...SOLVER_REDUCTION_STATIONS]).toEqual([
+      '2',
+      '13',
+      '18',
+      '25',
+      '3',
+      '4',
+      '45',
+      '5',
+      '8',
+    ]);
   });
 
   it('has metadata for every id, keyed consistently', () => {

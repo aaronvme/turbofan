@@ -51,7 +51,9 @@ describe('the sim/UI boundary is structured-clone-safe plain data (D0-2)', () =>
     const v = new Vec(3, 4);
     // why the check exists: the clone loses the prototype (and its methods) without an error
     expect(Object.getPrototypeOf(structuredClone(v))).toBe(Object.prototype);
-    expect(findNonPlainData({ cycle: { position: v } })).toMatch(/^cycle\.position: class instance/);
+    expect(findNonPlainData({ cycle: { position: v } })).toMatch(
+      /^cycle\.position: class instance/,
+    );
     expect(findNonPlainData([1, new Date(0)])).toMatch(/^\[1\]: class instance \(Date\)/);
     expect(findNonPlainData(new Map())).toMatch(/class instance \(Map\)/);
   });
@@ -140,13 +142,25 @@ describe('SimCommand validation (messages crossing a thread boundary are untrust
     ['a non-boolean starter', { type: 'start', engage: 'yes' }, /engage/],
     ['a non-boolean cutoff', { type: 'cutoff' }, /cutoff/],
     ['an unknown ignition mode', { type: 'ignition', mode: 'max' }, /mode/],
-    ['bleed above the TCDS limit', { type: 'setBleed', customerBleedFraction: 0.5 }, /customerBleedFraction/],
+    [
+      'bleed above the TCDS limit',
+      { type: 'setBleed', customerBleedFraction: 0.5 },
+      /customerBleedFraction/,
+    ],
     ['a bad ambient', { type: 'setAmbient', ambient: { pressurePa: 1 } }, /ambient/],
     ['an unknown fault', { type: 'injectFault', fault: 'fire' }, /fault/],
     ['an unknown reset state', { type: 'reset', initial: 'cruise' }, /initial/],
     ['an unknown view mode', { type: 'setViewMode', mode: 'xray' }, /mode/],
-    ['a bad render state', { type: 'setRenderState', render: { quality: 'insane' } }, /render\.quality/],
-    ['an unknown overlay', { type: 'setRenderState', render: { overlays: { lasers: true } } }, /lasers/],
+    [
+      'a bad render state',
+      { type: 'setRenderState', render: { quality: 'insane' } },
+      /render\.quality/,
+    ],
+    [
+      'an unknown overlay',
+      { type: 'setRenderState', render: { overlays: { lasers: true } } },
+      /lasers/,
+    ],
     ['a zero time scale', { type: 'setTimeScale', scale: 0 }, /scale/],
     ['a time scale above max', { type: 'setTimeScale', scale: TIME_SCALE_MAX * 2 }, /scale/],
     ['a non-boolean pause', { type: 'pause', paused: 1 }, /paused/],
@@ -162,8 +176,12 @@ describe('SimCommand validation (messages crossing a thread boundary are untrust
 
   it('validates the message envelope and its sequence number', () => {
     expect(validateSimCommandMessage({ seq: 0, command: { type: 'stopScenario' } })).toEqual([]);
-    expect(validateSimCommandMessage({ seq: -1, command: { type: 'stopScenario' } })[0]).toMatch(/seq/);
-    expect(validateSimCommandMessage({ seq: 1.5, command: { type: 'stopScenario' } })[0]).toMatch(/seq/);
+    expect(validateSimCommandMessage({ seq: -1, command: { type: 'stopScenario' } })[0]).toMatch(
+      /seq/,
+    );
+    expect(validateSimCommandMessage({ seq: 1.5, command: { type: 'stopScenario' } })[0]).toMatch(
+      /seq/,
+    );
     expect(validateSimCommandMessage({ seq: 3, command: { type: 'nope' } }).join()).toMatch(/nope/);
     expect(validateSimCommandMessage(null)[0]).toMatch(/message must be an object/);
   });

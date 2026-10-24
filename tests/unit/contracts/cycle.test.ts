@@ -31,9 +31,9 @@ describe('ambient conditions', () => {
     expect(validateAmbient({ pressurePa: 1e5, temperatureK: 288, machNumber: 1.2 })[0]).toMatch(
       /Mach/,
     );
-    expect(validateAmbient({ pressurePa: Number.NaN, temperatureK: 288, machNumber: 0 })[0]).toMatch(
-      /pressure/,
-    );
+    expect(
+      validateAmbient({ pressurePa: Number.NaN, temperatureK: 288, machNumber: 0 })[0],
+    ).toMatch(/pressure/);
   });
 });
 
@@ -70,7 +70,11 @@ describe('cycle inputs', () => {
   });
 
   it('rejects unknown enum values coming from untyped data', () => {
-    const bad = { ...DEFAULT_CYCLE_INPUTS, fuelLever: 'open', ignition: 'maybe' } as unknown as CycleInputs;
+    const bad = {
+      ...DEFAULT_CYCLE_INPUTS,
+      fuelLever: 'open',
+      ignition: 'maybe',
+    } as unknown as CycleInputs;
     const problems = validateCycleInputs(bad).join('\n');
     expect(problems).toMatch(/fuelLever/);
     expect(problems).toMatch(/ignition/);
@@ -105,11 +109,7 @@ describe('cycle state', () => {
 
   it.each<[string, CycleState, RegExp]>([
     ['non-finite thrust', mutate((s) => ({ ...s, netThrustN: Number.NaN })), /netThrustN/],
-    [
-      'percent not matching rpm',
-      mutate((s) => ({ ...s, n1Percent: 50 })),
-      /n1Percent .* n1Rpm/,
-    ],
+    ['percent not matching rpm', mutate((s) => ({ ...s, n1Percent: 50 })), /n1Percent .* n1Rpm/],
     [
       'negative total pressure',
       mutate((s) => ({ ...s, stations: { ...s.stations, '3': { ...s.stations['3'], ptPa: -1 } } })),
@@ -119,31 +119,29 @@ describe('cycle state', () => {
       'FAR above stoichiometric',
       mutate((s) => ({
         ...s,
-        stations: { ...s.stations, '4': { ...s.stations['4'], fuelAirRatio: STOICHIOMETRIC_FAR + 0.01 } },
+        stations: {
+          ...s.stations,
+          '4': { ...s.stations['4'], fuelAirRatio: STOICHIOMETRIC_FAR + 0.01 },
+        },
       })),
       /station 4 .*fuelAirRatio/,
     ],
     [
       'negative mass flow',
-      mutate((s) => ({ ...s, stations: { ...s.stations, '2': { ...s.stations['2'], wKgPerS: -3 } } })),
+      mutate((s) => ({
+        ...s,
+        stations: { ...s.stations, '2': { ...s.stations['2'], wKgPerS: -3 } },
+      })),
       /station 2 .*wKgPerS/,
     ],
-    [
-      'negative fuel flow',
-      mutate((s) => ({ ...s, fuelFlowKgPerS: -0.1 })),
-      /fuelFlowKgPerS/,
-    ],
+    ['negative fuel flow', mutate((s) => ({ ...s, fuelFlowKgPerS: -0.1 })), /fuelFlowKgPerS/],
     ['TSFC NaN', mutate((s) => ({ ...s, tsfcKgPerNs: Number.NaN })), /tsfcKgPerNs/],
     [
       'efficiency above 1',
       mutate((s) => ({ ...s, fan: { ...s.fan, isentropicEfficiency: 1.2 } })),
       /fan.*isentropicEfficiency/,
     ],
-    [
-      'VBV fraction above 1',
-      mutate((s) => ({ ...s, vbvOpenFraction: 1.5 })),
-      /vbvOpenFraction/,
-    ],
+    ['VBV fraction above 1', mutate((s) => ({ ...s, vbvOpenFraction: 1.5 })), /vbvOpenFraction/],
     [
       'unknown FADEC mode',
       mutate((s) => ({ ...s, fadec: { ...s.fadec, mode: 'turbo' } }) as unknown as CycleState),
@@ -172,11 +170,13 @@ describe('cycle state', () => {
 
   it('requires a null TSFC exactly when there is no positive net thrust', () => {
     const s = sampleCycleState();
-    expect(validateCycleState({ ...s, netThrustN: 0, tsfcKgPerNs: null }, SAMPLE_REFERENCE_SPEEDS)).toEqual(
-      [],
-    );
     expect(
-      validateCycleState({ ...s, netThrustN: 0, tsfcKgPerNs: 1e-5 }, SAMPLE_REFERENCE_SPEEDS).join('\n'),
+      validateCycleState({ ...s, netThrustN: 0, tsfcKgPerNs: null }, SAMPLE_REFERENCE_SPEEDS),
+    ).toEqual([]);
+    expect(
+      validateCycleState({ ...s, netThrustN: 0, tsfcKgPerNs: 1e-5 }, SAMPLE_REFERENCE_SPEEDS).join(
+        '\n',
+      ),
     ).toMatch(/tsfcKgPerNs must be null/);
     expect(
       validateCycleState({ ...s, tsfcKgPerNs: null }, SAMPLE_REFERENCE_SPEEDS).join('\n'),

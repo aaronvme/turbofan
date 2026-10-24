@@ -79,7 +79,15 @@ describe('UI store schema', () => {
     expect(render.viewMode).toBe('schlieren');
     expect('units' in render).toBe(false);
     expect(Object.keys(render).sort()).toEqual(
-      ['colormaps', 'cutPlaneField', 'overlays', 'particleTimeDilation', 'quality', 'selectedComponent', 'viewMode'].sort(),
+      [
+        'colormaps',
+        'cutPlaneField',
+        'overlays',
+        'particleTimeDilation',
+        'quality',
+        'selectedComponent',
+        'viewMode',
+      ].sort(),
     );
   });
 
@@ -87,7 +95,9 @@ describe('UI store schema', () => {
     expect(validateRenderStatePatch({ quality: 'low' })).toEqual([]);
     expect(validateRenderStatePatch({ overlays: { particles: false } })).toEqual([]);
     expect(validateRenderStatePatch({ colormaps: { temperature: 'magma' } })).toEqual([]);
-    expect(validateRenderStatePatch({ units: 'si' }).join()).toMatch(/units is not a render-state key/);
+    expect(validateRenderStatePatch({ units: 'si' }).join()).toMatch(
+      /units is not a render-state key/,
+    );
     expect(validateRenderStatePatch(null).join()).toMatch(/must be an object/);
     expect(validateRenderStatePatch({ colormaps: { heat: 'magma' } }).join()).toMatch(/heat/);
   });
