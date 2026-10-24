@@ -1,0 +1,167 @@
+// Per-run bookkeeping for the D0-1 protocol, on the page's frame clock (rAF timestamps in ms):
+// warm-up, then `runs` runs of `runMs`; each frame and each (late) timestamp-query sample is
+// attributed to the run its frame started in. Rates are counts over the fixed run window.
+
+import { median, medianOfRuns, summarize, type Summary } from './stats';
+
+export interface ProtocolTimes {
+  readonly warmupMs: number;
+  readonly runMs: number;
+  readonly runs: number;
+}
+
+export type Phase = 'warmup' | 'run' | 'done';
+
+export interface GpuSample {
+  /** Frame clock time of the frame whose work was timed. */
+  readonly frameT: number;
+  /** Solver compute-pass GPU time (timestamp queries). */
+  readonly solverMs: number;
+  readonly iterations: number;
+}
+
+export interface RunResult {
+  readonly index: number;
+  readonly frames: number;
+  readonly frameTime: Summary;
+  readonly fps: number;
+  readonly iterations: number;
+  readonly itPerSec: number;
+  readonly gpuSamples: number;
+  /** Total solver GPU time / total timed iterations, or null without samples. */
+  readonly solverMsPerIt: number | null;
+  readonly solverMsPerFrame: Summary | null;
+}
+
+interface RunAcc {
+  deltas: number[];
+  frames: number;
+  iterations: number;
+  gpuMs: number[];
+  gpuIts: number;
+}
+
+export class RunRecorder {
+  private readonly p: ProtocolTimes;
+  private readonly start: number;
+  private readonly acc: RunAcc[];
+  private lastT: number | null = null;
+  private current: Phase = 'warmup';
+  private index = -1;
+
+  constructor(protocol: ProtocolTimes, startT: number) {
+    this.p = protocol;
+    this.start = startT;
+    this.acc = Array.from({ length: protocol.runs }, () => ({
+      deltas: [],
+      frames: 0,
+      iterations: 0,
+      gpuMs: [],
+      gpuIts: 0,
+    }));
+  }
+
+  get phase(): Phase {
+    return this.current;
+  }
+
+  get runIndex(): number {
+    return this.index;
+  }
+
+  private runAt(t: number): number {
+    const into = t - this.start - this.p.warmupMs;
+    if (into < 0) return -1;
+    const r = Math.floor(into / this.p.runMs);
+    return r < this.p.runs ? r : this.p.runs;
+  }
+
+  /** A frame at clock time t that ran `iterations` solver iterations. Returns the phase. */
+  frame(t: number, iterations: number): Phase {
+    if (this.current === 'done') return 'done';
+    const r = this.runAt(t);
+    if (r >= this.p.runs) {
+      this.current = 'done';
+      return 'done';
+    }
+    if (r >= 0) {
+      const a = this.acc[r];
+      if (a) {
+        if (this.lastT !== null) a.deltas.push(t - this.lastT);
+        a.frames++;
+        a.iterations += iterations;
+      }
+      this.current = 'run';
+      this.index = r;
+    }
+    this.lastT = t;
+    return this.current;
+  }
+
+  gpu(sample: GpuSample): void {
+    const r = this.runAt(sample.frameT);
+    const a = r >= 0 ? this.acc[r] : undefined;
+    if (!a) return;
+    a.gpuMs.push(sample.solverMs);
+    a.gpuIts += sample.iterations;
+  }
+
+  results(): RunResult[] {
+    if (this.current !== 'done') throw new Error('protocol not done yet');
+    const sec = this.p.runMs / 1000;
+    return this.acc.map((a, index) => {
+      const total = a.gpuMs.reduce((s, x) => s + x, 0);
+      return {
+        index,
+        frames: a.frames,
+        frameTime: summarize(a.deltas),
+        fps: a.frames / sec,
+        iterations: a.iterations,
+        itPerSec: a.iterations / sec,
+        gpuSamples: a.gpuMs.length,
+        solverMsPerIt: a.gpuIts > 0 ? total / a.gpuIts : null,
+        solverMsPerFrame: a.gpuMs.length > 0 ? summarize(a.gpuMs) : null,
+      };
+    });
+  }
+}
+
+/** Iterations per second inside the plan's budget: 7 ms of solver GPU per 60 Hz frame. */
+export function solverBudgetItPerSec(msPerIt: number): number {
+  return (60 * 7) / msPerIt;
+}
+
+export interface Aggregate {
+  readonly runs: number;
+  readonly itPerSec: number;
+  readonly fps: number;
+  readonly frameTimeP50: number;
+  readonly frameTimeP95: number;
+  readonly frameTimeP99: number;
+  readonly solverMsPerIt: number | null;
+  readonly solverMsPerFrameP50: number | null;
+  /** 1000 / ms per iteration: the rate if the solver had the whole GPU. */
+  readonly saturatedItPerSec: number | null;
+  /** solverBudgetItPerSec(ms per iteration). */
+  readonly budgetItPerSec: number | null;
+}
+
+/** D0-1: the median over runs of each metric (per metric, not "the median run"). */
+export function aggregateRuns(runs: readonly RunResult[]): Aggregate {
+  const m = (xs: number[]) => (xs.length % 2 === 1 ? medianOfRuns(xs) : median(xs));
+  const gpu = runs.flatMap((r) => (r.solverMsPerIt === null ? [] : [r.solverMsPerIt]));
+  const perFrame = runs.flatMap((r) => (r.solverMsPerFrame ? [r.solverMsPerFrame.p50] : []));
+  const msPerIt = gpu.length > 0 ? m(gpu) : null;
+  return {
+    runs: runs.length,
+    itPerSec: m(runs.map((r) => r.itPerSec)),
+    fps: m(runs.map((r) => r.fps)),
+    frameTimeP50: m(runs.map((r) => r.frameTime.p50)),
+    frameTimeP95: m(runs.map((r) => r.frameTime.p95)),
+    frameTimeP99: m(runs.map((r) => r.frameTime.p99)),
+    solverMsPerIt: msPerIt,
+    solverMsPerFrameP50: perFrame.length > 0 ? m(perFrame) : null,
+    saturatedItPerSec: msPerIt === null ? null : 1000 / msPerIt,
+    budgetItPerSec: msPerIt === null ? null : solverBudgetItPerSec(msPerIt),
+  };
+}

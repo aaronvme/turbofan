@@ -29,8 +29,8 @@ describe('RunRecorder (D0-1 phases)', () => {
 
   it('measures frame times, fps and iterations per second per run, ignoring warm-up', () => {
     const rec = new RunRecorder(P, 0);
-    drive(rec, 0, 10, 2, 1000); // warm-up at 100 fps, discarded
-    drive(rec, 1000 + 1e-9, 20, 3, 8000); // 50 fps, 3 it/frame from the start of run 1
+    drive(rec, 0, 10, 2, 990); // warm-up at 100 fps, discarded
+    drive(rec, 1000, 20, 3, 8000); // 50 fps, 3 it/frame from the start of run 1
     const runs = rec.results();
     expect(runs).toHaveLength(3);
     for (const r of runs) {
