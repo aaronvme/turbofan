@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { GpuErrorLog, requestSimDevice, type SimDevice } from '../../src/gpu/device';
-import { createDawnGpu } from './helpers/dawn';
+import { DAWN_TIMESTAMP_QUANTUM_NS, detectQuantumNs } from '../../src/gpu/timestamps';
+import { DAWN_EXACT_TIMESTAMPS, createDawnGpu } from './helpers/dawn';
 
 // Spike (e): Dawn in Node is the solver test bed. This pins that a device comes up on the
 // real GPU, runs a kernel, reads back, times with timestamp queries, and that validation
@@ -32,12 +33,62 @@ async function readBack(device: GPUDevice, buffer: GPUBuffer, size: number): Pro
   return copy;
 }
 
+const BUSY_KERNEL = /* wgsl */ `
+@group(0) @binding(0) var<storage, read_write> v: array<f32>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  var x = f32(gid.x);
+  for (var k = 0u; k < 256u; k++) { x = fma(x, 1.0001, 0.5); }
+  v[gid.x] = x;
+}`;
+
+/** Begin/end timestamps of `runs` separately submitted compute passes, flattened. */
+async function timeDispatches(device: GPUDevice, runs: number): Promise<bigint[]> {
+  const querySet = device.createQuerySet({ type: 'timestamp', count: 2 * runs });
+  const resolve = device.createBuffer({
+    size: 16 * runs,
+    usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+  });
+  const data = device.createBuffer({ size: 4 * 65536, usage: GPUBufferUsage.STORAGE });
+  const pipeline = device.createComputePipeline({
+    layout: 'auto',
+    compute: { module: device.createShaderModule({ code: BUSY_KERNEL }) },
+  });
+  const bind = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [{ binding: 0, resource: { buffer: data } }],
+  });
+  for (let r = 0; r < runs; r++) {
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginComputePass({
+      timestampWrites: {
+        querySet,
+        beginningOfPassWriteIndex: 2 * r,
+        endOfPassWriteIndex: 2 * r + 1,
+      },
+    });
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bind);
+    pass.dispatchWorkgroups(1024);
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+  }
+  const encoder = device.createCommandEncoder();
+  encoder.resolveQuerySet(querySet, 0, 2 * runs, resolve, 0);
+  device.queue.submit([encoder.finish()]);
+  const values = [...new BigUint64Array(await readBack(device, resolve, 16 * runs))];
+  querySet.destroy();
+  resolve.destroy();
+  data.destroy();
+  return values;
+}
+
 describe('Dawn (webgpu@0.6.2) in Node', () => {
   const log = new GpuErrorLog();
   let sim: SimDevice;
 
   beforeAll(async () => {
-    sim = await requestSimDevice(createDawnGpu(), {
+    sim = await requestSimDevice(createDawnGpu(DAWN_EXACT_TIMESTAMPS), {
       powerPreference: 'high-performance',
       optionalFeatures: ['timestamp-query', 'shader-f16'],
       maxLimits: ['maxComputeWorkgroupStorageSize', 'maxStorageBufferBindingSize'],
@@ -99,54 +150,14 @@ describe('Dawn (webgpu@0.6.2) in Node', () => {
     dst.destroy();
   });
 
-  it('times a dispatch with timestamp queries (end after begin)', async () => {
+  it('times dispatches with unquantized timestamp queries when the quantization toggle is off', async () => {
     expect(sim.hasTimestamps).toBe(true);
-    const { device } = sim;
-    const querySet = device.createQuerySet({ type: 'timestamp', count: 2 });
-    const resolve = device.createBuffer({
-      size: 16,
-      usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
-    });
-    const data = device.createBuffer({ size: 4 * 65536, usage: GPUBufferUsage.STORAGE });
-    const pipeline = device.createComputePipeline({
-      layout: 'auto',
-      compute: {
-        module: device.createShaderModule({
-          code: /* wgsl */ `
-            @group(0) @binding(0) var<storage, read_write> v: array<f32>;
-            @compute @workgroup_size(64)
-            fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-              var x = f32(gid.x);
-              for (var k = 0u; k < 256u; k++) { x = fma(x, 1.0001, 0.5); }
-              v[gid.x] = x;
-            }`,
-        }),
-      },
-    });
-    const encoder = device.createCommandEncoder();
-    const pass = encoder.beginComputePass({
-      timestampWrites: { querySet, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 },
-    });
-    pass.setPipeline(pipeline);
-    pass.setBindGroup(
-      0,
-      device.createBindGroup({
-        layout: pipeline.getBindGroupLayout(0),
-        entries: [{ binding: 0, resource: { buffer: data } }],
-      }),
-    );
-    pass.dispatchWorkgroups(1024);
-    pass.end();
-    encoder.resolveQuerySet(querySet, 0, 2, resolve, 0);
-    device.queue.submit([encoder.finish()]);
-
-    const [t0, t1] = new BigUint64Array(await readBack(device, resolve, 16));
-    expect(t0).toBeDefined();
-    expect(t1).toBeDefined();
-    expect((t1 ?? 0n) > (t0 ?? 0n)).toBe(true);
-    querySet.destroy();
-    resolve.destroy();
-    data.destroy();
+    const values = await timeDispatches(sim.device, 8);
+    for (let r = 0; r < 8; r++) {
+      expect((values[2 * r + 1] ?? 0n) > (values[2 * r] ?? 0n)).toBe(true);
+    }
+    // 16 raw values all landing on multiples of 2^17 ns by chance: probability 2^-272.
+    expect(detectQuantumNs(values)).not.toBe(DAWN_TIMESTAMP_QUANTUM_NS);
   });
 
   it('delivers a validation error to our sink (never swallowed)', async () => {
@@ -157,5 +168,27 @@ describe('Dawn (webgpu@0.6.2) in Node', () => {
     expect(log.reports.map((r) => r.kind)).toEqual(['validation']);
     expect(log.reports[0]?.message).toMatch(/usage/i);
     log.clear();
+  });
+});
+
+describe('Dawn default timestamp quantization', () => {
+  const log = new GpuErrorLog();
+  let sim: SimDevice;
+
+  beforeAll(async () => {
+    sim = await requestSimDevice(createDawnGpu(), {
+      optionalFeatures: ['timestamp-query'],
+      onError: log.sink,
+    });
+  });
+
+  afterAll(() => {
+    sim.destroy();
+    log.assertNone('dawn-quantization');
+  });
+
+  it('rounds every timestamp down to a multiple of 2^17 ns (131.072 us) by default', async () => {
+    const values = await timeDispatches(sim.device, 8);
+    for (const v of values) expect(v % DAWN_TIMESTAMP_QUANTUM_NS).toBe(0n);
   });
 });

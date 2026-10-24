@@ -249,6 +249,13 @@ describe('requestSimDevice', () => {
     expect(sim.hasTimestamps).toBe(true);
   });
 
+  it('keeps a reference to the GPU object (dawn.node crashes if it is collected while a device lives)', async () => {
+    const fa = fakeAdapter([], {});
+    const { gpu } = fakeGpu(fa.adapter);
+    const sim = await requestSimDevice(gpu, { onError: () => undefined });
+    expect(sim.gpu).toBe(gpu);
+  });
+
   it('throws when no adapter is available', async () => {
     const { gpu } = fakeGpu(null);
     await expect(requestSimDevice(gpu, { onError: () => undefined })).rejects.toThrow(/adapter/);
