@@ -8,18 +8,29 @@
 export const DAWN_TIMESTAMP_QUANTUM_NS = 65536n;
 
 /**
- * Durations in ms from flattened (begin, end) pairs. A pair that runs backwards or was never
- * written (both 0) is dropped rather than reported as a duration.
+ * No single pass can take longer than the Windows GPU timeout (TDR, 2 s by default): the
+ * device would be reset. Longer "durations" are bad samples; measured: the first timestamp
+ * written on a fresh Dawn/D3D12 device can be ~200 s stale.
+ */
+export const MAX_PASS_MS = 2000;
+
+/** One (begin, end) pair in ms, or NaN if it ran backwards, was never written or is too long. */
+export function pairDurationMs(begin: bigint, end: bigint): number {
+  if ((begin === 0n && end === 0n) || end < begin) return Number.NaN;
+  const ms = Number(end - begin) / 1e6;
+  return ms > MAX_PASS_MS ? Number.NaN : ms;
+}
+
+/**
+ * Durations in ms from flattened (begin, end) pairs, keeping only the valid ones
+ * (see pairDurationMs) rather than reporting nonsense.
  */
 export function pairDurationsMs(raw: ArrayLike<bigint>): number[] {
   if (raw.length % 2 !== 0) throw new Error('timestamps must come in (begin, end) pairs');
   const out: number[] = [];
   for (let i = 0; i < raw.length; i += 2) {
-    const begin = raw[i] ?? 0n;
-    const end = raw[i + 1] ?? 0n;
-    if (begin === 0n && end === 0n) continue;
-    if (end < begin) continue;
-    out.push(Number(end - begin) / 1e6);
+    const ms = pairDurationMs(raw[i] ?? 0n, raw[i + 1] ?? 0n);
+    if (!Number.isNaN(ms)) out.push(ms);
   }
   return out;
 }
