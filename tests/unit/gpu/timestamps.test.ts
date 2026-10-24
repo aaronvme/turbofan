@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   DAWN_TIMESTAMP_QUANTUM_NS,
+  MAX_PASS_MS,
   detectQuantumNs,
+  pairDurationMs,
   pairDurationsMs,
 } from '../../../src/gpu/timestamps';
 
@@ -22,6 +24,21 @@ describe('pairDurationsMs', () => {
 
   it('rejects an odd number of timestamps', () => {
     expect(() => pairDurationsMs(new BigUint64Array([1n, 2n, 3n]))).toThrow(/pairs/);
+  });
+});
+
+describe('pairDurationMs', () => {
+  it('is NaN for a pair longer than the Windows TDR limit: the first timestamp on a fresh D3D12 device can be stale', () => {
+    expect(MAX_PASS_MS).toBe(2000);
+    // Measured on Dawn/D3D12: begin 1565863706624 ns, end 1782638767344 ns on the first frame.
+    expect(pairDurationMs(1565863706624n, 1782638767344n)).toBeNaN();
+    expect(pairDurationMs(1782640678894n, 1782640697592n)).toBeCloseTo(0.018698, 9);
+  });
+
+  it('is NaN for backwards or unwritten pairs and keeps exact zero', () => {
+    expect(pairDurationMs(5n, 4n)).toBeNaN();
+    expect(pairDurationMs(0n, 0n)).toBeNaN();
+    expect(pairDurationMs(65536n, 65536n)).toBe(0);
   });
 });
 
