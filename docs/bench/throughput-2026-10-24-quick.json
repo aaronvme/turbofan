@@ -1,0 +1,284 @@
+{
+  "kind": "throughput",
+  "conditions": {
+    "date": "2026-10-24T15:42:06.476Z",
+    "protocol": {
+      "name": "quick",
+      "warmupMs": 2000,
+      "runMs": 1000,
+      "runs": 3
+    },
+    "label": "indicative, contaminated (D0-1): --quick run",
+    "gitHead": "0795d0a",
+    "gitDirty": true,
+    "power": {
+      "source": "ac",
+      "batteryStatus": [
+        2
+      ]
+    },
+    "cpu": "Intel(R) Core(TM) Ultra 7 255H",
+    "logicalCpus": 16,
+    "memoryGiB": 15,
+    "cpuLoadBefore": 0.24768942590724768,
+    "node": "v24.18.0",
+    "chromeFlags": [],
+    "chrome": "155.0.8059.86",
+    "chromeGpu": [
+      ":host{--green:#080;--yellow:#880;--red:#f00;--gray:#888;--bg-yellow:#ff0;display:block;flex:1;overflow:auto;padding:10px}@media (prefers-color-scheme:dark){:host{--green:#0F0;--yellow:#FF0;--red:#f00;--gray:#888;--bg-yellow:#880}}:host *{user-select:text}:host([selected]){display:flex;flex-direction:column}h3,ul{margin-bottom:0;margin-top:0}#content>div,#download-to-file{margin-bottom:1em}.feature-green{color:var(--green)}.feature-yellow{color:var(--yellow)}.feature-red{color:var(--red)}.feature-gray{color:var(--gray)}.bg-yellow{background-color:var(--bg-yellow)}#vulkan-info-value{white-space:pre}#download-to-file{font:inherit;min-height:2em;user-select:none}h4.dawn-info-header{color:var(--yellow);margin-bottom:2px;margin-top:10px}table.info-table{border-collapse:collapse;table-layout:fixed;width:100%}.info-table td{border:1px solid #777;vertical-align:top;overflow-x:auto}.info-table td:nth-child(1){font-weight:bold;width:25%}.info-table td:nth-child(2){font-weight:bold;width:75%}.copy{display:none}",
+      "2D graphics backend",
+      "Skia Backend",
+      "GPU0",
+      "Driver D3D12 feature level",
+      "disable_d3d12_h264_encoder_non_reference_frames",
+      "disable_sharing_nv12_from_d3d11_to_d3d12",
+      "Intel drivers don't support setting a frame as not referenced in D3D12 H264 encoder",
+      "disable_d3d12_h264_encoder_non_reference_frames",
+      "Share nv12 texture from D3D11 to D3D12 may show corruption on some Intel GPUs.",
+      "disable_sharing_nv12_from_d3d11_to_d3d12",
+      "loseHardenedContextOnBackendError",
+      "Dawn Info",
+      "<Integrated GPU>  D3D12 backend - Intel(R) Arc(TM) 140T GPU (8GB)",
+      "[WebGPU Status]",
+      "dawn-internal-usages",
+      "dawn-multi-planar-formats",
+      "dawn-native",
+      "dawn-format-capabilities",
+      "shared-buffer-memory-d3d12resource",
+      "dawn-load-resolve-texture",
+      "dawn-partial-load-resolve-texture",
+      "dawn-allow-undefined-load-store-op",
+      "https://crbug.com/dawn/145",
+      "(https://crbug.com/dawn/145)",
+      "use_d3d12_resource_heap_tier2:",
+      "https://crbug.com/dawn/27",
+      "(https://crbug.com/dawn/27)",
+      "use_d3d12_render_pass:",
+      "https://crbug.com/dawn/36",
+      "(https://crbug.com/dawn/36)",
+      "Use the D3D12 render pass API introduced in Windows build 1809 by default.",
+      "off, Dawn will emulate a render pass.",
+      "use_d3d12_residency_management:",
+      "https://crbug.com/dawn/193",
+      "(https://crbug.com/dawn/193)",
+      "https://crbug.com/dawn/402",
+      "(https://crbug.com/dawn/402)",
+      "https://crbug.com/dawn/1800",
+      "(https://crbug.com/dawn/1800)"
+    ],
+    "page": {
+      "adapter": {
+        "vendor": "intel",
+        "architecture": "xe-lpg",
+        "device": "",
+        "description": "",
+        "features": [
+          "bgra8unorm-storage",
+          "clip-distances",
+          "core-features-and-limits",
+          "depth-clip-control",
+          "depth32float-stencil8",
+          "dual-source-blending",
+          "float32-blendable",
+          "float32-filterable",
+          "indirect-first-instance",
+          "primitive-index",
+          "rg11b10ufloat-renderable",
+          "shader-f16",
+          "subgroup-size-control",
+          "subgroups",
+          "texture-component-swizzle",
+          "texture-compression-bc",
+          "texture-compression-bc-sliced-3d",
+          "texture-formats-tier1",
+          "texture-formats-tier2",
+          "timestamp-query"
+        ],
+        "limits": {
+          "maxTextureDimension1D": 16384,
+          "maxTextureDimension2D": 16384,
+          "maxTextureDimension3D": 2048,
+          "maxTextureArrayLayers": 2048,
+          "maxBindGroups": 4,
+          "maxBindGroupsPlusVertexBuffers": 24,
+          "maxBindingsPerBindGroup": 1000,
+          "maxDynamicUniformBuffersPerPipelineLayout": 10,
+          "maxDynamicStorageBuffersPerPipelineLayout": 8,
+          "maxSampledTexturesPerShaderStage": 48,
+          "maxSamplersPerShaderStage": 16,
+          "maxStorageBuffersPerShaderStage": 16,
+          "maxStorageTexturesPerShaderStage": 8,
+          "maxUniformBuffersPerShaderStage": 12,
+          "maxUniformBufferBindingSize": 65536,
+          "maxStorageBufferBindingSize": 2147483644,
+          "minUniformBufferOffsetAlignment": 256,
+          "minStorageBufferOffsetAlignment": 256,
+          "maxVertexBuffers": 8,
+          "maxBufferSize": 2147483648,
+          "maxVertexAttributes": 30,
+          "maxVertexBufferArrayStride": 2048,
+          "maxInterStageShaderVariables": 28,
+          "maxColorAttachments": 8,
+          "maxColorAttachmentBytesPerSample": 128,
+          "maxComputeWorkgroupStorageSize": 32768,
+          "maxComputeInvocationsPerWorkgroup": 1024,
+          "maxComputeWorkgroupSizeX": 1024,
+          "maxComputeWorkgroupSizeY": 1024,
+          "maxComputeWorkgroupSizeZ": 64,
+          "maxComputeWorkgroupsPerDimension": 65535,
+          "maxImmediateSize": 64,
+          "maxStorageBuffersInFragmentStage": 16,
+          "maxStorageTexturesInFragmentStage": 8,
+          "maxStorageBuffersInVertexStage": 16,
+          "maxStorageTexturesInVertexStage": 8
+        }
+      },
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "innerWidth": 1920,
+      "innerHeight": 945,
+      "devicePixelRatio": 1,
+      "visibility": "visible",
+      "crossOriginIsolated": false
+    },
+    "cpuLoadAfter": 0.17450460290216882,
+    "finished": "2026-10-24T15:42:21.779Z"
+  },
+  "results": [
+    {
+      "id": "130k-16x8",
+      "cells": 131072,
+      "grid": {
+        "ni": 512,
+        "nj": 256
+      },
+      "blocks": {
+        "bi": 4,
+        "bj": 3
+      },
+      "tile": {
+        "x": 16,
+        "y": 8
+      },
+      "workgroups": 1056,
+      "iterations": "adaptive",
+      "protocol": {
+        "name": "quick",
+        "warmupMs": 2000,
+        "runMs": 1000,
+        "runs": 3
+      },
+      "runs": [
+        {
+          "index": 0,
+          "frames": 60,
+          "frameTime": {
+            "n": 60,
+            "mean": 16.665000000000003,
+            "min": 16.5,
+            "max": 16.90000000000009,
+            "p50": 16.699999999999818,
+            "p95": 16.79999999999975,
+            "p99": 16.841000000000143
+          },
+          "fps": 60,
+          "iterations": 480,
+          "itPerSec": 480,
+          "gpuSamples": 60,
+          "solverMsPerIt": 0.8051370666666665,
+          "solverMsPerFrame": {
+            "n": 60,
+            "mean": 6.4410965333333365,
+            "min": 6.22592,
+            "max": 7.340032,
+            "p50": 6.422528,
+            "p95": 6.625689599999999,
+            "p99": 6.992035839999998
+          }
+        },
+        {
+          "index": 1,
+          "frames": 60,
+          "frameTime": {
+            "n": 60,
+            "mean": 16.665000000000003,
+            "min": 16.599999999999454,
+            "max": 16.800000000000182,
+            "p50": 16.699999999999818,
+            "p95": 16.800000000000182,
+            "p99": 16.800000000000182
+          },
+          "fps": 60,
+          "iterations": 480,
+          "itPerSec": 480,
+          "gpuSamples": 60,
+          "solverMsPerIt": 0.8187904,
+          "solverMsPerFrame": {
+            "n": 60,
+            "mean": 6.550323200000002,
+            "min": 6.22592,
+            "max": 7.667712,
+            "p50": 6.422528,
+            "p95": 7.2155135999999995,
+            "p99": 7.513047039999999
+          }
+        },
+        {
+          "index": 2,
+          "frames": 60,
+          "frameTime": {
+            "n": 60,
+            "mean": 16.663333333333338,
+            "min": 16.5,
+            "max": 16.800000000000182,
+            "p50": 16.699999999999818,
+            "p95": 16.7050000000007,
+            "p99": 16.800000000000182
+          },
+          "fps": 60,
+          "iterations": 423,
+          "itPerSec": 423,
+          "gpuSamples": 60,
+          "solverMsPerIt": 0.9488001513002365,
+          "solverMsPerFrame": {
+            "n": 60,
+            "mean": 6.689041066666666,
+            "min": 5.963776,
+            "max": 8.454144,
+            "p50": 6.684672,
+            "p95": 7.4088448,
+            "p99": 7.912816639999996
+          }
+        }
+      ],
+      "aggregate": {
+        "runs": 3,
+        "itPerSec": 480,
+        "fps": 60,
+        "frameTimeP50": 16.699999999999818,
+        "frameTimeP95": 16.79999999999975,
+        "frameTimeP99": 16.800000000000182,
+        "solverMsPerIt": 0.8187904,
+        "solverMsPerFrameP50": 6.422528,
+        "saturatedItPerSec": 1221.3137818909454,
+        "budgetItPerSec": 512.951788394197
+      },
+      "resampleMsP50": 0.065536,
+      "renderGpuMsP50": 2.162688,
+      "threeComputeGpuMsP50": 0.065536,
+      "sceneTriangles": 571042,
+      "drawingBuffer": [
+        1920,
+        1080
+      ],
+      "timestampQuantumNs": "65536",
+      "stateFinite": true,
+      "maxAbsGaugePressurePa": 1107.0864939726453,
+      "gpuErrors": [],
+      "cpuLoadDuring": 0.2409380923759767
+    }
+  ],
+  "workerProbe": null,
+  "consoleErrors": [
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127"
+  ]
+}
