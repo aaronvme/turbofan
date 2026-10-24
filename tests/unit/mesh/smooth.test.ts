@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { geometric, uniform, vinokur } from '../../../tools/mesh/distribution';
 import { smoothMesh } from '../../../tools/mesh/smooth';
-import { tfi } from '../../../tools/mesh/tfi';
+import { tfi, twoBoundary } from '../../../tools/mesh/tfi';
 import {
   BC,
   nodeIndex,
@@ -136,6 +136,43 @@ describe('smoothMesh on a single block', () => {
     const report = smoothMesh({ blocks: [b], patches: [] }, { sweeps: 0 });
     expect(report.sweeps).toBe(0);
     expect(Array.from(b.x)).toEqual(Array.from(x0));
+  });
+
+  it('keeps a column-varying wall clustering only with initial-grid control (the C-block case)', () => {
+    // Wall at r = 1, outer row at r = 1.5; first wall spacing 0.005 m mid-block, 0.04 m at the ends.
+    const ni = 20;
+    const nj = 10;
+    const ds0 = (i: number): number => 0.01 + 0.07 * ((i - 10) / 10) ** 2;
+    const build = (): Block =>
+      twoBoundary(
+        'lip',
+        edge((u) => ({ x: 2 * u, r: 1 }), uniform(ni)),
+        edge((u) => ({ x: 2 * u, r: 1.5 }), uniform(ni)),
+        (i) => geometric(nj, ds0(i)),
+      );
+    const firstSpacingMid = (b: Block): number =>
+      (b.r[nodeIndex(b, 10, 1)] ?? 0) - (b.r[nodeIndex(b, 10, 0)] ?? 0);
+    const kept = build();
+    smoothMesh(
+      { blocks: [kept], patches: [] },
+      { sweeps: 200, blockControl: { lip: { psi: 'initial-grid' } } },
+    );
+    expect(firstSpacingMid(kept) / 0.005).toBeGreaterThan(0.85);
+    expect(firstSpacingMid(kept) / 0.005).toBeLessThan(1.15);
+    const lost = build();
+    smoothMesh({ blocks: [lost], patches: [] }, { sweeps: 200 });
+    expect(firstSpacingMid(lost) / 0.005).toBeGreaterThan(2);
+  });
+
+  it('applies the none and initial-grid sources to both directions on request', () => {
+    const a = curvedBlock();
+    const b = curvedBlock();
+    smoothMesh({ blocks: [a], patches: [] }, { sweeps: 50, control: 'none' });
+    smoothMesh({ blocks: [b], patches: [] }, { sweeps: 50, control: 'initial-grid' });
+    // pure Winslow pulls the clustered west-face distribution towards uniform; initial-grid keeps it
+    const first = (blk: Block): number =>
+      (blk.r[nodeIndex(blk, 1, 1)] ?? 0) - (blk.r[nodeIndex(blk, 1, 0)] ?? 0);
+    expect(first(a)).toBeGreaterThan(first(b));
   });
 });
 
