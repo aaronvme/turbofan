@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+reports/
+.stryker-tmp/
+test-results/
+playwright-report/
+.vite/
+.claude/worktrees/
+*.log
+.env
+.env.*

@@ -1,0 +1,10 @@
+dist/
+coverage/
+reports/
+.stryker-tmp/
+node_modules/
+.claude/
+test-results/
+playwright-report/
+package-lock.json
+*.md

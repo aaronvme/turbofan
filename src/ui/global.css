@@ -1,0 +1,30 @@
+:root {
+  color-scheme: dark;
+  --bg: #07090c;
+  --fg: #e6e9ee;
+  --muted: #8b94a3;
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.shell {
+  padding: 32px;
+}
+
+.shell p {
+  color: var(--muted);
+}
