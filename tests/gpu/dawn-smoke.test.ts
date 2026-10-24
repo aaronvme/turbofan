@@ -156,7 +156,7 @@ describe('Dawn (webgpu@0.6.2) in Node', () => {
     for (let r = 0; r < 8; r++) {
       expect((values[2 * r + 1] ?? 0n) > (values[2 * r] ?? 0n)).toBe(true);
     }
-    // 16 raw values all landing on multiples of 2^17 ns by chance: probability 2^-272.
+    // 16 raw values all landing on multiples of 2^16 ns by chance: probability 2^-256.
     expect(detectQuantumNs(values)).not.toBe(DAWN_TIMESTAMP_QUANTUM_NS);
   });
 
@@ -187,7 +187,7 @@ describe('Dawn default timestamp quantization', () => {
     log.assertNone('dawn-quantization');
   });
 
-  it('rounds every timestamp down to a multiple of 2^17 ns (131.072 us) by default', async () => {
+  it('rounds every timestamp down to a multiple of 2^16 ns (65.536 us) by default', async () => {
     const values = await timeDispatches(sim.device, 8);
     for (const v of values) expect(v % DAWN_TIMESTAMP_QUANTUM_NS).toBe(0n);
   });

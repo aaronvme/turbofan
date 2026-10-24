@@ -162,12 +162,10 @@ describe('selectLimits', () => {
 
 describe('classifyError', () => {
   it('maps the WebGPU error classes by constructor name', () => {
-    expect(classifyError(new GPUValidationError('a') as unknown as GPUError)).toBe('validation');
-    expect(classifyError(new GPUOutOfMemoryError('a') as unknown as GPUError)).toBe(
-      'out-of-memory',
-    );
-    expect(classifyError(new GPUInternalError('a') as unknown as GPUError)).toBe('internal');
-    expect(classifyError({ message: 'x' } as GPUError)).toBe('unknown');
+    expect(classifyError(new GPUValidationError('a'))).toBe('validation');
+    expect(classifyError(new GPUOutOfMemoryError('a'))).toBe('out-of-memory');
+    expect(classifyError(new GPUInternalError('a'))).toBe('internal');
+    expect(classifyError({ message: 'x' })).toBe('unknown');
   });
 });
 

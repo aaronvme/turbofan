@@ -161,7 +161,7 @@ export async function requestSimDevice(gpu: GPU, options: SimDeviceOptions): Pro
   if (!adapter) throw new Error('No WebGPU adapter available');
 
   const requiredFeatures = selectFeatures(
-    adapter.features as unknown as ReadonlySet<string>,
+    adapter.features,
     options.requiredFeatures ?? [],
     options.optionalFeatures ?? [],
   );

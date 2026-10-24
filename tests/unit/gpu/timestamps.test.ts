@@ -17,7 +17,7 @@ describe('pairDurationsMs', () => {
   });
 
   it('keeps an exact zero duration (both ends inside one quantum)', () => {
-    expect(pairDurationsMs(new BigUint64Array([131072n, 131072n]))).toEqual([0]);
+    expect(pairDurationsMs(new BigUint64Array([65536n, 65536n]))).toEqual([0]);
   });
 
   it('rejects an odd number of timestamps', () => {
@@ -26,10 +26,10 @@ describe('pairDurationsMs', () => {
 });
 
 describe('detectQuantumNs', () => {
-  it("finds Dawn's 2^17 ns quantum from quantized timestamps", () => {
+  it("finds Dawn's 2^16 ns quantum from quantized timestamps", () => {
     const q = DAWN_TIMESTAMP_QUANTUM_NS;
-    expect(q).toBe(131072n);
-    const raw = [24651774n * q, 24651778n * q, 24651790n * q, 24651791n * q];
+    expect(q).toBe(65536n);
+    const raw = [50485783n * q, 50485784n * q, 50485787n * q, 50485789n * q];
     expect(detectQuantumNs(raw)).toBe(q);
   });
 

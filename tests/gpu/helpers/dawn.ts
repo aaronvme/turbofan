@@ -5,7 +5,7 @@ import { create, globals } from 'webgpu';
 Object.assign(globalThis, globals);
 
 /**
- * Dawn quantizes timestamp queries to 2^17 ns unless this toggle is off (measured,
+ * Dawn quantizes timestamp queries to 2^16 ns unless this toggle is off (measured,
  * docs/GPU_FACTS.md). Solver timing tests want the full resolution.
  */
 export const DAWN_EXACT_TIMESTAMPS: readonly string[] = [
