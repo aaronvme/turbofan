@@ -160,7 +160,7 @@ describe('buildGeometry', () => {
     const m = cellMetrics(nodes, 7, 5);
     expect(geo[4 * c]).toBeCloseTo(m.vol, 6);
     expect(geo[4 * c + 1]).toBeCloseTo(m.rc, 6);
-    const blk = layout.blocks[4]; // I in [6, 12), J in [4, 8)
+    const blk = layout.blocks[5]; // p = 1, q = 1: I in [6, 12), J in [4, 8)
     if (!blk) throw new Error('no block');
     const slot = blk.faceVec4 + 2 * ((5 - blk.j0) * (blk.ni + 1) + (7 - blk.i0));
     const f = faceVectors(nodes, 7, 5);

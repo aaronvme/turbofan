@@ -20,6 +20,7 @@ import {
   type Tile,
 } from '../../spikes/lib/mesh';
 import { slau2Flux, type FluxPrim } from '../../spikes/lib/slau2';
+import { referenceIteration } from '../../spikes/lib/stageReference';
 import { createDawnGpu } from './helpers/dawn';
 
 // Spike (a) kernel on Dawn: it is not validated physics (that is W2), but these pin that it
@@ -187,6 +188,40 @@ describe('spike (a) stage kernel on Dawn', () => {
     const q = prims(layout, state, ctx);
     expect(Math.max(...q.map((p) => Math.hypot(p.u - inf.u, p.v)))).toBeLessThan(5e-2);
     expect(Math.max(...q.map((p) => Math.abs(p.pp)))).toBeLessThan(5);
+  });
+
+  it('matches the f64 reference iteration cell by cell (all BCs, MUSCL, SLAU2, source, dt, RK)', async () => {
+    const layout = makeLayout(GRID.ni, GRID.nj, 4, 3);
+    const inf = freestream(T_INF, P_INF, 102);
+    const { ctx, ghosts } = setup(102, layout, [16, 32]);
+    const s0 = initialState(nodes, layout, ctx, pulse(inf));
+    const ref = referenceIteration(nodes, layout, ghosts, inf, ctx, 1.5, s0);
+    const { state } = await run(layout, { x: 16, y: 8 }, 102, pulse(inf), 1, [16, 32]);
+    const g = prims(layout, state, ctx);
+    const r = prims(layout, ref, ctx);
+    const worst = { vel: 0, pp: 0, rho: 0, rw: 0, z: 0 };
+    g.forEach((p, k) => {
+      const q = r[k];
+      if (!q) throw new Error('missing reference cell');
+      worst.vel = Math.max(worst.vel, Math.hypot(p.u - q.u, p.v - q.v));
+      worst.pp = Math.max(worst.pp, Math.abs(p.pp - q.pp));
+      worst.rho = Math.max(worst.rho, Math.abs(p.rho - q.rho));
+      worst.rw = Math.max(worst.rw, Math.abs(p.rw - q.rw));
+      worst.z = Math.max(worst.z, Math.abs(p.z - q.z));
+    });
+    // f32 vs f64: state round-off ~1e-7 relative, p' from rho R T - pInf ~0.01 Pa. A wrong
+    // stencil, ghost or sign shows up at the pulse scale (hundreds of Pa, metres per second).
+    expect(worst.vel).toBeLessThan(1e-2);
+    expect(worst.pp).toBeLessThan(1);
+    expect(worst.rho).toBeLessThan(1e-5);
+    expect(worst.rw).toBeLessThan(1e-3);
+    expect(worst.z).toBeLessThan(1e-6);
+    // And the step did something at that scale.
+    const moved = g.reduce((m, p, k) => {
+      const q0 = prims(layout, s0, ctx)[k];
+      return Math.max(m, Math.abs(p.pp - (q0?.pp ?? 0)));
+    }, 0);
+    expect(moved).toBeGreaterThan(100);
   });
 
   it('gives the same result for every tile shape (halo and partial-tile logic)', async () => {

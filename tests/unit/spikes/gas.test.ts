@@ -4,8 +4,8 @@ import { GAS_R, T_MID, cpH, freestream, tempFromE } from '../../../spikes/lib/ga
 describe('placeholder thermally perfect gas (shape of the NASA-7 form, not real data)', () => {
   it('is continuous in cp and h at the range boundary', () => {
     for (const y of [0, 0.5, 1]) {
-      const lo = cpH(T_MID - 1e-6, y);
-      const hi = cpH(T_MID + 1e-6, y);
+      const lo = cpH(T_MID - 1e-9, y);
+      const hi = cpH(T_MID + 1e-9, y);
       expect(Math.abs(lo.cp - hi.cp)).toBeLessThan(1e-3);
       expect(Math.abs(lo.h - hi.h)).toBeLessThan(1e-3);
     }
