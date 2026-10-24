@@ -15,9 +15,23 @@ import {
   StorageBufferAttribute,
   type WebGPURenderer,
 } from 'three/webgpu';
-import { Fn, instanceIndex, int, ivec2, storage, texture, textureLoad, uv, vec2 } from 'three/tsl';
+import {
+  Fn,
+  float,
+  instanceIndex,
+  int,
+  ivec2,
+  storage,
+  texture,
+  textureLoad,
+  uv,
+  vec2,
+  vec4,
+  vertexIndex,
+} from 'three/tsl';
 import { GpuErrorLog, requestSimDevice, type SimDevice } from '../../src/gpu/device';
 import {
+  computeNow,
   createRendererOnDevice,
   gpuBufferOf,
   injectGpuBuffer,
@@ -135,7 +149,7 @@ describe('spike (b): our GPUDevice shared with three r186', () => {
     return { scene, camera, target };
   }
 
-  async function renderAndRead(ext: ExternalTexture, preRender?: () => void) {
+  function renderAndRead(ext: ExternalTexture, preRender?: () => void) {
     const { scene, camera, target } = planeScene(ext);
     preRender?.();
     renderer.setRenderTarget(target);
@@ -164,10 +178,14 @@ describe('spike (b): our GPUDevice shared with three r186', () => {
 
   it('raw WGSL -> rgba16float GPUTexture -> TSL material on a plane: the pixels are the written values', async () => {
     writeTex(0.25);
-    const { read } = await renderAndRead(nearestExternal());
+    const { read } = renderAndRead(nearestExternal());
     const px = (await read()) as Float32Array;
     // Find the row orientation once, then require every pixel to match it exactly.
     const flipped = px[1] !== 0;
+    // Measured: readRenderTargetPixelsAsync returns rows top-down, and TSL texture(ext, uv)
+    // samples texel row v * H (no flip; see the particle test), so the plane's bottom
+    // (uv.y = 0, texel row 0) is the last read-back row.
+    expect(flipped).toBe(true);
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         const k = 4 * (y * W + x);
@@ -189,10 +207,14 @@ describe('spike (b): our GPUDevice shared with three r186', () => {
       const y = i.div(W);
       // A particle at the texel centre samples the flow field, as the particle system will.
       const p = vec2(x.toFloat().add(0.5).div(W), y.toFloat().add(0.5).div(H));
-      storage(sampled, 'vec4', n).element(instanceIndex).assign(texture(ext, p).level(0));
-      storage(loaded, 'vec4', n).element(instanceIndex).assign(textureLoad(ext, ivec2(x, y)));
+      storage(sampled, 'vec4', n)
+        .element(instanceIndex)
+        .assign(texture(ext, p).level(float(0)));
+      storage(loaded, 'vec4', n)
+        .element(instanceIndex)
+        .assign(textureLoad(ext, ivec2(x, y)));
     })().compute(n);
-    renderer.compute(pass);
+    computeNow(renderer, pass);
     const s = new Float32Array(await renderer.getArrayBufferAsync(sampled));
     const l = new Float32Array(await renderer.getArrayBufferAsync(loaded));
     for (let y = 0; y < H; y++) {
@@ -207,13 +229,13 @@ describe('spike (b): our GPUDevice shared with three r186', () => {
   it('queue order: compute submitted before render() is seen by that frame; submitted after, it is not', async () => {
     const ext = nearestExternal();
     for (const k of [0.125, 0.375]) {
-      const { read } = await renderAndRead(ext, () => {
+      const { read } = renderAndRead(ext, () => {
         writeTex(k);
       });
       expect((await read())[2]).toBe(k);
     }
     // Render first, then write: the frame shows the previous value.
-    const { read } = await renderAndRead(ext);
+    const { read } = renderAndRead(ext);
     writeTex(0.75);
     expect((await read())[2]).toBe(0.375);
   });
@@ -221,7 +243,7 @@ describe('spike (b): our GPUDevice shared with three r186', () => {
   it('three never uploads over an ExternalTexture we write (texture still holds our data after renders)', async () => {
     writeTex(0.625);
     const ext = nearestExternal();
-    for (let f = 0; f < 5; f++) await renderAndRead(ext);
+    for (let f = 0; f < 5; f++) renderAndRead(ext);
     const staging = sim.device.createBuffer({
       size: 256 * H,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
@@ -246,7 +268,7 @@ describe('spike (b): our GPUDevice shared with three r186', () => {
         .assign(storage(attr, 'vec4', n).toReadOnly().element(instanceIndex));
     })().compute(n);
     expect(() => gpuBufferOf(renderer, attr)).toThrow(/not created yet/);
-    renderer.compute(copy); // three creates both buffers here (zeros)
+    computeNow(renderer, copy); // three creates both buffers here (zeros)
     const buffer = gpuBufferOf(renderer, attr);
 
     const { device } = sim;
@@ -268,18 +290,18 @@ describe('spike (b): our GPUDevice shared with three r186', () => {
     pass.end();
     device.queue.submit([enc.finish()]);
 
-    for (let f = 0; f < 3; f++) renderer.compute(copy);
+    for (let f = 0; f < 3; f++) computeNow(renderer, copy);
     let v = new Float32Array(await renderer.getArrayBufferAsync(out));
     expect([v[4 * 7], v[4 * 7 + 3]]).toEqual([7, 28]);
 
     attr.needsUpdate = true; // three re-uploads the (zero) CPU array on next use
-    renderer.compute(copy);
+    computeNow(renderer, copy);
     v = new Float32Array(await renderer.getArrayBufferAsync(out));
     expect([v[4 * 7], v[4 * 7 + 3]]).toEqual([0, 0]);
 
     attr.setUsage(DynamicDrawUsage); // ...and with DynamicDrawUsage on every use
     attr.array[4 * 7] = 99;
-    renderer.compute(copy);
+    computeNow(renderer, copy);
     v = new Float32Array(await renderer.getArrayBufferAsync(out));
     expect(v[4 * 7]).toBe(99);
   });
@@ -290,11 +312,16 @@ describe('spike (b): our GPUDevice shared with three r186', () => {
       size: 16 * n,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
     });
-    sim.device.queue.writeBuffer(own, 0, Float32Array.from({ length: 4 * n }, (_, i) => i));
+    sim.device.queue.writeBuffer(
+      own,
+      0,
+      Float32Array.from({ length: 4 * n }, (_, i) => i),
+    );
     const attr = new StorageBufferAttribute(new Float32Array(4 * n), 4);
     injectGpuBuffer(renderer, attr, own);
     const out = new StorageBufferAttribute(new Float32Array(4 * n), 4);
-    renderer.compute(
+    computeNow(
+      renderer,
       Fn(() => {
         storage(out, 'vec4', n)
           .element(instanceIndex)
@@ -310,7 +337,8 @@ describe('spike (b): our GPUDevice shared with three r186', () => {
   it('pads itemSize-3 storage attributes to 4 and replaces the attribute array', () => {
     const attr = new StorageBufferAttribute(new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9]), 3);
     const sink = new StorageBufferAttribute(new Float32Array(12), 4);
-    renderer.compute(
+    computeNow(
+      renderer,
       Fn(() => {
         storage(sink, 'vec4', 3)
           .element(instanceIndex)
@@ -323,13 +351,15 @@ describe('spike (b): our GPUDevice shared with three r186', () => {
   });
 
   it('a storage buffer read in a vertex shader needs no toReadOnly(): three emits var<storage, read> outside compute', async () => {
-    const n = 4;
+    // PlaneGeometry(2, 2) has 4 vertices; its triangle (0, 2, 1) built from these positions is
+    // counter-clockwise (front-facing) and covers clip space.
     const attr = new StorageBufferAttribute(
-      new Float32Array([-1, -1, 0, 1, 3, -1, 0, 1, -1, 3, 0, 1, 0, 0, 0, 1]),
+      new Float32Array([-1, 3, 0, 1, 3, -1, 0, 1, -1, -1, 0, 1, 0, 0, 0, 1]),
       4,
     );
     const material = new MeshBasicNodeMaterial();
-    material.positionNode = storage(attr, 'vec4', n).element(instanceIndex).xyz; // READ_WRITE by default
+    material.positionNode = storage(attr, 'vec4', 4).element(vertexIndex).xyz; // READ_WRITE node
+    material.colorNode = vec4(1, 0, 0, 1);
     const scene = new Scene();
     scene.add(new Mesh(new PlaneGeometry(2, 2), material));
     const camera = new OrthographicCamera(-1, 1, 1, -1, 0, 10);
@@ -338,17 +368,20 @@ describe('spike (b): our GPUDevice shared with three r186', () => {
     renderer.setRenderTarget(target);
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
-    await sim.device.queue.onSubmittedWorkDone();
+    const px = (await renderer.readRenderTargetPixelsAsync(target, 0, 0, W, H)) as Float32Array;
     await sleep(50);
     expect(log.reports).toEqual([]); // no "read_write storage in vertex stage" validation error
+    // Every pixel is red: the vertex shader really read the positions from the storage buffer.
+    for (let k = 0; k < W * H; k++) expect([px[4 * k], px[4 * k + 1]]).toEqual([1, 0]);
   });
 
   it('uncaptured errors reach our listener although three replaced device.onuncapturederror; three logs them too', async () => {
     const threeSaw: string[] = [];
     const previous = renderer.onError;
-    renderer.onError = (info: { message: string }) => {
+    // @types/three 0.186 declares (errorMessage: string) => void, but r186 passes an object.
+    renderer.onError = ((info: { message: string }) => {
       threeSaw.push(info.message);
-    };
+    }) as unknown as (errorMessage: string) => void;
     sim.device.createBuffer({ size: 16, usage: 0 });
     await sim.device.queue.onSubmittedWorkDone();
     await sleep(50);
