@@ -1,7 +1,8 @@
 // Block-face index helpers and multi-block connectivity checks. Interfaces are point matched: the
 // node at face index k of a patch is the same point as the node at the mapped index of the
-// neighbour patch, bitwise. Every block is right-handed in (x, r), which makes a matched max face
-// meet a min face with the same orientation and makes the shared face vectors bitwise equal.
+// neighbour patch, bitwise. Every block is right-handed in (x, r), so the face vectors the two sides
+// compute from the shared nodes are bitwise equal (a max face against a min face: both normals point
+// from one block into the other) or bitwise negated (max against max, min against min).
 import {
   BC,
   FACES,
@@ -65,6 +66,16 @@ export function findPatch(
   k: number,
 ): Patch | undefined {
   return patches.find((p) => p.block === block && p.face === face && p.start <= k && k <= p.end);
+}
+
+/** The patch of block b's face containing face cell c (cells start..end-1; unique). */
+export function findCellPatch(
+  patches: readonly Patch[],
+  block: number,
+  face: Face,
+  c: number,
+): Patch | undefined {
+  return patches.find((p) => p.block === block && p.face === face && p.start <= c && c < p.end);
 }
 
 /** The patch on the other side of an interface patch. */

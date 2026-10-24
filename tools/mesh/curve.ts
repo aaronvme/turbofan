@@ -156,3 +156,56 @@ export function joinCurves(curves: readonly Polyline[]): Polyline {
   }
   return new Polyline(pts);
 }
+
+/** A knot of a piecewise-cubic Hermite r(x): position and slope dr/dx. */
+export interface HermiteKnot {
+  readonly x: number;
+  readonly r: number;
+  readonly s: number;
+}
+
+/**
+ * C1 piecewise-cubic Hermite r(x) through the knots (x increasing), sampled densely. Knot points are
+ * reproduced exactly, so curves that share a knot share that point bitwise.
+ */
+export function hermitePoints(knots: readonly HermiteKnot[], perSegment = 240): Pt[] {
+  const pts: Pt[] = [];
+  for (let k = 0; k + 1 < knots.length; k++) {
+    const a = knots[k] as HermiteKnot;
+    const b = knots[k + 1] as HermiteKnot;
+    const h = b.x - a.x;
+    if (!(h > 0)) throw new Error('Hermite knots must have increasing x');
+    if (k === 0) pts.push({ x: a.x, r: a.r });
+    for (let m = 1; m <= perSegment; m++) {
+      if (m === perSegment) {
+        pts.push({ x: b.x, r: b.r });
+        continue;
+      }
+      const t = m / perSegment;
+      const h00 = 2 * t ** 3 - 3 * t ** 2 + 1;
+      const h10 = t ** 3 - 2 * t ** 2 + t;
+      const h01 = -2 * t ** 3 + 3 * t ** 2;
+      const h11 = t ** 3 - t ** 2;
+      pts.push({ x: a.x + t * h, r: h00 * a.r + h10 * h * a.s + h01 * b.r + h11 * h * b.s });
+    }
+  }
+  return pts;
+}
+
+/** Dense cubic Bezier from p0 to p3 with control points p1, p2 (end points exact). */
+export function bezier(p0: Pt, p1: Pt, p2: Pt, p3: Pt, n = 400): Polyline {
+  const pts: Pt[] = [p0];
+  for (let k = 1; k < n; k++) {
+    const t = k / n;
+    const a = (1 - t) ** 3;
+    const b = 3 * (1 - t) ** 2 * t;
+    const c = 3 * (1 - t) * t * t;
+    const d = t ** 3;
+    pts.push({
+      x: a * p0.x + b * p1.x + c * p2.x + d * p3.x,
+      r: a * p0.r + b * p1.r + c * p2.r + d * p3.r,
+    });
+  }
+  pts.push(p3);
+  return new Polyline(pts);
+}

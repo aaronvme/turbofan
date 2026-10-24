@@ -115,15 +115,51 @@ export function validateFlowpath(g: FlowpathGeometry): string[] {
     errors.push('stations must be ordered: fan face < splitter < bypass lip < core lip');
   }
   if (!(kp.plugTip.x > kp.coreLip.x)) errors.push('plug tip must be downstream of the core lip');
-  const hub = new Polyline(c.hub);
   if (errors.length === 0) {
-    if (
-      !(new Polyline(c.coreOuter).atX(kp.splitter.x + 1e-3).r > hub.atX(kp.splitter.x + 1e-3).r)
-    ) {
-      errors.push('core duct must have positive height after the splitter');
-    }
-    if (!(new Polyline(c.nacelleInner).atX(0).r > hub.atX(0).r))
-      errors.push('fan face must have positive span');
+    const hub = new Polyline(c.hub);
+    const outer = new Polyline(c.coreOuter);
+    const cowl = new Polyline(c.coreCowl);
+    const nacIn = new Polyline(c.nacelleInner);
+    const nacOut = new Polyline(c.nacelleOuter);
+    // Sample strictly inside each span: ducts need positive height, solid walls positive thickness.
+    const inside = (a: number, b: number, test: (x: number) => boolean, message: string): void => {
+      for (let k = 1; k < 200; k++) {
+        if (!test(a + ((b - a) * k) / 200)) {
+          errors.push(message);
+          return;
+        }
+      }
+    };
+    inside(
+      kp.splitter.x,
+      kp.coreLip.x,
+      (x) => outer.atX(x).r > hub.atX(x).r,
+      'core duct must have positive height',
+    );
+    inside(
+      kp.splitter.x,
+      kp.coreLip.x,
+      (x) => cowl.atX(x).r > outer.atX(x).r,
+      'core cowl must lie outside the core duct wall',
+    );
+    inside(
+      kp.splitter.x,
+      kp.bypassLip.x,
+      (x) => nacIn.atX(x).r > cowl.atX(x).r,
+      'bypass duct must have positive height',
+    );
+    inside(
+      kp.highlight.x,
+      kp.bypassLip.x,
+      (x) => nacOut.atX(x).r > nacIn.atX(x).r,
+      'nacelle must have positive thickness',
+    );
+    inside(
+      0,
+      kp.splitter.x,
+      (x) => nacIn.atX(x).r > hub.atX(x).r,
+      'fan duct must have positive span',
+    );
   }
   for (const row of g.bladeRows) {
     if (!(row.xTE > row.xLE)) errors.push(`blade row ${row.name}: xTE must exceed xLE`);

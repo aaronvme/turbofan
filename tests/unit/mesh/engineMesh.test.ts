@@ -94,11 +94,15 @@ describe.each([MESH_130K, MESH_80K])('engine mesh $name', (spec) => {
   });
 
   it('matches interface face vectors bitwise, so ghost exchange is exactly conservative', () => {
+    // A max face against a min face: both normals point from one block into the other (equal).
+    // Max against max or min against min: the normals point into each block (exactly negated).
+    const isMax = (f: Face): boolean => f === 'imax' || f === 'jmax';
     const geo = mesh.blocks.map((b) => blockGeometry(b));
     for (const p of mesh.patches) {
       if (p.bc !== BC.INTERFACE || p.nbr === undefined) continue;
       const a = mesh.blocks[p.block] as Block;
       const b = mesh.blocks[p.nbr.block] as Block;
+      const sign = isMax(p.face) !== isMax(p.nbr.face) ? 1 : -1;
       for (let c = p.start; c < p.end; c++) {
         const cb = Math.min(mapIndex(p, c), mapIndex(p, c + 1));
         const va = faceVector(a, geo[p.block] as ReturnType<typeof blockGeometry>, p.face, c);
@@ -108,8 +112,8 @@ describe.each([MESH_130K, MESH_80K])('engine mesh $name', (spec) => {
           p.nbr.face,
           cb,
         );
-        expect(va[0]).toBe(vb[0]);
-        expect(va[1]).toBe(vb[1]);
+        // === (not Object.is) so that +0 and -0 compare equal; IEEE negation is exact otherwise
+        expect(va[0] === sign * vb[0] && va[1] === sign * vb[1]).toBe(true);
       }
     }
   });
