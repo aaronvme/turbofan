@@ -92,8 +92,8 @@ export interface MeshSpec {
   readonly nearPlumeD: number;
   /** Growth beyond the near plume and upstream of the inlet. */
   readonly farGrowth: number;
-  /** Growth (m per m downstream) of the radial spacing along both jet shear lines. */
-  readonly shearGrowth: number;
+  /** Exponent of the growth of the radial spacing along both jet shear lines (lip -> outflow). */
+  readonly shearExponent: number;
   /** Uniform radial spacing of the plume blocks at the outflow boundary. */
   readonly outflowRadialSpacing: number;
   readonly upstreamD: number;
@@ -104,21 +104,29 @@ export interface MeshSpec {
   readonly sweeps: number;
 }
 
+/**
+ * Production spec (~130k cells). Shared with the 80k fallback: the C-block, inlet, upstream and fan
+ * (the topology's fixed counts: 16 core, 32 bypass, 48 fan, 16 C-block cells across), 8-10 mm radial
+ * spacing at both nozzle lips, the domain. The extra ~50k cells go where the solver needs them:
+ * 8 cells per blade chord in the core (2 mm axial cells in the HPC rear), 8 mm axial cells at the
+ * nozzle lips growing at 0.5 % per cell, and a 25 mm axial plateau along the jets out to 11 D
+ * after the core lip, so the shear layers stay resolved through the potential core.
+ */
 export const MESH_130K: MeshSpec = {
   name: '130k',
   targetCells: 130_000,
   nCore: 16,
   nBypass: 32,
   nLip: 16,
-  nFar: 40,
-  cellsPerChord: 6,
+  nFar: 36,
+  cellsPerChord: 8,
   lipRadialSpacing: 0.009,
-  lipAxialSpacing: 0.01,
+  lipAxialSpacing: 0.008,
   fanFaceSpacing: 0.009,
   splitterSpacing: 0.005,
   fanSpacingMax: 0.009,
   coreSpacingMax: 0.01,
-  bypassSpacingMax: 0.015,
+  bypassSpacingMax: 0.012,
   combustorSpacing: 0.008,
   highlightSpacing: 0.0035,
   lipWallNormalSpacing: 0.003,
@@ -126,11 +134,11 @@ export const MESH_130K: MeshSpec = {
   lipOuterSpacingMax: 0.02,
   bypassLipGrowth: 1.08,
   gradation: 0.08,
-  plumeGrowth: 0.01,
-  plumeSpacingMax: 0.03,
-  nearPlumeD: 10,
+  plumeGrowth: 0.005,
+  plumeSpacingMax: 0.025,
+  nearPlumeD: 11,
   farGrowth: 0.1,
-  shearGrowth: 0.002,
+  shearExponent: 2,
   outflowRadialSpacing: 0.045,
   upstreamD: 5,
   radialD: 5,
@@ -139,15 +147,21 @@ export const MESH_130K: MeshSpec = {
   sweeps: 0,
 };
 
+/**
+ * The P1 fallback (~80k cells): the same engine resolution requirements (16/48/32 across, >= 4
+ * cells per chord, 8-10 mm at the lips), with 6 cells per chord, 10 mm axial cells at the lips
+ * growing at 0.8 % per cell, and a 50 mm plume plateau out to 7 D.
+ */
 export const MESH_80K: MeshSpec = {
   ...MESH_130K,
   name: '80k',
   targetCells: 80_000,
-  cellsPerChord: 5,
-  lipAxialSpacing: 0.012,
+  cellsPerChord: 6,
+  lipAxialSpacing: 0.01,
+  bypassSpacingMax: 0.015,
+  plumeGrowth: 0.008,
   plumeSpacingMax: 0.05,
-  nearPlumeD: 8,
-  nFar: 32,
+  nearPlumeD: 7,
 };
 
 export interface EngineMesh extends MultiBlockMesh {
@@ -647,8 +661,13 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
     { x: P.x, r: csMid, s: 0 },
     { x: xOut, r: rCsOut, s: (rCsOut - csMid) / (xOut - P.x) },
   ]);
-  const hBs = (x: number): number => Math.min(hOut, lipR + spec.shearGrowth * (x - B.x));
-  const hCs = (x: number): number => Math.min(hOut, lipR + spec.shearGrowth * (x - C.x));
+  // radial spacing along each shear line: the lip value, growing like (distance / length)^p to the
+  // uniform outflow spacing, which tracks the jets' slow spreading (a linear growth outruns the
+  // jets' own mean cell size a few diameters downstream and forces a tan-type profile across them)
+  const shearSpacing = (x: number, x0: number): number =>
+    lipR + (hOut - lipR) * clamp((x - x0) / (xOut - x0), 0, 1) ** spec.shearExponent;
+  const hBs = (x: number): number => shearSpacing(x, B.x);
+  const hCs = (x: number): number => shearSpacing(x, C.x);
   const onLine = (c: Polyline, x: number, first: Pt, last: Pt, k: number, n: number): Pt =>
     k === 0 ? first : k === n ? last : c.atX(x);
   const bsNodes = xs.map((x, k) => onLine(bypassShear, x, B, { x: xOut, r: rBsOut }, k, kOut));
