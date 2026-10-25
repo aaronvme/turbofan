@@ -69,6 +69,22 @@ describe('RunRecorder (D0-1 phases)', () => {
     expect(r2?.longFrames).toBe(0);
   });
 
+  it('summarises how late each rAF callback started after its frame time (main-thread contention)', () => {
+    // rAF timestamps are vsync-aligned frame times: a callback delayed by a busy thread can
+    // still carry a regular timestamp, so frame deltas alone under-count late frames.
+    const rec = new RunRecorder(P, 0);
+    drive(rec, 0, 10, 1, 990);
+    const delays = [1, 1, 1, 12, 1];
+    delays.forEach((d, i) => rec.frame(1000 + 20 * i, 1, 1000 + 20 * i + d));
+    drive(rec, 1100, 20, 1, 8000); // no callback times: no delay statistics
+    const [r1, r2] = rec.results();
+    expect(r1?.callbackDelay?.max).toBe(12);
+    expect(r1?.callbackDelay?.p50).toBe(1);
+    expect(r2?.callbackDelay).toBeNull();
+    const agg = aggregateRuns(rec.results());
+    expect(agg.callbackDelayP99).toBeCloseTo(r1?.callbackDelay?.p99 ?? Number.NaN, 12);
+  });
+
   it('reports the measured window on the frame clock (for matching long tasks to runs)', () => {
     expect(new RunRecorder(P, 500).window).toEqual({ from: 1500, to: 7500 });
   });
