@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderSvg } from '../../../tools/mesh/svg';
-import { sideBySide } from './fixtures';
+import { rectBlock, sideBySide } from './fixtures';
 
 describe('renderSvg', () => {
   it('draws every block, its outline and the walls in a view box', () => {
@@ -70,5 +70,23 @@ describe('renderSvg', () => {
     });
     expect(thin.length).toBeLessThan(all.length);
     expect(thin).toContain('class="outline"');
+  });
+
+  it('drops nodes closer than a pixel to the last drawn point, keeping run ends', () => {
+    // 1000 cells along a 100 px wide view: 0.1 px per cell along the rows
+    const dense = { blocks: [rectBlock('D', 0, 1, 0, 0.1, 1000, 2)], patches: [] };
+    const svg = renderSvg(dense, {
+      title: 'dense',
+      xMin: 0,
+      xMax: 1,
+      rMin: 0,
+      rMax: 0.1,
+      widthPx: 100,
+    });
+    // undecimated: 3 rows x 1000 segments + 1001 columns x 2 segments = 5002 line commands
+    const lines = svg.match(/L/g)?.length ?? 0;
+    expect(lines).toBeLessThan(3000);
+    // every row still reaches the far edge of the view (x = 100 px)
+    expect(svg.match(/L100 /g)?.length).toBeGreaterThanOrEqual(3);
   });
 });
