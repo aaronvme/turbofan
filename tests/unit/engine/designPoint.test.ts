@@ -34,7 +34,7 @@ describe('design-point estimate (the derivation in ENGINE_FACTS.md)', () => {
     expect(est.bypassNozzle.areaM2).toBeCloseTo(factValue('bypassNozzleArea'), 3);
     expect(est.coreNozzle.choked).toBe(true);
     expect(est.bypassNozzle.choked).toBe(false);
-    expect(est.stations['5'].ptPa / p0).toBeCloseTo(2.646, 2);
+    expect(est.stations['5'].ptPa / p0).toBeCloseTo(2.64, 2);
   });
 
   it('closes on the published thrust and TSFC inside C1 and C3', () => {

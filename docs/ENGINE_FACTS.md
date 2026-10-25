@@ -111,7 +111,7 @@ No public source gives these. The SI column is the **model assumption**, not a f
 
 | ID | Figure | Source value | SI (model assumption) | Source | Confidence |
 |---|---|---|---|---|---|
-| fanBypassPressureRatio | Fan pressure ratio, bypass (outer) stream, SLS takeoff | unknown | 1.55 | none; closes the design-point estimate below at +2.1 % thrust (1.60 gives +3.5 %, outside C1's 3 %) | unknown |
+| fanBypassPressureRatio | Fan pressure ratio, bypass (outer) stream, SLS takeoff | unknown | 1.55 | none; closes the design-point estimate below at +2.0 % thrust (1.60 gives +3.4 %, outside C1's 3 %) | unknown |
 | fanCorePressureRatio | Fan pressure ratio, core (root) stream | unknown | 1.5 | none; a fan root does less work than the tip | unknown |
 | boosterPressureRatio | Booster (3-stage LPC) pressure ratio | unknown | 1.75 | none; typical 3-stage booster loading. The HPC pressure ratio follows as 29 / (1.5 x 1.75) = 11.048 | unknown |
 | etaFanBypass | Fan isentropic efficiency, bypass stream | unknown | 0.9 | none; typical of a wide-chord fan of this era | unknown |
@@ -125,8 +125,8 @@ No public source gives these. The SI column is the **model assumption**, not a f
 | turbineCoolingFraction | Core air that bypasses the combustor to cool the turbines | unknown | 0.12 | none | unknown |
 | fuelLhv | Jet-A lower heating value | unknown | 4.32e7 J/kg | none; the plan's value, inside the usual 42.8-43.5 MJ/kg band | unknown |
 | t4Takeoff | Combustor exit temperature T4, SLS takeoff | unknown | 1746 K | none; result of the design-point estimate below (energy balance on fuelFlowTakeoff) | unknown |
-| bypassNozzleArea | Bypass nozzle exit area A18 = A19 (convergent, unchoked at SLS) | unknown | 0.907 m² | none; sized by the design-point estimate below | unknown |
-| coreNozzleArea | Core nozzle throat area A8 = A9 (convergent, choked at SLS takeoff) | unknown | 0.177 m² | none; sized by the design-point estimate below | unknown |
+| bypassNozzleArea | Bypass nozzle exit area A18 = A19 (convergent, unchoked at SLS) | unknown | 0.9067 m² | none; sized by the design-point estimate below | unknown |
+| coreNozzleArea | Core nozzle throat area A8 = A9 (convergent, choked at SLS takeoff) | unknown | 0.1778 m² | none; sized by the design-point estimate below | unknown |
 | fanHubRadius | Fan hub (spinner base) radius at the fan face; hub/tip 0.296 | unknown | 0.229 m | none; a hub/tip ratio about 0.3 is typical of CFM56-class fans | unknown |
 | fanTipClearance | Fan tip clearance to the casing | unknown | 0.002 m | none | unknown |
 | inletHighlightRadius | Intake highlight radius (axisymmetric; the real 737NG intake has a flattened lower lip) | unknown | 0.8 m | none; highlight area 1.07 x the fan tip area | unknown |
@@ -167,18 +167,18 @@ PHYSICS.md C5 (≤ 5.0 s to 95 % takeoff thrust) is 33.73(b). The lever movement
 
 ## Design-point estimate (derivation of the assumed values)
 
-`src/engine/designPoint.ts` reproduces this and `tests/unit/engine/designPoint.test.ts` checks it. SLS ISA static (101325 Pa, 288.15 K), total airflow 359.245 kg/s, BPR 5.1 (bypass 300.353 kg/s, core 58.893 kg/s), OPR 29, fuel flow 1.293 kg/s, and the pressure ratios and efficiencies above. Constant-cp sections: cold cp 1004.5 J/(kg K), γ 1.4; hot cp 1150 J/(kg K), γ 1.333. Losses: bypass duct 1.5 % of Pt, core nozzle 1 %, combustor 5 %; mechanical efficiency 0.99; 100 % ram recovery (TCDS note 2); the cooling air mixes in at the HPT rotor inlet.
+`src/engine/designPoint.ts` reproduces this and `tests/unit/engine/designPoint.test.ts` checks it. SLS ISA static (101325 Pa, 288.15 K), total airflow 359.245 kg/s, BPR 5.1 (bypass 300.353 kg/s, core 58.893 kg/s), OPR 29, fuel flow 1.293 kg/s, and the pressure ratios and efficiencies above. Constant-cp, calorically perfect sections with R = 287.053 J/(kg K): cold γ 1.4, so cp = γR/(γ-1) = 1004.7 J/(kg K); hot cp 1150 J/(kg K), so γ = cp/(cp-R) = 1.3326. Losses: bypass duct 1.5 % of Pt, core nozzle 1 %, combustor 5 %; mechanical efficiency 0.99; 100 % ram recovery (TCDS note 2); the cooling air mixes in at the HPT rotor inlet.
 
 | Quantity | Value |
 |---|---|
 | T13 / T21 / T24 / T3 | 330.9 / 327.9 / 391.8 / 836.0 K |
 | FAR in the combustor | 0.0250 |
 | T4 / T41 (cooling mixed) | 1746 / 1627 K |
-| T45 / T49.5 / T5 | 1243 / 1174 / 966 K |
+| T45 / T49.5 / T5 | 1243 / 1174 / 965 K |
 | HP / LP shaft work | 26.3 / 19.0 MW |
-| P5 / p0 (core nozzle pressure ratio) | 2.65, choked |
-| A8 / A18 | 0.177 / 0.907 m² |
-| Net thrust | 123.9 kN, +2.1 % of takeoffThrust |
+| P5 / p0 (core nozzle pressure ratio) | 2.64, choked |
+| A8 / A18 | 0.1778 / 0.9067 m² |
+| Net thrust | 123.9 kN, +2.0 % of takeoffThrust |
 | TSFC | 1.043e-5 kg/(N s), -2.0 % from tsfcTakeoff |
 
 T49.5 (after LPT stage 1, equal stage work) comes out at 1174 K = 901 °C, i.e. 931 °C displayed with the 30 K shunt: under the 950 °C redline but hotter than the 855 °C measured on a 25 °C day ([WIDURI]). The W1 cycle calibration (efficiencies, cooling) is expected to bring it down; this estimate only fixes nozzle areas and blade velocity triangles.
@@ -189,18 +189,18 @@ T49.5 (after LPT stage 1, equal stage work) comes out at 1174 K = 901 °C, i.e. 
 
 | Region | x range (m) | Hub / casing radius (m) | Why |
 |---|---|---|---|
-| Intake | -0.775 to 0 | highlight 0.800, throat 0.735, fan casing 0.7767 | throat Mach about 0.6 at takeoff; highlight area 1.07 x the fan tip area |
+| Intake | -0.775 to 0 | highlight 0.800, throat 0.735, fan casing 0.7767 | throat Mach about 0.65 at takeoff; highlight area 1.07 x the fan tip area |
 | Spinner | -0.42 to 0 | 0 to 0.229 | conical nose; hub/tip 0.296 at the fan face, fan-face Mach about 0.6 |
-| Fan | 0 to 0.26 | hub rises 0.229 to 0.324 | the hub climbs to the booster radius, as in CFM56-class fans |
-| Bypass duct | 0.26 to 1.55 | core cowl 0.430 to 0.533, nacelle 0.777 to 0.757 | Mach about 0.5 behind the OGVs, accelerating to the nozzle; A18 = 0.907 m² |
-| Booster | 0.26 to 0.64 | 0.324 to 0.345 / 0.430 to 0.410 | entry Mach about 0.5; 7 rows (IGV + 3 stages) |
+| Fan | 0 to 0.26 | hub rises 0.229 to 0.316 | the hub climbs to the booster radius, as in CFM56-class fans |
+| Bypass duct | 0.26 to 1.55 | core cowl 0.430 to 0.533, nacelle 0.777 to 0.757 | Mach about 0.5 behind the OGVs, accelerating to the nozzle; A18 = 0.9067 m² |
+| Booster | 0.26 to 0.64 | 0.316 to 0.345 / 0.430 to 0.410 | entry Mach about 0.5; 7 rows (IGV + 3 stages) |
 | Transition duct | 0.64 to 0.86 | gooseneck down to 0.222 / 0.316 | brings the core flow down to the HPC radius |
 | HPC | 0.86 to 1.46 | 0.222 to 0.262 / 0.316 to 0.281 | entry Mach about 0.45, exit about 0.3 (19 mm blades at the exit); 19 rows |
 | Combustor | 1.46 to 1.74 | about 0.26 / up to 0.365 | low-Mach dump and liner annulus; NGV inlet Mach about 0.15 |
 | HPT | 1.74 to 1.88 | 0.298 / 0.342 to 0.348 | NGV + rotor |
 | Inter-turbine duct | 1.88 to 1.97 | rises to 0.330 / 0.388 | the LPT sits at a larger radius than the HPT |
 | LPT | 1.97 to 2.37 | 0.330 to 0.335 / 0.388 to 0.452 | 8 rows; exit Mach about 0.4 |
-| Exhaust and plug | 2.37 to 3.40 | plug 0.335 to 0 / casing 0.452 to 0.390 | core nozzle lip at x = 2.75, A8 = 0.177 m² |
+| Exhaust and plug | 2.37 to 3.40 | plug 0.335 to 0 / casing 0.452 to 0.390 | core nozzle lip at x = 2.75, A8 = 0.1778 m² |
 | Nacelle | -0.775 to 1.55 | outer radius up to 1.06 | nacelleMaxDiameter |
 
 ## Model vs published (updated every wave)
