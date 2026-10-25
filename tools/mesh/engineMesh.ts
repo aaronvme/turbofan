@@ -3,19 +3,28 @@
 //   upstream  - inflow x = x_in to the face in front of the inlet lip, axis to far field
 //   inlet     - inside the inlet: axis/spinner up to the C-block, from in front of the lip to the fan face
 //   lip       - C-block wrapping the nacelle: fan face -> inner wall -> highlight -> outer wall -> bypass lip
-//   fan       - fan face (x = 0) to the splitter plane, 48 cells hub to casing
-//   bypass    - splitter plane to the bypass-nozzle exit plane, 32 cells
-//   core      - one H-block from the splitter plane to the core-nozzle exit plane, 16 cells
+//   fan       - fan face (x = 0) to the splitter plane, nCore + nBypass cells hub to casing
+//   bypass    - splitter plane to the bypass-nozzle exit plane, nBypass cells
+//   core      - one H-block from the splitter plane to the core-nozzle exit plane, nCore cells
 //   afterbody - over the core cowl, bypass-nozzle exit to the core-nozzle exit plane
 //   plug      - over the plug, core-nozzle exit to the plug tip
 //   plume-core, plume-bypass, plume-outer - the three plume blocks, to x_out
 //   farfield  - above the C-block and the plume, to r_out and x_out
 //
-// Construction: algebraic (TFI; normal extrusion for the C-block), with node distributions chosen
-// so that cell sizes match across every interface, then multi-block elliptic smoothing. Station
-// planes (fan face, splitter, both nozzle exits) are fixed straight lines; other interfaces float.
+// Construction is algebraic and designed so that the algebraic grid already meets every quality
+// requirement (positive Jacobians, stretching <= 1.15 including across interfaces); elliptic
+// smoothing then only polishes it. The rules that make that work:
+// - Duct walls: nodes are placed by a spacing function along the duct mean line and cut by a
+//   smoothed mean-line normal that blends to radial at the station planes (fan face, splitter, both
+//   nozzle exits stay exactly radial and exactly where the geometry puts them).
+// - Shear layers: each jet boundary line (bypass shear, core shear) carries one radial spacing
+//   function h(x) that both blocks on either side use as their end spacing, so the cells match
+//   across the line by construction. The downstream blocks are built column by column.
+// - Every block that meets the C-block, the far field and the plume blocks re-spaces its grid lines
+//   so its first cell equals the neighbour's last, and the per-line targets are smoothed so that
+//   grid lines do not step between neighbouring rows.
 import { Polyline, bezier, hermitePoints, joinCurves } from './curve';
-import { bySpacing, geometric, vinokur } from './distribution';
+import { bySpacing, geometric, uniform, vinokur } from './distribution';
 import {
   keyPoints,
   validateFlowpath,
@@ -66,6 +75,8 @@ export interface MeshSpec {
   readonly fanSpacingMax: number;
   readonly coreSpacingMax: number;
   readonly bypassSpacingMax: number;
+  /** Axial spacing cap in the combustor (no blades there). */
+  readonly combustorSpacing: number;
   /** C-block: wall spacing at the highlight, first wall-normal spacing there, thickness there. */
   readonly highlightSpacing: number;
   readonly lipWallNormalSpacing: number;
@@ -81,11 +92,15 @@ export interface MeshSpec {
   readonly nearPlumeD: number;
   /** Growth beyond the near plume and upstream of the inlet. */
   readonly farGrowth: number;
+  /** Growth (m per m downstream) of the radial spacing along both jet shear lines. */
+  readonly shearGrowth: number;
   /** Uniform radial spacing of the plume blocks at the outflow boundary. */
   readonly outflowRadialSpacing: number;
   readonly upstreamD: number;
   readonly radialD: number;
   readonly downstreamD: number;
+  /** Smoothing passes (across rows) of the east-face copy that shapes the far-upstream columns. */
+  readonly upstreamSmoothing: number;
   readonly sweeps: number;
 }
 
@@ -99,11 +114,12 @@ export const MESH_130K: MeshSpec = {
   cellsPerChord: 6,
   lipRadialSpacing: 0.009,
   lipAxialSpacing: 0.01,
-  fanFaceSpacing: 0.008,
+  fanFaceSpacing: 0.009,
   splitterSpacing: 0.005,
   fanSpacingMax: 0.009,
-  coreSpacingMax: 0.008,
+  coreSpacingMax: 0.01,
   bypassSpacingMax: 0.015,
+  combustorSpacing: 0.008,
   highlightSpacing: 0.0035,
   lipWallNormalSpacing: 0.003,
   lipThickness: 0.12,
@@ -114,11 +130,13 @@ export const MESH_130K: MeshSpec = {
   plumeSpacingMax: 0.03,
   nearPlumeD: 10,
   farGrowth: 0.1,
+  shearGrowth: 0.002,
   outflowRadialSpacing: 0.045,
   upstreamD: 5,
   radialD: 5,
   downstreamD: 20,
-  sweeps: 300,
+  upstreamSmoothing: 100,
+  sweeps: 0,
 };
 
 export const MESH_80K: MeshSpec = {
@@ -151,6 +169,7 @@ export interface EngineMesh extends MultiBlockMesh {
 
 const dist = (a: Pt, b: Pt): number => Math.hypot(a.x - b.x, a.r - b.r);
 const smoothstep = (u: number): number => (u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u));
+const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 
 function nodeAt(b: Block, i: number, j: number): Pt {
   const k = nodeIndex(b, i, j);
@@ -171,10 +190,21 @@ function colNodes(b: Block, i: number): Pt[] {
   return Array.from({ length: b.nj + 1 }, (_, j) => nodeAt(b, i, j));
 }
 
+/**
+ * Straight line from a to b at fractions t. End points are exact (bitwise), and so is a coordinate
+ * the two ends share: a radial line stays exactly on its station plane.
+ */
+function segment(a: Pt, b: Pt, t: ArrayLike<number>): Pt[] {
+  const n = t.length - 1;
+  const lerp = (p: number, q: number, u: number): number => (p === q ? p : p * (1 - u) + q * u);
+  return Array.from(t, (u, k) =>
+    k === 0 ? a : k === n ? b : { x: lerp(a.x, b.x, u), r: lerp(a.r, b.r, u) },
+  );
+}
+
 /** Straight radial line at x from r0 to r1 at fractions t (end points exact). */
 function radialLine(x: number, r0: number, r1: number, t: ArrayLike<number>): Pt[] {
-  const n = t.length - 1;
-  return Array.from(t, (u, k) => ({ x, r: k === 0 ? r0 : k === n ? r1 : r0 * (1 - u) + r1 * u }));
+  return segment({ x, r: r0 }, { x, r: r1 }, t);
 }
 
 /** Nodes along a polyline at fractions of its arc length (end points exact). */
@@ -195,10 +225,21 @@ function geometricToEnd(n: number, dsLast: number): Float64Array {
   return t;
 }
 
-/** Two-sided distribution over length L with last spacing h1 and a first spacing balancing the mean. */
+/**
+ * Two-sided distribution of n cells over length L with end spacings h0 and h1 (metres). Requests
+ * that a two-sided tanh/tan cannot honour smoothly are pulled towards the mean spacing first.
+ */
+function twoSided(n: number, L: number, h0: number, h1: number): Float64Array {
+  const mean = L / n;
+  const a = clamp(h0, 0.25 * mean, 1.9 * mean);
+  const b = clamp(h1, 0.25 * mean, 1.9 * mean);
+  return vinokur(n, a / L, b / L);
+}
+
+/** Two-sided distribution with last spacing h1 and a first spacing balancing the mean. */
 function towardsEnd(n: number, L: number, h1: number): Float64Array {
-  const h0 = Math.max(0.5 * (L / n), Math.min(2 * (L / n) - h1, 2 * (L / n)));
-  return vinokur(n, h0 / L, h1 / L);
+  const mean = L / n;
+  return twoSided(n, L, clamp(2 * mean - h1, 0.5 * mean, 2 * mean), h1);
 }
 
 /** Cell count of a spacing function over [0, L] (continuous, for budgeting). */
@@ -209,16 +250,46 @@ function cellCount(L: number, h: (s: number) => number): number {
   return sum;
 }
 
+/** Spacing of consecutive nodes. */
+function spacings(nodes: readonly Pt[]): number[] {
+  return nodes.slice(1).map((p, k) => dist(nodes[k] as Pt, p));
+}
+
 /** Re-sample the interior nodes of column i (j = 1..nj-1) along the column at fractions t. */
 function respaceColumn(b: Block, i: number, t: ArrayLike<number>): void {
   const line = new Polyline(colNodes(b, i));
   for (let j = 1; j < b.nj; j++) setNode(b, i, j, line.at((t[j] ?? 0) * line.length));
 }
 
-/** Re-sample the interior nodes of row j (i = 1..ni-1) along the row at fractions t. */
-function respaceRow(b: Block, j: number, t: ArrayLike<number>): void {
-  const line = new Polyline(rowNodes(b, j));
-  for (let i = 1; i < b.ni; i++) setNode(b, i, j, line.at((t[i] ?? 0) * line.length));
+/** Block from columns (i index) of nj + 1 nodes each. */
+function columnBlock(name: string, columns: readonly (readonly Pt[])[]): Block {
+  const ni = columns.length - 1;
+  const nj = (columns[0]?.length ?? 0) - 1;
+  const b: Block = {
+    name,
+    ni,
+    nj,
+    x: new Float64Array((ni + 1) * (nj + 1)),
+    r: new Float64Array((ni + 1) * (nj + 1)),
+  };
+  columns.forEach((col, i) => {
+    if (col.length !== nj + 1) throw new Error(`${name}: column ${i} has the wrong node count`);
+    col.forEach((p, j) => {
+      setNode(b, i, j, p);
+    });
+  });
+  return b;
+}
+
+/** Repeated [1 2 1] / 4 smoothing of a sequence in log space, end values held. */
+function smoothLog(v: readonly number[], passes: number): number[] {
+  let a = v.map((x) => Math.log(x));
+  for (let p = 0; p < passes; p++) {
+    a = a.map((x, k) =>
+      k === 0 || k === a.length - 1 ? x : 0.25 * ((a[k - 1] ?? x) + 2 * x + (a[k + 1] ?? x)),
+    );
+  }
+  return a.map((x) => Math.exp(x));
 }
 
 /** Axial target spacing in a duct: blade rows set chord / cellsPerChord, smoothly graded. */
@@ -227,11 +298,16 @@ function ductSpacing(
   spec: MeshSpec,
   cap: number,
   ends: readonly { x: number; h: number }[],
+  zones: readonly { x0: number; x1: number; h: number }[] = [],
 ): (x: number) => number {
   const g = spec.gradation;
   return (x) => {
     let h = cap;
     for (const e of ends) h = Math.min(h, e.h + g * Math.abs(x - e.x));
+    for (const z of zones) {
+      const d = x < z.x0 ? z.x0 - x : x > z.x1 ? x - z.x1 : 0;
+      h = Math.min(h, z.h + g * d);
+    }
     for (const row of rows) {
       const d = x < row.xLE ? row.xLE - x : x > row.xTE ? x - row.xTE : 0;
       h = Math.min(h, (row.xTE - row.xLE) / spec.cellsPerChord + g * d);
@@ -241,10 +317,14 @@ function ductSpacing(
 }
 
 /**
- * Wall node rows of a duct between `lower` and `upper` from x0 to x1: nodes are placed on the
- * duct's mean line by the spacing function, and each cut is the mean-line normal (blended to
- * radial over the last few cuts so the station planes at both ends stay radial). This keeps the
- * cross-duct grid lines near-orthogonal through bends such as the booster-HPC gooseneck.
+ * Wall node rows of a duct between `lower` and `upper` from x0 to x1. Nodes are placed on the
+ * duct's mean line by the spacing function h(x), and each node's cross-duct cut runs along the
+ * mean-line normal. The normal direction is smoothed along the mean line over about one duct
+ * height (the walls are C1 Hermite curves, so their curvature jumps at knots; an unsmoothed normal
+ * would turn those jumps into wall-spacing jumps on the inside of bends), and it is blended to
+ * radial over `blendHeights` duct heights at both ends with a C1 smoothstep, so the station planes
+ * stay radial without compressing the first wall cells. This keeps the cross-duct grid lines
+ * near-orthogonal through bends such as the booster-HPC gooseneck.
  */
 function ductWalls(
   lower: Polyline,
@@ -253,14 +333,51 @@ function ductWalls(
   x1: number,
   h: (x: number) => number,
   ends: { lower0: Pt; upper0: Pt; lower1: Pt; upper1: Pt },
+  blendHeights = 1.5,
 ): { lo: Pt[]; up: Pt[] } {
-  const mean = new Polyline(
-    Array.from({ length: 1501 }, (_, m) => {
-      const x = m === 1500 ? x1 : x0 + ((x1 - x0) * m) / 1500;
-      return { x, r: 0.5 * (lower.atX(x).r + upper.atX(x).r) };
-    }),
-  );
-  const s = bySpacing(mean.length, (sv) => h(mean.at(sv).x));
+  const M = 1500;
+  const height = (x: number): number => upper.atX(x).r - lower.atX(x).r;
+  const pts = Array.from({ length: M + 1 }, (_, m) => {
+    const x = m === M ? x1 : x0 + ((x1 - x0) * m) / M;
+    return { x, r: 0.5 * (lower.atX(x).r + upper.atX(x).r) };
+  });
+  const mean = new Polyline(pts);
+  const L = mean.length;
+  const cum = mean.cum;
+  // normal angle at each sample, from a central difference over a few samples
+  const raw = pts.map((_, m) => {
+    const a = pts[Math.max(0, m - 2)] as Pt;
+    const b = pts[Math.min(M, m + 2)] as Pt;
+    return Math.atan2(b.x - a.x, -(b.r - a.r));
+  });
+  // moving average over half a local duct height either side, three passes
+  const H = pts.map((p) => height(p.x));
+  let ang = raw;
+  for (let pass = 0; pass < 3; pass++) {
+    const prev = ang;
+    let lo = 0;
+    let hi = 0;
+    let sum = 0;
+    ang = pts.map((_, m) => {
+      const s = cum[m] ?? 0;
+      const w = 0.5 * (H[m] ?? 0);
+      while (hi <= M && (cum[hi] ?? Infinity) <= s + w) sum += prev[hi++] ?? 0;
+      while (lo < hi && (cum[lo] ?? 0) < s - w) sum -= prev[lo++] ?? 0;
+      return hi > lo ? sum / (hi - lo) : (prev[m] ?? 0);
+    });
+  }
+  const Lb0 = blendHeights * height(x0);
+  const Lb1 = blendHeights * height(x1);
+  const angleAt = (s: number): number => {
+    const u = clamp((s / L) * M, 0, M);
+    const m = Math.min(M - 1, Math.floor(u));
+    // samples are near-uniform in arc length; interpolate on the sample index
+    const f = u - m;
+    const a = (ang[m] ?? 0) * (1 - f) + (ang[m + 1] ?? 0) * f;
+    const w = smoothstep(s / Lb0) * smoothstep((L - s) / Lb1);
+    return Math.PI / 2 + w * (a - Math.PI / 2);
+  };
+  const s = bySpacing(L, (sv) => h(mean.at(sv).x));
   const n = s.length - 1;
   const lo: Pt[] = [];
   const up: Pt[] = [];
@@ -272,13 +389,10 @@ function ductWalls(
       up.push(k === 0 ? ends.upper0 : ends.upper1);
       continue;
     }
-    const m = mean.at(s[k] ?? 0);
-    const t = mean.tangent(s[k] ?? 0);
-    const w = Math.min(1, k / 8, (n - k) / 8);
-    const dx = w * -t.r;
-    const dr = 1 - w + w * t.x;
-    const len = Math.hypot(dx, dr);
-    const dir = { x: dx / len, r: dr / len };
+    const sk = s[k] ?? 0;
+    const m = mean.at(sk);
+    const a = angleAt(sk);
+    const dir = { x: Math.cos(a), r: Math.sin(a) };
     const sl = lower.rayHit(m, dir);
     const su = upper.rayHit(m, dir);
     if (sl === null || su === null || !(sl > lastLo) || !(su > lastUp)) {
@@ -310,21 +424,19 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
   const kp = keyPoints(geometry);
   const { spinnerNose: N, plugTip: P, splitter: S, coreLip: C, highlight: HL, bypassLip: B } = kp;
   const g = spec.gradation;
+  const lipR = spec.lipRadialSpacing;
 
   const nacMaxR = Math.max(...geometry.curves.nacelleOuter.map((p) => p.r));
-  const xIn = Math.floor((HL.x - spec.upstreamD * D) * 100) / 100;
-  const xOut = Math.ceil((C.x + spec.downstreamD * D) * 100) / 100;
-  const rOut = Math.ceil((nacMaxR + spec.radialD * D) * 100) / 100;
+  // domain extents rounded outwards to whole centimetres, plus one so that the stated minimum
+  // distances also hold after floating-point subtraction
+  const xIn = Math.floor((HL.x - spec.upstreamD * D) * 100) / 100 - 0.01;
+  const xOut = Math.ceil((C.x + spec.downstreamD * D) * 100) / 100 + 0.01;
+  const rOut = Math.ceil((nacMaxR + spec.radialD * D) * 100) / 100 + 0.01;
 
   // -- fan face (x = 0) and the C-block's fan-face column ----------------------------------------
   const H0 = hub.atX(0);
   const Cas0 = nacIn.atX(0);
-  const fanWest = radialLine(
-    0,
-    H0.r,
-    Cas0.r,
-    Array.from({ length: nFan + 1 }, (_, k) => k / nFan),
-  );
+  const fanWest = radialLine(0, H0.r, Cas0.r, uniform(nFan));
 
   // -- lip: C-block around the nacelle, by extrusion along smoothed wall normals ------------------
   const innerPart = nacIn.sub(0, nacIn.sAtX(0)).reversed();
@@ -371,23 +483,30 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
     });
   }
   const deltaIn = Cas0.r - (fanWest[nInl] as Pt).r;
+  // the columns next to the fan face start radial (C1 blend), so the C-block's outer edge is not
+  // compressed against the fan block's first cell there
+  normals = normals.map((n, k) => {
+    const w = smoothstep((wallS[k] ?? 0) / deltaIn);
+    const x = w * n.x;
+    const r = (1 - w) * -1 + w * n.r;
+    const L = Math.hypot(x, r);
+    return { x: x / L, r: r / L };
+  });
   const qB = spec.bypassLipGrowth;
-  const deltaB = (spec.lipRadialSpacing * (qB ** spec.nLip - 1)) / (qB - 1);
+  const deltaB = (lipR * (qB ** spec.nLip - 1)) / (qB - 1);
   const blend = (s: number, atStart: number, atHL: number, atEnd: number): number =>
     s <= sHL
       ? atStart + (atHL - atStart) * smoothstep(s / sHL)
       : atHL + (atEnd - atHL) * smoothstep((s - sHL) / (Lw - sHL));
   const delta = wallS.map((s) => blend(s, deltaIn, spec.lipThickness, deltaB));
-  const firstH = wallS.map((s) =>
-    blend(s, deltaIn / spec.nLip, spec.lipWallNormalSpacing, spec.lipRadialSpacing),
-  );
+  const firstH = wallS.map((s) => blend(s, deltaIn / spec.nLip, spec.lipWallNormalSpacing, lipR));
   const outer: Pt[] = wall.map((w, k) => {
     const n = normals[k] as Pt;
     const d = delta[k] ?? 0;
     return { x: w.x + d * n.x, r: w.r + d * n.r };
   });
   const lip = twoBoundary('lip', wall, outer, (k) =>
-    geometric(spec.nLip, (firstH[k] ?? 0) / (delta[k] ?? 1)),
+    k === 0 ? uniform(spec.nLip) : geometric(spec.nLip, (firstH[k] ?? 0) / (delta[k] ?? 1)),
   );
   for (let j = 0; j <= spec.nLip; j++) setNode(lip, 0, j, fanWest[nFan - j] as Pt);
   // the valence-5 points where the C-block meets the inlet / upstream / far-field blocks:
@@ -401,8 +520,12 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
   if (iP1 <= 0 || iP2 <= iHL || iP1 >= iHL)
     throw new Error('could not place the C-block corner points');
   const nArc = iP2 - iP1;
+  /** Radial (wall-normal) size of the C-block's outermost cell layer at column i. */
   const lipCross = (i: number): number =>
     dist(nodeAt(lip, i, spec.nLip), nodeAt(lip, i, spec.nLip - 1));
+  /** Length of the C-block's outer edge from column i to i + 1. */
+  const lipEdge = (i: number): number =>
+    dist(nodeAt(lip, i, spec.nLip), nodeAt(lip, i + 1, spec.nLip));
   const P1 = nodeAt(lip, iP1, spec.nLip);
   const P2 = nodeAt(lip, iP2, spec.nLip);
   const O = nodeAt(lip, nW, spec.nLip);
@@ -416,7 +539,7 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
     S.x,
     S.r,
     Cs.r,
-    vinokur(spec.nBypass, hSplitR / (Cs.r - S.r), 1.2 / spec.nBypass),
+    twoSided(spec.nBypass, Cs.r - S.r, hSplitR, (Cs.r - S.r) / spec.nBypass),
   );
   const fanEast = [...coreIn, ...bypIn.slice(1)];
   const xFan = bySpacing(S.x, (x) =>
@@ -439,18 +562,25 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
     coreOuter,
     S.x,
     C.x,
-    ductSpacing(coreRows, spec, spec.coreSpacingMax, [
-      { x: S.x, h: spec.splitterSpacing },
-      { x: C.x, h: spec.lipAxialSpacing },
-    ]),
+    ductSpacing(
+      coreRows,
+      spec,
+      spec.coreSpacingMax,
+      [
+        { x: S.x, h: spec.splitterSpacing },
+        { x: C.x, h: spec.lipAxialSpacing },
+      ],
+      [
+        {
+          x0: geometry.combustor.xStart,
+          x1: geometry.combustor.xEnd,
+          h: spec.combustorSpacing,
+        },
+      ],
+    ),
     { lower0: Hs, upper0: S, lower1: plugC, upper1: C },
   );
-  const coreExit = radialLine(
-    C.x,
-    plugC.r,
-    C.r,
-    towardsEnd(spec.nCore, C.r - plugC.r, spec.lipRadialSpacing),
-  );
+  const coreExit = radialLine(C.x, plugC.r, C.r, towardsEnd(spec.nCore, C.r - plugC.r, lipR));
   const core = tfi('core', coreWalls.lo, coreWalls.up, coreIn, coreExit);
 
   // -- bypass --------------------------------------------------------------------------------------
@@ -467,12 +597,7 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
     ]),
     { lower0: S, upper0: Cs, lower1: cowlB, upper1: B },
   );
-  const bypExit = radialLine(
-    B.x,
-    cowlB.r,
-    B.r,
-    towardsEnd(spec.nBypass, B.r - cowlB.r, spec.lipRadialSpacing),
-  );
+  const bypExit = radialLine(B.x, cowlB.r, B.r, towardsEnd(spec.nBypass, B.r - cowlB.r, lipR));
   const bypass = tfi('bypass', bypWalls.lo, bypWalls.up, bypIn, bypExit);
 
   // -- plume axial distribution (shared by every plume line) --------------------------------------
@@ -507,7 +632,7 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
   const rBsOut = nFan * hOut;
   const rPoOut = (nFan + spec.nLip) * hOut;
 
-  // plume block boundary lines (free internal lines, shaped to follow the jets)
+  // jet boundary lines (free internal lines, shaped to follow the jets) and their radial spacing
   const line = (knots: { x: number; r: number; s: number }[]): Polyline =>
     new Polyline(hermitePoints(knots, 400));
   const bsMid = B.r - 0.05;
@@ -522,97 +647,170 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
     { x: P.x, r: csMid, s: 0 },
     { x: xOut, r: rCsOut, s: (rCsOut - csMid) / (xOut - P.x) },
   ]);
-  const prevO = nodeAt(lip, nW - 1, spec.nLip);
-  const sO = (O.r - prevO.r) / (O.x - prevO.x);
-  const s1 = (rPoOut - O.r) / (xOut - O.x);
-  const r1 = O.r + 2.5 * 0.5 * (sO + s1);
-  const outerTop = line([
-    { x: O.x, r: O.r, s: sO },
-    { x: O.x + 2.5, r: r1, s: s1 },
-    { x: xOut, r: rPoOut, s: s1 },
-  ]);
+  const hBs = (x: number): number => Math.min(hOut, lipR + spec.shearGrowth * (x - B.x));
+  const hCs = (x: number): number => Math.min(hOut, lipR + spec.shearGrowth * (x - C.x));
   const onLine = (c: Polyline, x: number, first: Pt, last: Pt, k: number, n: number): Pt =>
     k === 0 ? first : k === n ? last : c.atX(x);
-
   const bsNodes = xs.map((x, k) => onLine(bypassShear, x, B, { x: xOut, r: rBsOut }, k, kOut));
   const csNodes = xs
     .slice(kC)
     .map((x, k) => onLine(coreShear, x, C, { x: xOut, r: rCsOut }, k, kOut - kC));
-  const xTop = xs.map((x) => O.x + ((x - B.x) * (xOut - O.x)) / (xOut - B.x));
-  const topNodes = xTop.map((x, k) => onLine(outerTop, x, O, { x: xOut, r: rPoOut }, k, kOut));
 
-  // -- afterbody, plug, plume blocks ------------------------------------------------------------
+  // The outer shear-layer block (plume-outer) is designed by its columns: each one rises from the
+  // bypass shear line with first cell hBs(x) and grows geometrically to a top cell fTop(x), which
+  // runs smoothly from the C-block's outermost cell at the bypass lip to the uniform outflow
+  // spacing. Its thickness follows from those two, so the far field above starts from a smooth,
+  // monotone first-cell size (a thin spot would force a fast-growing far-field column there).
+  // The columns lean like the C-block's last column at the lip and turn radial within 2 m.
+  const fTop0 = lipCross(nW);
+  const ratio0 = fTop0 / lipR;
+  const lipDir = { x: (O.x - B.x) / dist(O, B), r: (O.r - B.r) / dist(O, B) };
+  const poColumn = (k: number): { bot: Pt; top: Pt; q: number } => {
+    const x = xs[k] ?? 0;
+    const bot = bsNodes[k] as Pt;
+    const h = hBs(x);
+    const u = (x - B.x) / (xOut - B.x);
+    const q = ratio0 ** ((1 - u) / (spec.nLip - 1));
+    const t = Math.abs(q - 1) < 1e-12 ? spec.nLip * h : (h * (q ** spec.nLip - 1)) / (q - 1);
+    const w = smoothstep((x - B.x) / 2);
+    const dx = (1 - w) * lipDir.x;
+    const dr = (1 - w) * lipDir.r + w;
+    const L = Math.hypot(dx, dr);
+    return { bot, top: { x: bot.x + (t * dx) / L, r: bot.r + (t * dr) / L }, q };
+  };
+  const topNodes = xs.map((_, k) =>
+    k === 0 ? O : k === kOut ? { x: xOut, r: rPoOut } : poColumn(k).top,
+  );
+
+  // -- afterbody, plug and the three plume blocks, column by column -------------------------------
   const cowlNodes = xs
     .slice(0, kC + 1)
     .map((x, k) => (k === 0 ? cowlB : k === kC ? C : cowl.atX(x)));
   const bsC = bsNodes[kC] as Pt;
-  const aftEast = radialLine(
-    C.x,
-    C.r,
-    bsC.r,
-    vinokur(spec.nBypass, spec.lipRadialSpacing / (bsC.r - C.r), 0.012 / (bsC.r - C.r)),
+  const aftEast = radialLine(C.x, C.r, bsC.r, twoSided(spec.nBypass, bsC.r - C.r, lipR, hBs(C.x)));
+  const hCowl0 = spacings(bypExit)[0] ?? lipR;
+  const afterbody = columnBlock(
+    'afterbody',
+    cowlNodes.map((bot, k) => {
+      if (k === 0) return bypExit;
+      if (k === kC) return aftEast;
+      const x = xs[k] ?? 0;
+      const top = bsNodes[k] as Pt;
+      const u = (x - B.x) / (C.x - B.x);
+      const hb = hCowl0 + (lipR - hCowl0) * u;
+      return segment(bot, top, twoSided(spec.nBypass, dist(bot, top), hb, hBs(x)));
+    }),
   );
-  const afterbody = tfi('afterbody', cowlNodes, bsNodes.slice(0, kC + 1), bypExit, aftEast);
 
   const plugNodes = xs
     .slice(kC, kP + 1)
     .map((x, k, a) => (k === 0 ? plugC : k === a.length - 1 ? P : hub.atX(x)));
   const csP = csNodes[kP - kC] as Pt;
-  const plugEast = radialLine(P.x, 0, csP.r, towardsEnd(spec.nCore, csP.r, 0.011));
+  const hAxis = (x: number, height: number): number =>
+    clamp(
+      (2 * height) / spec.nCore - hCs(x),
+      (0.5 * height) / spec.nCore,
+      (2 * height) / spec.nCore,
+    );
+  const plugEast = radialLine(
+    P.x,
+    0,
+    csP.r,
+    twoSided(spec.nCore, csP.r, hAxis(P.x, csP.r), hCs(P.x)),
+  );
   plugEast[0] = P;
-  const plug = tfi('plug', plugNodes, csNodes.slice(0, kP - kC + 1), coreExit, plugEast);
+  const hPlug0 = spacings(coreExit)[0] ?? lipR;
+  const hPlug1 = spacings(plugEast)[0] ?? lipR;
+  const plug = columnBlock(
+    'plug',
+    plugNodes.map((bot, k) => {
+      if (k === 0) return coreExit;
+      if (k === plugNodes.length - 1) return plugEast;
+      const x = xs[kC + k] ?? 0;
+      const top = csNodes[k] as Pt;
+      const u = (x - C.x) / (P.x - C.x);
+      return segment(
+        bot,
+        top,
+        twoSided(spec.nCore, dist(bot, top), hPlug0 + (hPlug1 - hPlug0) * u, hCs(x)),
+      );
+    }),
+  );
 
-  const axisNodes = xs.slice(kP).map((x, k) => (k === 0 ? P : { x, r: 0 }));
-  const uniformT = (n: number): Float64Array =>
-    Float64Array.from({ length: n + 1 }, (_, k) => k / n);
-  const plumeCore = tfi(
+  const plumeCore = columnBlock(
     'plume-core',
-    axisNodes,
-    csNodes.slice(kP - kC),
-    plugEast,
-    radialLine(xOut, 0, rCsOut, uniformT(spec.nCore)),
+    xs.slice(kP).map((x, k, a) => {
+      if (k === 0) return plugEast;
+      const top = csNodes[kP - kC + k] as Pt;
+      if (k === a.length - 1) return radialLine(xOut, 0, rCsOut, uniform(spec.nCore));
+      return segment({ x, r: 0 }, top, twoSided(spec.nCore, top.r, hAxis(x, top.r), hCs(x)));
+    }),
   );
-  const plumeBypass = tfi(
+  const plumeBypass = columnBlock(
     'plume-bypass',
-    csNodes,
-    bsNodes.slice(kC),
-    aftEast,
-    radialLine(xOut, rCsOut, rBsOut, uniformT(spec.nBypass)),
+    xs.slice(kC).map((x, k, a) => {
+      if (k === 0) return aftEast;
+      if (k === a.length - 1) return radialLine(xOut, rCsOut, rBsOut, uniform(spec.nBypass));
+      const bot = csNodes[k] as Pt;
+      const top = bsNodes[kC + k] as Pt;
+      return segment(bot, top, twoSided(spec.nBypass, dist(bot, top), hCs(x), hBs(x)));
+    }),
   );
-  const plumeOuter = tfi(
+  const plumeOuter = columnBlock(
     'plume-outer',
-    bsNodes,
-    topNodes,
-    colNodes(lip, nW),
-    radialLine(xOut, rBsOut, rPoOut, uniformT(spec.nLip)),
+    xs.map((x, k) => {
+      if (k === 0) return colNodes(lip, nW);
+      if (k === kOut) return radialLine(xOut, rBsOut, rPoOut, uniform(spec.nLip));
+      const bot = bsNodes[k] as Pt;
+      const top = topNodes[k] as Pt;
+      return segment(bot, top, geometric(spec.nLip, hBs(x) / dist(bot, top)));
+    }),
   );
 
   // -- far field: TFI, then each column re-spaced so its first cell matches the block below -----
+  // The north nodes take the south boundary's arc-length fractions, so the far field's columns
+  // inherit a smooth version of the spacing along the C-block and the plume.
   const T = { x: P2.x - 0.6, r: rOut };
   const ffWestCurve = bezier(P2, { x: P2.x - 0.4, r: P2.r + 0.69 }, { x: T.x, r: P2.r + 2.5 }, T);
-  const ffWest = alongCurve(ffWestCurve, geometric(spec.nFar, lipCross(iP2) / ffWestCurve.length));
+  const ffFirst = Math.sqrt(lipCross(iP2) * lipEdge(iP2 - 1));
+  const ffWest = alongCurve(ffWestCurve, geometric(spec.nFar, ffFirst / ffWestCurve.length));
   const ffSouth = [...rowNodes(lip, spec.nLip).slice(iP2), ...topNodes.slice(1)];
   const nFF = ffSouth.length - 1;
-  const ffNorth = ffSouth.map((p, k) =>
+  const southArc = [0];
+  for (let k = 1; k <= nFF; k++)
+    southArc.push((southArc[k - 1] ?? 0) + dist(ffSouth[k - 1] as Pt, ffSouth[k] as Pt));
+  const southLen = southArc[nFF] ?? 1;
+  const ffNorth = ffSouth.map((_, k) =>
     k === 0
       ? T
       : k === nFF
         ? { x: xOut, r: rOut }
-        : { x: T.x + ((p.x - P2.x) * (xOut - T.x)) / (xOut - P2.x), r: rOut },
+        : { x: T.x + ((southArc[k] ?? 0) / southLen) * (xOut - T.x), r: rOut },
   );
   const ffEast = radialLine(xOut, rPoOut, rOut, geometric(spec.nFar, hOut / (rOut - rPoOut)));
   const farfield = tfi('farfield', ffSouth, ffNorth, ffWest, ffEast);
   const nLipOuter = nW - iP2;
+  // first-cell targets: the cell below, smoothed along the far field so that neighbouring columns
+  // get near-identical geometric ratios (a column-to-column ratio jump puts the nodes of one row at
+  // different heights in neighbouring columns, i.e. skews the far-field cells)
+  const ffBelow = smoothLog(
+    Array.from({ length: nFF + 1 }, (_, k) =>
+      k === 0
+        ? ffFirst
+        : k === nFF
+          ? hOut
+          : k <= nLipOuter
+            ? lipCross(iP2 + k)
+            : dist(
+                nodeAt(plumeOuter, k - nLipOuter, spec.nLip),
+                nodeAt(plumeOuter, k - nLipOuter, spec.nLip - 1),
+              ),
+    ),
+    10,
+  );
   for (let k = 1; k < nFF; k++) {
-    const below =
-      k <= nLipOuter
-        ? lipCross(iP2 + k)
-        : dist(
-            nodeAt(plumeOuter, k - nLipOuter, spec.nLip),
-            nodeAt(plumeOuter, k - nLipOuter, spec.nLip - 1),
-          );
     const L = new Polyline(colNodes(farfield, k)).length;
-    respaceColumn(farfield, k, geometric(spec.nFar, below / L));
+    respaceColumn(farfield, k, geometric(spec.nFar, (ffBelow[k] ?? 0) / L));
   }
 
   // -- inlet: from in front of the lip to the fan face, axis/spinner up to the C-block ----------
@@ -623,17 +821,21 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
     { x: P1.x - 0.35 * P1.r * 0.5, r: P1.r - 0.35 * P1.r * 0.866 },
     P1,
   );
-  const inlWest = alongCurve(inlWestCurve, towardsEnd(nInl, inlWestCurve.length, lipCross(iP1)));
+  // at P1 the inlet's corner cell sits between the C-block's outer layer (across) and the
+  // C-block's outer edge (along the upstream block's east face): split the difference
+  const inlLast = Math.sqrt(lipCross(iP1) * lipEdge(iP1));
+  const inlWest = alongCurve(inlWestCurve, towardsEnd(nInl, inlWestCurve.length, inlLast));
   const spinner = hub.sub(0, hub.sAtX(0));
   const sN = N.x - F.x;
   const Ls = sN + spinner.length;
-  const hF = lipCross(iP1);
+  const hF = spacings(alongCurve(inlWestCurve, towardsEnd(nInl, inlWestCurve.length, inlLast)))[0];
+  const hAxisF = hF ?? lipCross(iP1);
   const hSouth =
     (cap: number) =>
     (s: number): number =>
       Math.min(
         cap,
-        hF + g * s,
+        Math.max(hAxisF, lipEdge(iP1 - 1)) + g * s,
         spec.fanFaceSpacing + g * Math.abs(s - sN),
         spec.fanFaceSpacing + g * (Ls - s),
       );
@@ -663,7 +865,7 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
   for (let k = 1; k < iP1; k++) {
     const L = new Polyline(colNodes(inlet, k)).length;
     const first = dist(nodeAt(inlet, k, 0), nodeAt(inlet, k, 1));
-    respaceColumn(inlet, k, vinokur(nInl, first / L, lipCross(iP1 - k) / L));
+    respaceColumn(inlet, k, twoSided(nInl, L, first, lipCross(iP1 - k)));
   }
 
   // -- upstream: rows re-spaced so the last cell matches the block across the east face ---------
@@ -679,21 +881,83 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
       : j <= nInl + nArc
         ? lipCross(iP1 + (j - nInl))
         : dist(nodeAt(farfield, 0, j - nInl - nArc), nodeAt(farfield, 1, j - nInl - nArc));
-  const hMinUp = Math.min(...Array.from({ length: nUpJ + 1 }, (_, j) => eastCross(j)));
+  // the per-row targets are smoothed so that neighbouring rows get near-identical distributions
+  // (rows with different geometric ratios would make the columns step between them)
+  const hEast = smoothLog(
+    Array.from({ length: nUpJ + 1 }, (_, j) => eastCross(j)),
+    40,
+  );
+  const hMinUp = Math.min(...hEast);
   const qUp = 1 + spec.farGrowth;
   const nUpI = Math.ceil(Math.log(1 + ((F.x - xIn) * (qUp - 1)) / hMinUp) / Math.log(qUp));
-  const upSouth = Array.from(geometricToEnd(nUpI, eastCross(0) / (F.x - xIn)), (u, k) =>
-    k === nUpI ? F : { x: xIn + u * (F.x - xIn), r: 0 },
+  const eastArc = [0];
+  for (let j = 1; j <= nUpJ; j++)
+    eastArc.push((eastArc[j - 1] ?? 0) + dist(upEast[j - 1] as Pt, upEast[j] as Pt));
+  const eastLen = eastArc[nUpJ] ?? 1;
+  const upWest = upEast.map((_, j) => ({
+    x: xIn,
+    r: j === 0 ? 0 : j === nUpJ ? rOut : ((eastArc[j] ?? 0) / eastLen) * rOut,
+  }));
+  // The east face turns sharply at the valence-5 points P1 and P2. Node (k, j) is the linear blend
+  // W_j + u (E_j - W_j) of the west and east nodes of row j. The west face takes the east face's
+  // arc-length fractions, so west and east are two curves with the same parameterisation, and a
+  // blend of them keeps the cell lengths along each column smooth through the turns (both legs of
+  // each turn lean about equally from the vertical west face). The fraction u comes from the row's
+  // geometric distribution, computed from the smoothed east target and a smoothed row length so
+  // that u varies smoothly across the rows (a jump in u would shift whole rows axially).
+  const rowLen = smoothLog(
+    upEast.map((e, j) => dist(e, upWest[j] as Pt)),
+    40,
   );
-  const upNorth = Array.from(geometricToEnd(nUpI, eastCross(nUpJ) / (T.x - xIn)), (u, k) =>
-    k === nUpI ? T : { x: xIn + u * (T.x - xIn), r: rOut },
-  );
-  const upWest = upEast.map((p, j) => ({ x: xIn, r: j === nUpJ ? rOut : p.r }));
-  const upstream = tfi('upstream', upSouth, upNorth, upWest, upEast);
-  for (let j = 1; j < nUpJ; j++) {
-    const L = new Polyline(rowNodes(upstream, j)).length;
-    respaceRow(upstream, j, geometricToEnd(nUpI, eastCross(j) / L));
+  const rowT = upEast.map((_, j) => geometricToEnd(nUpI, (hEast[j] ?? 0) / (rowLen[j] ?? 1)));
+  // Further upstream, the east face is replaced by a progressively smoothed copy of itself,
+  // resampled at the east face's own arc-length fractions, so the turns fade out of the columns
+  // without changing the spacing along them.
+  const sigma = eastArc.map((a) => a / eastLen);
+  const smoothPass = (prev: readonly Pt[]): Pt[] =>
+    prev.map((q, j) =>
+      j === 0 || j === nUpJ
+        ? q
+        : {
+            x: 0.25 * ((prev[j - 1] as Pt).x + 2 * q.x + (prev[j + 1] as Pt).x),
+            r: 0.25 * ((prev[j - 1] as Pt).r + 2 * q.r + (prev[j + 1] as Pt).r),
+          },
+    );
+  let smoothed = upEast.slice();
+  let next = smoothPass(smoothed);
+  let passesDone = 0;
+  const upColumns: Pt[][] = [];
+  for (let k = nUpI; k >= 0; k--) {
+    const uMid = rowT[Math.round(nUpJ / 2)]?.[k] ?? 0;
+    // the added displacement per column must stay small against the local column spacing, which
+    // grows geometrically away from the east face: a continuous amount of smoothing ~ (1 - u)^2,
+    // capped (fractional amounts blend two consecutive passes)
+    const passes = Math.min(spec.upstreamSmoothing, 1000 * (1 - uMid) ** 2);
+    for (; passesDone + 1 <= passes; passesDone++) {
+      smoothed = next;
+      next = smoothPass(smoothed);
+    }
+    const f = passes - passesDone;
+    const shape = smoothed.map((p, j) => ({
+      x: p.x + f * ((next[j] as Pt).x - p.x),
+      r: p.r + f * ((next[j] as Pt).r - p.r),
+    }));
+    const guideLine = new Polyline(shape);
+    const guide = sigma.map((sg, j) =>
+      j === 0 || j === nUpJ ? (shape[j] as Pt) : guideLine.at(sg * guideLine.length),
+    );
+    upColumns[k] = upWest.map((w, j) => {
+      if (k === 0) return w;
+      if (k === nUpI) return upEast[j] as Pt;
+      const e = guide[j] as Pt;
+      const u = rowT[j]?.[k] ?? 0;
+      return {
+        x: w.x + u * (e.x - w.x),
+        r: j === 0 ? 0 : j === nUpJ ? rOut : w.r + u * (e.r - w.r),
+      };
+    });
   }
+  const upstream = columnBlock('upstream', upColumns);
 
   // -- assemble ------------------------------------------------------------------------------------
   const blocks = [
@@ -805,19 +1069,19 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
 }
 
 /**
- * Smoothing set-up: Thomas-Middlecoff control everywhere, except the directions whose spacing was
- * designed column by column (C-block and far-field wall-normal, inlet radial, upstream axial),
- * which keep their algebraic spacing as control (see smooth.ts).
+ * Elliptic smoothing set-up (docs/MESH.md, decision on smoothing). The algebraic grid already
+ * meets every requirement and the production specs run 0 sweeps. Measured with 300 sweeps and the
+ * interfaces held: the TFI duct blocks (fan, core, bypass) are left essentially unchanged, while
+ * smoothing the far field, upstream, inlet or C-block disturbs the cells next to the fixed
+ * valence-5 points P1/P2 and the corner O (stretching up to 1.3-3 across interfaces), and floating
+ * interfaces with pinned junction points spike there. So only the duct blocks are smoothed when
+ * sweeps > 0, with Thomas-Middlecoff control from their boundaries.
  */
 export function smoothingOptions(spec: MeshSpec): SmoothOptions {
   return {
     sweeps: spec.sweeps,
     omega: 0.8,
-    blockControl: {
-      lip: { psi: 'initial-grid' },
-      farfield: { psi: 'initial-grid' },
-      inlet: { psi: 'initial-grid' },
-      upstream: { phi: 'initial-grid' },
-    },
+    floatInterfaces: false,
+    blocks: ['fan', 'core', 'bypass'],
   };
 }

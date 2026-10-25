@@ -99,7 +99,7 @@ export function renderSvg(mesh: MultiBlockMesh, view: SvgView): string {
   const labels: string[] = [];
   const visible: { name: string; colour: string }[] = [];
   mesh.blocks.forEach((b, bi) => {
-    const colour = SERIES[(view.slots?.[b.name] ?? bi) % SERIES.length] ?? (SERIES[0] as string);
+    const colour = SERIES[(view.slots?.[b.name] ?? bi) % SERIES.length] ?? TEXT_2;
     let grid = '';
     for (let j = stride; j < b.nj; j += stride) grid += polyline(b, row(j, b));
     for (let i = stride; i < b.ni; i += stride) grid += polyline(b, col(i, b));

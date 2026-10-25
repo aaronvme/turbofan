@@ -38,6 +38,11 @@ export interface SmoothOptions {
   readonly blockControl?: Readonly<
     Record<string, { readonly phi?: ControlSource; readonly psi?: ControlSource }>
   >;
+  /**
+   * Smooth only these blocks (by name); every node of the other blocks is fixed, including the
+   * interface nodes they share with smoothed blocks. Default: all blocks.
+   */
+  readonly blocks?: readonly string[];
 }
 
 export type ControlSource = 'boundary' | 'initial-grid' | 'none';
@@ -148,6 +153,14 @@ export function smoothMesh(mesh: MultiBlockMesh, opts: SmoothOptions): SmoothRep
         pinned[g(p.block, i, j)] = 0;
       }
     }
+  }
+  // Blocks left out of `blocks` are frozen whole; their interface copies pin the shared nodes.
+  if (opts.blocks !== undefined) {
+    const only = opts.blocks;
+    blocks.forEach((b, bi) => {
+      if (!only.includes(b.name))
+        pinned.fill(1, offset[bi] ?? 0, (offset[bi] ?? 0) + (b.ni + 1) * (b.nj + 1));
+    });
   }
   const canonPinned = new Uint8Array(total);
   for (let n = 0; n < total; n++) {
