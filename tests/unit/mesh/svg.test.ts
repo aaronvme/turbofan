@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { uniform } from '../../../tools/mesh/distribution';
 import { renderSvg } from '../../../tools/mesh/svg';
+import { twoBoundary } from '../../../tools/mesh/tfi';
 import { rectBlock, sideBySide } from './fixtures';
 
 describe('renderSvg', () => {
@@ -88,5 +90,29 @@ describe('renderSvg', () => {
     expect(lines).toBeLessThan(3000);
     // every row still reaches the far edge of the view (x = 100 px)
     expect(svg.match(/L100 /g)?.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('puts a block label on one of its nodes, not in a hole of a C-shaped block', () => {
+    // half annulus 1 < radius < 1.2 about (0, 0): the centroid of its nodes lies in the hole
+    const arc = (rad: number): { x: number; r: number }[] =>
+      Array.from(uniform(20), (u) => ({
+        x: -rad * Math.cos(Math.PI * u),
+        r: rad * Math.sin(Math.PI * u),
+      }));
+    const block = twoBoundary('C', arc(1), arc(1.2), () => uniform(2));
+    const view = { title: 'C', xMin: -1.3, xMax: 1.3, rMin: 0, rMax: 1.3, widthPx: 260 };
+    const svg = renderSvg({ blocks: [block], patches: [] }, view);
+    const m = /class="block-label" x="([\d.]+)" y="([\d.]+)"/.exec(svg);
+    expect(m).not.toBeNull();
+    const lx = Number(m?.[1]);
+    const ly = Number(m?.[2]);
+    // pixel scale 100 px/m, plot top at the 44 px header
+    let nearest = Infinity;
+    for (let k = 0; k < block.x.length; k++) {
+      const x = ((block.x[k] ?? 0) + 1.3) * 100;
+      const y = 44 + (1.3 - (block.r[k] ?? 0)) * 100;
+      nearest = Math.min(nearest, Math.hypot(x - lx, y - ly));
+    }
+    expect(nearest).toBeLessThan(0.1);
   });
 });
