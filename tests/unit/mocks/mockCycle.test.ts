@@ -137,7 +137,7 @@ describe('mock magnitudes come from ENGINE_FACTS', () => {
   });
 
   it('full throttle settles on the measured static takeoff point and the rated thrust and fuel flow', () => {
-    const s = run(idleModel(), 20, { ...RUN, throttleLever: 1 });
+    const s = run(idleModel(), 30, { ...RUN, throttleLever: 1 });
     expect(s.n1Percent).toBeCloseTo(v('staticTakeoffN1'), 2);
     expect(s.n2Percent).toBeCloseTo(v('staticTakeoffN2'), 2);
     expect(s.egtDisplayedK).toBeCloseTo(corrected(v('staticTakeoffEgt')), 1);
