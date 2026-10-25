@@ -14,7 +14,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { cpus, totalmem } from 'node:os';
 import { chromium, type Page } from '@playwright/test';
 import { createServer, type InlineConfig, type ViteDevServer } from 'vite';
-import { parseBenchArgs, protocolLabel, type Protocol } from '../lib/protocol.ts';
+import { benchFileName, parseBenchArgs, protocolLabel, type Protocol } from '../lib/protocol.ts';
 import {
   cpuBusyFraction,
   parseActiveScheme,
@@ -335,7 +335,7 @@ async function main(): Promise<void> {
       consoleErrors,
     };
     mkdirSync('docs/bench', { recursive: true });
-    const file = `docs/bench/${kind}-${started.toISOString().slice(0, 10)}-${args.protocol.name}.json`;
+    const file = benchFileName(kind, started, args.protocol);
     writeFileSync(file, JSON.stringify(out, null, 2) + '\n');
     process.stdout.write(`wrote ${file}\n`);
   } finally {

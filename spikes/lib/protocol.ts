@@ -48,3 +48,11 @@ export function parseBenchArgs(argv: readonly string[]): BenchArgs {
   }
   return { protocol, only, port };
 }
+
+/** Output path for a harness run, stamped with the local start date and minute. */
+export function benchFileName(kind: string, started: Date, protocol: Protocol): string {
+  const two = (n: number) => String(n).padStart(2, '0');
+  const day = `${started.getFullYear()}-${two(started.getMonth() + 1)}-${two(started.getDate())}`;
+  const hm = `${two(started.getHours())}${two(started.getMinutes())}`;
+  return `docs/bench/${kind}-${day}-${hm}-${protocol.name}.json`;
+}
