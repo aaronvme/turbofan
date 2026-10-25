@@ -72,7 +72,8 @@ export async function probeWorkerFeatures(
     }),
     textureLoader: await check(async () => {
       const t = await new TextureLoader().loadAsync(url);
-      return `loaded ${String(t.image)}`;
+      const image: unknown = t.image;
+      return `loaded ${Object.prototype.toString.call(image)}`;
     }),
     imageBitmapLoader: await check(async () => {
       const loader = new ImageBitmapLoader();

@@ -95,7 +95,7 @@ function finish(frame: ConfigResult, startTasks: number): WorkerBenchResult {
 }
 
 async function coiCheck(): Promise<CoiReport> {
-  let sab = 'unavailable';
+  let sab: string;
   let shared: SharedArrayBuffer | null = null;
   try {
     shared = new SharedArrayBuffer(16);

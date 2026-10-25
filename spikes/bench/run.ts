@@ -15,7 +15,7 @@ import { cpus, totalmem } from 'node:os';
 import { chromium, type Page } from '@playwright/test';
 import { createServer, type ViteDevServer } from 'vite';
 import { parseBenchArgs, protocolLabel, type Protocol } from '../lib/protocol.ts';
-import { cpuBusyFraction, powerSourceFromBatteryStatus, type CpuTimes } from '../lib/system.ts';
+import { cpuBusyFraction, powerSourceFromBatteryStatus } from '../lib/system.ts';
 
 type Kind = 'throughput' | 'worker';
 
@@ -86,9 +86,9 @@ function powerSource() {
 }
 
 async function cpuLoadOver(ms: number): Promise<number> {
-  const before = cpus() as CpuTimes[];
+  const before = cpus();
   await new Promise((r) => setTimeout(r, ms));
-  return cpuBusyFraction(before, cpus() as CpuTimes[]);
+  return cpuBusyFraction(before, cpus());
 }
 
 function git(args: string[]): string {
@@ -127,10 +127,11 @@ async function chromeGpuBackend(page: Page): Promise<string[] | null> {
 }
 
 async function main(): Promise<void> {
-  const kind = process.argv[2] as Kind;
-  if (kind !== 'throughput' && kind !== 'worker') {
+  const kindArg = process.argv[2];
+  if (kindArg !== 'throughput' && kindArg !== 'worker') {
     throw new Error('usage: node spikes/bench/run.ts <throughput|worker> [--quick] [--only=..]');
   }
+  const kind: Kind = kindArg;
   const args = parseBenchArgs(process.argv.slice(3));
   const all =
     kind === 'throughput' ? throughputConfigs(args.protocol) : workerConfigs(args.protocol);
@@ -190,9 +191,9 @@ async function main(): Promise<void> {
       pageInfo = await page.evaluate(() => window.__bench?.ready);
       for (const config of configs) {
         process.stdout.write(`  ${config.id} ... `);
-        const before = cpus() as CpuTimes[];
+        const before = cpus();
         const r = await page.evaluate((c) => window.__bench?.run(c as never), config);
-        const load = cpuBusyFraction(before, cpus() as CpuTimes[]);
+        const load = cpuBusyFraction(before, cpus());
         results.push({ ...(r as object), cpuLoadDuring: load });
         const agg = (r as { aggregate: { solverMsPerIt: number | null; itPerSec: number } })
           .aggregate;
@@ -209,9 +210,9 @@ async function main(): Promise<void> {
         await page.bringToFront();
         const info = await page.evaluate(() => window.__workerBench?.ready);
         pageInfo ??= info;
-        const before = cpus() as CpuTimes[];
+        const before = cpus();
         const r = await page.evaluate((c) => window.__workerBench?.run(c as never), config);
-        const load = cpuBusyFraction(before, cpus() as CpuTimes[]);
+        const load = cpuBusyFraction(before, cpus());
         results.push({ ...(r as object), cpuLoadDuring: load });
         const ft = (
           r as {
