@@ -169,7 +169,8 @@ export function createBenchScene(renderer: WebGPURenderer, o: BenchSceneOptions)
   nacelle.scale.set(1, 1, 1);
   scene.add(nacelle);
 
-  // Cut plane in the meridional (x, r) plane, coloured by p / pInf from the flow texture.
+  // Cut plane in the meridional (x, r) plane, coloured by the gauge ratio (p - pInf) / pInf
+  // from the flow texture (D0-4), -3% .. +5.3%.
   const flow = new ExternalTexture(o.flowA);
   flow.minFilter = LinearFilter;
   flow.magFilter = LinearFilter;
@@ -177,7 +178,7 @@ export function createBenchScene(renderer: WebGPURenderer, o: BenchSceneOptions)
   const { x0, x1, r1 } = o.domain;
   const planeMat = new MeshBasicNodeMaterial({ side: DoubleSide });
   const f = texture(flow, uv());
-  const s = f.x.sub(0.97).mul(12).clamp(0, 1);
+  const s = f.x.add(0.03).mul(12).clamp(0, 1);
   planeMat.colorNode = vec4(
     mix(vec3(0.05, 0.1, 0.35), vec3(1.6, 0.6, 0.15), s).add(f.w.abs().mul(0.004)),
     1,

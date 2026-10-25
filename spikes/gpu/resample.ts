@@ -2,7 +2,9 @@
 // two rgba16float textures three samples from TSL. Texel (x, y) of an NI x NJ texture is
 // logical cell (x, y); the real mesh will need a texel -> (cell, weights) map instead, which is
 // what the per-texel index buffer stands in for.
-//   A = (p / pInf, rho - rhoInf, u, v)    B = (w, T, Z, |V|)
+//   A = ((p - pInf) / pInf, (rho - rhoInf) / rhoInf, u, v)    B = (w, T, Z, |V|)
+// A holds the gauge ratios of D0-4: near freestream they are near 0, where rgba16float is
+// fine-grained (1e-6 = 0.1 Pa), whereas p / pInf near 1 has an f16 step of ~50 Pa.
 // T uses the linearised e(T) around the freestream (display only, no Newton).
 
 import type { Freestream } from '../lib/gas';
@@ -33,7 +35,7 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
   let e = (b.x + rho * R.h0Inf - R.pInf) / rho - 0.5 * q2;
   let T = R.tInf + (e - R.eInf) / R.cvInf;
   let p = rho * R.gasR * T;
-  textureStore(outA, g.xy, vec4f(p / R.pInf, a.x, u, v));
+  textureStore(outA, g.xy, vec4f((p - R.pInf) / R.pInf, a.x / R.rhoInf, u, v));
   textureStore(outB, g.xy, vec4f(w, T, b.y / rho, sqrt(q2)));
 }`;
 
@@ -55,7 +57,7 @@ export class FlowResample {
     const usage =
       GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC;
     this.textureA = device.createTexture({
-      label: 'flow A (p/pInf, rho-rhoInf, u, v)',
+      label: 'flow A ((p-pInf)/pInf, (rho-rhoInf)/rhoInf, u, v)',
       size: [this.width, this.height],
       format: 'rgba16float',
       usage,

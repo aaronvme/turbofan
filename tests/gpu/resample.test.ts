@@ -27,6 +27,21 @@ function halfToFloat(h: number): number {
   return s * (1 + f / 1024) * 2 ** (e - 15);
 }
 
+/** One binary16 step at the magnitude of x (normal range; subnormal step below 2^-14). */
+function f16Ulp(x: number): number {
+  const a = Math.abs(x);
+  return a < 2 ** -14 ? 2 ** -24 : 2 ** (Math.floor(Math.log2(a)) - 10);
+}
+
+/**
+ * Within one f16 step: the f32 -> rgba16float store on Dawn/D3D12 (Arc 140T) truncates toward
+ * zero (measured: 101.99999758 is stored as 101.9375, not 102), so the error is up to one step,
+ * not half. `extra` covers the f32 arithmetic and model error of the value itself.
+ */
+function expectF16(got: number, want: number, extra: number): void {
+  expect(Math.abs(got - want)).toBeLessThanOrEqual(f16Ulp(want) + extra);
+}
+
 describe('spike (a/b) flow resample on Dawn', () => {
   const log = new GpuErrorLog();
   let sim: SimDevice;
@@ -107,11 +122,11 @@ describe('spike (a/b) flow resample on Dawn', () => {
         const k = 4 * (J * GRID.ni + I);
         const at = (i: number) => halfToFloat(half[k + i] ?? 0);
         const [pRatio, rhoRatio, u, v] = [at(0), at(1), at(2), at(3)];
-        // f16 half-ulp at 0.08 is 3e-5; the resample's linearised e(T) adds < 1e-5 here.
-        expect(pRatio).toBeCloseTo(q.pp / P_INF, 4);
-        expect(rhoRatio).toBeCloseTo((q.rho - inf.rho) / inf.rho, 4);
-        expect(u).toBeCloseTo(q.u, 1); // f16 step at 100 m/s is 0.06 m/s
-        expect(v).toBeCloseTo(q.v, 2);
+        // The resample's linearised e(T) (display only) adds < 1e-5 to the pressure ratio here.
+        expectF16(pRatio, q.pp / P_INF, 1e-5);
+        expectF16(rhoRatio, (q.rho - inf.rho) / inf.rho, 1e-7);
+        expectF16(u, q.u, 1e-4);
+        expectF16(v, q.v, 1e-5);
         if (Math.abs(q.pp) > 100) pulseCells++;
         if (Math.abs(q.pp) < 0.01 && q.rho === inf.rho) {
           // Freestream: resolved to 0.1 Pa and 1e-6 relative density (f32 round-off).

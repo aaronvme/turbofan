@@ -14,8 +14,9 @@ export const DAWN_EXACT_TIMESTAMPS: readonly string[] = [
 
 /**
  * A `GPU` object backed by Dawn. On Windows Dawn picks D3D12 (docs/GPU_FACTS.md). Keep the
- * returned object only as long as its devices: dawn.node keeps the process alive while the
- * object is referenced and a device is live.
+ * returned object referenced for as long as any of its devices lives: dawn.node segfaults if
+ * it is garbage-collected first (SimDevice holds it). A live device does not keep the process
+ * alive (spikes/dawn/exit-probe.ts).
  */
 export function createDawnGpu(flags: readonly string[] = []): GPU {
   return create([...flags]);
