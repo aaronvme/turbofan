@@ -1,0 +1,801 @@
+{
+  "spec": {
+    "name": "130k",
+    "targetCells": 130000,
+    "nCore": 16,
+    "nBypass": 32,
+    "nLip": 16,
+    "nFar": 36,
+    "cellsPerChord": 8,
+    "lipRadialSpacing": 0.009,
+    "lipAxialSpacing": 0.008,
+    "fanFaceSpacing": 0.009,
+    "splitterSpacing": 0.005,
+    "fanSpacingMax": 0.009,
+    "coreSpacingMax": 0.01,
+    "bypassSpacingMax": 0.012,
+    "combustorSpacing": 0.008,
+    "highlightSpacing": 0.0035,
+    "lipWallNormalSpacing": 0.003,
+    "lipThickness": 0.12,
+    "lipOuterSpacingMax": 0.02,
+    "bypassLipGrowth": 1.08,
+    "gradation": 0.08,
+    "plumeGrowth": 0.005,
+    "plumeSpacingMax": 0.025,
+    "nearPlumeD": 11,
+    "farGrowth": 0.1,
+    "shearExponent": 2,
+    "outflowRadialSpacing": 0.045,
+    "upstreamD": 5,
+    "radialD": 5,
+    "downstreamD": 20,
+    "upstreamSmoothing": 100,
+    "sweeps": 0
+  },
+  "report": {
+    "spec": "130k",
+    "targetCells": 130000,
+    "totalCells": 129913,
+    "deviation": -0.000669231,
+    "blocks": [
+      {
+        "name": "upstream",
+        "ni": 43,
+        "nj": 87,
+        "cells": 3741,
+        "minJacobian": 0.000173449,
+        "maxJacobian": 0.509659,
+        "minScaledJacobian": 0.688056,
+        "maxStretch": 1.13658,
+        "maxStretchAt": {
+          "i": 34,
+          "j": 50,
+          "x": -0.939701,
+          "r": 0.956389
+        },
+        "maxSkewDeg": 46.5236,
+        "maxSkewAt": {
+          "i": 42,
+          "j": 50,
+          "x": -0.755912,
+          "r": 0.952043
+        },
+        "wallOrthoMaxDeg": 0,
+        "interfaceOrthoMaxDeg": 46.4756,
+        "interfaceKinkMaxDeg": 46.0683,
+        "aspectMin": 1.00155,
+        "aspectMax": 51.3726,
+        "aspectMaxAt": {
+          "i": 42,
+          "j": 86,
+          "x": -1.34964,
+          "r": 8.31685
+        },
+        "minEdge": 0.0136714,
+        "maxEdge": 0.866316
+      },
+      {
+        "name": "inlet",
+        "ni": 78,
+        "nj": 32,
+        "cells": 2496,
+        "minJacobian": 0.000088024,
+        "maxJacobian": 0.000411912,
+        "minScaledJacobian": 0.802671,
+        "maxStretch": 1.09663,
+        "maxStretchAt": {
+          "i": 34,
+          "j": 12,
+          "x": -0.469467,
+          "r": 0.284346
+        },
+        "maxSkewDeg": 36.6141,
+        "maxSkewAt": {
+          "i": 36,
+          "j": 0,
+          "x": -0.487753,
+          "r": 0.0195681
+        },
+        "wallOrthoMaxDeg": 36.4671,
+        "interfaceOrthoMaxDeg": 20.5656,
+        "interfaceKinkMaxDeg": 38.9665,
+        "aspectMin": 1.00123,
+        "aspectMax": 2.55213,
+        "aspectMaxAt": {
+          "i": 35,
+          "j": 4,
+          "x": -0.489203,
+          "r": 0.107333
+        },
+        "minEdge": 0.00792409,
+        "maxEdge": 0.0295431
+      },
+      {
+        "name": "lip",
+        "ni": 219,
+        "nj": 16,
+        "cells": 3504,
+        "minJacobian": 0.0000108022,
+        "maxJacobian": 0.000630096,
+        "minScaledJacobian": 0.986051,
+        "maxStretch": 1.11236,
+        "maxStretchAt": {
+          "i": 84,
+          "j": 14,
+          "x": -0.797971,
+          "r": 0.793326
+        },
+        "maxSkewDeg": 9.58107,
+        "maxSkewAt": {
+          "i": 84,
+          "j": 0,
+          "x": -0.701439,
+          "r": 0.801696
+        },
+        "wallOrthoMaxDeg": 6.64265,
+        "interfaceOrthoMaxDeg": 6.63247,
+        "interfaceKinkMaxDeg": 46.2541,
+        "aspectMin": 1.00005,
+        "aspectMax": 6.38924,
+        "aspectMaxAt": {
+          "i": 106,
+          "j": 0,
+          "x": -0.537241,
+          "r": 0.932953
+        },
+        "minEdge": 0.003,
+        "maxEdge": 0.0285495
+      },
+      {
+        "name": "fan",
+        "ni": 48,
+        "nj": 48,
+        "cells": 2304,
+        "minJacobian": 0.0000320689,
+        "maxJacobian": 0.000106487,
+        "minScaledJacobian": 0.954192,
+        "maxStretch": 1.08434,
+        "maxStretchAt": {
+          "i": 41,
+          "j": 0,
+          "x": 0.376764,
+          "r": 0.320493
+        },
+        "maxSkewDeg": 17.4094,
+        "maxSkewAt": {
+          "i": 8,
+          "j": 0,
+          "x": 0.0772306,
+          "r": 0.268453
+        },
+        "wallOrthoMaxDeg": 17.4094,
+        "interfaceOrthoMaxDeg": 15.2275,
+        "interfaceKinkMaxDeg": 20.2405,
+        "aspectMin": 1.00006,
+        "aspectMax": 2.27558,
+        "aspectMaxAt": {
+          "i": 47,
+          "j": 37,
+          "x": 0.417371,
+          "r": 0.646512
+        },
+        "minEdge": 0.00525721,
+        "maxEdge": 0.0120078
+      },
+      {
+        "name": "bypass",
+        "ni": 103,
+        "nj": 32,
+        "cells": 3296,
+        "minJacobian": 0.0000313458,
+        "maxJacobian": 0.000131933,
+        "minScaledJacobian": 0.95864,
+        "maxStretch": 1.08557,
+        "maxStretchAt": {
+          "i": 99,
+          "j": 0,
+          "x": 1.56749,
+          "r": 0.503294
+        },
+        "maxSkewDeg": 16.5363,
+        "maxSkewAt": {
+          "i": 0,
+          "j": 0,
+          "x": 0.422582,
+          "r": 0.443809
+        },
+        "wallOrthoMaxDeg": 16.5356,
+        "interfaceOrthoMaxDeg": 16.3894,
+        "interfaceKinkMaxDeg": 20.2405,
+        "aspectMin": 1.00193,
+        "aspectMax": 2.55235,
+        "aspectMaxAt": {
+          "i": 93,
+          "j": 0,
+          "x": 1.49587,
+          "r": 0.504916
+        },
+        "minEdge": 0.00475,
+        "maxEdge": 0.0124136
+      },
+      {
+        "name": "core",
+        "ni": 550,
+        "nj": 16,
+        "cells": 8800,
+        "minJacobian": 0.00000259666,
+        "maxJacobian": 0.00011101,
+        "minScaledJacobian": 0.958542,
+        "maxStretch": 1.12815,
+        "maxStretchAt": {
+          "i": 100,
+          "j": 15,
+          "x": 0.830591,
+          "r": 0.395623
+        },
+        "maxSkewDeg": 16.556,
+        "maxSkewAt": {
+          "i": 549,
+          "j": 0,
+          "x": 2.99596,
+          "r": 0.186384
+        },
+        "wallOrthoMaxDeg": 16.5293,
+        "interfaceOrthoMaxDeg": 16.4861,
+        "interfaceKinkMaxDeg": 4.07625,
+        "aspectMin": 1.00001,
+        "aspectMax": 4.12653,
+        "aspectMaxAt": {
+          "i": 340,
+          "j": 15,
+          "x": 1.63476,
+          "r": 0.292459
+        },
+        "minEdge": 0.00138616,
+        "maxEdge": 0.0112256
+      },
+      {
+        "name": "afterbody",
+        "ni": 145,
+        "nj": 32,
+        "cells": 4640,
+        "minJacobian": 0.0000381379,
+        "maxJacobian": 0.000103682,
+        "minScaledJacobian": 0.921002,
+        "maxStretch": 1.0839,
+        "maxStretchAt": {
+          "i": 64,
+          "j": 30,
+          "x": 2.20972,
+          "r": 0.657499
+        },
+        "maxSkewDeg": 22.9269,
+        "maxSkewAt": {
+          "i": 141,
+          "j": 0,
+          "x": 2.97172,
+          "r": 0.351391
+        },
+        "wallOrthoMaxDeg": 22.9269,
+        "interfaceOrthoMaxDeg": 22.7443,
+        "interfaceKinkMaxDeg": 22.7527,
+        "aspectMin": 1.00006,
+        "aspectMax": 2.42835,
+        "aspectMaxAt": {
+          "i": 72,
+          "j": 14,
+          "x": 2.3,
+          "r": 0.562976
+        },
+        "minEdge": 0.00463437,
+        "maxEdge": 0.0115203
+      },
+      {
+        "name": "plug",
+        "ni": 59,
+        "nj": 16,
+        "cells": 944,
+        "minJacobian": 0.0000722942,
+        "maxJacobian": 0.000299256,
+        "minScaledJacobian": 0.941112,
+        "maxStretch": 1.11046,
+        "maxStretchAt": {
+          "i": 58,
+          "j": 14,
+          "x": 3.54463,
+          "r": 0.280983
+        },
+        "maxSkewDeg": 19.7608,
+        "maxSkewAt": {
+          "i": 58,
+          "j": 0,
+          "x": 3.54463,
+          "r": 0.0157756
+        },
+        "wallOrthoMaxDeg": 19.7608,
+        "interfaceOrthoMaxDeg": 18.9499,
+        "interfaceKinkMaxDeg": 18.949,
+        "aspectMin": 1.00055,
+        "aspectMax": 2.43874,
+        "aspectMaxAt": {
+          "i": 58,
+          "j": 0,
+          "x": 3.54463,
+          "r": 0.0157756
+        },
+        "minEdge": 0.0082005,
+        "maxEdge": 0.0278637
+      },
+      {
+        "name": "plume-core",
+        "ni": 833,
+        "nj": 16,
+        "cells": 13328,
+        "minJacobian": 0.0000970621,
+        "maxJacobian": 0.00732968,
+        "minScaledJacobian": 0.999827,
+        "maxStretch": 1.11193,
+        "maxStretchAt": {
+          "i": 0,
+          "j": 14,
+          "x": 3.55539,
+          "r": 0.280979
+        },
+        "maxSkewDeg": 1.06578,
+        "maxSkewAt": {
+          "i": 758,
+          "j": 15,
+          "x": 23.8734,
+          "r": 0.534507
+        },
+        "wallOrthoMaxDeg": 0,
+        "interfaceOrthoMaxDeg": 1.06578,
+        "interfaceKinkMaxDeg": 18.949,
+        "aspectMin": 1.00004,
+        "aspectMax": 4.64539,
+        "aspectMaxAt": {
+          "i": 729,
+          "j": 15,
+          "x": 20.8416,
+          "r": 0.480714
+        },
+        "minEdge": 0.00901132,
+        "maxEdge": 0.162568
+      },
+      {
+        "name": "plume-bypass",
+        "ni": 892,
+        "nj": 32,
+        "cells": 28544,
+        "minJacobian": 0.0000722942,
+        "maxJacobian": 0.00731483,
+        "minScaledJacobian": 0.971074,
+        "maxStretch": 1.10532,
+        "maxStretchAt": {
+          "i": 778,
+          "j": 31,
+          "x": 20.1848,
+          "r": 1.32117
+        },
+        "maxSkewDeg": 13.8144,
+        "maxSkewAt": {
+          "i": 0,
+          "j": 0,
+          "x": 3.00402,
+          "r": 0.338512
+        },
+        "wallOrthoMaxDeg": 0,
+        "interfaceOrthoMaxDeg": 13.8144,
+        "interfaceKinkMaxDeg": 8.92983,
+        "aspectMin": 1.00001,
+        "aspectMax": 4.64551,
+        "aspectMaxAt": {
+          "i": 788,
+          "j": 0,
+          "x": 20.8416,
+          "r": 0.501631
+        },
+        "minEdge": 0.00803269,
+        "maxEdge": 0.162741
+      },
+      {
+        "name": "plume-outer",
+        "ni": 1037,
+        "nj": 16,
+        "cells": 16592,
+        "minJacobian": 0.0000707965,
+        "maxJacobian": 0.00731483,
+        "minScaledJacobian": 0.95242,
+        "maxStretch": 1.10533,
+        "maxStretchAt": {
+          "i": 923,
+          "j": 15,
+          "x": 20.1848,
+          "r": 1.74593
+        },
+        "maxSkewDeg": 17.7455,
+        "maxSkewAt": {
+          "i": 48,
+          "j": 15,
+          "x": 2.12731,
+          "r": 0.918306
+        },
+        "wallOrthoMaxDeg": 0,
+        "interfaceOrthoMaxDeg": 17.6863,
+        "interfaceKinkMaxDeg": 46.2723,
+        "aspectMin": 1.00002,
+        "aspectMax": 4.48839,
+        "aspectMaxAt": {
+          "i": 933,
+          "j": 0,
+          "x": 20.8416,
+          "r": 1.38353
+        },
+        "minEdge": 0.00749079,
+        "maxEdge": 0.162961
+      },
+      {
+        "name": "farfield",
+        "ni": 1159,
+        "nj": 36,
+        "cells": 41724,
+        "minJacobian": 0.00017321,
+        "maxJacobian": 0.0656379,
+        "minScaledJacobian": 0.691167,
+        "maxStretch": 1.123,
+        "maxStretchAt": {
+          "i": 4,
+          "j": 19,
+          "x": -0.982465,
+          "r": 2.00247
+        },
+        "maxSkewDeg": 46.2774,
+        "maxSkewAt": {
+          "i": 121,
+          "j": 0,
+          "x": 1.6958,
+          "r": 0.986458
+        },
+        "wallOrthoMaxDeg": 0,
+        "interfaceOrthoMaxDeg": 46.261,
+        "interfaceKinkMaxDeg": 46.2723,
+        "aspectMin": 1.00031,
+        "aspectMax": 95.8814,
+        "aspectMaxAt": {
+          "i": 266,
+          "j": 35,
+          "x": 2.53195,
+          "r": 8.38603
+        },
+        "minEdge": 0.00749079,
+        "maxEdge": 0.86984
+      }
+    ],
+    "worst": {
+      "minJacobian": {
+        "value": 0.00000259666,
+        "block": "core"
+      },
+      "minScaledJacobian": {
+        "value": 0.688056,
+        "block": "upstream"
+      },
+      "maxStretch": {
+        "value": 1.13658,
+        "block": "upstream",
+        "at": {
+          "i": 34,
+          "j": 50,
+          "x": -0.939701,
+          "r": 0.956389
+        }
+      },
+      "maxSkewDeg": {
+        "value": 46.5236,
+        "block": "upstream",
+        "at": {
+          "i": 42,
+          "j": 50,
+          "x": -0.755912,
+          "r": 0.952043
+        }
+      },
+      "maxAspect": {
+        "value": 95.8814,
+        "block": "farfield",
+        "at": {
+          "i": 266,
+          "j": 35,
+          "x": 2.53195,
+          "r": 8.38603
+        }
+      },
+      "wallOrthoMaxDeg": {
+        "value": 36.4671,
+        "block": "inlet"
+      },
+      "interfaceOrthoMaxDeg": {
+        "value": 46.4756,
+        "block": "upstream"
+      },
+      "interfaceKinkMaxDeg": {
+        "value": 46.2723,
+        "block": "plume-outer"
+      },
+      "minEdge": {
+        "value": 0.00138616,
+        "block": "core"
+      }
+    },
+    "cellsAcross": {
+      "upstream": 87,
+      "inlet": 32,
+      "lip": 16,
+      "fan": 48,
+      "bypass": 32,
+      "core": 16,
+      "afterbody": 32,
+      "plug": 16,
+      "plume-core": 16,
+      "plume-bypass": 32,
+      "plume-outer": 16,
+      "farfield": 36
+    },
+    "cellsPerChord": [
+      {
+        "name": "Fan rotor",
+        "duct": "fan",
+        "chord": 0.17,
+        "cells": 19
+      },
+      {
+        "name": "Fan OGV",
+        "duct": "bypass",
+        "chord": 0.16,
+        "cells": 14
+      },
+      {
+        "name": "Booster IGV",
+        "duct": "core",
+        "chord": 0.03,
+        "cells": 8
+      },
+      {
+        "name": "Booster R1",
+        "duct": "core",
+        "chord": 0.03,
+        "cells": 8
+      },
+      {
+        "name": "Booster S1",
+        "duct": "core",
+        "chord": 0.03,
+        "cells": 8
+      },
+      {
+        "name": "Booster R2",
+        "duct": "core",
+        "chord": 0.03,
+        "cells": 8
+      },
+      {
+        "name": "Booster S2",
+        "duct": "core",
+        "chord": 0.03,
+        "cells": 8
+      },
+      {
+        "name": "Booster R3",
+        "duct": "core",
+        "chord": 0.03,
+        "cells": 8
+      },
+      {
+        "name": "Booster S3",
+        "duct": "core",
+        "chord": 0.03,
+        "cells": 8
+      },
+      {
+        "name": "HPC IGV",
+        "duct": "core",
+        "chord": 0.03,
+        "cells": 8
+      },
+      {
+        "name": "HPC R1",
+        "duct": "core",
+        "chord": 0.0291667,
+        "cells": 8
+      },
+      {
+        "name": "HPC S1",
+        "duct": "core",
+        "chord": 0.0283333,
+        "cells": 8
+      },
+      {
+        "name": "HPC R2",
+        "duct": "core",
+        "chord": 0.0275,
+        "cells": 8
+      },
+      {
+        "name": "HPC S2",
+        "duct": "core",
+        "chord": 0.0266667,
+        "cells": 8
+      },
+      {
+        "name": "HPC R3",
+        "duct": "core",
+        "chord": 0.0258333,
+        "cells": 8
+      },
+      {
+        "name": "HPC S3",
+        "duct": "core",
+        "chord": 0.025,
+        "cells": 8
+      },
+      {
+        "name": "HPC R4",
+        "duct": "core",
+        "chord": 0.0241667,
+        "cells": 8
+      },
+      {
+        "name": "HPC S4",
+        "duct": "core",
+        "chord": 0.0233333,
+        "cells": 8
+      },
+      {
+        "name": "HPC R5",
+        "duct": "core",
+        "chord": 0.0225,
+        "cells": 8
+      },
+      {
+        "name": "HPC S5",
+        "duct": "core",
+        "chord": 0.0216667,
+        "cells": 8
+      },
+      {
+        "name": "HPC R6",
+        "duct": "core",
+        "chord": 0.0208333,
+        "cells": 8
+      },
+      {
+        "name": "HPC S6",
+        "duct": "core",
+        "chord": 0.02,
+        "cells": 8
+      },
+      {
+        "name": "HPC R7",
+        "duct": "core",
+        "chord": 0.0191667,
+        "cells": 8
+      },
+      {
+        "name": "HPC S7",
+        "duct": "core",
+        "chord": 0.0183333,
+        "cells": 8
+      },
+      {
+        "name": "HPC R8",
+        "duct": "core",
+        "chord": 0.0175,
+        "cells": 8
+      },
+      {
+        "name": "HPC S8",
+        "duct": "core",
+        "chord": 0.0166667,
+        "cells": 8
+      },
+      {
+        "name": "HPC R9",
+        "duct": "core",
+        "chord": 0.0158333,
+        "cells": 8
+      },
+      {
+        "name": "HPC S9",
+        "duct": "core",
+        "chord": 0.015,
+        "cells": 8
+      },
+      {
+        "name": "HPT NGV",
+        "duct": "core",
+        "chord": 0.04,
+        "cells": 8
+      },
+      {
+        "name": "HPT R1",
+        "duct": "core",
+        "chord": 0.035,
+        "cells": 8
+      },
+      {
+        "name": "LPT S1",
+        "duct": "core",
+        "chord": 0.03,
+        "cells": 8
+      },
+      {
+        "name": "LPT R1",
+        "duct": "core",
+        "chord": 0.0321429,
+        "cells": 9
+      },
+      {
+        "name": "LPT S2",
+        "duct": "core",
+        "chord": 0.0342857,
+        "cells": 8
+      },
+      {
+        "name": "LPT R2",
+        "duct": "core",
+        "chord": 0.0364286,
+        "cells": 8
+      },
+      {
+        "name": "LPT S3",
+        "duct": "core",
+        "chord": 0.0385714,
+        "cells": 8
+      },
+      {
+        "name": "LPT R3",
+        "duct": "core",
+        "chord": 0.0407143,
+        "cells": 8
+      },
+      {
+        "name": "LPT S4",
+        "duct": "core",
+        "chord": 0.0428571,
+        "cells": 8
+      },
+      {
+        "name": "LPT R4",
+        "duct": "core",
+        "chord": 0.045,
+        "cells": 8
+      },
+      {
+        "name": "TRF struts",
+        "duct": "core",
+        "chord": 0.07,
+        "cells": 8
+      }
+    ],
+    "lipSpacing": {
+      "bypassInside": 0.009,
+      "bypassOutside": 0.009,
+      "coreInside": 0.009,
+      "coreOutside": 0.009
+    },
+    "domain": {
+      "xIn": -8.46,
+      "xOut": 34.01,
+      "rOut": 8.75,
+      "D": 1.55,
+      "upstreamD": 5.00645,
+      "radialD": 5.64516,
+      "downstreamD": 20.0065
+    }
+  },
+  "binaryBytes": {
+    "f64": 12809408,
+    "f32": 7546376
+  }
+}
