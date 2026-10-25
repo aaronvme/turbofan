@@ -1,0 +1,16 @@
+// Critic pass 1: prints the synthesized rows of the reference definition for the plausibility check.
+import { it } from 'vitest';
+import { ENGINE_DEFINITION, ENGINE_MEANLINE } from '../../../src/engine/definition';
+
+it('dumps rows', () => {
+  const deg = (r: number) => ((r * 180) / Math.PI).toFixed(1);
+  for (const [k, row] of ENGINE_DEFINITION.bladeRows.entries()) {
+    const m = ENGINE_MEANLINE[k];
+    console.log(
+      [row.id.padEnd(12), row.kind.padEnd(6), String(row.count).padStart(4),
+       'chord', row.chord.mid.toFixed(4), 'in', deg(row.inletMetalAngle.mid), 'out', deg(row.exitMetalAngle.mid),
+       'stag', deg(row.stagger.mid), 'M_in', m?.inlet.mach.toFixed(2), 'Mx_in', m?.inlet.axialMach.toFixed(2)].join(' '),
+    );
+  }
+  console.log('rotation', JSON.stringify(ENGINE_DEFINITION.rotation));
+});
