@@ -30,6 +30,12 @@ const r = (id: keyof typeof curves, x: number): number => {
   return v;
 };
 
+/**
+ * A full-resolution raster is about 330k texels; under coverage instrumentation it takes
+ * several seconds, so the tests that build one get this timeout (ms).
+ */
+const FULL_RASTER_TIMEOUT = 60_000;
+
 let takeoff: MockCpuFlowField;
 let model: MockFlowModel;
 
@@ -37,7 +43,11 @@ beforeAll(() => {
   const state = mockSteadyState(def, 1);
   takeoff = createMockFlowField(def, state, ISA_SLS, { version: 7 });
   model = createMockFlowModel(def, state, ISA_SLS);
-});
+}, FULL_RASTER_TIMEOUT);
+
+/** Byte-for-byte equality of two texel arrays (a deep toEqual on 1M elements is slow). */
+const sameBits = (a: Uint16Array, b: Uint16Array) =>
+  a.length === b.length && Buffer.from(a.buffer).equals(Buffer.from(b.buffer));
 
 /** Decoded texel nearest to (x, r) in an extent. */
 function texel(field: CpuFieldTextures, x: number, rr: number) {
@@ -66,12 +76,17 @@ describe('mock flow field: layout and encoding (D0-4)', () => {
     }
   });
 
-  it('is deterministic: the same state gives the same bits', () => {
-    const again = createMockFlowField(def, mockSteadyState(def, 1), ISA_SLS, { version: 7 });
-    expect(again.near.state).toEqual(takeoff.near.state);
-    expect(again.near.velocity).toEqual(takeoff.near.velocity);
-    expect(again.far.state).toEqual(takeoff.far.state);
-  });
+  it(
+    'is deterministic: the same state gives the same bits',
+    () => {
+      const again = createMockFlowField(def, mockSteadyState(def, 1), ISA_SLS, { version: 7 });
+      expect(sameBits(again.near.state, takeoff.near.state)).toBe(true);
+      expect(sameBits(again.near.velocity, takeoff.near.velocity)).toBe(true);
+      expect(sameBits(again.far.state, takeoff.far.state)).toBe(true);
+      expect(sameBits(again.far.velocity, takeoff.far.velocity)).toBe(true);
+    },
+    FULL_RASTER_TIMEOUT,
+  );
 
   it('stores pressure and density as gauge ratios against the ambient reference', () => {
     // inside the HPC at takeoff: the texel holds (p - p_inf) / p_inf, not p / p_inf
@@ -95,35 +110,39 @@ describe('mock flow field: layout and encoding (D0-4)', () => {
     expect(Math.abs(far.s[1] ?? 1)).toBeLessThan(1e-4);
   });
 
-  it('decodes to physical values inside sensible ranges everywhere', () => {
-    const t4 = mockSteadyState(def, 1).stations['4'].ttK;
-    for (const id of ['near', 'far'] as FieldExtentId[]) {
-      const tex = takeoff[id];
-      for (let k = 0; k < tex.state.length; k += 4) {
-        const p = REF.pInfPa * (1 + fromHalfBits(tex.state[k] ?? 0));
-        const tK = fromHalfBits(tex.state[k + 2] ?? 0);
-        const far = fromHalfBits(tex.state[k + 3] ?? 0);
-        const ux = fromHalfBits(tex.velocity[k] ?? 0);
-        const ur = fromHalfBits(tex.velocity[k + 1] ?? 0);
-        const ut = fromHalfBits(tex.velocity[k + 2] ?? 0);
-        const ff = fromHalfBits(tex.velocity[k + 3] ?? 0);
-        if (!(
-          p > 0 &&
-          tK > REF.tInfK - 60 &&
-          tK < t4 + 10 &&
-          far >= 0 &&
-          far <= STOICHIOMETRIC_FAR &&
-          ff >= 0 &&
-          ff <= 1 &&
-          Math.hypot(ux, ur, ut) < 700
-        )) {
-          throw new Error(
-            `${id} texel ${k / 4}: p=${p} T=${tK} FAR=${far} u=(${ux}, ${ur}, ${ut}) ff=${ff}`,
-          );
+  it(
+    'decodes to physical values inside sensible ranges everywhere',
+    () => {
+      const t4 = mockSteadyState(def, 1).stations['4'].ttK;
+      for (const id of ['near', 'far'] as FieldExtentId[]) {
+        const tex = takeoff[id];
+        for (let k = 0; k < tex.state.length; k += 4) {
+          const p = REF.pInfPa * (1 + fromHalfBits(tex.state[k] ?? 0));
+          const tK = fromHalfBits(tex.state[k + 2] ?? 0);
+          const far = fromHalfBits(tex.state[k + 3] ?? 0);
+          const ux = fromHalfBits(tex.velocity[k] ?? 0);
+          const ur = fromHalfBits(tex.velocity[k + 1] ?? 0);
+          const ut = fromHalfBits(tex.velocity[k + 2] ?? 0);
+          const ff = fromHalfBits(tex.velocity[k + 3] ?? 0);
+          if (!(
+            p > 0 &&
+            tK > REF.tInfK - 60 &&
+            tK < t4 + 10 &&
+            far >= 0 &&
+            far <= STOICHIOMETRIC_FAR &&
+            ff >= 0 &&
+            ff <= 1 &&
+            Math.hypot(ux, ur, ut) < 700
+          )) {
+            throw new Error(
+              `${id} texel ${k / 4}: p=${p} T=${tK} FAR=${far} u=(${ux}, ${ur}, ${ut}) ff=${ff}`,
+            );
+          }
         }
       }
-    }
-  });
+    },
+    FULL_RASTER_TIMEOUT,
+  );
 });
 
 describe('mock flow field: geometry and flow features', () => {
@@ -193,28 +212,32 @@ describe('mock flow field: geometry and flow features', () => {
 });
 
 describe('mock flow field: an engine at rest', () => {
-  it('is the ambient everywhere: zero gauge bits, zero velocity, ambient temperature', () => {
-    const rest = createMockCycle(def).reset('shutdown');
-    const field = createMockFlowField(def, rest, ISA_SLS);
-    expect(field.version).toBe(0);
-    const zero = toHalfBits(0);
-    const tInf = toHalfBits(REF.tInfK);
-    for (const tex of [field.near, field.far]) {
-      for (let k = 0; k < tex.state.length; k += 4) {
-        const fluid = fromHalfBits(tex.velocity[k + 3] ?? 0) > 0;
-        if (!fluid) continue;
-        if (
-          tex.state[k] !== zero ||
-          tex.state[k + 1] !== zero ||
-          tex.state[k + 2] !== tInf ||
-          tex.state[k + 3] !== zero ||
-          tex.velocity[k] !== zero ||
-          tex.velocity[k + 1] !== zero ||
-          tex.velocity[k + 2] !== zero
-        ) {
-          throw new Error(`texel ${k / 4} of ${tex.extent.id} is not ambient`);
+  it(
+    'is the ambient everywhere: zero gauge bits, zero velocity, ambient temperature',
+    () => {
+      const rest = createMockCycle(def).reset('shutdown');
+      const field = createMockFlowField(def, rest, ISA_SLS);
+      expect(field.version).toBe(0);
+      const zero = toHalfBits(0);
+      const tInf = toHalfBits(REF.tInfK);
+      for (const tex of [field.near, field.far]) {
+        for (let k = 0; k < tex.state.length; k += 4) {
+          const fluid = fromHalfBits(tex.velocity[k + 3] ?? 0) > 0;
+          if (!fluid) continue;
+          if (
+            tex.state[k] !== zero ||
+            tex.state[k + 1] !== zero ||
+            tex.state[k + 2] !== tInf ||
+            tex.state[k + 3] !== zero ||
+            tex.velocity[k] !== zero ||
+            tex.velocity[k + 1] !== zero ||
+            tex.velocity[k + 2] !== zero
+          ) {
+            throw new Error(`texel ${k / 4} of ${tex.extent.id} is not ambient`);
+          }
         }
       }
-    }
-  });
+    },
+    FULL_RASTER_TIMEOUT,
+  );
 });

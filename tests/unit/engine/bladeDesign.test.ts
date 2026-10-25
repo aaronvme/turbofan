@@ -209,6 +209,10 @@ describe('designRow', () => {
         { targetSolidity: 1 },
       ),
     ).toThrow(/axial velocity/);
+    // an accelerating row turned to 85 deg: the Carter deviation pushes the metal past 90 deg
+    expect(() => designRow(EDGES, stator(0, -85 * DEG), { targetSolidity: 1 })).toThrow(
+      /beyond 90 deg/,
+    );
     // turning so large that Carter's rule has no solution at a tiny solidity
     expect(() => designRow(EDGES, stator(80 * DEG, -60 * DEG), { count: 1 })).toThrow();
   });
