@@ -81,3 +81,35 @@ export function powerModeFromOverlay(guid: string): PowerMode {
       return 'unknown';
   }
 }
+
+export interface GpuEngineSample {
+  /** Counter instance, e.g. "pid_28304_luid_0x0_0xe467_phys_0_eng_0_engtype_3D". */
+  readonly instance: string;
+  /** Utilization Percentage of that engine for that process. */
+  readonly value: number;
+}
+
+/**
+ * Per-process GPU use from `Get-Counter '\GPU Engine(*)\Utilization Percentage'` over
+ * `sampleCount` samples: the 3D and compute engines summed (Dawn's D3D12 queue does compute on
+ * a direct queue, so the solver shows up as 3D), averaged over the samples, busiest first,
+ * under 1% dropped. An integrated GPU is shared, so anything listed here before a run
+ * contaminates the timings (D0-1).
+ */
+export function gpuBusyByProcess(
+  samples: readonly GpuEngineSample[],
+  sampleCount: number,
+): { pid: number; percent: number }[] {
+  const byPid = new Map<number, number>();
+  for (const s of samples) {
+    const m = /^pid_(\d+)_.*_engtype_(\w+)$/i.exec(s.instance);
+    const type = m?.[2]?.toLowerCase();
+    if (!m || (type !== '3d' && type !== 'compute')) continue;
+    const pid = Number(m[1]);
+    byPid.set(pid, (byPid.get(pid) ?? 0) + s.value);
+  }
+  return [...byPid]
+    .map(([pid, total]) => ({ pid, percent: Math.round((10 * total) / sampleCount) / 10 }))
+    .filter((p) => p.percent >= 1)
+    .sort((a, b) => b.percent - a.percent);
+}

@@ -98,12 +98,14 @@ describe('gpuBusyByProcess (GPU Engine counters: who else is using the GPU, D0-1
     ]);
   });
 
-  it('counts only 3D engines (compute work runs there too on this driver) and skips odd names', () => {
+  it('counts 3D and compute engines (not copy or video) and skips other instance names', () => {
     const samples = [
       { instance: inst(1, 0, '3d'), value: 10 },
+      { instance: inst(1, 1, 'Compute'), value: 5 },
+      { instance: inst(1, 2, 'copy'), value: 70 },
       { instance: inst(1, 3, 'videodecode'), value: 90 },
       { instance: 'not-a-gpu-engine', value: 50 },
     ];
-    expect(gpuBusyByProcess(samples, 1)).toEqual([{ pid: 1, percent: 10 }]);
+    expect(gpuBusyByProcess(samples, 1)).toEqual([{ pid: 1, percent: 15 }]);
   });
 });

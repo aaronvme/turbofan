@@ -1,12 +1,14 @@
 // Benchmark harness for spikes (a) and (d), D0-1 protocol (docs/reviews/LOG.md).
 //
 //   npm run bench:throughput [-- --quick] [-- --only=130k-16x8,...] [-- --port=5181]
-//   npm run bench:worker     [-- --quick]
+//   npm run bench:worker     [-- --quick] [-- --only=main-idle,worker-idle,...]
 //
 // Starts a Vite dev server, launches the installed Chrome headed and maximized (Playwright,
 // no extra Chrome flags), runs each configuration in the page (warm-up, then 3 runs), records
-// the conditions (power source, CPU load before and during, adapter, Chrome version, window
-// size) and writes docs/bench/<kind>-<date>-<protocol>.json. Only the orchestrator's quiet,
+// the conditions (D0-1/D0-3: power source, power plan and Windows power mode, CPU load before,
+// during and after, other processes using the GPU before and after, GPU name and driver,
+// adapter features/limits, Chrome version, window size, git HEAD) and writes
+// docs/bench/<kind>-<local date>-<HHMM>-<protocol>.json. Only the orchestrator's quiet,
 // official runs count for P1/D0-2; --quick numbers are "indicative, contaminated (D0-1)".
 
 import { execFileSync } from 'node:child_process';
@@ -19,6 +21,7 @@ import type { WorkerBenchResult } from '../worker/main.ts';
 import { benchFileName, parseBenchArgs, protocolLabel, type Protocol } from '../lib/protocol.ts';
 import {
   cpuBusyFraction,
+  gpuBusyByProcess,
   parseActiveScheme,
   powerModeFromOverlay,
   powerSourceFromBatteryStatus,
@@ -94,6 +97,40 @@ function powerSource() {
     return { source: powerSourceFromBatteryStatus(codes), batteryStatus: codes };
   } catch (e) {
     return { source: 'unknown' as const, error: String(e) };
+  }
+}
+
+/**
+ * Other processes using the (shared, integrated) GPU over a 3 s sample, with their names. A
+ * game or video in the background shows up here and explains slow solver timings (D0-1).
+ */
+function gpuBusyOthers() {
+  const samples = 3;
+  try {
+    const raw = powershell(
+      `(Get-Counter '\\GPU Engine(*)\\Utilization Percentage' -SampleInterval 1 -MaxSamples ${samples} -ErrorAction SilentlyContinue).CounterSamples | ` +
+        'ForEach-Object { "$($_.InstanceName)|$($_.CookedValue)" }',
+    );
+    const busy = gpuBusyByProcess(
+      raw
+        .split(/\r?\n/)
+        .map((l) => l.split('|'))
+        .map(([instance = '', value = '']) => ({ instance, value: Number(value) })),
+      samples,
+    );
+    const names = new Map<number, string>();
+    if (busy.length > 0) {
+      const ids = busy.map((b) => b.pid).join(',');
+      for (const l of powershell(
+        `Get-Process -Id ${ids} -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Id)|$($_.ProcessName)" }`,
+      ).split(/\r?\n/)) {
+        const [pid = '', name = ''] = l.split('|');
+        names.set(Number(pid), name.trim());
+      }
+    }
+    return busy.map((b) => ({ ...b, name: names.get(b.pid) ?? 'exited' }));
+  } catch (e) {
+    return { error: String(e) };
   }
 }
 
@@ -241,6 +278,8 @@ async function main(): Promise<void> {
     memoryGiB: Math.round(totalmem() / 2 ** 30),
     // Other work on the machine shows up here; the official run wants this near idle.
     cpuLoadBefore: await cpuLoadOver(3000),
+    // Should be empty (apart from dwm, the desktop compositor) for an official run.
+    gpuBusyBefore: gpuBusyOthers(),
     node: process.version,
     chromeFlags: [] as string[],
   };
@@ -333,6 +372,7 @@ async function main(): Promise<void> {
         chromeGpu: gpuPage,
         page: pageInfo,
         cpuLoadAfter: await cpuLoadOver(2000),
+        gpuBusyAfter: gpuBusyOthers(),
         finished: new Date().toISOString(),
       },
       results,

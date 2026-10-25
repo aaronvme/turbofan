@@ -73,6 +73,21 @@ describe('RunRecorder (D0-1 phases)', () => {
     expect(new RunRecorder(P, 500).window).toEqual({ from: 1500, to: 7500 });
   });
 
+  it('reports the 10th percentile of per-frame ms/it: the cost when nothing else had the GPU', () => {
+    // On a shared integrated GPU another process's work lands inside our timestamp pair and
+    // inflates some frames; the low percentile stays near the uncontended cost.
+    const rec = new RunRecorder(P, 0);
+    drive(rec, 0, 10, 4, 7000);
+    const perIt = [1, 1, 1, 1, 1, 1, 1, 1, 5, 9]; // 10 frames in run 1, two contended
+    perIt.forEach((ms, i) => {
+      rec.gpu({ frameT: 1000 + 10 * i, solverMs: 4 * ms, iterations: 4 });
+    });
+    const [r1, r2] = rec.results();
+    expect(r1?.solverMsPerItP10).toBeCloseTo(1, 12);
+    expect(r1?.solverMsPerIt).toBeCloseTo(2.2, 12); // total / iterations, inflated
+    expect(r2?.solverMsPerItP10).toBeNull();
+  });
+
   it('refuses results before the protocol is done', () => {
     const rec = new RunRecorder(P, 0);
     rec.frame(10, 1);
@@ -97,6 +112,7 @@ describe('aggregateRuns', () => {
     expect(agg.frameTimeP50).toBeCloseTo(10, 6);
     expect(agg.runs).toBe(3);
     expect(agg.longFrames).toBe(0);
+    expect(agg.solverMsPerItP10).toBeCloseTo(1.25, 12); // one sample per run: 1.5, 1.0, 1.25
   });
 });
 
