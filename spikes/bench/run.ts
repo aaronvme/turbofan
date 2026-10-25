@@ -15,7 +15,12 @@ import { cpus, totalmem } from 'node:os';
 import { chromium, type Page } from '@playwright/test';
 import { createServer, type ViteDevServer } from 'vite';
 import { parseBenchArgs, protocolLabel, type Protocol } from '../lib/protocol.ts';
-import { cpuBusyFraction, powerSourceFromBatteryStatus } from '../lib/system.ts';
+import {
+  cpuBusyFraction,
+  parseActiveScheme,
+  powerModeFromOverlay,
+  powerSourceFromBatteryStatus,
+} from '../lib/system.ts';
 
 type Kind = 'throughput' | 'worker';
 
@@ -85,6 +90,52 @@ function powerSource() {
   }
 }
 
+/** D0-3: the active plan ("Balanced" first, as a lower bound). */
+function powerPlan() {
+  try {
+    const out = execFileSync('powercfg', ['/getactivescheme'], { encoding: 'utf8' });
+    return parseActiveScheme(out) ?? { error: `unparsed: ${out.trim()}` };
+  } catch (e) {
+    return { error: String(e) };
+  }
+}
+
+/** Windows 11 power mode (an overlay on the plan) for AC and battery. */
+function powerMode() {
+  try {
+    const out = powershell(
+      "$k = Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Power\\User\\PowerSchemes'; " +
+        '"$($k.ActiveOverlayAcPowerScheme) $($k.ActiveOverlayDcPowerScheme)"',
+    );
+    const [ac = '', dc = ''] = out.split(/\s+/);
+    return {
+      ac: powerModeFromOverlay(ac),
+      dc: powerModeFromOverlay(dc),
+      acOverlay: ac,
+      dcOverlay: dc,
+    };
+  } catch (e) {
+    return { error: String(e) };
+  }
+}
+
+/** The GPU name and driver version as Windows reports them (adapter.info has neither). */
+function gpuDrivers() {
+  try {
+    return powershell(
+      'Get-CimInstance Win32_VideoController | ForEach-Object { "$($_.Name)|$($_.DriverVersion)" }',
+    )
+      .split(/\r?\n/)
+      .filter((l) => l.includes('|'))
+      .map((l) => {
+        const [name = '', driverVersion = ''] = l.split('|');
+        return { name: name.trim(), driverVersion: driverVersion.trim() };
+      });
+  } catch (e) {
+    return { error: String(e) };
+  }
+}
+
 async function cpuLoadOver(ms: number): Promise<number> {
   const before = cpus();
   await new Promise((r) => setTimeout(r, ms));
@@ -147,6 +198,9 @@ async function main(): Promise<void> {
     gitHead: git(['rev-parse', '--short', 'HEAD']),
     gitDirty: git(['status', '--porcelain']).length > 0,
     power: powerSource(),
+    powerPlan: powerPlan(),
+    powerMode: powerMode(),
+    gpu: gpuDrivers(),
     cpu: cpus()[0]?.model ?? 'unknown',
     logicalCpus: cpus().length,
     memoryGiB: Math.round(totalmem() / 2 ** 30),

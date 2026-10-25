@@ -40,3 +40,44 @@ export function cpuBusyFraction(before: readonly CpuTimes[], after: readonly Cpu
   });
   return total > 0 ? busy / total : 0;
 }
+
+export interface PowerPlan {
+  readonly guid: string;
+  /** The plan's display name (localized), '' if powercfg printed none. */
+  readonly name: string;
+}
+
+const GUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+/**
+ * `powercfg /getactivescheme` prints "Power Scheme GUID: <guid>  (<name>)". The label is
+ * localized, so only the GUID and the parenthesized name are relied on. D0-3 records the plan
+ * with every timing (the official runs start on "Balanced" as a lower bound).
+ */
+export function parseActiveScheme(output: string): PowerPlan | null {
+  const m = GUID.exec(output);
+  if (!m) return null;
+  const name = /\(([^)]*)\)/.exec(output.slice(m.index + m[0].length));
+  return { guid: m[0].toLowerCase(), name: name?.[1]?.trim() ?? '' };
+}
+
+export type PowerMode = 'best-power-efficiency' | 'balanced' | 'best-performance' | 'unknown';
+
+/**
+ * Windows 11 "Power mode" (Settings > System > Power) is an overlay on the plan, stored as
+ * ActiveOverlayAcPowerScheme / ActiveOverlayDcPowerScheme under
+ * HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes. It changes CPU/GPU power
+ * limits independently of the plan, so it is recorded next to it.
+ */
+export function powerModeFromOverlay(guid: string): PowerMode {
+  switch (guid.toLowerCase()) {
+    case '961cc777-2547-4f9d-8174-7d86181b8a7a':
+      return 'best-power-efficiency';
+    case '00000000-0000-0000-0000-000000000000':
+      return 'balanced';
+    case 'ded574b5-45a0-4f42-8737-46345c09c238':
+      return 'best-performance';
+    default:
+      return 'unknown';
+  }
+}
