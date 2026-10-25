@@ -39,6 +39,8 @@ const TEXT = '#0b0b0b';
 const TEXT_2 = '#52514e';
 const HEADER = 44;
 const LEGEND_ROW = 20;
+/** Grid-line nodes closer than this to the last drawn point are dropped (px). */
+const MIN_PX = 0.75;
 
 function escapeXml(s: string): string {
   return s
@@ -67,10 +69,17 @@ export function renderSvg(mesh: MultiBlockMesh, view: SvgView): string {
     Math.max(r0, r1) >= view.rMin - mr &&
     Math.min(r0, r1) <= view.rMax + mr;
 
-  /** Path data for a node sequence, broken into visible runs. */
+  /**
+   * Path data for a node sequence, broken into visible runs. Nodes closer than MIN_PX to the last
+   * drawn point are dropped (the last node of each run is always drawn), so overviews of a dense
+   * grid stay small without changing what is visible.
+   */
   const polyline = (b: Block, nodes: readonly [number, number][]): string => {
     let d = '';
     let open = false;
+    let pending = '';
+    let lx = 0;
+    let ly = 0;
     for (let k = 0; k + 1 < nodes.length; k++) {
       const [i0, j0] = nodes[k] as [number, number];
       const [i1, j1] = nodes[k + 1] as [number, number];
@@ -81,14 +90,29 @@ export function renderSvg(mesh: MultiBlockMesh, view: SvgView): string {
       const x1 = b.x[c] ?? 0;
       const r1 = b.r[c] ?? 0;
       if (!segVisible(x0, r0, x1, r1)) {
+        d += pending;
+        pending = '';
         open = false;
         continue;
       }
-      if (!open) d += `M${fmt(px(x0))} ${fmt(py(r0))}`;
-      d += `L${fmt(px(x1))} ${fmt(py(r1))}`;
-      open = true;
+      if (!open) {
+        lx = px(x0);
+        ly = py(r0);
+        d += `M${fmt(lx)} ${fmt(ly)}`;
+        open = true;
+      }
+      const X = px(x1);
+      const Y = py(r1);
+      if (Math.hypot(X - lx, Y - ly) >= MIN_PX) {
+        d += `L${fmt(X)} ${fmt(Y)}`;
+        lx = X;
+        ly = Y;
+        pending = '';
+      } else {
+        pending = `L${fmt(X)} ${fmt(Y)}`;
+      }
     }
-    return d;
+    return d + pending;
   };
   const row = (j: number, b: Block): [number, number][] =>
     Array.from({ length: b.ni + 1 }, (_, i) => [i, j]);
@@ -129,8 +153,23 @@ export function renderSvg(mesh: MultiBlockMesh, view: SvgView): string {
       }
     }
     if (n > 0) {
+      // the centroid can fall outside a curved block (inside the nacelle for the C-block)
+      const cx = sxv / n;
+      const cr = srv / n;
+      let best = 0;
+      let bestD = Infinity;
+      for (let k = 0; k < b.x.length; k++) {
+        const x = b.x[k] ?? 0;
+        const r = b.r[k] ?? 0;
+        if (x < view.xMin || x > view.xMax || r < view.rMin || r > view.rMax) continue;
+        const d = Math.hypot(px(x) - px(cx), py(r) - py(cr));
+        if (d < bestD) {
+          bestD = d;
+          best = k;
+        }
+      }
       labels.push(
-        `<text class="block-label" x="${fmt(px(sxv / n))}" y="${fmt(py(srv / n))}">${escapeXml(b.name)}</text>`,
+        `<text class="block-label" x="${fmt(px(b.x[best] ?? cx))}" y="${fmt(py(b.r[best] ?? cr))}">${escapeXml(b.name)}</text>`,
       );
     }
   });
