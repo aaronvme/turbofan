@@ -2,7 +2,7 @@
 // warm-up, then `runs` runs of `runMs`; each frame and each (late) timestamp-query sample is
 // attributed to the run its frame started in. Rates are counts over the fixed run window.
 
-import { median, medianOfRuns, summarize, type Summary } from './stats';
+import { median, medianOfRuns, quantile, summarize, type Summary } from './stats';
 
 export interface ProtocolTimes {
   readonly warmupMs: number;
@@ -32,6 +32,11 @@ export interface RunResult {
   readonly gpuSamples: number;
   /** Total solver GPU time / total timed iterations, or null without samples. */
   readonly solverMsPerIt: number | null;
+  /**
+   * 10th percentile of the per-frame ms/it. Another process's GPU work that lands inside our
+   * timestamp pair inflates single frames; this stays near the uncontended cost.
+   */
+  readonly solverMsPerItP10: number | null;
   readonly solverMsPerFrame: Summary | null;
 }
 
@@ -41,6 +46,7 @@ interface RunAcc {
   iterations: number;
   gpuMs: number[];
   gpuIts: number;
+  msPerIt: number[];
 }
 
 export class RunRecorder {
@@ -60,6 +66,7 @@ export class RunRecorder {
       iterations: 0,
       gpuMs: [],
       gpuIts: 0,
+      msPerIt: [],
     }));
   }
 
@@ -112,6 +119,7 @@ export class RunRecorder {
     if (!a) return;
     a.gpuMs.push(sample.solverMs);
     a.gpuIts += sample.iterations;
+    if (sample.iterations > 0) a.msPerIt.push(sample.solverMs / sample.iterations);
   }
 
   results(): RunResult[] {
@@ -130,6 +138,7 @@ export class RunRecorder {
         itPerSec: a.iterations / sec,
         gpuSamples: a.gpuMs.length,
         solverMsPerIt: a.gpuIts > 0 ? total / a.gpuIts : null,
+        solverMsPerItP10: a.msPerIt.length > 0 ? quantile(a.msPerIt, 0.1) : null,
         solverMsPerFrame: a.gpuMs.length > 0 ? summarize(a.gpuMs) : null,
       };
     });
@@ -150,6 +159,7 @@ export interface Aggregate {
   readonly frameTimeP99: number;
   readonly longFrames: number;
   readonly solverMsPerIt: number | null;
+  readonly solverMsPerItP10: number | null;
   readonly solverMsPerFrameP50: number | null;
   /** 1000 / ms per iteration: the rate if the solver had the whole GPU. */
   readonly saturatedItPerSec: number | null;
@@ -162,6 +172,7 @@ export function aggregateRuns(runs: readonly RunResult[]): Aggregate {
   const m = (xs: number[]) => (xs.length % 2 === 1 ? medianOfRuns(xs) : median(xs));
   const gpu = runs.flatMap((r) => (r.solverMsPerIt === null ? [] : [r.solverMsPerIt]));
   const perFrame = runs.flatMap((r) => (r.solverMsPerFrame ? [r.solverMsPerFrame.p50] : []));
+  const p10 = runs.flatMap((r) => (r.solverMsPerItP10 === null ? [] : [r.solverMsPerItP10]));
   const msPerIt = gpu.length > 0 ? m(gpu) : null;
   return {
     runs: runs.length,
@@ -172,6 +183,7 @@ export function aggregateRuns(runs: readonly RunResult[]): Aggregate {
     frameTimeP99: m(runs.map((r) => r.frameTime.p99)),
     longFrames: m(runs.map((r) => r.longFrames)),
     solverMsPerIt: msPerIt,
+    solverMsPerItP10: p10.length > 0 ? m(p10) : null,
     solverMsPerFrameP50: perFrame.length > 0 ? m(perFrame) : null,
     saturatedItPerSec: msPerIt === null ? null : 1000 / msPerIt,
     budgetItPerSec: msPerIt === null ? null : solverBudgetItPerSec(msPerIt),

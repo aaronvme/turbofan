@@ -322,7 +322,8 @@ async function main(): Promise<void> {
         results.push({ ...(r as object), cpuLoadDuring: load });
         const agg = (r as ConfigResult).aggregate;
         process.stdout.write(
-          `${agg.solverMsPerIt?.toFixed(3) ?? '-'} ms/it, achieved ${agg.itPerSec.toFixed(0)} it/s, CPU ${(100 * load).toFixed(0)}%\n`,
+          `${agg.solverMsPerIt?.toFixed(3) ?? '-'} ms/it (p10 ${agg.solverMsPerItP10?.toFixed(3) ?? '-'}), ` +
+            `achieved ${agg.itPerSec.toFixed(0)} it/s, frame p99 ${agg.frameTimeP99.toFixed(1)} ms, CPU ${(100 * load).toFixed(0)}%\n`,
         );
       }
       await page.evaluate(() => window.__bench?.dispose());
