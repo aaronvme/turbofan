@@ -69,6 +69,12 @@ export interface ConfigResult {
   readonly stateFinite: boolean;
   readonly maxAbsGaugePressurePa: number;
   readonly gpuErrors: readonly GpuErrorReport[];
+  /**
+   * The measured runs on the rendering thread's frame clock, with that thread's
+   * performance.timeOrigin, so the page can match main-thread long tasks to the runs in both
+   * modes (a worker has its own time origin).
+   */
+  readonly measured: { readonly timeOrigin: number; readonly from: number; readonly to: number };
 }
 
 const DOMAIN = { x0: -1, x1: 3, r1: 1.5 };
@@ -282,6 +288,7 @@ export class BenchApp {
       stateFinite,
       maxAbsGaugePressurePa: maxAbsPp,
       gpuErrors: this.log.reports.slice(errorsBefore),
+      measured: { timeOrigin: performance.timeOrigin, ...recorder.window },
     };
     scene.dispose();
     ring.destroy();

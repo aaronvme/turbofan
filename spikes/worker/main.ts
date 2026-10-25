@@ -1,6 +1,6 @@
-// Spike (d) page: ?mode=main|worker&react=0|1, or ?mode=coi. The harness drives it through
-// window.__workerBench. In both render modes the frame-time statistics come from the thread
-// that renders; the React load always runs on the main thread, as the UI will.
+// Spike (d) page: ?mode=main|worker&react=<Hz> (0 = no React load), or ?mode=coi. The harness
+// drives it through window.__workerBench. In both render modes the frame-time statistics come
+// from the thread that renders; the React load always runs on the main thread, as the UI will.
 
 import { BenchApp, type BenchConfig, type ConfigResult } from '../scene/benchApp';
 import { summarize, type Summary } from '../lib/stats';
@@ -10,10 +10,13 @@ import type { ProbeResult } from './workerProbe';
 
 export interface WorkerBenchResult {
   readonly mode: string;
-  readonly react: boolean;
+  /** React load update rate in Hz (0 = none). */
+  readonly reactHz: number;
   readonly frame: ConfigResult;
+  /** React commits and their render durations (Profiler actualDuration) during the runs. */
   readonly reactUpdates: number;
   readonly reactCommitMs: Summary | null;
+  /** Main-thread long tasks (> 50 ms) that started during the runs. */
   readonly longTasks: { count: number; totalMs: number; maxMs: number };
 }
 
@@ -39,18 +42,22 @@ declare global {
 
 const params = new URLSearchParams(location.search);
 const mode = params.get('mode') ?? 'main';
-const withReact = params.get('react') === '1';
+const reactHz = Number(params.get('react') ?? '0');
+if (!Number.isFinite(reactHz) || reactHz < 0) throw new Error('react=<Hz> must be >= 0');
 const canvas = document.getElementById('view');
 const ui = document.getElementById('ui');
 if (!(canvas instanceof HTMLCanvasElement) || !ui) throw new Error('page markup missing');
 
-const longTasks: number[] = [];
+/** Long tasks with absolute start times (timeOrigin + startTime), to compare across threads. */
+const longTasks: { start: number; duration: number }[] = [];
 new PerformanceObserver((list) => {
-  for (const e of list.getEntries()) longTasks.push(e.duration);
+  for (const e of list.getEntries()) {
+    longTasks.push({ start: performance.timeOrigin + e.startTime, duration: e.duration });
+  }
 }).observe({ type: 'longtask', buffered: true });
 
 let reactStats: ReactLoadStats | null = null;
-if (withReact) reactStats = mountReactLoad(ui);
+if (reactHz > 0) reactStats = mountReactLoad(ui, reactHz);
 
 /** Request/response over postMessage. */
 function workerChannel(w: Worker) {
@@ -77,15 +84,17 @@ function workerChannel(w: Worker) {
     });
 }
 
-function finish(frame: ConfigResult, startTasks: number): WorkerBenchResult {
-  const tasks = longTasks.slice(startTasks);
+function finish(frame: ConfigResult): WorkerBenchResult {
+  const from = frame.measured.timeOrigin + frame.measured.from;
+  const to = frame.measured.timeOrigin + frame.measured.to;
+  const tasks = longTasks.filter((t) => t.start >= from && t.start < to).map((t) => t.duration);
+  const commits = (reactStats?.commits ?? []).filter((c) => c.at >= from && c.at < to);
   return {
     mode,
-    react: withReact,
+    reactHz,
     frame,
-    reactUpdates: reactStats?.updates ?? 0,
-    reactCommitMs:
-      reactStats && reactStats.commitMs.length > 0 ? summarize(reactStats.commitMs) : null,
+    reactUpdates: commits.length,
+    reactCommitMs: commits.length > 0 ? summarize(commits.map((c) => c.ms)) : null,
     longTasks: {
       count: tasks.length,
       totalMs: tasks.reduce((s, x) => s + x, 0),
@@ -129,8 +138,7 @@ if (mode === 'worker') {
     ready: ready.then((r) => ({ ...(r as object), innerWidth, innerHeight, devicePixelRatio })),
     run: async (config) => {
       await ready;
-      const start = longTasks.length;
-      return finish((await call({ type: 'run', config })) as ConfigResult, start);
+      return finish((await call({ type: 'run', config })) as ConfigResult);
     },
     probe: async () => (await call({ type: 'probe' })) as Record<string, ProbeResult>,
     dispose: async () => {
@@ -147,13 +155,12 @@ if (mode === 'worker') {
       : Promise.resolve(null),
     run: async (config) => {
       if (!app) throw new Error('mode=coi has no renderer');
-      const start = longTasks.length;
       const result = await (
         await app
       ).run(config, (cb) => {
         requestAnimationFrame(cb);
       });
-      return finish(result, start);
+      return finish(result);
     },
     probe: () => Promise.resolve(null),
     dispose: async () => {

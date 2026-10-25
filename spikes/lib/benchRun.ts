@@ -24,6 +24,8 @@ export interface RunResult {
   readonly index: number;
   readonly frames: number;
   readonly frameTime: Summary;
+  /** Frames longer than 1.5 x the run's median frame time: at least one missed vsync. */
+  readonly longFrames: number;
   readonly fps: number;
   readonly iterations: number;
   readonly itPerSec: number;
@@ -69,6 +71,12 @@ export class RunRecorder {
     return this.index;
   }
 
+  /** The measured runs' span on the frame clock (warm-up excluded). */
+  get window(): { from: number; to: number } {
+    const from = this.start + this.p.warmupMs;
+    return { from, to: from + this.p.runs * this.p.runMs };
+  }
+
   private runAt(t: number): number {
     const into = t - this.start - this.p.warmupMs;
     if (into < 0) return -1;
@@ -111,10 +119,12 @@ export class RunRecorder {
     const sec = this.p.runMs / 1000;
     return this.acc.map((a, index) => {
       const total = a.gpuMs.reduce((s, x) => s + x, 0);
+      const typical = a.deltas.length > 0 ? median(a.deltas) : 0;
       return {
         index,
         frames: a.frames,
         frameTime: summarize(a.deltas),
+        longFrames: a.deltas.filter((d) => d > 1.5 * typical).length,
         fps: a.frames / sec,
         iterations: a.iterations,
         itPerSec: a.iterations / sec,
@@ -138,6 +148,7 @@ export interface Aggregate {
   readonly frameTimeP50: number;
   readonly frameTimeP95: number;
   readonly frameTimeP99: number;
+  readonly longFrames: number;
   readonly solverMsPerIt: number | null;
   readonly solverMsPerFrameP50: number | null;
   /** 1000 / ms per iteration: the rate if the solver had the whole GPU. */
@@ -159,6 +170,7 @@ export function aggregateRuns(runs: readonly RunResult[]): Aggregate {
     frameTimeP50: m(runs.map((r) => r.frameTime.p50)),
     frameTimeP95: m(runs.map((r) => r.frameTime.p95)),
     frameTimeP99: m(runs.map((r) => r.frameTime.p99)),
+    longFrames: m(runs.map((r) => r.longFrames)),
     solverMsPerIt: msPerIt,
     solverMsPerFrameP50: perFrame.length > 0 ? m(perFrame) : null,
     saturatedItPerSec: msPerIt === null ? null : 1000 / msPerIt,

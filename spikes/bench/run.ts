@@ -14,6 +14,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { cpus, totalmem } from 'node:os';
 import { chromium, type Page } from '@playwright/test';
 import { createServer, type InlineConfig, type ViteDevServer } from 'vite';
+import type { ConfigResult } from '../scene/benchApp.ts';
+import type { WorkerBenchResult } from '../worker/main.ts';
 import { benchFileName, parseBenchArgs, protocolLabel, type Protocol } from '../lib/protocol.ts';
 import {
   cpuBusyFraction,
@@ -65,9 +67,14 @@ function workerConfigs(protocol: Protocol): PageConfig[] {
     particles: 65536,
   };
   return [
-    { id: 'main-idle', mode: 'main', react: false, ...base },
-    { id: 'main-react', mode: 'main', react: true, ...base },
-    { id: 'worker-react', mode: 'worker', react: true, ...base },
+    // Idle pair: what the worker path costs by itself. 15 Hz: an engine overlay's update rate.
+    // 60 Hz: a UI that re-renders every frame (e.g. an unthrottled store subscription).
+    { id: 'main-idle', mode: 'main', reactHz: 0, ...base },
+    { id: 'worker-idle', mode: 'worker', reactHz: 0, ...base },
+    { id: 'main-react15', mode: 'main', reactHz: 15, ...base },
+    { id: 'worker-react15', mode: 'worker', reactHz: 15, ...base },
+    { id: 'main-react60', mode: 'main', reactHz: 60, ...base },
+    { id: 'worker-react60', mode: 'worker', reactHz: 60, ...base },
   ];
 }
 
@@ -184,9 +191,12 @@ const PREBUNDLE = [
   'react',
   'react/jsx-dev-runtime',
   'react-dom/client',
+  'three',
   'three/webgpu',
   'three/tsl',
+  'three/addons/controls/OrbitControls.js',
   'three/addons/environments/RoomEnvironment.js',
+  'three/addons/loaders/GLTFLoader.js',
   'three/addons/loaders/HDRLoader.js',
   'three/addons/tsl/display/BloomNode.js',
 ];
@@ -271,8 +281,7 @@ async function main(): Promise<void> {
         const r = await page.evaluate((c) => window.__bench?.run(c as never), config);
         const load = cpuBusyFraction(before, cpus());
         results.push({ ...(r as object), cpuLoadDuring: load });
-        const agg = (r as { aggregate: { solverMsPerIt: number | null; itPerSec: number } })
-          .aggregate;
+        const agg = (r as ConfigResult).aggregate;
         process.stdout.write(
           `${agg.solverMsPerIt?.toFixed(3) ?? '-'} ms/it, achieved ${agg.itPerSec.toFixed(0)} it/s, CPU ${(100 * load).toFixed(0)}%\n`,
         );
@@ -281,7 +290,7 @@ async function main(): Promise<void> {
     } else {
       for (const config of configs) {
         process.stdout.write(`  ${config.id} ... `);
-        const url = `${base}/spikes/worker/index.html?mode=${String(config.mode)}&react=${config.react ? 1 : 0}`;
+        const url = `${base}/spikes/worker/index.html?mode=${String(config.mode)}&react=${String(config.reactHz)}`;
         await page.goto(url);
         await page.bringToFront();
         const info = await page.evaluate(() => window.__workerBench?.ready);
@@ -290,15 +299,11 @@ async function main(): Promise<void> {
         const r = await page.evaluate((c) => window.__workerBench?.run(c as never), config);
         const load = cpuBusyFraction(before, cpus());
         results.push({ ...(r as object), cpuLoadDuring: load });
-        const ft = (
-          r as {
-            frame: {
-              aggregate: { frameTimeP50: number; frameTimeP95: number; frameTimeP99: number };
-            };
-          }
-        ).frame.aggregate;
+        const w = r as WorkerBenchResult;
+        const ft = w.frame.aggregate;
         process.stdout.write(
-          `frame p50/p95/p99 ${ft.frameTimeP50.toFixed(2)}/${ft.frameTimeP95.toFixed(2)}/${ft.frameTimeP99.toFixed(2)} ms, CPU ${(100 * load).toFixed(0)}%\n`,
+          `frame p50/p95/p99 ${ft.frameTimeP50.toFixed(2)}/${ft.frameTimeP95.toFixed(2)}/${ft.frameTimeP99.toFixed(2)} ms, ` +
+            `long frames/run ${ft.longFrames}, React commit p95 ${w.reactCommitMs?.p95.toFixed(1) ?? '-'} ms, CPU ${(100 * load).toFixed(0)}%\n`,
         );
         workerProbe ??= await page.evaluate(() => window.__workerBench?.probe());
         await page.evaluate(() => window.__workerBench?.dispose());
