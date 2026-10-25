@@ -136,3 +136,126 @@ None.
 - (a) C6 ambient: ISA SLS only, or also the 30 °C flat-rating corner. See I6; the current estimate would fail the corner.
 - (b) Confirm that W1 calibrates with A8/A18 held fixed.
 - (c) Who fixes I1-I5. One small contracts follow-up is cheaper than spreading them across W1/W2 builders.
+
+## Critic pass 1: w0/mesh-spike @a72c771
+
+Reviewed 2026-10-24 by the pass-1 critic: `tools/mesh/**`, `tests/unit/mesh/**`, docs/MESH.md, the SVGs and metrics JSON, and the vitest/package changes. Checklists applied: typescript-reviewer, silent-failure-hunter, pr-test-analyzer, security-review. The generator writes only `docs/mesh/` and two fixed-name files in the OS temp dir; the resolve hook only appends `.ts` to relative specifiers; SVG labels are XML-escaped. Nothing found.
+
+Probes:
+- `docs/reviews/probes/w0m-mesh.probe.ts.txt`: metric identities and the ghost map on the production mesh, the D3 smoothing rerun, a split-vs-single smoother check, and N2.
+- `docs/reviews/probes/w0x-adapter.probe.ts.txt` (needs both branches merged): EngineDefinition → mesher.
+
+**Gates (rerun in the builder worktree):**
+- `npm test`: 120 passed / 0 skipped (13 files).
+- `npm run lint`: clean. `npm run typecheck`: clean.
+- `npm run coverage`: lines 99.14 %, statements 98.17 %, branches 80.38 %, functions 100 %. The new `tools/mesh/**` lines ≥ 90 threshold passes.
+- `npm run mesh`, run in a detached checkout, reproduces every reported number:
+  - cells: 129,913 (130k) / 79,769 (80k);
+  - worst stretching: 1.137 / 1.135 (upstream);
+  - worst skew: 46.5° / 46.4°;
+  - min Jacobian: 2.60e-6 / 3.46e-6 m²;
+  - smallest edge: 1.39 mm;
+  - binary v1 round trip: ok for f64 and f32.
+- The SVGs and metrics JSON regenerate byte-identically (git status clean afterwards), so the generator is deterministic.
+
+**Requirements checked:**
+- **Topology:** 12 blocks, a C-block lip, point-matched interfaces (bitwise, via `validateMesh` plus face vectors), the axis at r = 0.
+- **Cells across:** 16 core, 48 fan, 32 bypass, checked wall-to-wall at every column.
+- **Cells per chord:** ≥ 4 everywhere (8 at the HPC rear for 130k, 6 for 80k).
+- **Domain:** 5.006 D upstream of the highlight, r_out = 5.65 D, 20.006 D downstream.
+- **Stretching:** ≤ 1.15, including across interfaces. But see I2: the test cannot detect a broken in-block measurement.
+
+**My own checks on the 130k production mesh:**
+- The FV identities hold in every cell: outward Σ n·L closes to 3.4e-16 relative, and Σ n_r r̄ L equals the planar area A to 9.9e-14 (Green). No cell has a non-positive area.
+- All 6922 interface ghosts are adjacent: each layer-1 source cell owns the ghost's face, and each layer-2 source shares exactly one edge with layer 1.
+- The ghost index map, the face-vector sign convention and the binary layout match MESH.md.
+
+**D0-6 evidence:** my rerun is 300 sweeps, ω 0.8, Thomas-Middlecoff control, all blocks.
+- Floating interfaces: stretching reaches 3.83 at P2 (-0.78, 0.96) and around O (1.68, 0.96), with lip skew up to 79.5°.
+- Fixed interfaces: upstream/inlet/lip stretching reaches 2.27-3.99 next to P1/P2, the far-field skew goes from 46.3° to 39.5°, and the afterbody/plume-outer stretching at O reaches 1.49.
+- The duct blocks are unchanged.
+- The smoother is not at fault: a distorted block split into two with a floating interface converges to the single-block result to 2.2e-16 (pure Winslow).
+- **The evidence is real and D0-6 stands.** Details in N1.
+
+**Mutation testing** (Stryker 10.1.1). With the full suite, 85 % of the 1050 mutants of `tfi.ts`, `distribution.ts` and `metrics.ts` count as static (the engine builds in `beforeAll`), so a full run would take more than 20 min. I ran it in two stages:
+- **Stage 1** (all mutants, the mesh unit tests without `engineMesh`/`report`, 1 min 56 s): 77.52 %.
+- **Stage 2** (the full suite on every line with a stage-1 survivor, 471 mutants, 8 min 34 s).
+- **Combined final scores:**
+  - `distribution.ts` 71.4 % (98 of 343 surviving);
+  - `metrics.ts` 87.6 % (59 of 475);
+  - `tfi.ts` 80.6 % (45 of 232);
+  - overall 80.8 % (848 of 1050 killed or timed out).
+- Many survivors are equivalent: convergence-loop bounds, unreachable `?? 0` guards, the cosmetic `where` locations.
+- The ones that matter are I2 and I3. I confirmed both by hand-applying the mutants to the full suite.
+
+### Blocking
+None.
+
+### Important
+- **W0M-I1 OPEN: the real EngineDefinition does not swap in cleanly.**
+  - Where: `tools/mesh/geometry/flowpath.ts:106` and `:110`.
+  - The probe: an adapter maps the contracts curves onto the mesher's (hub = spinner ⊕ coreInner ⊕ plug; the other four 1:1; rows by component; combustor extent). `validateFlowpath` then rejects ENGINE_DEFINITION with "coreCowl must end at the core lip" and "nacelleOuter must end at the bypass lip".
+  - Why: the definition has blunt trailing edges (core cowl 0.405 over a 0.390 lip; nacelle 0.775 over 0.757), which the contracts validator allows, but the mesher requires knife edges.
+  - With both edges pinched: the build succeeds (127,679 / 78,099 cells, all Jacobians positive) but violates the stretching requirement. Max stretch is 1.393 in the plug block at the plug tip (3.39, 0.02), and far-field skew is 59.8°. This is R1 coming true.
+  - Fix: an orchestrator decision on trailing-edge topology, either (a) close both edges in the definition (cheapest: a contracts edit; the validator already allows outer = inner) or (b) give the mesher a finite-thickness base. Then w1/mesh retunes the plug tip and boattail.
+  - Allowed after merge: W1, after the decision.
+- **W0M-I2 OPEN: the quality-metric tests cannot catch a broken metric.**
+  - Where: `tools/mesh/metrics.ts:312` and `:317-321`.
+  - Failure: disabling both in-block stretching loops (`:317-321`), or recording the last value instead of the maximum (`:312`), leaves all 120 tests green (hand-applied). The headline "stretching ≤ 1.15 everywhere" test in engineMesh.test.ts therefore cannot fail for in-block stretching, only across interfaces.
+  - The same holds for the reported maximum skew (`:291`) and aspect ratio (`:301`).
+  - Fix: unit tests on small blocks with a known geometric ratio q ≠ 1 along i and along j, placed away from the last cell (expect exactly q), plus a known skewed corner and a known aspect ratio.
+  - Allowed after merge: this must be **w1/mesh's first task, before any retuning** (I1). Retuning against an unverified metric is exactly how a violation would slip through.
+- **W0M-I3 OPEN: geometry formulas the tests do not pin.**
+  - Cell centroid x (`metrics.ts:55-59`): mutants such as `x0 - cx` survive the full suite (hand-applied). `CELL_X` ships in the binary and the solver will use it for reconstruction distances and resampling. `centreR` is pinned only through `volR`.
+  - TFI arc-length blending (`tfi.ts:77-79`): `den = 1 + …`, `a - c(b - a)` and others survive, because every TFI test uses edges whose opposite fractions coincide, where the Soni formula degenerates.
+  - Vinokur interior (`distribution.ts:104`): `A - (1 - A) u` survives, because the Newton loop restores the end spacings and the tests check only the ends.
+  - Fix: an exact-centroid test on a trapezoid; a TFI test with different clustering on opposite edges against the analytic line intersection; a Vinokur interior check against the closed form.
+  - Allowed after merge: W1 (w1/mesh).
+- **W0M-I4 OPEN: no station planes for the solver reductions.**
+  - Gap 1: `FlowpathGeometry` (`flowpath.ts:33`) carries no stations.
+  - Gap 2: the core H-block's i-lines follow smoothed mean-line normals, so they are radial only at the four fixed planes (fan face, splitter, both nozzle exits).
+  - Gap 3: binary v1 has no section that maps contracts `SOLVER_REDUCTION_STATIONS` (2, 13, 18, 25, 3, 4, 45, 5, 8) to grid lines.
+  - Failure: the W2/W3 `StationReduction` (mass flow and area per plane, checked to ±0.5 % in L12) would have to integrate across oblique cells by interpolation, which is not exactly conservative.
+  - Fix: pass `EngineDefinition.stations` through `FlowpathGeometry`, force exact radial i-lines at those x (as for the fixed planes), and add a STATIONS section (block, i, x) in binary v2.
+  - Allowed after merge: W1 (w1/mesh).
+- **W0M-I5 OPEN (cross-branch, found in the trial merge): the far render extent reaches past the mesh.**
+  - `FIELD_EXTENTS.far` (`src/contracts/flow.ts`) covers r ≤ 10 m. The mesh ends at r_out = 8.75 m (placeholder) or 8.82 m (definition). The x range is covered: -8.46..34.01 contains -8..32.
+  - Failure: far texels with r > r_out have no solver data, and the contract does not say what they hold.
+  - Fix: either flow.ts defines out-of-domain texels as exact ambient (gauge 0, u = 0, fluidFraction 1) for the W2 resample to write, or the far extent is sized from the mesh domain.
+  - Allowed after merge: W2.
+
+### Nits
+- **W0M-N1 OPEN: the D0-6 record is overstated in places.** The conclusion holds, but:
+  - MESH.md D3's numbers do not reproduce with the default options. It says 4.3 and "folded cells" with floating interfaces; I measure at most 3.83 and every Jacobian positive. It says O mismatch 1.31 and far-field skew 38°; I measure 1.49 and 39.5°.
+  - D0-6 in this log says smoothing "moved the fixed singular corner points". It does not: P1, P2 and O stay pinned, and the cells around them deteriorate.
+  - Fix: record the exact options or a script in MESH.md D3, and reword D0-6.
+- **W0M-N2 OPEN: `maxRatio` misses folds.** `distribution.ts:197-202`: it returns 1 for the folded distribution [0, 0.5, 0.4, 1] (probe), and its direction branch is unpinned (mutants at `:202` survive). The distribution tests' own stretching checks rely on it. Fix: return Infinity (or throw) on a non-positive spacing, and test both orientations.
+- **W0M-N3 OPEN: `decodeMeshFile` does no structural validation.**
+  - Where: `format.ts:368`, `:413`.
+  - Gaps: a section's declared element type is not checked against the precision flag (an F64 real section in an f32 file passes the length check and is read as twice as many f32 values); block offsets and Σ ni·nj, ghost sources < cells, and face/BC codes are not checked either.
+  - Consequence: a bad asset would upload out-of-range indices that WGSL clamps silently.
+  - Fix: add the checks in the decoder or the W2 loader.
+- **W0M-N4 OPEN: no corner ghosts.** `ghost.ts:6`: that is fine for dimension-split MUSCL. But the v1 plume eddy viscosity (and v2 k-ω) needs face cross-derivatives that read diagonal neighbours at block corners. W2/W3 must add corner ghosts or build face gradients from the available cells.
+- **W0M-N5 OPEN: the TFI corner check is not exercised.** `tfi.ts:28`: the corner-coincidence check can be deleted without a test failing, because the existing "corners do not coincide" case trips another check first.
+
+**Verdict w0/mesh-spike @a72c771: MERGE.** No blocking items: the spike meets every requirement on its placeholder, deterministically. I explicitly allow the Important items after the merge:
+- I2, then I3, as w1/mesh's first tasks, before any retuning;
+- I1 after the orchestrator's trailing-edge decision, in W1;
+- I4 in W1;
+- I5 in W2.
+
+## Critic pass 1: trial merge (w0/contracts @e51aff1 + w0/mesh-spike @a72c771)
+
+- **Merge:** octopus `git merge --no-ff --no-commit` into `critic`. Clean, no conflicts; the two branches touch disjoint files.
+- **Gates on the combined tree:**
+  - `npm test`: 833 passed (29 files; 718 + 120, minus the 5 shared main tests).
+  - `npm run lint`: clean. `npm run typecheck`: clean.
+  - `npm run coverage`: lines 99.43 %, statements 97.84 %, branches 87.85 %, functions 99.81 %; every threshold passes.
+  - `npm run build`: ok.
+- **Restore:** `git merge --abort`. The worktree is back on its own HEAD.
+- **Cross-branch findings:** W0M-I1 (trailing-edge topology) and W0M-I5 (far extent vs. domain) above.
+
+**Orchestrator decisions needed (mesh / cross-branch):**
+- (d) Trailing-edge topology: knife edges in the definition, or a base block in the mesher (W0M-I1).
+- (e) Reword D0-6. The conclusion stands (W0M-N1).
+- (f) Add "station planes as exact radial grid lines plus a station map in the asset" to w1/mesh's brief (W0M-I4).

@@ -1,0 +1,202 @@
+// Critic pass 1, w0/mesh-spike @a72c771. Independent checks of the metrics, the ghost map and the
+// D3 smoothing evidence on the production mesh, plus pinned findings.
+import { describe, expect, it } from 'vitest';
+import { MESH_130K, buildEngineMesh, type EngineMesh } from '../../../tools/mesh/engineMesh';
+import { placeholderFlowpath } from '../../../tools/mesh/geometry/placeholder';
+import { blockGeometry, meshQuality } from '../../../tools/mesh/metrics';
+import { buildGhostMap } from '../../../tools/mesh/ghost';
+import { smoothMesh } from '../../../tools/mesh/smooth';
+import { maxRatio, uniform } from '../../../tools/mesh/distribution';
+import { tfi } from '../../../tools/mesh/tfi';
+import { connect, validateMesh } from '../../../tools/mesh/topology';
+import { BC, nodeIndex, type Block, type MultiBlockMesh, type Patch } from '../../../tools/mesh/types';
+
+const geometry = placeholderFlowpath();
+const fresh = (): EngineMesh => buildEngineMesh(geometry, MESH_130K);
+
+describe('W0M: FV metric identities on the 130k production mesh', () => {
+  it('every cell closes: sum of outward n L = 0 and sum n_r rbar L = planar area', () => {
+    const mesh = fresh();
+    let worstClose = 0;
+    let worstGreen = 0;
+    let negArea = 0;
+    for (const b of mesh.blocks) {
+      const g = blockGeometry(b);
+      const len = (k: number, ax: Float64Array, ar: Float64Array) => Math.hypot(ax[k] ?? 0, ar[k] ?? 0);
+      for (let j = 0; j < b.nj; j++) {
+        for (let i = 0; i < b.ni; i++) {
+          const iw = j * (b.ni + 1) + i;
+          const ie = iw + 1;
+          const js = j * b.ni + i;
+          const jn = js + b.ni;
+          const nx = (g.iFaceNx[ie] ?? 0) - (g.iFaceNx[iw] ?? 0) + (g.jFaceNx[jn] ?? 0) - (g.jFaceNx[js] ?? 0);
+          const nr = (g.iFaceNr[ie] ?? 0) - (g.iFaceNr[iw] ?? 0) + (g.jFaceNr[jn] ?? 0) - (g.jFaceNr[js] ?? 0);
+          const green =
+            ((g.iFaceNr[ie] ?? 0) / len(ie, g.iFaceNx, g.iFaceNr)) * (g.iFaceAreaR[ie] ?? 0) -
+            ((g.iFaceNr[iw] ?? 0) / len(iw, g.iFaceNx, g.iFaceNr)) * (g.iFaceAreaR[iw] ?? 0) +
+            ((g.jFaceNr[jn] ?? 0) / len(jn, g.jFaceNx, g.jFaceNr)) * (g.jFaceAreaR[jn] ?? 0) -
+            ((g.jFaceNr[js] ?? 0) / len(js, g.jFaceNx, g.jFaceNr)) * (g.jFaceAreaR[js] ?? 0);
+          const A = g.area[js] ?? 0;
+          if (!(A > 0)) negArea++;
+          worstClose = Math.max(worstClose, Math.hypot(nx, nr) / Math.sqrt(A));
+          worstGreen = Math.max(worstGreen, Math.abs(green - A) / A);
+        }
+      }
+    }
+    console.log(`closure ${worstClose.toExponential(2)}, Green ${worstGreen.toExponential(2)}`);
+    expect(negArea).toBe(0);
+    expect(worstClose).toBeLessThan(1e-12);
+    expect(worstGreen).toBeLessThan(1e-9);
+  });
+});
+
+describe('W0M: ghost map adjacency on the 130k production mesh', () => {
+  it('layer-1 interface ghosts share the face; layer-2 ghosts are the next cell in', () => {
+    const mesh = fresh();
+    const gm = buildGhostMap(mesh, 2);
+    const key = (x: number, r: number) => `${x.toFixed(12)},${r.toFixed(12)}`;
+    const cellNodes: string[][] = [];
+    for (const b of mesh.blocks) {
+      const n = (ii: number, jj: number) => {
+        const k = nodeIndex(b, ii, jj);
+        return key(b.x[k] ?? NaN, b.r[k] ?? NaN);
+      };
+      for (let j = 0; j < b.nj; j++)
+        for (let i = 0; i < b.ni; i++) cellNodes.push([n(i, j), n(i + 1, j), n(i + 1, j + 1), n(i, j + 1)]);
+    }
+    const faceKeys = (b: Block, face: string, c: number): [string, string] => {
+      const n = (ii: number, jj: number) => {
+        const k = nodeIndex(b, ii, jj);
+        return key(b.x[k] ?? NaN, b.r[k] ?? NaN);
+      };
+      if (face === 'imin') return [n(0, c), n(0, c + 1)];
+      if (face === 'imax') return [n(b.ni, c), n(b.ni, c + 1)];
+      if (face === 'jmin') return [n(c, 0), n(c + 1, 0)];
+      return [n(c, b.nj), n(c + 1, b.nj)];
+    };
+    let bad1 = 0;
+    let bad2 = 0;
+    let checked = 0;
+    const faces = ['imin', 'imax', 'jmin', 'jmax'] as const;
+    mesh.blocks.forEach((b, bi) => {
+      let base = gm.ghostOffset[bi] ?? 0;
+      for (const face of faces) {
+        const n = face === 'imin' || face === 'imax' ? b.nj : b.ni;
+        for (let c = 0; c < n; c++) {
+          const g1 = base + c;
+          const g2 = base + n + c;
+          if (gm.bc[g1] === BC.INTERFACE) {
+            checked++;
+            const [a, z] = faceKeys(b, face, c);
+            const s1 = cellNodes[gm.src[g1] ?? -1] ?? [];
+            if (!(s1.includes(a) && s1.includes(z))) bad1++;
+            const s2 = cellNodes[gm.src[g2] ?? -1] ?? [];
+            const shared = s1.filter((k) => s2.includes(k)).length;
+            if (!(shared === 2 && !(s2.includes(a) && s2.includes(z)))) bad2++;
+          }
+        }
+        base += 2 * n;
+      }
+    });
+    console.log(`interface ghosts checked: ${checked}`);
+    expect(checked).toBeGreaterThan(0);
+    expect(bad1).toBe(0);
+    expect(bad2).toBe(0);
+  });
+});
+
+describe('W0M: D3 smoothing evidence (300 sweeps, all blocks)', () => {
+  const run = (floatInterfaces: boolean) => {
+    const mesh = fresh();
+    const q0 = meshQuality(mesh);
+    smoothMesh(mesh, { sweeps: 300, omega: 0.8, floatInterfaces });
+    return { q0, q: meshQuality(mesh), v: validateMesh(mesh) };
+  };
+  for (const floating of [true, false]) {
+    it(`floatInterfaces = ${String(floating)}`, () => {
+      const { q0, q, v } = run(floating);
+      expect(v).toEqual([]);
+      for (const [k, b] of q.entries())
+        console.log(
+          `${floating ? 'float' : 'fixed'} ${b.name.padEnd(13)} stretch ${q0[k]?.maxStretch.toFixed(3)} -> ${b.maxStretch.toFixed(3)} at (${b.maxStretchAt.x.toFixed(2)}, ${b.maxStretchAt.r.toFixed(2)}) minJ ${q0[k]?.minJacobian.toExponential(2)} -> ${b.minJacobian.toExponential(2)} skew ${q0[k]?.maxSkewDeg.toFixed(1)} -> ${b.maxSkewDeg.toFixed(1)}`,
+        );
+    }, 120_000);
+  }
+});
+
+describe('W0M: the smoother across a regular floating interface', () => {
+  const wall = (block: number, face: Patch['face'], n: number): Patch => ({
+    block,
+    face,
+    start: 0,
+    end: n,
+    bc: BC.SLIP_WALL,
+    label: 'w',
+  });
+  const rect = (x0: number, x1: number, ni: number, name: string): Block => {
+    const lerp = (a: number, b: number, u: number) => a + (b - a) * u;
+    return tfi(
+      name,
+      Array.from(uniform(ni), (u) => ({ x: lerp(x0, x1, u), r: 0 })),
+      Array.from(uniform(ni), (u) => ({ x: lerp(x0, x1, u), r: 1 })),
+      Array.from(uniform(8), (v) => ({ x: x0, r: v })),
+      Array.from(uniform(8), (v) => ({ x: x1, r: v })),
+    );
+  };
+  it('a distorted block split in two converges to the single-block result (pure Winslow)', () => {
+    const one = rect(0, 1, 8, 'one');
+    for (let j = 1; j < 8; j++)
+      for (let i = 1; i < 8; i++) {
+        const k = nodeIndex(one, i, j);
+        one.x[k] = (one.x[k] ?? 0) + 0.03 * Math.sin(7 * i + 3 * j);
+        one.r[k] = (one.r[k] ?? 0) + 0.03 * Math.cos(5 * i - 2 * j);
+      }
+    const A = rect(0, 0.5, 4, 'A');
+    const B = rect(0.5, 1, 4, 'B');
+    for (let j = 0; j <= 8; j++)
+      for (let i = 0; i <= 8; i++) {
+        const k = nodeIndex(one, i, j);
+        if (i <= 4) {
+          A.x[nodeIndex(A, i, j)] = one.x[k] ?? 0;
+          A.r[nodeIndex(A, i, j)] = one.r[k] ?? 0;
+        }
+        if (i >= 4) {
+          B.x[nodeIndex(B, i - 4, j)] = one.x[k] ?? 0;
+          B.r[nodeIndex(B, i - 4, j)] = one.r[k] ?? 0;
+        }
+      }
+    const single: MultiBlockMesh = {
+      blocks: [one],
+      patches: [wall(0, 'imin', 8), wall(0, 'imax', 8), wall(0, 'jmin', 8), wall(0, 'jmax', 8)],
+    };
+    const patches: Patch[] = [
+      wall(0, 'imin', 8),
+      wall(0, 'jmin', 4),
+      wall(0, 'jmax', 4),
+      wall(1, 'imax', 8),
+      wall(1, 'jmin', 4),
+      wall(1, 'jmax', 4),
+    ];
+    connect(patches, { block: 0, face: 'imax', start: 0, end: 8 }, { block: 1, face: 'imin', start: 0, end: 8 }, 'A|B', true);
+    const split: MultiBlockMesh = { blocks: [A, B], patches };
+    expect(validateMesh(split)).toEqual([]);
+    smoothMesh(single, { sweeps: 4000, control: 'none', omega: 1 });
+    smoothMesh(split, { sweeps: 4000, control: 'none', omega: 1 });
+    let worst = 0;
+    for (let j = 0; j <= 8; j++)
+      for (let i = 0; i <= 8; i++) {
+        const k = nodeIndex(one, i, j);
+        const tgt = i <= 4 ? A : B;
+        const kk = nodeIndex(tgt, i <= 4 ? i : i - 4, j);
+        worst = Math.max(worst, Math.hypot((one.x[k] ?? 0) - (tgt.x[kk] ?? 0), (one.r[k] ?? 0) - (tgt.r[kk] ?? 0)));
+      }
+    console.log(`split vs single max node difference ${worst.toExponential(2)}`);
+    expect(worst).toBeLessThan(1e-9);
+  });
+});
+
+describe('W0M: maxRatio misses a fold', () => {
+  it('returns 1 for a non-monotone distribution', () => {
+    expect(maxRatio([0, 0.5, 0.4, 1])).toBe(1);
+  });
+});
