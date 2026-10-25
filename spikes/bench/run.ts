@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { cpus, totalmem } from 'node:os';
 import { chromium, type Page } from '@playwright/test';
-import { createServer, type ViteDevServer } from 'vite';
+import { createServer, type InlineConfig, type ViteDevServer } from 'vite';
 import { parseBenchArgs, protocolLabel, type Protocol } from '../lib/protocol.ts';
 import {
   cpuBusyFraction,
@@ -177,6 +177,31 @@ async function chromeGpuBackend(page: Page): Promise<string[] | null> {
   }
 }
 
+// Every bare import the spike pages and their workers use. Without the list, Vite discovers
+// the worker's imports (e.g. HDRLoader in the probe) only when the worker requests them,
+// re-optimizes and reloads the page in the middle of a run.
+const PREBUNDLE = [
+  'react',
+  'react/jsx-dev-runtime',
+  'react-dom/client',
+  'three/webgpu',
+  'three/tsl',
+  'three/addons/environments/RoomEnvironment.js',
+  'three/addons/loaders/HDRLoader.js',
+  'three/addons/tsl/display/BloomNode.js',
+];
+
+function devServer(port: number, headers?: Record<string, string>): InlineConfig {
+  return {
+    logLevel: 'warn',
+    optimizeDeps: {
+      entries: ['spikes/throughput/index.html', 'spikes/worker/index.html'],
+      include: PREBUNDLE,
+    },
+    server: { port, strictPort: true, host: '127.0.0.1', ...(headers ? { headers } : {}) },
+  };
+}
+
 async function main(): Promise<void> {
   const kindArg = process.argv[2];
   if (kindArg !== 'throughput' && kindArg !== 'worker') {
@@ -219,10 +244,7 @@ async function main(): Promise<void> {
     args: ['--start-maximized'],
   });
   try {
-    server = await createServer({
-      logLevel: 'warn',
-      server: { port: args.port, strictPort: true, host: '127.0.0.1' },
-    });
+    server = await createServer(devServer(args.port));
     await server.listen();
     const context = await browser.newContext({ viewport: null });
     const page = await context.newPage();
@@ -284,18 +306,12 @@ async function main(): Promise<void> {
       // crossOriginIsolated / SharedArrayBuffer with COOP/COEP from a Vite dev server, set
       // here on a second server rather than in vite.config.ts (D0-2 asks whether it works,
       // not to turn it on).
-      coiServer = await createServer({
-        logLevel: 'warn',
-        server: {
-          port: args.port + 1,
-          strictPort: true,
-          host: '127.0.0.1',
-          headers: {
-            'Cross-Origin-Opener-Policy': 'same-origin',
-            'Cross-Origin-Embedder-Policy': 'require-corp',
-          },
-        },
-      });
+      coiServer = await createServer(
+        devServer(args.port + 1, {
+          'Cross-Origin-Opener-Policy': 'same-origin',
+          'Cross-Origin-Embedder-Policy': 'require-corp',
+        }),
+      );
       await coiServer.listen();
       await page.goto(`http://127.0.0.1:${args.port + 1}/spikes/worker/index.html?mode=coi`);
       const coi = await page.evaluate(() => window.__workerBench?.coiCheck());

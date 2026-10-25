@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { OFFICIAL, QUICK, parseBenchArgs, protocolLabel } from '../../../spikes/lib/protocol';
+import {
+  OFFICIAL,
+  QUICK,
+  benchFileName,
+  parseBenchArgs,
+  protocolLabel,
+} from '../../../spikes/lib/protocol';
 
 describe('D0-1 protocol', () => {
   it('official: 10 s warm-up, then 3 runs of 60 s', () => {
@@ -33,5 +39,18 @@ describe('parseBenchArgs', () => {
   it('rejects unknown flags rather than silently running the official protocol', () => {
     expect(() => parseBenchArgs(['--qiuck'])).toThrow(/--qiuck/);
     expect(() => parseBenchArgs(['--port=abc'])).toThrow(/port/);
+  });
+});
+
+describe('benchFileName', () => {
+  it('uses the local date and minute, so two runs on one day (e.g. two power plans) both survive', () => {
+    // Built from local components, so the expectation holds in any time zone.
+    const started = new Date(2026, 9, 24, 21, 5, 59);
+    expect(benchFileName('throughput', started, OFFICIAL)).toBe(
+      'docs/bench/throughput-2026-10-24-2105-official.json',
+    );
+    expect(benchFileName('worker', new Date(2026, 0, 2, 3, 4), QUICK)).toBe(
+      'docs/bench/worker-2026-01-02-0304-quick.json',
+    );
   });
 });
