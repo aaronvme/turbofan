@@ -56,6 +56,23 @@ describe('RunRecorder (D0-1 phases)', () => {
     expect(r3?.gpuSamples).toBe(0);
   });
 
+  it('counts long frames: deltas over 1.5 x the run median, i.e. at least one missed vsync', () => {
+    const rec = new RunRecorder(P, 0);
+    drive(rec, 0, 10, 1, 990);
+    // Run 1 (1000..3000): 20 ms frames, one 29 ms frame (below 30: not long), two 40 ms gaps.
+    const times = [1000];
+    for (const dt of [20, 20, 29, 20, 40, 20, 40, 20]) times.push((times.at(-1) ?? 0) + dt);
+    for (const t of times) rec.frame(t, 1);
+    drive(rec, 1229, 20, 1, 8000); // the rest of run 1, runs 2 and 3: steady
+    const [r1, r2] = rec.results();
+    expect(r1?.longFrames).toBe(2);
+    expect(r2?.longFrames).toBe(0);
+  });
+
+  it('reports the measured window on the frame clock (for matching long tasks to runs)', () => {
+    expect(new RunRecorder(P, 500).window).toEqual({ from: 1500, to: 7500 });
+  });
+
   it('refuses results before the protocol is done', () => {
     const rec = new RunRecorder(P, 0);
     rec.frame(10, 1);
@@ -79,6 +96,7 @@ describe('aggregateRuns', () => {
     expect(agg.itPerSec).toBeCloseTo(400, 0);
     expect(agg.frameTimeP50).toBeCloseTo(10, 6);
     expect(agg.runs).toBe(3);
+    expect(agg.longFrames).toBe(0);
   });
 });
 
