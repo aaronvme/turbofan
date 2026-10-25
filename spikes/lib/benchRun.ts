@@ -26,6 +26,13 @@ export interface RunResult {
   readonly frameTime: Summary;
   /** Frames longer than 1.5 x the run's median frame time: at least one missed vsync. */
   readonly longFrames: number;
+  /**
+   * How late each rAF callback started after its frame time (performance.now() - t), or null
+   * if the caller gave no callback times. The timestamps are vsync-aligned, so a callback held
+   * up by a busy thread can still show a regular frame delta; a delay near a frame period
+   * means that frame was produced late.
+   */
+  readonly callbackDelay: Summary | null;
   readonly fps: number;
   readonly iterations: number;
   readonly itPerSec: number;
@@ -47,6 +54,7 @@ interface RunAcc {
   gpuMs: number[];
   gpuIts: number;
   msPerIt: number[];
+  delays: number[];
 }
 
 export class RunRecorder {
@@ -67,6 +75,7 @@ export class RunRecorder {
       gpuMs: [],
       gpuIts: 0,
       msPerIt: [],
+      delays: [],
     }));
   }
 
@@ -91,8 +100,11 @@ export class RunRecorder {
     return r < this.p.runs ? r : this.p.runs;
   }
 
-  /** A frame at clock time t that ran `iterations` solver iterations. Returns the phase. */
-  frame(t: number, iterations: number): Phase {
+  /**
+   * A frame at clock time t that ran `iterations` solver iterations; `callbackAt` is the clock
+   * time the callback actually started (performance.now()). Returns the phase.
+   */
+  frame(t: number, iterations: number, callbackAt?: number): Phase {
     if (this.current === 'done') return 'done';
     const r = this.runAt(t);
     if (r >= this.p.runs) {
@@ -105,6 +117,7 @@ export class RunRecorder {
         if (this.lastT !== null) a.deltas.push(t - this.lastT);
         a.frames++;
         a.iterations += iterations;
+        if (callbackAt !== undefined) a.delays.push(callbackAt - t);
       }
       this.current = 'run';
       this.index = r;
@@ -133,6 +146,7 @@ export class RunRecorder {
         frames: a.frames,
         frameTime: summarize(a.deltas),
         longFrames: a.deltas.filter((d) => d > 1.5 * typical).length,
+        callbackDelay: a.delays.length > 0 ? summarize(a.delays) : null,
         fps: a.frames / sec,
         iterations: a.iterations,
         itPerSec: a.iterations / sec,
@@ -158,6 +172,8 @@ export interface Aggregate {
   readonly frameTimeP95: number;
   readonly frameTimeP99: number;
   readonly longFrames: number;
+  readonly callbackDelayP95: number | null;
+  readonly callbackDelayP99: number | null;
   readonly solverMsPerIt: number | null;
   readonly solverMsPerItP10: number | null;
   readonly solverMsPerFrameP50: number | null;
@@ -173,6 +189,7 @@ export function aggregateRuns(runs: readonly RunResult[]): Aggregate {
   const gpu = runs.flatMap((r) => (r.solverMsPerIt === null ? [] : [r.solverMsPerIt]));
   const perFrame = runs.flatMap((r) => (r.solverMsPerFrame ? [r.solverMsPerFrame.p50] : []));
   const p10 = runs.flatMap((r) => (r.solverMsPerItP10 === null ? [] : [r.solverMsPerItP10]));
+  const delays = runs.flatMap((r) => (r.callbackDelay ? [r.callbackDelay] : []));
   const msPerIt = gpu.length > 0 ? m(gpu) : null;
   return {
     runs: runs.length,
@@ -182,6 +199,8 @@ export function aggregateRuns(runs: readonly RunResult[]): Aggregate {
     frameTimeP95: m(runs.map((r) => r.frameTime.p95)),
     frameTimeP99: m(runs.map((r) => r.frameTime.p99)),
     longFrames: m(runs.map((r) => r.longFrames)),
+    callbackDelayP95: delays.length > 0 ? m(delays.map((d) => d.p95)) : null,
+    callbackDelayP99: delays.length > 0 ? m(delays.map((d) => d.p99)) : null,
     solverMsPerIt: msPerIt,
     solverMsPerItP10: p10.length > 0 ? m(p10) : null,
     solverMsPerFrameP50: perFrame.length > 0 ? m(perFrame) : null,

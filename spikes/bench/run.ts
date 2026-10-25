@@ -350,7 +350,7 @@ async function main(): Promise<void> {
         const ft = w.frame.aggregate;
         process.stdout.write(
           `frame p50/p95/p99 ${ft.frameTimeP50.toFixed(2)}/${ft.frameTimeP95.toFixed(2)}/${ft.frameTimeP99.toFixed(2)} ms, ` +
-            `long frames/run ${ft.longFrames}, React commit p95 ${w.reactCommitMs?.p95.toFixed(1) ?? '-'} ms, CPU ${(100 * load).toFixed(0)}%${hiddenNote(w.pageHiddenMs)}\n`,
+            `long frames/run ${ft.longFrames}, rAF delay p99 ${ft.callbackDelayP99?.toFixed(1) ?? '-'} ms, React commit p95 ${w.reactCommitMs?.p95.toFixed(1) ?? '-'} ms, CPU ${(100 * load).toFixed(0)}%${hiddenNote(w.pageHiddenMs)}\n`,
         );
         workerProbe ??= await page.evaluate(() => window.__workerBench?.probe());
         await page.evaluate(() => window.__workerBench?.dispose());

@@ -204,6 +204,7 @@ export class BenchApp {
       let rec: RunRecorder | null = null;
       let last: number | null = null;
       const frame = (t: number) => {
+        const callbackAt = performance.now();
         rec ??= new RunRecorder(config.protocol, t);
         const k = scheduler ? scheduler.iterations : (config.iterations as number);
         const slot = ring.acquire();
@@ -234,7 +235,7 @@ export class BenchApp {
           void this.renderer.resolveTimestampsAsync('render').then(keep(renderMs));
           void this.renderer.resolveTimestampsAsync('compute').then(keep(threeComputeMs));
         }
-        if (rec.frame(t, k) === 'done') {
+        if (rec.frame(t, k, callbackAt) === 'done') {
           resolve(rec);
           return;
         }
