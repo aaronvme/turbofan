@@ -487,7 +487,7 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
   const fTop0 = lipCross(nW);
   const ratio0 = fTop0 / lipR;
   const lipDir = { x: (O.x - B.x) / dist(O, B), r: (O.r - B.r) / dist(O, B) };
-  const poColumn = (k: number): { bot: Pt; top: Pt; q: number } => {
+  const poTop = (k: number): Pt => {
     const x = xs[k] ?? 0;
     const bot = bsNodes[k] as Pt;
     const h = hBs(x);
@@ -498,11 +498,9 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
     const dx = (1 - w) * lipDir.x;
     const dr = (1 - w) * lipDir.r + w;
     const L = Math.hypot(dx, dr);
-    return { bot, top: { x: bot.x + (t * dx) / L, r: bot.r + (t * dr) / L }, q };
+    return { x: bot.x + (t * dx) / L, r: bot.r + (t * dr) / L };
   };
-  const topNodes = xs.map((_, k) =>
-    k === 0 ? O : k === kOut ? { x: xOut, r: rPoOut } : poColumn(k).top,
-  );
+  const topNodes = xs.map((_, k) => (k === 0 ? O : k === kOut ? { x: xOut, r: rPoOut } : poTop(k)));
 
   // -- afterbody, plug and the three plume blocks, column by column -------------------------------
   const cowlNodes = xs
@@ -650,8 +648,7 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
   const spinner = hub.sub(0, hub.sAtX(0));
   const sN = N.x - F.x;
   const Ls = sN + spinner.length;
-  const hF = spacings(alongCurve(inlWestCurve, towardsEnd(nInl, inlWestCurve.length, inlLast)))[0];
-  const hAxisF = hF ?? lipCross(iP1);
+  const hAxisF = spacings(inlWest)[0] ?? lipCross(iP1);
   const hSouth =
     (cap: number) =>
     (s: number): number =>
@@ -690,7 +687,8 @@ export function buildEngineMesh(geometry: FlowpathGeometry, spec: MeshSpec): Eng
     respaceColumn(inlet, k, twoSided(nInl, L, first, lipCross(iP1 - k)));
   }
 
-  // -- upstream: rows re-spaced so the last cell matches the block across the east face ---------
+  // -- upstream: inflow face to the composite east face (inlet west, C-block arc, far-field west) ---
+  // Each row's last cell matches the block across the east face (smoothed targets).
   const upEast = [
     ...colNodes(inlet, 0),
     ...rowNodes(lip, spec.nLip).slice(iP1 + 1, iP2 + 1),
