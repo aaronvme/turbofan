@@ -64,8 +64,8 @@ Reference variant: **CFM56-7B27/3** (Tech Insertion, "TI"), the 27,300 lbf ratin
 | rotationSense | Rotation sense, "The engine rotates clockwise (aft looking forward)": the angular velocity about +x (downstream) is negative | clockwise, aft looking forward | -1 | [NTSB] 1.3.1 | published |
 | n1MaxRpm | Maximum N1 (104 %) | 5382 rpm | 5382 rpm | [TCDS] IV.2 | official |
 | n2MaxRpm | Maximum N2 (105 %) | 15183 rpm | 15183 rpm | [TCDS] IV.2 | official |
-| n1ReferenceRpm | N1 at 100 % | 100 % N1 | 5175 rpm | derived: 5382 rpm / 1.04 = 5175 rpm ([TCDS] IV.2) | estimate |
-| n2ReferenceRpm | N2 at 100 % | 100 % N2 | 14460 rpm | derived: 15183 rpm / 1.05 = 14460 rpm; consistent with 10022 rpm = 69.3 % and 8500 rpm = 58.8 % in [TCDS] IV.2 | estimate |
+| n1ReferenceRpm | N1 at 100 % | the 100 % N1 speed | 5175 rpm | derived: 5382 rpm / 1.04 = 5175 rpm ([TCDS] IV.2) | estimate |
+| n2ReferenceRpm | N2 at 100 % | the 100 % N2 speed | 14460 rpm | derived: 15183 rpm / 1.05 = 14460 rpm; consistent with 10022 rpm = 69.3 % and 8500 rpm = 58.8 % in [TCDS] IV.2 | estimate |
 | egtTakeoffLimit | Max displayed EGT, takeoff (the C6 redline) | 950 °C | 1223.15 K | [TCDS] IV.1.1 | official |
 | egtMaxContinuousLimit | Max displayed EGT, maximum continuous | 925 °C | 1198.15 K | [TCDS] IV.1.1 | official |
 | egtStartLimit | Max displayed EGT, starting | 725 °C | 998.15 K | [TCDS] IV.1.1 | official |

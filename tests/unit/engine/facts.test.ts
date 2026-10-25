@@ -171,7 +171,8 @@ describe('docs/ENGINE_FACTS.md and src/engine/facts.ts', () => {
     const cited = [...row.source.matchAll(/\[([A-Z0-9-]+)\]/g)].map((m) => m[1]);
     expect(cited.length, `${row.id} must cite a [SOURCE]`).toBeGreaterThan(0);
     const defined = readSourceKeys();
-    for (const key of cited) expect(defined, `[${String(key)}] is not in ## Sources`).toContain(key);
+    for (const key of cited)
+      expect(defined, `[${String(key)}] is not in ## Sources`).toContain(key);
   });
 });
 
