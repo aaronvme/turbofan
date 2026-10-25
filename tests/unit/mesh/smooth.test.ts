@@ -280,3 +280,21 @@ describe('smoothMesh across a floating interface', () => {
     }
   });
 });
+
+describe('smoothMesh on a subset of blocks', () => {
+  it('smooths only the named blocks and leaves every node of the others bitwise unchanged', () => {
+    const mesh = twoBlocks(true);
+    const [A, B] = mesh.blocks as [Block, Block];
+    const ax0 = Float64Array.from(A.x);
+    const bx0 = Float64Array.from(B.x);
+    const br0 = Float64Array.from(B.r);
+    const report = smoothMesh(mesh, { sweeps: 50, control: 'none', blocks: ['A'] });
+    // A's interior only: the interface belongs to B too, so it is held
+    expect(report.freeNodes).toBe(9 * 9);
+    expect(Array.from(B.x)).toEqual(Array.from(bx0));
+    expect(Array.from(B.r)).toEqual(Array.from(br0));
+    let moved = 0;
+    for (let k = 0; k < A.x.length; k++) if (A.x[k] !== ax0[k]) moved++;
+    expect(moved).toBeGreaterThan(0);
+  });
+});
