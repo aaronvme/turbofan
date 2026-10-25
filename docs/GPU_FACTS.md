@@ -111,7 +111,7 @@ Evidence for M27-M29: the worker probe (`spikes/worker/workerProbe.ts`, run insi
     | 724x362 (262k) | 32x4 | 2.759 | 2.010 | 152 | 107 | 33.4 | 3.1 |
 
   - Readings:
-    - 16x8 is the fastest tile at every grid size.
+    - The tile ranking does NOT hold up. A second sweep at low CPU load (`throughput-2026-10-24-2153-quick.json`) ranked the tiles differently. Run alone, each as the first configuration (`--only`, files 2154-2156), the 130k tiles all came in at 0.88-0.97 ms/it (16x8 0.898 and 0.877, 32x4 0.973, 8x8 0.923). So the gaps within a sweep come from run order or GPU clock/power drift (not measured), not from the tile shape.
     - 130k cells reach ~400 it/s inside the budget, against P1's kill line of 150.
     - The previous builder's run (`docs/bench/throughput-2026-10-24-quick.json`, 0795d0a, CPU 17-24%, power plan and mode not recorded) measured 0.82 ms/it and 480 it/s for 130k-16x8.
     - The resample pass costs at most 0.33 ms, the particle compute one quantum (0.066 ms).

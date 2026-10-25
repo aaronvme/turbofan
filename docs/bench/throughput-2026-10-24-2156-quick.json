@@ -1,0 +1,318 @@
+{
+  "kind": "throughput",
+  "conditions": {
+    "date": "2026-10-25T01:56:12.842Z",
+    "protocol": {
+      "name": "quick",
+      "warmupMs": 2000,
+      "runMs": 1000,
+      "runs": 3
+    },
+    "label": "indicative, contaminated (D0-1): --quick run",
+    "gitHead": "c269978",
+    "gitDirty": true,
+    "power": {
+      "source": "ac",
+      "batteryStatus": [
+        2
+      ]
+    },
+    "powerPlan": {
+      "guid": "381b4222-f694-41f0-9685-ff5bb260df2e",
+      "name": "Balanced"
+    },
+    "powerMode": {
+      "ac": "best-performance",
+      "dc": "balanced",
+      "acOverlay": "ded574b5-45a0-4f42-8737-46345c09c238",
+      "dcOverlay": "00000000-0000-0000-0000-000000000000"
+    },
+    "gpu": [
+      {
+        "name": "Intel(R) Arc(TM) 140T GPU (8GB)",
+        "driverVersion": "32.0.101.8860"
+      }
+    ],
+    "cpu": "Intel(R) Core(TM) Ultra 7 255H",
+    "logicalCpus": 16,
+    "memoryGiB": 15,
+    "cpuLoadBefore": 0.2891290448986326,
+    "gpuBusyBefore": [
+      {
+        "pid": 9140,
+        "percent": 1.1,
+        "name": "WindowsTerminal"
+      }
+    ],
+    "node": "v24.18.0",
+    "chromeFlags": [],
+    "chrome": "155.0.8059.86",
+    "chromeGpu": [
+      "Driver D3D12 feature level",
+      "<Integrated GPU>  D3D12 backend - Intel(R) Arc(TM) 140T GPU (8GB)",
+      "<CPU>  D3D12 backend - Microsoft Basic Render Driver",
+      "<CPU>  Vulkan backend - SwiftShader Device (Subzero)",
+      "<Integrated GPU>  Vulkan backend - Intel(R) Arc(TM) 140T GPU (8GB)",
+      "<Integrated GPU>  D3D11 backend - Intel(R) Arc(TM) 140T GPU (8GB)",
+      "<CPU>  D3D11 backend - Microsoft Basic Render Driver"
+    ],
+    "page": {
+      "adapter": {
+        "vendor": "intel",
+        "architecture": "xe-lpg",
+        "device": "",
+        "description": "",
+        "features": [
+          "bgra8unorm-storage",
+          "clip-distances",
+          "core-features-and-limits",
+          "depth-clip-control",
+          "depth32float-stencil8",
+          "dual-source-blending",
+          "float32-blendable",
+          "float32-filterable",
+          "indirect-first-instance",
+          "primitive-index",
+          "rg11b10ufloat-renderable",
+          "shader-f16",
+          "subgroup-size-control",
+          "subgroups",
+          "texture-component-swizzle",
+          "texture-compression-bc",
+          "texture-compression-bc-sliced-3d",
+          "texture-formats-tier1",
+          "texture-formats-tier2",
+          "timestamp-query"
+        ],
+        "limits": {
+          "maxTextureDimension1D": 16384,
+          "maxTextureDimension2D": 16384,
+          "maxTextureDimension3D": 2048,
+          "maxTextureArrayLayers": 2048,
+          "maxBindGroups": 4,
+          "maxBindGroupsPlusVertexBuffers": 24,
+          "maxBindingsPerBindGroup": 1000,
+          "maxDynamicUniformBuffersPerPipelineLayout": 10,
+          "maxDynamicStorageBuffersPerPipelineLayout": 8,
+          "maxSampledTexturesPerShaderStage": 48,
+          "maxSamplersPerShaderStage": 16,
+          "maxStorageBuffersPerShaderStage": 16,
+          "maxStorageTexturesPerShaderStage": 8,
+          "maxUniformBuffersPerShaderStage": 12,
+          "maxUniformBufferBindingSize": 65536,
+          "maxStorageBufferBindingSize": 2147483644,
+          "minUniformBufferOffsetAlignment": 256,
+          "minStorageBufferOffsetAlignment": 256,
+          "maxVertexBuffers": 8,
+          "maxBufferSize": 2147483648,
+          "maxVertexAttributes": 30,
+          "maxVertexBufferArrayStride": 2048,
+          "maxInterStageShaderVariables": 28,
+          "maxColorAttachments": 8,
+          "maxColorAttachmentBytesPerSample": 128,
+          "maxComputeWorkgroupStorageSize": 32768,
+          "maxComputeInvocationsPerWorkgroup": 1024,
+          "maxComputeWorkgroupSizeX": 1024,
+          "maxComputeWorkgroupSizeY": 1024,
+          "maxComputeWorkgroupSizeZ": 64,
+          "maxComputeWorkgroupsPerDimension": 65535,
+          "maxImmediateSize": 64,
+          "maxStorageBuffersInFragmentStage": 16,
+          "maxStorageTexturesInFragmentStage": 8,
+          "maxStorageBuffersInVertexStage": 16,
+          "maxStorageTexturesInVertexStage": 8
+        }
+      },
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "innerWidth": 1920,
+      "innerHeight": 945,
+      "devicePixelRatio": 1,
+      "visibility": "visible",
+      "crossOriginIsolated": false
+    },
+    "cpuLoadAfter": 0.04332253643951663,
+    "gpuBusyAfter": [],
+    "finished": "2026-10-25T01:56:38.063Z"
+  },
+  "results": [
+    {
+      "id": "130k-8x8",
+      "cells": 131072,
+      "grid": {
+        "ni": 512,
+        "nj": 256
+      },
+      "blocks": {
+        "bi": 4,
+        "bj": 3
+      },
+      "tile": {
+        "x": 8,
+        "y": 8
+      },
+      "workgroups": 2112,
+      "iterations": "adaptive",
+      "protocol": {
+        "name": "quick",
+        "warmupMs": 2000,
+        "runMs": 1000,
+        "runs": 3
+      },
+      "runs": [
+        {
+          "index": 0,
+          "frames": 60,
+          "frameTime": {
+            "n": 60,
+            "mean": 16.663333333333338,
+            "min": 16.5,
+            "max": 16.800000000000182,
+            "p50": 16.699999999999818,
+            "p95": 16.70500000000027,
+            "p99": 16.800000000000182
+          },
+          "longFrames": 0,
+          "callbackDelay": {
+            "n": 60,
+            "mean": 0.383333306908609,
+            "min": 0.09999995231646608,
+            "max": 0.9999999523161023,
+            "p50": 0.29999997615823304,
+            "p95": 0.8049999654291239,
+            "p99": 0.9409999734161462
+          },
+          "fps": 60,
+          "iterations": 480,
+          "itPerSec": 480,
+          "gpuSamples": 60,
+          "solverMsPerIt": 0.8168789333333333,
+          "solverMsPerItP10": 0.77824,
+          "solverMsPerFrame": {
+            "n": 60,
+            "mean": 6.535031466666666,
+            "min": 6.22592,
+            "max": 7.405568,
+            "p50": 6.422528,
+            "p95": 7.20896,
+            "p99": 7.32823552
+          }
+        },
+        {
+          "index": 1,
+          "frames": 60,
+          "frameTime": {
+            "n": 60,
+            "mean": 16.664999999999996,
+            "min": 16.599999999999454,
+            "max": 16.800000000000182,
+            "p50": 16.699999999999818,
+            "p95": 16.800000000000182,
+            "p99": 16.800000000000182
+          },
+          "longFrames": 0,
+          "callbackDelay": {
+            "n": 60,
+            "mean": 0.3599999789396861,
+            "min": -1.192074705613777e-8,
+            "max": 1.099999988079162,
+            "p50": 0.29999997019763214,
+            "p95": 0.7049999982116785,
+            "p99": 1.099999988079162
+          },
+          "fps": 60,
+          "iterations": 434,
+          "itPerSec": 434,
+          "gpuSamples": 60,
+          "solverMsPerIt": 0.9227891612903227,
+          "solverMsPerItP10": 0.8675328,
+          "solverMsPerFrame": {
+            "n": 60,
+            "mean": 6.6748416000000015,
+            "min": 6.160384,
+            "max": 7.471104,
+            "p50": 6.619136,
+            "p95": 7.2777728,
+            "p99": 7.43243776
+          }
+        },
+        {
+          "index": 2,
+          "frames": 60,
+          "frameTime": {
+            "n": 60,
+            "mean": 16.66500000000001,
+            "min": 16.5,
+            "max": 16.800000000000182,
+            "p50": 16.699999999999818,
+            "p95": 16.700000000000728,
+            "p99": 16.799999999999645
+          },
+          "longFrames": 0,
+          "callbackDelay": {
+            "n": 60,
+            "mean": 0.4183333128690871,
+            "min": 0.09999995231646608,
+            "max": 0.899999964237395,
+            "p50": 0.44999997615786924,
+            "p95": 0.699999988079071,
+            "p99": 0.7819999853372239
+          },
+          "fps": 60,
+          "iterations": 381,
+          "itPerSec": 381,
+          "gpuSamples": 60,
+          "solverMsPerIt": 1.0332670656167984,
+          "solverMsPerItP10": 0.9736777142857143,
+          "solverMsPerFrame": {
+            "n": 60,
+            "mean": 6.561245866666667,
+            "min": 5.767168,
+            "max": 7.471104,
+            "p50": 6.520832,
+            "p95": 7.20896,
+            "p99": 7.43243776
+          }
+        }
+      ],
+      "aggregate": {
+        "runs": 3,
+        "itPerSec": 434,
+        "fps": 60,
+        "frameTimeP50": 16.699999999999818,
+        "frameTimeP95": 16.70500000000027,
+        "frameTimeP99": 16.800000000000182,
+        "longFrames": 0,
+        "callbackDelayP95": 0.7049999982116785,
+        "callbackDelayP99": 0.9409999734161462,
+        "solverMsPerIt": 0.9227891612903227,
+        "solverMsPerItP10": 0.8675328,
+        "solverMsPerFrameP50": 6.520832,
+        "saturatedItPerSec": 1083.671159077892,
+        "budgetItPerSec": 455.1418868127147
+      },
+      "resampleMsP50": 0.065536,
+      "renderGpuMsP50": 2.424831999999999,
+      "threeComputeGpuMsP50": 0.065536,
+      "sceneTriangles": 571042,
+      "drawingBuffer": [
+        1920,
+        1080
+      ],
+      "timestampQuantumNs": "65536",
+      "stateFinite": true,
+      "maxAbsGaugePressurePa": 2132.7428083757404,
+      "gpuErrors": [],
+      "measured": {
+        "timeOrigin": 1792893385589.7,
+        "from": 2474.5,
+        "to": 5474.5
+      },
+      "pageHiddenMs": 0,
+      "cpuLoadDuring": 0.08327167630057804
+    }
+  ],
+  "workerProbe": null,
+  "consoleErrors": [
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127"
+  ]
+}
