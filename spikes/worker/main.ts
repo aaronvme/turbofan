@@ -4,6 +4,7 @@
 
 import { BenchApp, type BenchConfig, type ConfigResult } from '../scene/benchApp';
 import { summarize, type Summary } from '../lib/stats';
+import { trackVisibility } from '../scene/visibilityTracker';
 import { mountReactLoad, type ReactLoadStats } from './reactLoad';
 import type { ToWorker } from './worker';
 import type { ProbeResult } from './workerProbe';
@@ -18,6 +19,8 @@ export interface WorkerBenchResult {
   readonly reactCommitMs: Summary | null;
   /** Main-thread long tasks (> 50 ms) that started during the runs. */
   readonly longTasks: { count: number; totalMs: number; maxMs: number };
+  /** How long the page was hidden during the runs; > 0 makes the timing invalid (D0-1). */
+  readonly pageHiddenMs: number;
 }
 
 export interface CoiReport {
@@ -47,6 +50,8 @@ if (!Number.isFinite(reactHz) || reactHz < 0) throw new Error('react=<Hz> must b
 const canvas = document.getElementById('view');
 const ui = document.getElementById('ui');
 if (!(canvas instanceof HTMLCanvasElement) || !ui) throw new Error('page markup missing');
+
+const hiddenDuring = trackVisibility();
 
 /** Long tasks with absolute start times (timeOrigin + startTime), to compare across threads. */
 const longTasks: { start: number; duration: number }[] = [];
@@ -100,6 +105,7 @@ function finish(frame: ConfigResult): WorkerBenchResult {
       totalMs: tasks.reduce((s, x) => s + x, 0),
       maxMs: tasks.length > 0 ? Math.max(...tasks) : 0,
     },
+    pageHiddenMs: hiddenDuring(frame.measured),
   };
 }
 

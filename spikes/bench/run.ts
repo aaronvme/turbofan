@@ -16,7 +16,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { cpus, totalmem } from 'node:os';
 import { chromium, type Page } from '@playwright/test';
 import { createServer, type InlineConfig, type ViteDevServer } from 'vite';
-import type { ConfigResult } from '../scene/benchApp.ts';
+import type { ThroughputResult } from '../throughput/main.ts';
 import type { WorkerBenchResult } from '../worker/main.ts';
 import { benchFileName, parseBenchArgs, protocolLabel, type Protocol } from '../lib/protocol.ts';
 import {
@@ -180,6 +180,11 @@ function gpuDrivers() {
   }
 }
 
+/** Another window covered Chrome during the runs: rAF stopped, so the timing is invalid. */
+function hiddenNote(ms: number): string {
+  return ms > 0 ? `, PAGE HIDDEN ${ms.toFixed(0)} ms: INVALID (D0-1)` : '';
+}
+
 async function cpuLoadOver(ms: number): Promise<number> {
   const before = cpus();
   await new Promise((r) => setTimeout(r, ms));
@@ -316,14 +321,16 @@ async function main(): Promise<void> {
       pageInfo = await page.evaluate(() => window.__bench?.ready);
       for (const config of configs) {
         process.stdout.write(`  ${config.id} ... `);
+        await page.bringToFront();
         const before = cpus();
         const r = await page.evaluate((c) => window.__bench?.run(c as never), config);
         const load = cpuBusyFraction(before, cpus());
         results.push({ ...(r as object), cpuLoadDuring: load });
-        const agg = (r as ConfigResult).aggregate;
+        const tr = r as ThroughputResult;
+        const agg = tr.aggregate;
         process.stdout.write(
           `${agg.solverMsPerIt?.toFixed(3) ?? '-'} ms/it (p10 ${agg.solverMsPerItP10?.toFixed(3) ?? '-'}), ` +
-            `achieved ${agg.itPerSec.toFixed(0)} it/s, frame p99 ${agg.frameTimeP99.toFixed(1)} ms, CPU ${(100 * load).toFixed(0)}%\n`,
+            `achieved ${agg.itPerSec.toFixed(0)} it/s, frame p99 ${agg.frameTimeP99.toFixed(1)} ms, CPU ${(100 * load).toFixed(0)}%${hiddenNote(tr.pageHiddenMs)}\n`,
         );
       }
       await page.evaluate(() => window.__bench?.dispose());
@@ -343,7 +350,7 @@ async function main(): Promise<void> {
         const ft = w.frame.aggregate;
         process.stdout.write(
           `frame p50/p95/p99 ${ft.frameTimeP50.toFixed(2)}/${ft.frameTimeP95.toFixed(2)}/${ft.frameTimeP99.toFixed(2)} ms, ` +
-            `long frames/run ${ft.longFrames}, React commit p95 ${w.reactCommitMs?.p95.toFixed(1) ?? '-'} ms, CPU ${(100 * load).toFixed(0)}%\n`,
+            `long frames/run ${ft.longFrames}, React commit p95 ${w.reactCommitMs?.p95.toFixed(1) ?? '-'} ms, CPU ${(100 * load).toFixed(0)}%${hiddenNote(w.pageHiddenMs)}\n`,
         );
         workerProbe ??= await page.evaluate(() => window.__workerBench?.probe());
         await page.evaluate(() => window.__workerBench?.dispose());
