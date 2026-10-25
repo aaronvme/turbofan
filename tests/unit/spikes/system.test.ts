@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   cpuBusyFraction,
+  gpuBusyByProcess,
   parseActiveScheme,
   powerModeFromOverlay,
   powerSourceFromBatteryStatus,
@@ -73,5 +74,36 @@ describe('powerModeFromOverlay (Windows 11 Settings > Power mode)', () => {
     expect(powerModeFromOverlay('00000000-0000-0000-0000-000000000000')).toBe('balanced');
     expect(powerModeFromOverlay('DED574B5-45A0-4F42-8737-46345C09C238')).toBe('best-performance');
     expect(powerModeFromOverlay('')).toBe('unknown');
+  });
+});
+
+describe('gpuBusyByProcess (GPU Engine counters: who else is using the GPU, D0-1)', () => {
+  const inst = (pid: number, eng: number, type: string) =>
+    `pid_${pid}_luid_0x00000000_0x0000e467_phys_0_eng_${eng}_engtype_${type}`;
+
+  it('averages each process 3D-engine use over the samples, busiest first, ignoring < 1%', () => {
+    const samples = [
+      // sample 1
+      { instance: inst(28304, 0, '3d'), value: 44 },
+      { instance: inst(2108, 0, '3d'), value: 13 },
+      { instance: inst(9140, 0, '3d'), value: 0.7 },
+      // sample 2
+      { instance: inst(28304, 0, '3d'), value: 36 },
+      { instance: inst(2108, 0, '3d'), value: 11 },
+      { instance: inst(9140, 0, '3d'), value: 0.5 },
+    ];
+    expect(gpuBusyByProcess(samples, 2)).toEqual([
+      { pid: 28304, percent: 40 },
+      { pid: 2108, percent: 12 },
+    ]);
+  });
+
+  it('counts only 3D engines (compute work runs there too on this driver) and skips odd names', () => {
+    const samples = [
+      { instance: inst(1, 0, '3d'), value: 10 },
+      { instance: inst(1, 3, 'videodecode'), value: 90 },
+      { instance: 'not-a-gpu-engine', value: 50 },
+    ];
+    expect(gpuBusyByProcess(samples, 1)).toEqual([{ pid: 1, percent: 10 }]);
   });
 });
