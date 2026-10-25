@@ -1,90 +1,61 @@
-w0/contracts: STOP-CLEAN (usage brake). Deliverable 1 (src/contracts) is done and green; deliverables 2-4 (mocks, definition.ts, ENGINE_FACTS.md) are not started in code. The research for them is done and recorded below. (from fe260dd; HEAD = the commit that adds this file, on top of 7c7b399)
+w0/contracts: DONE. Contracts, ENGINE_FACTS (+ code mirror and doc-sync test), the CFM56-7B27/3-class definition, both mocks and the PHYSICS.md section 2 notes are in, all green; ready for the critic. (from fe260dd; HEAD = the commit that adds this file, on top of 709867e)
 
 DONE
-- 06a9de7 (TDD) contract tests, RED: the 9 test files failed to import the missing modules.
-- 7c7b399 src/contracts GREEN (312 tests):
-  - stations.ts: ARP755 (superseded by AS755) stations 0,1,2,13,18,19,21,24,25,3,4,41,45,49.5,5,8,9; SOLVER_REDUCTION_STATIONS = 2,13,18,25,3,4,45,5,8; STREAM_ORDER.
-  - ambient.ts: ISA_SLS, R_AIR, validateAmbient.
-  - engine.ts: EngineDefinition (7 curves, 11 components, station planes, blade rows, VSV schedules, bleeds, design point, ratings, limits incl. EGT shunt, start schedule) and validateEngineDefinition (about 60 checks, each tested against tests/unit/contracts/fixtures/engineFixture.ts). Angles are geometric (from +x, positive toward +theta); rotation[spool] = +-1 about +x.
-  - cycle.ts: CycleInputs, CycleState (egtDisplayedK = T49.5 + shunt), CycleModel {reset, step, injectFault, state}, validateCycleInputs/State.
-  - flow.ts: FlowSolver, MeshAsset header, FlowTargets plus flowTargetsFromCycleState, StationReduction, render textures. near is 1024x256 over x[-2,5] r[0,1.75]; far is 512x128 over x[-8,32] r[0,10]; both rgba16float. Channels: state = (p-pinf)/pinf, (rho-rhoinf)/rhoinf, T K, FAR; velocity = ux, ur, utheta, fluidFraction. rasterizeField and sampleCpuField (bilinear, axis mirror) are the CPU sampling interface.
-  - half.ts: f16 conversion; all 65536 bit patterns round-trip, and it matches Math.f16round.
-  - sim.ts: SimSnapshot, SimCommand (16 types), SimCommandMessage, validators, findNonPlainData (rejects class instances, functions, NaN, cycles, holes), deepFreeze, nextSnapshot, SimClock plus advanceClock.
-  - scenario.ts: timeline + outcomes as data (array paths, eventually/always/at windows), a pure reducer, and validateScenario.
-  - ui.ts: view modes, overlays, fields, colormaps (perceptual only), quality presets, RenderState, validators.
-  - thresholds.ts: all 29 IDs. thresholds.test.ts parses docs/PHYSICS.md §3 and asserts Check, Pass and section verbatim, and that every typed number is parsed from its own text token.
+- 06a9de7 (TDD) / 7c7b399 src/contracts (previous builder): stations (ARP755/AS755), ambient, EngineDefinition + validator, cycle, flow solver + render textures (gauge encoding, matches D0-4), f16, sim/UI boundary, scenarios, UI schema, thresholds mirrored from PHYSICS.md section 3.
+- 04e54a5 (TDD) / 4bbbd74 docs/ENGINE_FACTS.md filled and src/engine/facts.ts mirrors it.
+  - 77 published rows (TCDS E.004, EEDB 8CM066, Safran fiche, NTSB AAR-19/03, Widuri 2026, AW 2008, 14 CFR 33.73 quoted verbatim) and 29 `unknown` rows, each with the model assumption and why.
+  - Also: sources list, contradictions (airflow 792 vs 782 lb/s, length 2508 mm vs 103.5 in, TSFC 0.376 vs 0.386), the design-point derivation, the flowpath proportions table, and the model-vs-published skeleton.
+  - D0-5: tsfcTakeoff = 1.293 / 121430 = 1.0648e-5 kg/(N s) = 0.376 (lb/h)/lbf, `estimate`; AW 0.386 recorded beside it (+2.7 %).
+  - tests/unit/engine/facts.test.ts parses both tables. It checks the doc and facts.ts against each other (same IDs, SI, unit, confidence), that each SI value follows from its source value by unit conversion (tolerance 5e-4), that published rows cite a defined [SOURCE], that estimates show "derived", and the derivations themselves (TSFC, 100 % speeds).
+- 25adc8c (TDD) / 2adfb4a src/engine:
+  - designPoint.ts: constant-cp closure, gas sections calorically perfect with R_AIR. Net thrust +2.0 % of the TCDS figure, A8 0.1778 m², A18 0.9067 m², T4 1746 K. Tests: designPoint.test.ts.
+  - bladeDesign.ts: continuity on the subsonic branch; free vortex; rotor frame; Carter's rule (n = 1/2 or 1); no deviation in turbines; counts from solidity. Tests: bladeDesign.test.ts.
+  - definition.ts: ENGINE_DEFINITION, plus ENGINE_MEANLINE and ENGINE_DESIGN_ESTIMATE. Tests: definition.test.ts.
+    - validateEngineDefinition returns [].
+    - Every figure comes from facts.ts.
+    - Rotation is -1/-1.
+    - 38 rows: fan, OGV, booster IGV + 3 stages, HPC IGV + 9 stages with VSVs on IGV and S1-S3, HPT 1 stage, LPT 4 stages.
+    - Fan: 24 blades, tip radius 0.7747 m, tip chord 0.2786 m (published 0.2794).
+    - Station axial Mach numbers fall within plausible bands.
+    - The mean-line Euler work equals each component's work to 1e-9.
+    - The definition is deep-frozen plain data.
+- c4c3d9f (TDD) / a1e3bff src/mocks:
+  - mockCycle.ts: `createMockCycle(def)` is a CycleModel with `label: 'MOCK'`; `mockSteadyState(def, lever, ambient?)`; `mockN1PercentFromN2`.
+    - The working line passes through Widuri's idle, MPA and static takeoff points (N1 exponent fitted, 1.76).
+    - EGT corrected by EGT/theta from the 25 °C run-up day.
+    - Thrust = TCDS x (N1/N1to)^2; fuel from the EEDB LTO points, so takeoff hits the C3 TSFC exactly.
+    - Start: fuel no earlier than 20 %, light-off after 3 s, cut-out at 56 %, idle at about 60 s. Idle to 95 % thrust in 4.4 s (< C5).
+    - Faults, shutdown and the EGT shunt are in.
+  - mockFlowField.ts: `createMockFlowField(def, state, ambient, {version})` returns a CpuFlowField with `label`, `extents` and `version`, in the exact near/far rgba16float layout with the D0-4 gauge encoding. `createMockFlowModel(...).sample(x, r, smoothing?)` gives point values.
+    - Pieces: ducts by continuity, fan free-vortex swirl in -theta, an intake sink, and coaxial jets (erf shear layers to Gaussian, dr1/2/dx = 0.094, momentum decay B about 6.3).
+    - An engine at rest encodes as exact ambient bits.
+  - Tests: mockCycle.test.ts and mockFlowField.test.ts (determinism, layout, encoding, ranges, walls, swirl sign, jets).
+- ea36195 docs/PHYSICS.md: new sections 2.1 (frame, rotation, angle, curve conventions, D0-4 encoding, EGT shunt), 2.2 (station table with the reference-engine x) and 2.3 (design-point estimate, blade synthesis). Section 3 is untouched; thresholds.test.ts still passes.
+- 709867e coverage: tests/unit/contracts/validators.test.ts covers the remaining validator branches (cycle, engine, scenario, UI, describeValue). src/contracts went from 95.8 % to 99.75 % lines.
 
-NEXT (in order)
-1. docs/ENGINE_FACTS.md: write the figures below as table rows (ID | Figure | Source value | SI | Source | Confidence). Then add src/engine/facts.ts and a test that each fact's SI text matches the doc row.
-2. src/engine/definition.ts (+ src/engine/bladeDesign.ts: free-vortex velocity triangles + Carter's rule δ = mθ/σ^n, n=0.5 for decelerating rows, n=1 for accelerating IGVs, δ=0 in turbines; stagger = mean of metal angles; counts from a target solidity). Test that validateEngineDefinition(def) returns []. The planned flowpath polylines, row specs and work split are in the GOTCHAS.
-3. src/mocks/mockCycle.ts. Data-driven: N1 = N1idle + (N1to − N1idle)·s^1.75 with s = the N2 fraction. The exponent is fitted to Widuri's 65 % N1 / 89.3 % N2 point. Fuel flow is interpolated linearly through the EEDB LTO points; the start sequence goes 25 % fuel-on, light-off, 56 % cut-out, idle. Then src/mocks/mockFlowField.ts: a point sink at the highlight, two Gaussian jets with spreading 0.094 and a potential core, and free-vortex swirl between the fan TE and the OGV/booster IGV. Internal ducts take their state by interpolating the stations along x and inverting the flow function.
-4. docs/PHYSICS.md §2: add the coordinate and station notes (from the stations.ts and engine.ts headers).
-5. Coverage polish: cycle.ts 90.7 %, describe.ts 67 %, scenario.ts 92.6 %, ui.ts 93 % lines. The aim is ≥ 95 % in contracts.
-
-Researched figures (all fetched 2026-10-24). Reference variant: CFM56-7B27/3 (Tech Insertion).
-- EASA TCDS E.004 Issue 07 (9 Jan 2023), https://www.easa.europa.eu/en/downloads/7795/en (official):
-  - takeoff 12143 daN; max continuous 11521 daN;
-  - stages: 1 fan, 3 LPC, 9 HPC, 1 HPT, 4 LPT, annular combustor;
-  - length 2508 mm, width 2118 mm, height 1829 mm; dry weight 2386 kg;
-  - N1 max 5382 rpm = 104 %, N2 max 15183 rpm = 105 %, so 100 % = 5175 / 14460 rpm;
-  - displayed EGT: takeoff 950 °C, max continuous 925 °C, start 725 °C, transient 960 °C for 20 s;
-  - EGT is measured at T49.5 (LPT stage 2 nozzle); display shunt +30 °C (SAC/TI non-/F), ramped linearly over 8300–8500 rpm N2 for TI;
-  - bleed limits (III.10): bypass 2 % of secondary flow; HPC 5th stage 10 %; HPC 9th stage 12 %→7 %; 5th + 9th combined 13 %→10 %.
-- ICAO Engine Emissions Databank v32 (EASA, https://www.easa.europa.eu/en/downloads/131424/en), UID 8CM066 (-7B27/3) (official):
-  - BPR 5.1, OPR 29.0, rated thrust 121.4 kN;
-  - fuel flow at T/O 1.293, C/O 1.031, App 0.343, Idle 0.110 kg/s.
-  - UID 3CM034 (-7B27 SAC): BPR 5.0, OPR 28.63, T/O fuel flow 1.284 kg/s.
-  - Derived TSFC (estimate) = 1.293/121430 = 1.0648e-5 kg/(N s) = 0.3759 (lb/h)/lbf. Aviation Week 28 Jan 2008 gives 0.386 for -7B27, 2.7 % higher; it also lists OPR 28.9 and a max envelope diameter of 65 in.
-- Safran/Snecma CFM56-7B fiche, Mar 2011 (archived: https://web.archive.org/web/20161220201436/http://www.safran-aircraft-engines.com/file/download/fiche_cfm56-7b_ang.pdf) (official):
-  - 27,300 lbf, flat rated to 86 °F (30 °C);
-  - airflow 792 lb/s (359.25 kg/s), BPR 5.10;
-  - max climb thrust 5,960 lb at 35,000 ft, M0.8, ISA; OPR at max climb 32.70;
-  - fan diameter 61 in (1.5494 m); length 103.5 in, which conflicts with the TCDS (use 2508 mm).
-- CFM technology page 2010 (archived cfm56.com/products/cfm56-7b/cfm56-7b-technology), for -7B27: airflow 782 lb/s, BPR 5.1, OPR at max climb 32.8, max cruise thrust 5,480 lb, length 98.7 in, weight 5,216 lb.
-- NTSB AAR-19/03 §1.3.1 (published):
-  - 24 Ti-6-4 wide-chord fan blades, chord about 11 in (0.279 m), about 10.83 lb each;
-  - "The engine rotates clockwise (aft looking forward)", so rotation = −1 about +x (co-rotating spools assumed).
-- Widuri et al. 2026, AVITEC 8(1) 125-137, doi:10.28989/avitec.v8i1.3415 (published):
-  - AMM-based ground-idle limits: N1 20–22 %, N2 60–62 %, EGT < 500 °C;
-  - measured idle: N1 20.5–21.0 %, N2 60.6–60.7 %, EGT 466–493 °C (OAT 25 °C);
-  - start: start lever to idle at 25 % N2, starter cut-out 56 % N2, peak EGT 492 °C, starting time 60 s;
-  - static takeoff: N1 97.4 %, N2 99.8 %, EGT 855 °C; MPA: 65 % N1, 89.3 % N2, 585 °C.
-- 14 CFR 33.73: fetched verbatim from the eCFR API, version 2026-10-01; quote it in ENGINE_FACTS.
-- Unknown (state the model assumption in ENGINE_FACTS):
-  - cruise TSFC;
-  - flight-idle N1: C5 starts from ground idle, which is under 15 % of takeoff thrust (33.73(b) alternative);
-  - light-off time: assume 2–4 s after fuel on;
-  - fan PR, T4, component efficiencies;
-  - nacelle max diameter: assume 2.12 m so the axisymmetric nacelle encloses the TCDS width;
-  - VSV stages: IGV + S1–S3 per CFM training material (secondary only); VBV and TBV counts unknown.
-- Design-point estimates, from my rough closure (constant-cp sections, 12 % turbine cooling, LHV 43.2 MJ/kg):
-  - PRs: fan bypass 1.60, fan core 1.50, booster 1.75, HPC 11.048 (OPR 29);
-  - isentropic efficiencies: fan bypass 0.90, fan core 0.89, booster 0.89, HPC 0.87, HPT 0.90, LPT 0.91; combustor efficiency 0.995, combustor ΔP 5 %;
-  - T3 about 836 K, T4 about 1745 K;
-  - thrust closes within +1 % to +3 % for FPR 1.55–1.60;
-  - fan tip speed at 100 % N1 = 419.8 m/s; fan-face specific flow 208.8 kg/(s m²) at hub/tip 0.296.
+NEXT
+1. Critic pass 1: review contracts, facts, definition and mocks. The points most worth a look are under GOTCHAS.
+2. Orchestrator: merge after MERGE. The plan's W1 builders read src/engine/facts.ts, src/engine/definition.ts and src/mocks.
+3. W1 cycle: replace the design-point estimate as the truth. Fill the "Model" column of the ENGINE_FACTS model-vs-published table. Recalibrate if T49.5 stays hot (see GOTCHAS).
+4. W2 flowviz: upload CpuFlowField with device.queue.writeTexture into rgba16float textures to build FlowField (bytesPerRow = 8 x width = 8192 near / 4096 far). Show a MOCK badge while `label === 'MOCK'`.
 
 GOTCHAS
-- Integer-like object keys ('2', '3', …) enumerate numerically, so compare station-keyed records as sets.
-- Scenario paths are string arrays, because station '49.5' contains a dot.
-- The render textures store gauge ratios (p − p∞)/p∞, not the plan's p/p∞. At 1.0, f16 quantises p/p∞ to about 1e-3 (about 100 Pa). Flagged for the orchestrator; the flow.ts comments explain it.
-- MAX_CUSTOMER_BLEED_FRACTION = 0.13 (TCDS combined limit); validators use it.
-- Planned flowpath (m, fan face x = 0):
-  - inlet highlight (−0.775, 0.800); throat r 0.735; fan casing 0.7747; spinner from (−0.42, 0) to (0, 0.229);
-  - splitter lip (0.26, 0.430); nacelle TE x 1.55 (inner 0.757, outer 0.775); max outer r 1.06;
-  - HPC [0.84, 1.44], hub 0.222→0.262, casing 0.316→0.281; combustor [1.44, 1.72]; HPT [1.72, 1.86]; LPT [1.95, 2.30], casing up to 0.48;
-  - core nozzle lip x 2.75, r 0.39/0.405; plug tail (3.25, 0);
-  - resulting areas: A8 about 0.346 m², A18 about 0.84 m².
-  - The 19 HPC rows are tight; the LPT may need [1.95, 2.33].
-- Engine length: place the 2.508 m from the fan-case flange (x ≈ −0.09) to the TRF aft flange (≈ 2.42).
-- `python -I` hides user site-packages here (no openpyxl); use `python -P -E` for research scripts.
-- Research downloads are in %TEMP%\tf-research (untrusted; not in the repo).
-- The Chrome page I opened (isolated context w0-contracts) is closed. No dev server was started.
+- Gas sections are calorically perfect with R_AIR, so the sonic speed and the energy equation agree: cold gamma 1.4 gives cp 1004.69; hot cp 1150 gives gamma 1.3326. The doc says so.
+- The design-point closure is rough. FPR 1.55 closes at +2.0 % thrust; 1.60 would give +3.4 %, outside C1. T49.5 comes out at 1174 K, i.e. 931 °C displayed, which is only 19 K under the 950 °C redline and hotter than the 855 °C measured on a 25 °C day. W1 will likely need lower T4 or higher efficiencies. No threshold changed.
+- Uniform-work free vortex behind the fan puts about 44 deg of swirl and Mach 0.84 at the booster IGV inlet. That follows from the method (representative geometry); W3's body-force calibration absorbs it.
+- Widuri's fuel-flow columns (Tables 1, 5, 7) carry impossible exponents (e.g. 1.18e-3 kg/s at takeoff). They are not used; EEDB fuel flows are.
+- [CFMWEB] (airflow 782 lb/s, length 98.7 in) could not be re-opened: web.archive.org is blocked from this environment. Only cross-check rows cite it. All other sources were re-read from the local copies in %TEMP%\tf-research (untrusted; not in the repo).
+- "Fills the exact FlowField layout" is read as CpuFlowField (raw f16 texel data plus reference, extents and version). Creating GPUTextures is left to W2 so the mocks stay unit-testable in Node.
+- mockCycle.test.ts: the green commit lengthened one settle from 20 s to 30 s. That is a tighter check: the 6-digit compare was borderline at 20 s.
+- Full-resolution rasters (330k texels) are about 0.15 s warm but several seconds under coverage, so those tests have a 60 s timeout and use a byte compare (a deep toEqual on 1M-element typed arrays is very slow).
+- Commit 2adfb4a's message says 41 rows; there are 38.
+- Integer-like object keys ('2', '3', ...) enumerate numerically, so compare station-keyed records as sets. Scenario paths are string arrays (station '49.5' has a dot).
+- `python -I` hides user site-packages here; use `python -P -E` for research scripts.
+- No dev server or Chrome page was started. No new dependencies.
 
-GATES @7c7b399 (run just before the STOP; this commit adds only this file)
-- npm test: 312 passed / 0 skipped (10 files)
+GATES @709867e (this commit adds only this file)
+- npm test: 718 passed / 0 skipped (17 files)
 - npm run lint: clean (eslint --max-warnings 0 + prettier --check)
 - npm run typecheck: clean
-- coverage (vitest --coverage, same config as npm run coverage): lines 95.9 %, stmts 93.6 %, branches 91.0 %, funcs 99.2 %; src/contracts 95.8 % lines
+- coverage (npm run coverage): lines 99.75 %, stmts 97.49 %, branches 93.45 %, funcs 99.63 %; src/contracts 99.75 % lines, src/mocks 100 %, src/engine 99.2 %
 - gpu/browser suites: not touched, not run
-- No new dependencies.
