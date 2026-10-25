@@ -75,6 +75,11 @@ const OFFSETS: readonly (readonly [number, number])[] = [
   [-1, -1],
 ];
 
+/** Array read. Every index used here is in range; the fallback only satisfies the type checker. */
+function at(a: ArrayLike<number>, k: number): number {
+  return a[k] ?? 0;
+}
+
 function find(parent: Int32Array, a: number): number {
   let root = a;
   while (parent[root] !== root) root = parent[root] ?? root;
@@ -198,9 +203,9 @@ export function smoothMesh(mesh: MultiBlockMesh, opts: SmoothOptions): SmoothRep
     return canon[g(p.nbr.block, hi, hj)] ?? -1;
   };
   for (let f = 0; f < nFree; f++) {
-    const bi = home[3 * f] ?? 0;
-    const i = home[3 * f + 1] ?? 0;
-    const j = home[3 * f + 2] ?? 0;
+    const bi = at(home, 3 * f);
+    const i = at(home, 3 * f + 1);
+    const j = at(home, 3 * f + 2);
     node[f] = g(bi, i, j);
     OFFSETS.forEach(([di, dj], s) => {
       stencil[8 * f + s] = neighbour(bi, i + di, j + dj);
@@ -209,10 +214,10 @@ export function smoothMesh(mesh: MultiBlockMesh, opts: SmoothOptions): SmoothRep
 
   // Control functions, computed once from the algebraic grid.
   const lineControl = (a: number, c: number, b: number): number => {
-    const tx = 0.5 * ((X[b] ?? 0) - (X[a] ?? 0));
-    const tr = 0.5 * ((R[b] ?? 0) - (R[a] ?? 0));
-    const sx = (X[b] ?? 0) - 2 * (X[c] ?? 0) + (X[a] ?? 0);
-    const sr = (R[b] ?? 0) - 2 * (R[c] ?? 0) + (R[a] ?? 0);
+    const tx = 0.5 * (at(X, b) - at(X, a));
+    const tr = 0.5 * (at(R, b) - at(R, a));
+    const sx = at(X, b) - 2 * at(X, c) + at(X, a);
+    const sr = at(R, b) - 2 * at(R, c) + at(R, a);
     return -(tx * sx + tr * sr) / (tx * tx + tr * tr);
   };
   const boundaryControl = blocks.map((b, bi) => {
@@ -235,23 +240,22 @@ export function smoothMesh(mesh: MultiBlockMesh, opts: SmoothOptions): SmoothRep
     const eta = new Float64Array((b.ni + 1) * (b.nj + 1));
     const xi = new Float64Array(eta.length);
     const dist = (p: number, q: number): number =>
-      Math.hypot((X[p] ?? 0) - (X[q] ?? 0), (R[p] ?? 0) - (R[q] ?? 0));
+      Math.hypot(at(X, p) - at(X, q), at(R, p) - at(R, q));
     for (let i = 0; i <= b.ni; i++) {
       for (let j = 1; j <= b.nj; j++) {
         eta[nodeIndex(b, i, j)] =
-          (eta[nodeIndex(b, i, j - 1)] ?? 0) + dist(g(bi, i, j), g(bi, i, j - 1));
+          at(eta, nodeIndex(b, i, j - 1)) + dist(g(bi, i, j), g(bi, i, j - 1));
       }
       const all = eta[nodeIndex(b, i, b.nj)] ?? 1;
-      for (let j = 0; j <= b.nj; j++)
-        eta[nodeIndex(b, i, j)] = (eta[nodeIndex(b, i, j)] ?? 0) / all;
+      for (let j = 0; j <= b.nj; j++) eta[nodeIndex(b, i, j)] = at(eta, nodeIndex(b, i, j)) / all;
     }
     for (let j = 0; j <= b.nj; j++) {
       for (let i = 1; i <= b.ni; i++) {
         xi[nodeIndex(b, i, j)] =
-          (xi[nodeIndex(b, i - 1, j)] ?? 0) + dist(g(bi, i, j), g(bi, i - 1, j));
+          at(xi, nodeIndex(b, i - 1, j)) + dist(g(bi, i, j), g(bi, i - 1, j));
       }
       const all = xi[nodeIndex(b, b.ni, j)] ?? 1;
-      for (let i = 0; i <= b.ni; i++) xi[nodeIndex(b, i, j)] = (xi[nodeIndex(b, i, j)] ?? 0) / all;
+      for (let i = 0; i <= b.ni; i++) xi[nodeIndex(b, i, j)] = at(xi, nodeIndex(b, i, j)) / all;
     }
     return { eta, xi };
   });
@@ -263,27 +267,27 @@ export function smoothMesh(mesh: MultiBlockMesh, opts: SmoothOptions): SmoothRep
   const phi = new Float64Array(nFree);
   const psi = new Float64Array(nFree);
   for (let f = 0; f < nFree; f++) {
-    const bi = home[3 * f] ?? 0;
-    const i = home[3 * f + 1] ?? 0;
-    const j = home[3 * f + 2] ?? 0;
+    const bi = at(home, 3 * f);
+    const i = at(home, 3 * f + 1);
+    const j = at(home, 3 * f + 2);
     const b = blocks[bi] as Block;
     const bc = boundaryControl[bi];
     const override = opts.blockControl?.[b.name];
     const phiSource = override?.phi ?? control;
     const psiSource = override?.psi ?? control;
-    const c = node[f] ?? 0;
+    const c = at(node, f);
     const o = 8 * f;
     if (phiSource === 'initial-grid' || (phiSource === 'boundary' && (i === 0 || i === b.ni))) {
-      phi[f] = lineControl(stencil[o + W] ?? 0, c, stencil[o + E] ?? 0);
+      phi[f] = lineControl(at(stencil, o + W), c, at(stencil, o + E));
     } else if (phiSource === 'boundary' && bc !== undefined) {
       const eta = arcFraction(bi, i, j, true);
-      phi[f] = (1 - eta) * (bc.south[i] ?? 0) + eta * (bc.north[i] ?? 0);
+      phi[f] = (1 - eta) * at(bc.south, i) + eta * at(bc.north, i);
     }
     if (psiSource === 'initial-grid' || (psiSource === 'boundary' && (j === 0 || j === b.nj))) {
-      psi[f] = lineControl(stencil[o + S] ?? 0, c, stencil[o + N] ?? 0);
+      psi[f] = lineControl(at(stencil, o + S), c, at(stencil, o + N));
     } else if (psiSource === 'boundary' && bc !== undefined) {
       const xi = arcFraction(bi, i, j, false);
-      psi[f] = (1 - xi) * (bc.west[j] ?? 0) + xi * (bc.east[j] ?? 0);
+      psi[f] = (1 - xi) * at(bc.west, j) + xi * at(bc.east, j);
     }
   }
 
@@ -292,16 +296,16 @@ export function smoothMesh(mesh: MultiBlockMesh, opts: SmoothOptions): SmoothRep
   for (let sweep = 0; sweep < opts.sweeps; sweep++) {
     let maxMove = 0;
     for (let f = 0; f < nFree; f++) {
-      const c = node[f] ?? 0;
+      const c = at(node, f);
       const o = 8 * f;
-      const xe = X[stencil[o + E] ?? 0] ?? 0;
-      const xw = X[stencil[o + W] ?? 0] ?? 0;
-      const xn = X[stencil[o + N] ?? 0] ?? 0;
-      const xs = X[stencil[o + S] ?? 0] ?? 0;
-      const re = R[stencil[o + E] ?? 0] ?? 0;
-      const rw = R[stencil[o + W] ?? 0] ?? 0;
-      const rn = R[stencil[o + N] ?? 0] ?? 0;
-      const rs = R[stencil[o + S] ?? 0] ?? 0;
+      const xe = at(X, at(stencil, o + E));
+      const xw = at(X, at(stencil, o + W));
+      const xn = at(X, at(stencil, o + N));
+      const xs = at(X, at(stencil, o + S));
+      const re = at(R, at(stencil, o + E));
+      const rw = at(R, at(stencil, o + W));
+      const rn = at(R, at(stencil, o + N));
+      const rs = at(R, at(stencil, o + S));
       const xxi = 0.5 * (xe - xw);
       const rxi = 0.5 * (re - rw);
       const xeta = 0.5 * (xn - xs);
@@ -310,17 +314,17 @@ export function smoothMesh(mesh: MultiBlockMesh, opts: SmoothOptions): SmoothRep
       const gamma = xxi * xxi + rxi * rxi;
       const beta = xxi * xeta + rxi * reta;
       const crossX =
-        (X[stencil[o + NE] ?? 0] ?? 0) -
-        (X[stencil[o + NW] ?? 0] ?? 0) -
-        (X[stencil[o + SE] ?? 0] ?? 0) +
-        (X[stencil[o + SW] ?? 0] ?? 0);
+        at(X, at(stencil, o + NE)) -
+        at(X, at(stencil, o + NW)) -
+        at(X, at(stencil, o + SE)) +
+        at(X, at(stencil, o + SW));
       const crossR =
-        (R[stencil[o + NE] ?? 0] ?? 0) -
-        (R[stencil[o + NW] ?? 0] ?? 0) -
-        (R[stencil[o + SE] ?? 0] ?? 0) +
-        (R[stencil[o + SW] ?? 0] ?? 0);
-      const p = phi[f] ?? 0;
-      const q = psi[f] ?? 0;
+        at(R, at(stencil, o + NE)) -
+        at(R, at(stencil, o + NW)) -
+        at(R, at(stencil, o + SE)) +
+        at(R, at(stencil, o + SW));
+      const p = at(phi, f);
+      const q = at(psi, f);
       const den = 2 * (alpha + gamma);
       const xNew =
         (alpha * (xe + xw + p * (xe - xw) * 0.5) +
@@ -332,8 +336,8 @@ export function smoothMesh(mesh: MultiBlockMesh, opts: SmoothOptions): SmoothRep
           gamma * (rn + rs + q * (rn - rs) * 0.5) -
           0.5 * beta * crossR) /
         den;
-      const xOld = X[c] ?? 0;
-      const rOld = R[c] ?? 0;
+      const xOld = at(X, c);
+      const rOld = at(R, c);
       const dx = omega * (xNew - xOld);
       const dr = omega * (rNew - rOld);
       X[c] = xOld + dx;
