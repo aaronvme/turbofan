@@ -21,6 +21,7 @@
     "test:browser": "vitest run -c vitest.browser.config.ts",
     "e2e": "playwright test",
     "mutate": "stryker run",
+    "mesh": "node --import ./tools/mesh/ts-resolve.mjs tools/mesh/scripts/generate.ts",
     "gates": "npm run typecheck && npm run lint && npm run coverage"
   },
   "dependencies": {
