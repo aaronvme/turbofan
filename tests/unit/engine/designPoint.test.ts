@@ -29,9 +29,17 @@ describe('design-point estimate (the derivation in ENGINE_FACTS.md)', () => {
     expect(dp.t4K).toBe(factValue('t4Takeoff'));
   });
 
-  it('sizes the nozzles to the assumed areas, choked core and unchoked bypass', () => {
-    expect(est.coreNozzle.areaM2).toBeCloseTo(factValue('coreNozzleArea'), 3);
-    expect(est.bypassNozzle.areaM2).toBeCloseTo(factValue('bypassNozzleArea'), 3);
+  it('sizes the nozzles near the cycle-sized areas, choked core and unchoked bypass', () => {
+    // The ENGINE_FACTS table values of this constant-cp estimate. Since D2-2 the definition
+    // carries the w1/cycle sizing (thermally perfect gas), which this estimate undershoots by
+    // 4.0 % (core) and 1.0 % (bypass): constant cp_hot = 1150 J/(kg K) overstates the choked
+    // mass flux at T5. The 5 % / 2 % bounds keep the two sizings tied without equating them.
+    expect(est.coreNozzle.areaM2).toBeCloseTo(0.1778, 4);
+    expect(est.bypassNozzle.areaM2).toBeCloseTo(0.9067, 4);
+    expect(Math.abs(est.coreNozzle.areaM2 / factValue('coreNozzleArea') - 1)).toBeLessThan(0.05);
+    expect(Math.abs(est.bypassNozzle.areaM2 / factValue('bypassNozzleArea') - 1)).toBeLessThan(
+      0.02,
+    );
     expect(est.coreNozzle.choked).toBe(true);
     expect(est.bypassNozzle.choked).toBe(false);
     expect(est.stations['5'].ptPa / p0).toBeCloseTo(2.64, 2);

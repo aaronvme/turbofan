@@ -8,7 +8,7 @@ import {
 } from '../../../src/engine/definition';
 import { axialVelocity } from '../../../src/engine/bladeDesign';
 import { COLD_GAS, HOT_GAS } from '../../../src/engine/designPoint';
-import { factValue } from '../../../src/engine/facts';
+import { ENGINE_FACTS, factValue } from '../../../src/engine/facts';
 import { celsiusToKelvin } from '../../../src/engine/units';
 import {
   casingRadiusAt,
@@ -154,6 +154,28 @@ describe('figures taken from ENGINE_FACTS', () => {
     expect(casing).toBeCloseTo(v('fanDiameter') / 2 + v('fanTipClearance'), 12);
     expect(Math.abs(fan.chord.tip / v('fanBladeChord') - 1)).toBeLessThan(0.05);
     expect(radiusAt(def.flowpath.curves.coreInner, 0)).toBe(v('fanHubRadius'));
+  });
+
+  it('D2-2: the nozzle exits carry the design-point-sized A8 and A18 and are the throats', () => {
+    // A8/A18 are outputs of the w1/cycle design-point sizing (D1-2), not placeholders
+    expect(ENGINE_FACTS.coreNozzleArea.confidence).toBe('estimate');
+    expect(ENGINE_FACTS.bypassNozzleArea.confidence).toBe('estimate');
+    expect(annulusArea('exhaust', stationX('8')) / v('coreNozzleArea') - 1).toBeCloseTo(0, 6);
+    expect(annulusArea('bypassDuct', stationX('18')) / v('bypassNozzleArea') - 1).toBeCloseTo(0, 6);
+    // convergent nozzles: the area falls monotonically over the last 0.2 m to the exit, so the
+    // exit plane is the throat the cycle chokes (core) or expands (bypass) at
+    for (const [id, station] of [
+      ['exhaust', '8'],
+      ['bypassDuct', '18'],
+    ] as const) {
+      const xe = stationX(station);
+      let prev = Infinity;
+      for (let k = 0; k <= 40; k++) {
+        const a = annulusArea(id, xe - 0.2 + (0.2 * k) / 40);
+        expect(a).toBeLessThan(prev);
+        prev = a;
+      }
+    }
   });
 
   it('the nacelle, the nozzles and the engine length', () => {
