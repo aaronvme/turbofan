@@ -55,6 +55,7 @@ import {
   solveSteady,
   surgeMargins,
   vbvScheduleFraction,
+  vsvOffsetRad,
   type EnginePoint,
   type OperatingConditions,
   type SizedEngine,
@@ -846,10 +847,12 @@ class TurbofanCycleModel implements CycleModel {
     const t2 = stations['2'].ttK;
     const n2c = this.pct2() / Math.sqrt(t2 / 288.15);
     const vsv = this.definition.vsvSchedules[0];
+    // the displayed schedule stands for the HPC map's own; D3-11 adds the fitted offset
     const vsvClosure =
       vsv === undefined
         ? 0
-        : hermite1(
+        : vsvOffsetRad(cal, n2c) +
+          hermite1(
             vsv.points.map((p) => p.n2CorrectedPercent),
             vsv.points.map((p) => p.closure),
             clamp(

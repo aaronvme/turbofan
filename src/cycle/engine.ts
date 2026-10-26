@@ -54,6 +54,7 @@ import { LPC_MAP } from './maps/lpc';
 import { LPT_MAP } from './maps/lpt';
 import { at } from './at';
 import { newton } from './newton';
+import { PART_POWER_FIT } from './partPowerFit';
 
 const T_STD = 288.15;
 const P_STD = 101325;
@@ -110,6 +111,42 @@ export interface CycleCalibration {
     readonly openBelowN2cPercent: number;
     readonly closedAboveN2cPercent: number;
   };
+  /** The part-power mechanisms of D3-11 (PartPowerCalibration); none acts at the design point. */
+  readonly partPower: PartPowerCalibration;
+}
+
+/**
+ * D3-11: part-power mechanisms, each zero at the design point and bounded in src/cycle/partPower.ts
+ * (PART_POWER_PARAMETERS, with the reason for each bound; ENGINE_FACTS "Part-power calibration
+ * (D3-11)"). tools/cycle/fit-part-power.ts fits them to C10 and C11 together.
+ */
+export interface PartPowerCalibration {
+  /**
+   * Fan isentropic efficiency loss (both streams: the core stream keeps its design ratio to the
+   * tip) at corrected speeds at or below partSpeedKnee, ramped linearly to zero at design speed.
+   * It is the loss at the design efficiency's level; the map efficiency is scaled by
+   * (1 - loss / eta_design), so a point that is already poor (near choke) loses in proportion
+   * and no efficiency goes negative.
+   */
+  readonly fanEfficiencyLoss: number;
+  /** The same for the booster, on its own corrected speed. */
+  readonly boosterEfficiencyLoss: number;
+  /** Corrected speed fraction below which the part-speed losses are fully in. */
+  readonly partSpeedKnee: number;
+  /**
+   * LPT Reynolds lapse: at the design efficiency's level (1 - eta) grows by the factor
+   * (Re / Re_design)^-n, with Re ~ P45 / (sqrt(T45) mu(T45)) at the turbine inlet (a fixed
+   * corrected point); the map efficiency is scaled by the same relative amount.
+   */
+  readonly lptReynoldsExponent: number;
+  /**
+   * HPC VSV setting relative to the schedule the HPC map was made with, rad (positive = more
+   * closed), piecewise linear in corrected N2 (%) through these knots, constant beyond them.
+   */
+  readonly vsvOffsetN2cPercent: readonly number[];
+  readonly vsvOffsetRad: readonly number[];
+  /** Fractional HPC corrected-flow loss per rad of extra closure (vsvFlowSensitivity). */
+  readonly vsvFlowLossPerRad: number;
 }
 
 const dp = ENGINE_DEFINITION.designPoint;
@@ -140,6 +177,15 @@ export const W0_CALIBRATION: CycleCalibration = {
   mechanicalLossSpeedExponent: 1,
   clearanceEfficiencyLoss: { hpc: 0, hpt: 0 },
   vbv: { maxFraction: 0, openBelowN2cPercent: 70, closedAboveN2cPercent: 85 },
+  partPower: {
+    fanEfficiencyLoss: 0,
+    boosterEfficiencyLoss: 0,
+    partSpeedKnee: 0.875,
+    lptReynoldsExponent: 0,
+    vsvOffsetN2cPercent: [60, 85, 95],
+    vsvOffsetRad: [0, 0, 0],
+    vsvFlowLossPerRad: 0,
+  },
 };
 
 /**
@@ -172,6 +218,38 @@ export const CYCLE_CALIBRATION: CycleCalibration = {
     openBelowN2cPercent: factValue('vbvOpenBelowN2c'),
     closedAboveN2cPercent: factValue('vbvClosedAboveN2c'),
   },
+  // D3-11: the part-power mechanisms are implemented but off in the reference calibration. Their
+  // bounded fit (PART_POWER_FIT_CALIBRATION below) meets C10 but not C11 and costs the 33.73(a)
+  // ground-idle slam its HPC surge margin (docs/handoffs/w1-cycle-calib-2.md): adopting it is an
+  // orchestrator decision. The VSV flow sensitivity is set so that an offset, once fitted, acts.
+  partPower: {
+    ...W0_CALIBRATION.partPower,
+    vsvFlowLossPerRad: vsvFlowSensitivity(ENGINE_DEFINITION),
+  },
+};
+
+/**
+ * D3-11: CYCLE_CALIBRATION with the bounded least-squares part-power fit of
+ * tools/cycle/fit-part-power.ts (src/cycle/partPowerFit.ts): the VBV schedule, the HPC VSV offset
+ * from the map's schedule, the fan and booster part-speed losses, the LPT Reynolds lapse, and the
+ * EGT probe share re-derived to the measured 855 C (W0C-I6). Not the reference calibration; see
+ * the comment in CYCLE_CALIBRATION.
+ */
+export const PART_POWER_FIT_CALIBRATION: CycleCalibration = {
+  ...CYCLE_CALIBRATION,
+  egtProbeLptWorkFraction: PART_POWER_FIT.egtProbeLptWorkFraction,
+  vbv: {
+    maxFraction: PART_POWER_FIT.vbvMaxFraction,
+    openBelowN2cPercent: PART_POWER_FIT.vbvOpenBelowN2cPercent,
+    closedAboveN2cPercent: PART_POWER_FIT.vbvClosedAboveN2cPercent,
+  },
+  partPower: {
+    ...CYCLE_CALIBRATION.partPower,
+    fanEfficiencyLoss: PART_POWER_FIT.fanEfficiencyLoss,
+    boosterEfficiencyLoss: PART_POWER_FIT.boosterEfficiencyLoss,
+    lptReynoldsExponent: PART_POWER_FIT.lptReynoldsExponent,
+    vsvOffsetRad: [PART_POWER_FIT.vsvOffsetLowRad, PART_POWER_FIT.vsvOffsetMidRad, 0],
+  },
 };
 
 export interface OperatingConditions {
@@ -193,6 +271,57 @@ export function vbvScheduleFraction(cal: CycleCalibration, n2CorrectedPercent: n
     (v.closedAboveN2cPercent - n2CorrectedPercent) /
     (v.closedAboveN2cPercent - v.openBelowN2cPercent);
   return v.maxFraction * Math.min(1, Math.max(0, open));
+}
+
+/** Piecewise linear through (xs, ys), constant beyond the end knots. */
+function piecewiseLinear(xs: readonly number[], ys: readonly number[], x: number): number {
+  if (x <= at(xs, 0)) return at(ys, 0);
+  for (let i = 1; i < xs.length; i++) {
+    const x1 = at(xs, i);
+    if (x <= x1) {
+      const x0 = at(xs, i - 1);
+      return at(ys, i - 1) + ((at(ys, i) - at(ys, i - 1)) * (x - x0)) / (x1 - x0);
+    }
+  }
+  return at(ys, ys.length - 1);
+}
+
+/** D3-11: the HPC VSV offset from the map's own schedule at a corrected N2 (%), rad. */
+export function vsvOffsetRad(cal: CycleCalibration, n2CorrectedPercent: number): number {
+  const pp = cal.partPower;
+  return piecewiseLinear(pp.vsvOffsetN2cPercent, pp.vsvOffsetRad, n2CorrectedPercent);
+}
+
+/**
+ * Fractional loss of HPC corrected flow per rad of extra VSV closure, from the velocity triangle
+ * of the inlet guide vane and rotor 1 at mid-span: at a fixed rotor-1 incidence and blade speed U,
+ * c_x = U / (tan(beta1) + tan(alpha1)), with alpha1 the IGV exit (pre-swirl) angle and beta1 the
+ * rotor-1 inlet angle, so -d ln(c_x) / d alpha1 = sec^2(alpha1) / (tan(beta1) + tan(alpha1)).
+ */
+export function vsvFlowSensitivity(def: EngineDefinition): number {
+  const row = (id: string) => {
+    const r = def.bladeRows.find((b) => b.id === id);
+    if (r === undefined) throw new Error(`vsvFlowSensitivity: no blade row ${id}`);
+    return r;
+  };
+  const alpha1 = Math.abs(row('hpc-igv').exitMetalAngle.mid);
+  const beta1 = Math.abs(row('hpc-r1').inletMetalAngle.mid);
+  return 1 / Math.cos(alpha1) ** 2 / (Math.tan(beta1) + Math.tan(alpha1));
+}
+
+/** Part-speed loss ramp: 1 at or below the knee, 0 at or above design speed, linear between. */
+function partSpeedRamp(knee: number, speedFraction: number): number {
+  return Math.min(1, Math.max(0, (1 - speedFraction) / (1 - knee)));
+}
+
+/** Dynamic viscosity of air, Pa s (Sutherland, 1.458e-6 T^1.5 / (T + 110.4)); ratios only. */
+export function sutherlandViscosity(tK: number): number {
+  return (1.458e-6 * tK ** 1.5) / (tK + 110.4);
+}
+
+/** Reynolds number index at a fixed corrected point, up to a constant: P / (sqrt(T) mu(T)). */
+export function reynoldsIndex(ptPa: number, ttK: number): number {
+  return ptPa / (Math.sqrt(ttK) * sutherlandViscosity(ttK));
 }
 
 /** Corrected N2 the FADEC schedules on, % of the 100 % speed (corrected to the inlet T2). */
@@ -235,6 +364,9 @@ export interface EnginePoint {
   readonly mechanicalLossW: { readonly hp: number; readonly lp: number };
   /** VBV dump, kg/s (booster exit to the bypass duct). */
   readonly vbvFlowKgPerS: number;
+  /** D3-11: HPC VSV offset from the map's schedule, rad, and the resulting flow factor. */
+  readonly vsvOffsetRad: number;
+  readonly hpcVsvFlowFactor: number;
   /** Shaft power surplus after compressors, extraction and mechanical losses, W. */
   readonly netPowerHpW: number;
   readonly netPowerLpW: number;
@@ -279,6 +411,8 @@ export interface DesignData {
     readonly fpBypassDuct: number;
     readonly fpCoreNozzle: number;
     readonly fpCombustor: number;
+    /** Design Reynolds number index of the LPT inlet (reynoldsIndex at P45, T45). */
+    readonly reLpt: number;
   };
 }
 
@@ -415,9 +549,20 @@ function gasPath(
   const f0 = freeStream(c.ambient);
   const s2: Flow = { tt: f0.tt, pt: f0.pt };
   const theta = (t: number) => Math.sqrt(t / T_STD);
+  const sc = ties.scale;
 
   const nFan = n1Rpm / theta(s2.tt) / ties.corrSpeed.fan;
-  const fan = compressorPoint(maps.fan, nFan, rFan);
+  const pp = cal.partPower;
+  // D3-11 part-speed efficiency trends (zero at design speed)
+  const fanMap = compressorPoint(maps.fan, nFan, rFan);
+  const fan = {
+    ...fanMap,
+    efficiency:
+      fanMap.efficiency *
+      (1 -
+        (pp.fanEfficiencyLoss * partSpeedRamp(pp.partSpeedKnee, nFan)) /
+          cal.efficiencies.fanBypass),
+  };
   const w2 = (fan.correctedFlow * (s2.pt / P_STD)) / theta(s2.tt);
   const w13 = (w2 * bpr) / (1 + bpr);
   const w21 = w2 / (1 + bpr);
@@ -429,10 +574,19 @@ function gasPath(
   );
 
   const nLpc = n1Rpm / theta(s21.tt) / ties.corrSpeed.lpc;
-  const lpc = compressorPoint(maps.lpc, nLpc, rLpc);
+  const lpcMap = compressorPoint(maps.lpc, nLpc, rLpc);
+  const lpc = {
+    ...lpcMap,
+    efficiency:
+      lpcMap.efficiency *
+      (1 -
+        (pp.boosterEfficiencyLoss * partSpeedRamp(pp.partSpeedKnee, nLpc)) /
+          cal.efficiencies.booster),
+  };
   const wc21 = (w21 * theta(s21.tt)) / (s21.pt / P_STD);
   const s24 = compress(s21, lpc.pressureRatio, lpc.efficiency);
-  const vbv = c.vbvFraction ?? vbvScheduleFraction(cal, correctedN2Percent(cal, n2Rpm, s2.tt));
+  const n2c = correctedN2Percent(cal, n2Rpm, s2.tt);
+  const vbv = c.vbvFraction ?? vbvScheduleFraction(cal, n2c);
   const wVbv = vbv * w21;
   const w25 = w21 - wVbv;
 
@@ -445,6 +599,11 @@ function gasPath(
     efficiency: hpcMap.efficiency - cal.clearanceEfficiencyLoss.hpc * clearance,
   };
   const wc25 = (w25 * theta(s24.tt)) / (s24.pt / P_STD);
+  // D3-11: a VSV setting off the map's own schedule shifts the speed line in flow. The point and
+  // its stall line stay in the map's frame (surge margins, the Greitzer cubic); only the
+  // continuity residual sees the physical flow.
+  const dVsv = vsvOffsetRad(cal, n2c);
+  const vsvFlowFactor = 1 - pp.vsvFlowLossPerRad * dVsv;
   const s3 = compress(s24, hpc.pressureRatio, hpc.efficiency);
 
   const wBleed = c.customerBleedFraction * w25;
@@ -461,7 +620,6 @@ function gasPath(
   // from the root cannot drive a duct's exit pressure negative
   const coldLoss = (design: number, w: number, tt: number, pt: number, ref: number): number =>
     Math.min(0.5, design * ((w * Math.sqrt(tt)) / pt / ref) ** 2);
-  const sc = ties.scale;
   const pt4 =
     s3.pt * (1 - coldLoss(cal.combustorPressureLossFraction, wComb, s3.tt, s3.pt, sc.fpCombustor));
   const w41 = w4 + wCool;
@@ -479,7 +637,16 @@ function gasPath(
   const s45 = expand(s41, prHpt, hpt.efficiency, far41);
 
   const nLpt = n1Rpm / Math.sqrt(s45.tt) / ties.corrSpeed.lpt;
-  const lpt = turbinePoint(maps.lpt, nLpt, prLpt);
+  const lptMap = turbinePoint(maps.lpt, nLpt, prLpt);
+  // D3-11: Reynolds lapse of the LPT (the scaled map holds the design Reynolds number)
+  // (floored so that a start from standstill cannot blow the factor up)
+  const reRatio = Math.max(1e-3, reynoldsIndex(s45.pt, s45.tt) / sc.reLpt);
+  const etaLpt = cal.efficiencies.lpt;
+  const lpt = {
+    ...lptMap,
+    efficiency:
+      lptMap.efficiency * (1 - ((1 - etaLpt) / etaLpt) * (reRatio ** -pp.lptReynoldsExponent - 1)),
+  };
   const fp45 = (w41 * Math.sqrt(s45.tt)) / s45.pt;
   const s5 = expand(s45, prLpt, lpt.efficiency, far41);
 
@@ -534,7 +701,7 @@ function gasPath(
   const h5 = h45 - s5.dh;
   const residuals = [
     (lpc.correctedFlow - wc21) / sc.wcLpc,
-    (hpc.correctedFlow - wc25) / sc.wcHpc,
+    (hpc.correctedFlow * vsvFlowFactor - wc25) / sc.wcHpc,
     (hpt.flowParameter - fp41) / sc.fpHpt,
     (lpt.flowParameter - fp45) / sc.fpLpt,
     (w8 - w41) / sc.wCore,
@@ -581,6 +748,8 @@ function gasPath(
     power,
     mechanicalLossW,
     vbvFlowKgPerS: wVbv,
+    vsvOffsetRad: dVsv,
+    hpcVsvFlowFactor: vsvFlowFactor,
     netPowerHpW,
     netPowerLpW,
     coreNozzleChoked: n8.choked,
@@ -686,6 +855,7 @@ function designCycle(cal: CycleCalibration, fpr: number): DesignCycle {
         fpBypassDuct: (w13 * Math.sqrt(s13.tt)) / s13.pt,
         fpCoreNozzle: (w41 * Math.sqrt(s5.tt)) / s5.pt,
         fpCombustor: (wComb * Math.sqrt(s3.tt)) / s3.pt,
+        reLpt: reynoldsIndex(s45.pt, s45.tt),
       },
       areas: { core: a8, bypass: a18 },
     },
