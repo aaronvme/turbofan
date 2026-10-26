@@ -56,6 +56,8 @@ describe('mock cycle model: labelled, deterministic, plain data', () => {
     const m = createMockCycle(def);
     expect(MOCK_LABEL).toBe('MOCK');
     expect(m.label).toBe('MOCK');
+    // W0C-I3: CycleModel.source is what the sim stamps into SimSnapshot.sources.cycle
+    expect(m.source).toBe('mock');
     expect(m.definition).toBe(def);
   });
 

@@ -62,6 +62,8 @@ function texel(field: CpuFieldTextures, x: number, rr: number) {
 describe('mock flow field: layout and encoding (D0-4)', () => {
   it('is labelled MOCK and fills the exact FlowField layout', () => {
     expect(takeoff.label).toBe('MOCK');
+    // W0C-I3: the provenance travels with the data, so the GPU FlowField built from it keeps it
+    expect(takeoff.source).toBe('mock');
     expect(takeoff.version).toBe(7);
     expect(takeoff.reference).toEqual(REF);
     expect(takeoff.extents).toEqual(FIELD_EXTENTS);

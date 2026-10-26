@@ -11,9 +11,15 @@ import {
   nextSnapshot,
   validateSimCommand,
   validateSimCommandMessage,
+  SNAPSHOT_ROOTS,
+  snapshotHasMockData,
   type SimClock,
   type SnapshotParts,
 } from '../../../src/contracts/sim';
+import { validateScenario } from '../../../src/contracts/scenario';
+import { ISA_SLS } from '../../../src/contracts/ambient';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
+import { mockSteadyState } from '../../../src/mocks/mockCycle';
 import { SAMPLE_COMMANDS, sampleSnapshot, sampleSnapshotParts } from './fixtures/snapshotFixture';
 
 describe('the sim/UI boundary is structured-clone-safe plain data (D0-2)', () => {
@@ -144,6 +150,68 @@ describe('snapshots are immutable and versioned', () => {
     const obj = { a: shared, b: shared };
     expect(deepFreeze(obj)).toBe(obj);
     expect(Object.isFrozen(obj.a.v)).toBe(true);
+  });
+});
+
+describe('W0C-I3: snapshots carry the provenance of their data (MOCK badge under D0-2)', () => {
+  const mockParts = (): SnapshotParts => ({
+    ...sampleSnapshotParts(),
+    cycle: mockSteadyState(ENGINE_DEFINITION, 0.5),
+    sources: { cycle: 'mock', flow: 'mock' },
+  });
+
+  it('a snapshot built from the MOCK cycle says so, so the UI can label it', () => {
+    const s = nextSnapshot(null, mockParts());
+    expect(s.sources).toEqual({ cycle: 'mock', flow: 'mock' });
+    expect(snapshotHasMockData(s)).toBe(true);
+    const real = nextSnapshot(s, { ...mockParts(), sources: { cycle: 'model', flow: 'solver' } });
+    expect(snapshotHasMockData(real)).toBe(false);
+    const half = nextSnapshot(s, { ...mockParts(), sources: { cycle: 'model', flow: 'mock' } });
+    expect(snapshotHasMockData(half)).toBe(true);
+    const noFlow = nextSnapshot(s, { ...mockParts(), sources: { cycle: 'mock', flow: 'none' } });
+    expect(snapshotHasMockData(noFlow)).toBe(true);
+    expect(snapshotHasMockData({ ...real, sources: { cycle: 'model', flow: 'none' } })).toBe(false);
+  });
+
+  it('bumps the schema version for the new fields', () => {
+    expect(SIM_SCHEMA_VERSION).toBe(2);
+    expect(sampleSnapshot().schemaVersion).toBe(SIM_SCHEMA_VERSION);
+  });
+
+  it('makes sources a snapshot root that scenario paths can address', () => {
+    expect(SNAPSHOT_ROOTS).toContain('sources');
+    const scenario = {
+      id: 'src',
+      title: 'sources',
+      description: '',
+      initial: 'groundIdle' as const,
+      ambient: ISA_SLS,
+      durationS: 1,
+      timeline: [],
+      outcomes: [
+        {
+          id: 'model',
+          description: 'the real cycle model is running',
+          window: { kind: 'at' as const, atS: 0 },
+          predicate: {
+            kind: 'compare' as const,
+            path: ['sources', 'cycle'],
+            op: '==' as const,
+            value: 'model',
+          },
+          thresholdId: null,
+        },
+      ],
+    };
+    expect(validateScenario(scenario, sampleSnapshot())).toEqual([]);
+  });
+
+  it('refuses a snapshot whose sources are missing or unknown', () => {
+    const bad = (sources: unknown) =>
+      nextSnapshot(null, { ...sampleSnapshotParts(), sources } as unknown as SnapshotParts);
+    expect(() => bad(undefined)).toThrow(/sources/);
+    expect(() => bad({ cycle: 'MOCK', flow: 'none' })).toThrow(/sources\.cycle "MOCK"/);
+    expect(() => bad({ cycle: 'model', flow: 'gpu' })).toThrow(/sources\.flow "gpu"/);
   });
 });
 
