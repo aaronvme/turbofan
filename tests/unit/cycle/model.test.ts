@@ -67,6 +67,8 @@ describe('C9: Greitzer lumped compression system', () => {
   });
 });
 
+/** Simulation tests take 1-10 s each; Stryker's instrumented runs are several times slower. */
+const TIMEOUT_MS = 600_000;
 const refs = { n1Rpm: factValue('n1ReferenceRpm'), n2Rpm: factValue('n2ReferenceRpm') };
 const inputs = (over: Partial<CycleInputs>): CycleInputs => ({
   ...DEFAULT_CYCLE_INPUTS,
@@ -92,7 +94,7 @@ function run(
   return out;
 }
 
-describe('transient model: shaft dynamics and FADEC', { timeout: 120_000 }, () => {
+describe('transient model: shaft dynamics and FADEC', { timeout: TIMEOUT_MS }, () => {
   it('spool inertias are positive estimates (LP larger than HP)', () => {
     expect(SPOOL_INERTIA.lpKgM2).toBeGreaterThan(SPOOL_INERTIA.hpKgM2);
     expect(SPOOL_INERTIA.hpKgM2).toBeGreaterThan(0);
@@ -206,7 +208,7 @@ describe('transient model: shaft dynamics and FADEC', { timeout: 120_000 }, () =
   });
 });
 
-describe('start sequence', { timeout: 120_000 }, () => {
+describe('start sequence', { timeout: TIMEOUT_MS }, () => {
   function start(fuelScale = 1, ignition: CycleInputs['ignition'] = 'auto') {
     const m = createCycleModel({ startFuelScale: fuelScale });
     m.reset('shutdown', ISA_SLS);

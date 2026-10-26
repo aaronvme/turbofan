@@ -16,6 +16,8 @@ import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 import { factValue } from '../../../src/engine/facts';
 import { createCycleModel } from '../../../src/cycle/model';
 
+/** Simulation tests take 1-10 s each; Stryker's instrumented runs are several times slower. */
+const TIMEOUT_MS = 600_000;
 const refs = { n1Rpm: factValue('n1ReferenceRpm'), n2Rpm: factValue('n2ReferenceRpm') };
 const inputs = (over: Partial<CycleInputs> = {}): CycleInputs => ({
   ...DEFAULT_CYCLE_INPUTS,
@@ -53,7 +55,7 @@ describe('CycleModel.step input checks', () => {
   });
 });
 
-describe('FADEC limiters and schedules', { timeout: 120_000 }, () => {
+describe('FADEC limiters and schedules', { timeout: TIMEOUT_MS }, () => {
   it('a hot day above the flat rating rebuilds the schedules: the N1 limiter caps the lever', () => {
     const m = createCycleModel();
     m.reset('groundIdle', ISA_SLS);
@@ -153,7 +155,7 @@ describe('FADEC limiters and schedules', { timeout: 120_000 }, () => {
   });
 });
 
-describe('flameout, relight and shutdown', { timeout: 120_000 }, () => {
+describe('flameout, relight and shutdown', { timeout: TIMEOUT_MS }, () => {
   it('auto ignition relights a flameout after the light-off delay and recovers to idle', () => {
     const m = createCycleModel();
     m.reset('groundIdle', ISA_SLS);
@@ -214,7 +216,7 @@ describe('flameout, relight and shutdown', { timeout: 120_000 }, () => {
   });
 });
 
-describe('start aborts', { timeout: 120_000 }, () => {
+describe('start aborts', { timeout: TIMEOUT_MS }, () => {
   it('releasing the starter while cranking aborts the start', () => {
     const m = createCycleModel();
     m.reset('shutdown', ISA_SLS);
@@ -250,7 +252,7 @@ describe('start aborts', { timeout: 120_000 }, () => {
   });
 });
 
-describe('surge episode', { timeout: 120_000 }, () => {
+describe('surge episode', { timeout: TIMEOUT_MS }, () => {
   it('cuts the fuel at onset, reports a negative HPC margin, and ends after the episode', () => {
     const m = createCycleModel();
     m.reset('groundIdle', ISA_SLS);
