@@ -82,9 +82,27 @@ describe('RollingPassStats', () => {
 
   it('the total is the median of per-frame totals, not the sum of medians', () => {
     const r = new RollingPassStats(3);
-    r.push(sumByGroup([{ label: 'Opaque', ms: 1 }, { label: 'AO', ms: 5 }]), 0);
-    r.push(sumByGroup([{ label: 'Opaque', ms: 5 }, { label: 'AO', ms: 1 }]), 0);
-    r.push(sumByGroup([{ label: 'Opaque', ms: 3 }, { label: 'AO', ms: 3 }]), 0);
+    r.push(
+      sumByGroup([
+        { label: 'Opaque', ms: 1 },
+        { label: 'AO', ms: 5 },
+      ]),
+      0,
+    );
+    r.push(
+      sumByGroup([
+        { label: 'Opaque', ms: 5 },
+        { label: 'AO', ms: 1 },
+      ]),
+      0,
+    );
+    r.push(
+      sumByGroup([
+        { label: 'Opaque', ms: 3 },
+        { label: 'AO', ms: 3 },
+      ]),
+      0,
+    );
     const m = r.medians();
     expect(m.gpu.opaque).toBe(3);
     expect(m.gpu.gtao).toBe(3);
