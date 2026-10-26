@@ -306,8 +306,35 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
       break;
   }
   m.maskNode = outsideWedge(u);
+  m.aoNode = float(CAVITY[kind]);
   return m;
 }
+
+/**
+ * Indirect-light occlusion per part family. The studio light is image based and has no
+ * visibility, so surfaces deep inside the nacelle or the core would be lit by the whole
+ * environment and read washed out in the cutaway; GTAO only covers the small scale. These
+ * factors stand in for the cavity occlusion (direct light keeps the key's shadow map).
+ */
+const CAVITY: Readonly<Record<PartMaterial, number>> = {
+  inletLip: 1,
+  nacellePaint: 1,
+  acousticLiner: 0.5,
+  fanCase: 0.5,
+  splitter: 0.75,
+  cowlPaint: 0.9,
+  compressorCase: 0.5,
+  combustorCase: 0.5,
+  turbineCase: 0.5,
+  exhaust: 0.85,
+  plug: 0.9,
+  spinner: 0.85,
+  drum: 0.5,
+  disk: 0.45,
+  innerCase: 0.5,
+  shaft: 0.45,
+  combustorLiner: 0.45,
+};
 
 /** The painted spiral, in the spinner's frame: a stripe winding 0.9 turn from nose to base. */
 function spinnerSpiral(): Node<'vec3'> {
@@ -326,28 +353,29 @@ function spinnerSpiral(): Node<'vec3'> {
 
 /** Section colours (LD-4): one red-orange family, darker for paint and composites. */
 const CAP_TINT: Readonly<Record<PartMaterial, readonly [number, number, number]>> = {
-  inletLip: [0.62, 0.14, 0.06],
-  nacellePaint: [0.42, 0.1, 0.05],
-  acousticLiner: [0.32, 0.09, 0.05],
-  fanCase: [0.5, 0.12, 0.05],
-  splitter: [0.62, 0.14, 0.06],
-  cowlPaint: [0.42, 0.1, 0.05],
-  compressorCase: [0.62, 0.14, 0.06],
-  combustorCase: [0.7, 0.22, 0.05],
-  turbineCase: [0.7, 0.22, 0.05],
-  exhaust: [0.66, 0.2, 0.06],
-  plug: [0.66, 0.2, 0.06],
-  spinner: [0.42, 0.1, 0.05],
-  drum: [0.62, 0.14, 0.06],
-  disk: [0.62, 0.14, 0.06],
-  innerCase: [0.62, 0.14, 0.06],
-  shaft: [0.55, 0.12, 0.05],
-  combustorLiner: [0.7, 0.3, 0.08],
+  inletLip: [0.46, 0.08, 0.03],
+  nacellePaint: [0.3, 0.06, 0.025],
+  acousticLiner: [0.24, 0.05, 0.025],
+  fanCase: [0.36, 0.07, 0.03],
+  splitter: [0.46, 0.08, 0.03],
+  cowlPaint: [0.3, 0.06, 0.025],
+  compressorCase: [0.46, 0.08, 0.03],
+  combustorCase: [0.52, 0.14, 0.03],
+  turbineCase: [0.52, 0.14, 0.03],
+  exhaust: [0.5, 0.12, 0.035],
+  plug: [0.5, 0.12, 0.035],
+  spinner: [0.3, 0.06, 0.025],
+  drum: [0.46, 0.08, 0.03],
+  disk: [0.46, 0.08, 0.03],
+  innerCase: [0.46, 0.08, 0.03],
+  shaft: [0.4, 0.07, 0.03],
+  combustorLiner: [0.55, 0.2, 0.04],
 };
 
 function capMaterial(kind: PartMaterial): NodeMaterial {
   const [r, g, b] = CAP_TINT[kind];
   const m = new MeshStandardNodeMaterial({ metalness: 0, roughness: 0.6 });
+  m.aoNode = float(0.7);
   // 45-degree hatching every 6 mm in the section plane (cap uv is (x, r) in metres),
   // anti-aliased, fading to the mean tone where the lines are finer than a pixel
   const s = uv().x.add(uv().y).div(0.006);
@@ -477,6 +505,8 @@ export function createMaterials(u: LookUniforms): MaterialSet {
           Number(object?.userData.thetaMax ?? 0),
         );
         m.positionNode = bladeHide(u, rowAngle, tMin, tMax);
+        // inside the nacelle (fan) or the core (every other row): see CAVITY
+        m.aoNode = float(kind === 'fanBlade' ? 0.62 : 0.5);
         if (spool !== null) {
           // the rotor pass records the angle this spool turns while the shutter is open and
           // the row's blade pitch (the image is periodic in it: see src/render/post.ts)
