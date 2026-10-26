@@ -606,6 +606,7 @@ export function createMockCycle(definition: EngineDefinition): MockCycleModel {
   let current = buildState(ctx, s);
   return {
     label: MOCK_LABEL,
+    source: 'mock',
     definition,
     reset(initial: CycleInitialCondition, ambient: AmbientConditions = ISA_SLS): CycleState {
       s = initialInternal(ctx, initial, ambient);

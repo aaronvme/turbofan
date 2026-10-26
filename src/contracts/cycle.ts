@@ -163,11 +163,20 @@ export const CYCLE_INITIAL_CONDITIONS = [
 ] as const satisfies readonly CycleInitialCondition[];
 
 /**
+ * Where cycle data comes from: the W1 transient model, or the labelled stand-in in src/mocks.
+ * The sim copies CycleModel.source into SimSnapshot.sources.cycle so that the UI, which only
+ * sees snapshots (D0-2), can show the MOCK badge (W0C-I3).
+ */
+export type CycleSource = 'mock' | 'model';
+export const CYCLE_SOURCES = ['mock', 'model'] as const satisfies readonly CycleSource[];
+
+/**
  * The transient cycle model. step() integrates the shaft dynamics and controller over dtS
  * seconds of simulation time and returns the new state; it never mutates a returned state.
  */
 export interface CycleModel {
   readonly definition: EngineDefinition;
+  readonly source: CycleSource;
   reset(initial: CycleInitialCondition, ambient?: AmbientConditions): CycleState;
   step(dtS: number, inputs: CycleInputs): CycleState;
   /** Scenario hook: forces a surge or a flameout at the next step. */

@@ -242,6 +242,14 @@ export function texelIndexAt(
   return { i, j };
 }
 
+/**
+ * Where field data comes from: the W2 solver, or the labelled stand-in in src/mocks. It travels
+ * with the data (CpuFlowField -> FlowField -> SimSnapshot.sources.flow) so that a MOCK raster
+ * uploaded to the GPU keeps its label (W0C-I3).
+ */
+export type FlowFieldSource = 'mock' | 'solver';
+export const FLOW_FIELD_SOURCES = ['mock', 'solver'] as const satisfies readonly FlowFieldSource[];
+
 /** CPU copy of one extent's two textures: raw f16 bits, exactly what writeTexture uploads. */
 export interface CpuFieldTextures {
   readonly extent: FieldExtent;
@@ -250,6 +258,7 @@ export interface CpuFieldTextures {
 }
 
 export interface CpuFlowField {
+  readonly source: FlowFieldSource;
   readonly reference: FieldReference;
   readonly near: CpuFieldTextures;
   readonly far: CpuFieldTextures;
@@ -262,6 +271,7 @@ export interface FieldTexturePair {
 }
 
 export interface FlowField {
+  readonly source: FlowFieldSource;
   readonly reference: FieldReference;
   readonly extents: Readonly<Record<FieldExtentId, FieldExtent>>;
   readonly near: FieldTexturePair;

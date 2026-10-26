@@ -7,15 +7,24 @@ import { validateAmbient, type AmbientConditions } from './ambient';
 import {
   CYCLE_FAULTS,
   CYCLE_INITIAL_CONDITIONS,
+  CYCLE_SOURCES,
   IGNITION_MODES,
   MAX_CUSTOMER_BLEED_FRACTION,
   type CycleFault,
   type CycleInitialCondition,
   type CycleInputs,
+  type CycleSource,
   type CycleState,
   type IgnitionMode,
 } from './cycle';
-import { SOLVER_MODES, type FlowStepStats, type SolverMode, type StationReduction } from './flow';
+import {
+  FLOW_FIELD_SOURCES,
+  SOLVER_MODES,
+  type FlowFieldSource,
+  type FlowStepStats,
+  type SolverMode,
+  type StationReduction,
+} from './flow';
 import type { ScenarioStatus } from './scenario';
 import {
   VIEW_MODES,
@@ -25,7 +34,8 @@ import {
   type ViewMode,
 } from './ui';
 
-export const SIM_SCHEMA_VERSION = 1 as const;
+/** 2: SimSnapshot.sources, FlowStatus.status/error, OutcomeResult.samples (W0C-I2/I3/I5). */
+export const SIM_SCHEMA_VERSION = 2 as const;
 
 // ---------------------------------------------------------------------------------------
 // Clock
@@ -66,6 +76,22 @@ export interface FlowStatus {
   readonly reduction: StationReduction | null;
 }
 
+/** The flow part's provenance: 'none' while no field is shown (no WebGPU, or not started). */
+export type FlowSource = 'none' | FlowFieldSource;
+export const FLOW_SOURCES = [
+  'none',
+  ...FLOW_FIELD_SOURCES,
+] as const satisfies readonly FlowSource[];
+
+/**
+ * Provenance of the data in a snapshot. Under D0-2 the UI sees only snapshots, so this is how
+ * it knows to show the MOCK badge the mocks require (W0C-I3).
+ */
+export interface SnapshotSources {
+  readonly cycle: CycleSource;
+  readonly flow: FlowSource;
+}
+
 export interface SimSnapshot {
   readonly schemaVersion: typeof SIM_SCHEMA_VERSION;
   /** Increments by one per published snapshot. */
@@ -80,6 +106,7 @@ export interface SimSnapshot {
   readonly scenario: ScenarioStatus;
   /** Echo of the render state the renderer is using. */
   readonly view: RenderState;
+  readonly sources: SnapshotSources;
 }
 
 export type SnapshotParts = Omit<SimSnapshot, 'schemaVersion' | 'version'>;
@@ -95,7 +122,13 @@ export const SNAPSHOT_ROOTS = [
   'flow',
   'scenario',
   'view',
+  'sources',
 ] as const satisfies readonly (keyof SimSnapshot)[];
+
+/** True when any part of the snapshot comes from a mock: the UI must label it MOCK. */
+export function snapshotHasMockData(snapshot: Pick<SimSnapshot, 'sources'>): boolean {
+  return snapshot.sources.cycle === 'mock' || snapshot.sources.flow === 'mock';
+}
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
@@ -165,6 +198,19 @@ export function findNonPlainData(value: unknown): string | null {
   return visit(value, '');
 }
 
+function sourcesProblems(sources: unknown): string[] {
+  if (!isRecord(sources)) return ['sources must be an object'];
+  const problems: string[] = [];
+  const check = (key: 'cycle' | 'flow', list: readonly string[]): void => {
+    const v = sources[key];
+    if (!(typeof v === 'string' && list.includes(v)))
+      problems.push(`sources.${key} "${String(v)}" must be one of ${list.join(', ')}`);
+  };
+  check('cycle', CYCLE_SOURCES);
+  check('flow', FLOW_SOURCES);
+  return problems;
+}
+
 /** Freezes value and everything reachable from it; returns the same object. */
 export function deepFreeze<T>(value: T): T {
   const seen = new WeakSet<object>();
@@ -185,6 +231,8 @@ export function deepFreeze<T>(value: T): T {
 export function nextSnapshot(previous: SimSnapshot | null, parts: SnapshotParts): SimSnapshot {
   const bad = findNonPlainData(parts);
   if (bad !== null) throw new Error(`snapshot is not plain data: ${bad}`);
+  const problems = sourcesProblems(parts.sources);
+  if (problems.length > 0) throw new Error(`snapshot ${problems.join('; ')}`);
   // stamped after the copy: SnapshotParts omits these keys only at the type level, and parts
   // spread from the previous snapshot still carry its version (W0C-I1)
   const snapshot: SimSnapshot = {
