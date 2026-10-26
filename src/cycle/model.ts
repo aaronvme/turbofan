@@ -421,7 +421,8 @@ class TurbofanCycleModel implements CycleModel {
       this.lit = false;
       this.flags = { ...this.flags, flameout: true };
       this.fuelOnTime = this.t;
-    } else if (this.pending === 'surge') {
+    } else if (this.pending === 'surge' && this.pct2() >= SUBIDLE_N2_PERCENT) {
+      // below the sub-idle speed the HPC is not pressurised: nothing to surge, the fault is dropped
       this.startSurge(prev, true);
     }
     this.pending = null;
@@ -593,7 +594,13 @@ class TurbofanCycleModel implements CycleModel {
     if (this.mode === 'shutdown' && this.n2 < 1) this.mode = 'off';
 
     // surge: beyond the surge line in the matched regime
-    if (this.surge === null && snap.hpc.surgeMarginFraction < 0) this.startSurge(snap, false);
+    if (
+      this.surge === null &&
+      snap.hpc.surgeMarginFraction < 0 &&
+      this.pct2() >= SUBIDLE_N2_PERCENT
+    ) {
+      this.startSurge(snap, false);
+    }
     if (this.surge !== null) {
       const ep = this.surge;
       const sys = this.surgeAt(snap, this.t < ep.forcedUntilS);
