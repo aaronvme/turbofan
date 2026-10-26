@@ -15,7 +15,8 @@ export function sampleSnapshotParts(): SnapshotParts {
     cycle: sampleCycleState(),
     inputs: { ...DEFAULT_CYCLE_INPUTS, throttleLever: 0.6, fuelLever: 'run' },
     flow: {
-      available: true,
+      status: 'running',
+      error: null,
       mode: 'tracking',
       stats: {
         iterationsThisStep: 5,
