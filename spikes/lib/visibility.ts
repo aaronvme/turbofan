@@ -1,6 +1,8 @@
-// Page visibility during a benchmark run. D0-1 wants Chrome in the foreground: when another
-// window covers it, Windows native occlusion tracking marks the page hidden and Chrome stops
-// rAF, which shows up as second-long frames and a collapsed iteration rate, not as slow GPU.
+// Page visibility during a benchmark run (D0-1 wants Chrome in the foreground). This catches a
+// page that really is hidden (minimized, another tab). It does NOT catch an occluded or
+// unfocused window under the harness: Playwright launches Chrome with
+// --disable-backgrounding-occluded-windows, so such a page stays "visible" while its rAF drops
+// to ~1 Hz (W0G-I1). spikes/lib/validity.ts judges that from the rAF rate.
 
 export interface VisibilityEvent {
   /** Absolute time (performance.timeOrigin + performance.now()), ms. */
