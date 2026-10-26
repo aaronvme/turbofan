@@ -1,0 +1,67 @@
+// Critic pass 2, w1/contracts-fix @3969af7. Each test pins the behaviour observed for a finding.
+// Run from a checkout of the branch (see vitest.probes.config.mjs).
+import { describe, expect, it } from 'vitest';
+import { nextSnapshot, sanitizeFlowStatus, findNonPlainData } from '../../../src/contracts/sim';
+import {
+  FIELD_EXTENTS,
+  fieldExtentDomainProblems,
+  minimumSolverDomain,
+} from '../../../src/contracts/flow';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
+import { mockSteadyState } from '../../../src/mocks/mockCycle';
+import { sampleSnapshotParts } from '../../../tests/unit/contracts/fixtures/snapshotFixture';
+
+const running = () => {
+  const parts = sampleSnapshotParts();
+  return { parts, flow: parts.flow };
+};
+
+describe('W1F-I1: solver reporting glitches', () => {
+  it('a lost device whose GPUDeviceLostInfo.message is empty makes nextSnapshot throw (publication stops)', () => {
+    const { parts, flow } = running();
+    const lost = { ...flow, status: 'lost' as const, error: '' };
+    expect(() => nextSnapshot(null, { ...parts, flow: lost })).toThrow(/must say why/);
+  });
+  it('a NaN GPU time alone (timestamp pair past the TDR bound) flips a running solver to diverged', () => {
+    const { flow } = running();
+    if (flow.stats === null) throw new Error('fixture has no stats');
+    const s = sanitizeFlowStatus({ ...flow, status: 'running', error: null, stats: { ...flow.stats, gpuTimeMs: Number.NaN } });
+    expect(s.status).toBe('diverged');
+    expect(s.stats?.gpuTimeMs).toBeNull();
+    expect(s.error).toMatch(/gpuTimeMs/);
+  });
+  it('a NaN residual is diverged and the snapshot is still published (W0C-I5 fixed)', () => {
+    const { parts, flow } = running();
+    if (flow.stats === null) throw new Error('fixture has no stats');
+    const snap = nextSnapshot(null, { ...parts, flow: { ...flow, stats: { ...flow.stats, residualDensityL2: Number.NaN } } });
+    expect(snap.flow.status).toBe('diverged');
+    expect(snap.version).toBe(1);
+  });
+});
+
+describe('W0C-I3: provenance is declared by the caller', () => {
+  it('a mock cycle state published with sources.cycle = model is accepted (nothing ties the two)', () => {
+    const parts = sampleSnapshotParts();
+    const snap = nextSnapshot(null, { ...parts, cycle: mockSteadyState(ENGINE_DEFINITION, 0.5), sources: { cycle: 'model', flow: 'solver' } });
+    expect(snap.sources.cycle).toBe('model');
+  });
+});
+
+describe('W0C-N9 fixed', () => {
+  it('rejects extra keys on arrays and non-enumerable properties', () => {
+    expect(findNonPlainData(Object.assign([1, 2], { extra: 1 }))).toMatch(/non-index key/);
+    const o = {};
+    Object.defineProperty(o, 'hidden', { value: 1, enumerable: false });
+    expect(findNonPlainData(o)).toMatch(/non-enumerable/);
+  });
+});
+
+describe('W0M-I5: far extent vs the minimum domain', () => {
+  it('the far extent fits the reference engine minimum domain', () => {
+    const d = minimumSolverDomain(ENGINE_DEFINITION);
+    expect(fieldExtentDomainProblems(FIELD_EXTENTS.far, d)).toEqual([]);
+    expect(d.rOut).toBeGreaterThan(8.4375);
+    // eslint-disable-next-line no-console
+    console.log('minimum domain', d);
+  });
+});
