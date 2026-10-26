@@ -1,0 +1,866 @@
+// The 0-D gas path of the two-spool separate-flow turbofan: design-point sizing (D1-2) and
+// map-based off-design matching (C7, C8). Thermally perfect gas (src/thermo), pyCycle maps
+// (src/cycle/maps, Apache-2.0), SI units. The transient model (src/cycle/model.ts) calls
+// evaluateGasPath / solveGasPath every step; the steady solver here is its initialiser and the
+// C1-C8 test harness.
+//
+// Component models (Walsh & Fletcher, Gas Turbine Performance, 2nd ed., ch. 5 and 7):
+// - inlet: 100 % ram recovery (TCDS E.004 note 2); station 1 = station 2.
+// - fan: one map (the bypass/tip stream); the core (root) stream keeps the design ratio of
+//   PR - 1 and of efficiency to the tip; booster (LPC) and HPC on their maps; VBV dumps booster
+//   flow into the bypass duct; P25 = P24 (the OPR convention of docs/PHYSICS.md 2.2).
+// - customer bleed leaves at HPC exit; turbine cooling air skips the combustor and mixes in at
+//   the HPT rotor inlet (41), as in the W0 estimate.
+// - combustor: sensible-enthalpy balance with eta_b Wf LHV; constant fractional pressure loss.
+// - turbines on their maps; the EGT probe (49.5) sits after the LPT stage that does the
+//   calibrated share of LPT work.
+// - convergent nozzles, choked or not, thermally perfect; gross thrust = W V + (p - p0) A.
+//
+// Unknowns of the gas path at given spool speeds and fuel flow: fan R-line, BPR, booster R-line,
+// HPC R-line, HPT and LPT pressure ratios. Residuals: booster and HPC flow continuity, HPT and LPT
+// flow capacity, core and bypass nozzle flow. The steady state adds N1, N2 and fuel flow, with
+// the two shaft power balances and one specification (fuel flow, N1, N2 or net thrust).
+
+import { R_AIR, type AmbientConditions } from '../contracts/ambient';
+import type { StationState } from '../contracts/cycle';
+import type { EngineDefinition } from '../contracts/engine';
+import type { StationId } from '../contracts/stations';
+import { DESIGN_LOSSES } from '../engine/designPoint';
+import { ENGINE_DEFINITION } from '../engine/definition';
+import { factValue } from '../engine/facts';
+import {
+  enthalpy,
+  entropyFunction,
+  gamma,
+  gasConstant,
+  isentropicTemperature,
+  temperatureFromEnthalpy,
+} from '../thermo/gas';
+import {
+  compressorPoint,
+  scaleCompressorMap,
+  scaleTurbineMap,
+  surgeMargin,
+  turbinePoint,
+  type CompressorPoint,
+  type ScaledCompressorMap,
+  type ScaledTurbineMap,
+  type TurbinePoint,
+} from './componentMaps';
+import { FAN_MAP } from './maps/fan';
+import { HPC_MAP } from './maps/hpc';
+import { HPT_MAP } from './maps/hpt';
+import { LPC_MAP } from './maps/lpc';
+import { LPT_MAP } from './maps/lpt';
+import { newton } from './newton';
+
+const T_STD = 288.15;
+const P_STD = 101325;
+
+/** Every assumption of the cycle; CYCLE_CALIBRATION documents each value. */
+export interface CycleCalibration {
+  readonly ambient: AmbientConditions;
+  readonly totalAirflowKgPerS: number;
+  readonly bypassRatio: number;
+  readonly fanCorePressureRatio: number;
+  readonly boosterPressureRatio: number;
+  readonly overallPressureRatio: number;
+  readonly efficiencies: {
+    readonly fanBypass: number;
+    readonly fanCore: number;
+    readonly booster: number;
+    readonly hpc: number;
+    readonly hpt: number;
+    readonly lpt: number;
+    readonly combustor: number;
+  };
+  readonly combustorPressureLossFraction: number;
+  readonly turbineCoolingFraction: number;
+  readonly bypassDuctPtLoss: number;
+  readonly coreNozzlePtLoss: number;
+  readonly mechanicalEfficiency: number;
+  readonly fuelLhvJPerKg: number;
+  readonly fuelFlowKgPerS: number;
+  readonly netThrustN: number;
+  /** Physical spool speeds at the design point (ISA SLS rated takeoff), rpm. */
+  readonly n1Rpm: number;
+  readonly n2Rpm: number;
+  /** The 100 % speeds that percentages refer to (EngineDefinition.designPoint), rpm. */
+  readonly n1ReferenceRpm: number;
+  readonly n2ReferenceRpm: number;
+  /** Share of the LPT work done upstream of the EGT probe (LPT stage 2 nozzle). */
+  readonly egtProbeLptWorkFraction: number;
+  /** FADEC ground-idle N2 floor, % of the 100 % speed. */
+  readonly groundIdleN2Percent: number;
+}
+
+const dp = ENGINE_DEFINITION.designPoint;
+
+/** The W0 assumptions exactly as the definition states them (docs/ENGINE_FACTS.md). */
+export const W0_CALIBRATION: CycleCalibration = {
+  ambient: dp.ambient,
+  totalAirflowKgPerS: dp.totalAirflowKgPerS,
+  bypassRatio: dp.bypassRatio,
+  fanCorePressureRatio: dp.pressureRatios.fanCore,
+  boosterPressureRatio: dp.pressureRatios.booster,
+  overallPressureRatio: dp.pressureRatios.overall,
+  efficiencies: dp.efficiencies,
+  combustorPressureLossFraction: dp.combustorPressureLossFraction,
+  turbineCoolingFraction: dp.turbineCoolingFraction,
+  bypassDuctPtLoss: DESIGN_LOSSES.bypassDuctPtLoss,
+  coreNozzlePtLoss: DESIGN_LOSSES.coreNozzlePtLoss,
+  mechanicalEfficiency: DESIGN_LOSSES.mechanicalEfficiency,
+  fuelLhvJPerKg: factValue('fuelLhv'),
+  fuelFlowKgPerS: dp.fuelFlowKgPerS,
+  netThrustN: dp.netThrustN,
+  n1Rpm: dp.n1Rpm,
+  n2Rpm: dp.n2Rpm,
+  n1ReferenceRpm: dp.n1Rpm,
+  n2ReferenceRpm: dp.n2Rpm,
+  egtProbeLptWorkFraction: 0.25,
+  groundIdleN2Percent: 61,
+};
+
+/**
+ * The calibrated cycle (W0C-I6). Changes from W0_CALIBRATION, each inside the physically
+ * plausible range and justified in docs/ENGINE_FACTS.md ("Cycle model calibration (W1)").
+ */
+export const CYCLE_CALIBRATION: CycleCalibration = {
+  ...W0_CALIBRATION,
+  // ISA SLS rated takeoff N1 is not published; 101 % reproduces the measured 25 C static run
+  // (N2 99.9 % vs 99.8 % measured at N1 97.4 %; 100.3 % with 100 %) and keeps the 30 C corner at
+  // 103.4 % N1, under the 104 % TCDS limit.
+  n1Rpm: 1.01 * dp.n1Rpm,
+  // Effective EGT probe position: equal stage work would put it at 0.25 of the LPT work; 0.35
+  // also absorbs the thermocouple's radiation and sampling error (about 20 K at 1100 K gas). Fitted
+  // to the measured 855 C at N1 97.4 %, OAT 25 C (WIDURI Table 7).
+  egtProbeLptWorkFraction: 0.35,
+};
+
+export interface OperatingConditions {
+  readonly ambient: AmbientConditions;
+  /** Customer bleed, fraction of HPC inlet flow (leaves at HPC exit). */
+  readonly customerBleedFraction: number;
+  readonly powerExtractionW: number;
+  /** Booster variable bleed valve dump, fraction of booster flow (default 0). */
+  readonly vbvFraction?: number;
+}
+
+export interface MapState<P> {
+  readonly point: P;
+  readonly speedFraction: number;
+}
+
+export interface EnginePoint {
+  readonly stations: Readonly<Record<StationId, StationState>>;
+  readonly n1Rpm: number;
+  readonly n2Rpm: number;
+  readonly n1Percent: number;
+  readonly n2Percent: number;
+  readonly fuelFlowKgPerS: number;
+  readonly grossThrustN: number;
+  readonly netThrustN: number;
+  readonly tsfcKgPerNs: number | null;
+  readonly bypassRatio: number;
+  readonly overallPressureRatio: number;
+  readonly totalAirflowKgPerS: number;
+  readonly fan: MapState<CompressorPoint> & { readonly rline: number };
+  readonly lpc: MapState<CompressorPoint> & { readonly rline: number };
+  readonly hpc: MapState<CompressorPoint> & { readonly rline: number };
+  readonly hpt: MapState<TurbinePoint> & { readonly pressureRatio: number };
+  readonly lpt: MapState<TurbinePoint> & { readonly pressureRatio: number };
+  /** Component powers, W (compressors absorbed, turbines delivered). */
+  readonly power: {
+    readonly fan: number;
+    readonly lpc: number;
+    readonly hpc: number;
+    readonly hpt: number;
+    readonly lpt: number;
+  };
+  /** Shaft power surplus after compressors, extraction and mechanical losses, W. */
+  readonly netPowerHpW: number;
+  readonly netPowerLpW: number;
+  readonly coreNozzleChoked: boolean;
+  readonly bypassNozzleChoked: boolean;
+  /** Energy bookkeeping for C8 (W): flows in and out of the engine control volume. */
+  readonly energy: { readonly inW: number; readonly outW: number };
+  /** Mass bookkeeping for C8 (kg/s): nozzle-computed exit flows plus bleed. */
+  readonly mass: { readonly inKgPerS: number; readonly outKgPerS: number };
+  /** The six gas-path residuals (relative). */
+  readonly residuals: readonly number[];
+}
+
+export interface DesignData {
+  readonly point: EnginePoint;
+  readonly unknowns: readonly number[];
+  readonly fanBypassPressureRatio: number;
+  readonly coreNozzleAreaM2: number;
+  readonly bypassNozzleAreaM2: number;
+  /** Ratios that tie the fan core stream to the fan map (tip) stream. */
+  readonly fanCorePrRatio: number;
+  readonly fanCoreEffRatio: number;
+  /** Design corrected speeds: compressors N / sqrt(Tt / 288.15), turbines N / sqrt(Tt), rpm. */
+  readonly corrSpeed: {
+    readonly fan: number;
+    readonly lpc: number;
+    readonly hpc: number;
+    readonly hpt: number;
+    readonly lpt: number;
+  };
+  /** Normalisers of the residuals. */
+  readonly scale: {
+    readonly wcLpc: number;
+    readonly wcHpc: number;
+    readonly fpHpt: number;
+    readonly fpLpt: number;
+    readonly wCore: number;
+    readonly wBypass: number;
+    readonly powerHp: number;
+    readonly powerLp: number;
+  };
+}
+
+export interface SizedEngine {
+  readonly calibration: CycleCalibration;
+  readonly definition: EngineDefinition;
+  readonly maps: {
+    readonly fan: ScaledCompressorMap;
+    readonly lpc: ScaledCompressorMap;
+    readonly hpc: ScaledCompressorMap;
+    readonly hpt: ScaledTurbineMap;
+    readonly lpt: ScaledTurbineMap;
+  };
+  readonly design: DesignData;
+}
+
+// ---------------------------------------------------------------------------------------
+// Thermodynamic building blocks
+
+interface Flow {
+  readonly tt: number;
+  readonly pt: number;
+}
+
+function compress(inlet: Flow, pr: number, eff: number): Flow & { readonly dh: number } {
+  const h1 = enthalpy(inlet.tt, 0);
+  const h2s = enthalpy(isentropicTemperature(inlet.tt, pr, 0), 0);
+  const h2 = h1 + (h2s - h1) / eff;
+  return { tt: temperatureFromEnthalpy(h2, 0), pt: inlet.pt * pr, dh: h2 - h1 };
+}
+
+function expand(inlet: Flow, pr: number, eff: number, far: number): Flow & { readonly dh: number } {
+  const h1 = enthalpy(inlet.tt, far);
+  const h2s = enthalpy(isentropicTemperature(inlet.tt, 1 / pr, far), far);
+  const h2 = h1 - eff * (h1 - h2s);
+  return { tt: temperatureFromEnthalpy(h2, far), pt: inlet.pt / pr, dh: h1 - h2 };
+}
+
+/** Turbine pressure ratio that extracts dh J/kg at efficiency eff. */
+function prForWork(inlet: Flow, dh: number, eff: number, far: number): number {
+  const h1 = enthalpy(inlet.tt, far);
+  const t2s = temperatureFromEnthalpy(h1 - dh / eff, far);
+  return Math.exp((entropyFunction(inlet.tt, far) - entropyFunction(t2s, far)) / gasConstant(far));
+}
+
+export interface NozzleState {
+  /** Mass flow per unit throat area, kg/(s m^2). */
+  readonly flux: number;
+  readonly velocity: number;
+  readonly staticPressure: number;
+  readonly choked: boolean;
+}
+
+/** Convergent nozzle, isentropic from (pt, tt) to the throat; thermally perfect. */
+export function nozzle(pt: number, tt: number, far: number, pAmb: number): NozzleState {
+  if (pt <= pAmb) return { flux: 0, velocity: 0, staticPressure: pAmb, choked: false };
+  const r = gasConstant(far);
+  const ht = enthalpy(tt, far);
+  const st = entropyFunction(tt, far);
+  // sonic throat: 2 (ht - h(T*)) = gamma R T*
+  let ts = (2 * tt) / (gamma(tt, far) + 1);
+  for (let i = 0; i < 30; i++) {
+    const g = gamma(ts, far);
+    const res = 2 * (ht - enthalpy(ts, far)) - g * r * ts;
+    const step = res / ((-2 * (g * r)) / (g - 1) - g * r);
+    ts -= step;
+    if (Math.abs(step) < 1e-10) break;
+  }
+  const pStar = pt * Math.exp((entropyFunction(ts, far) - st) / r);
+  let t = ts;
+  let p = pStar;
+  const choked = pStar >= pAmb;
+  if (!choked) {
+    p = pAmb;
+    t = isentropicTemperature(tt, pAmb / pt, far);
+  }
+  const v = Math.sqrt(Math.max(0, 2 * (ht - enthalpy(t, far))));
+  return { flux: (p / (r * t)) * v, velocity: v, staticPressure: p, choked };
+}
+
+function freeStream(a: AmbientConditions): Flow & { readonly v0: number; readonly h0t: number } {
+  const r = gasConstant(0);
+  const v0 = a.machNumber * Math.sqrt(gamma(a.temperatureK, 0) * r * a.temperatureK);
+  const h0t = enthalpy(a.temperatureK, 0) + 0.5 * v0 * v0;
+  const tt = temperatureFromEnthalpy(h0t, 0);
+  const pt =
+    a.pressurePa * Math.exp((entropyFunction(tt, 0) - entropyFunction(a.temperatureK, 0)) / r);
+  return { tt, pt, v0, h0t };
+}
+
+const st = (pt: number, tt: number, w: number, far = 0): StationState => ({
+  ptPa: pt,
+  ttK: tt,
+  wKgPerS: w,
+  fuelAirRatio: far,
+});
+
+// ---------------------------------------------------------------------------------------
+// Gas path
+
+interface PathInputs {
+  readonly n1Rpm: number;
+  readonly n2Rpm: number;
+  readonly wf: number;
+  /** Combustor lit: fuel releases eta_b LHV; otherwise it only adds mass at 298.15 K. */
+  readonly lit: boolean;
+  /** [fan R-line, BPR, booster R-line, HPC R-line, HPT PR, LPT PR]. */
+  readonly x: readonly number[];
+}
+
+interface DesignTies {
+  readonly fanCorePrRatio: number;
+  readonly fanCoreEffRatio: number;
+  readonly corrSpeed: DesignData['corrSpeed'];
+  readonly scale: DesignData['scale'];
+  readonly areas: { readonly core: number; readonly bypass: number };
+}
+
+function gasPath(
+  maps: SizedEngine['maps'],
+  ties: DesignTies,
+  cal: CycleCalibration,
+  c: OperatingConditions,
+  inp: PathInputs,
+): EnginePoint {
+  const [rFan = 0, bpr = 0, rLpc = 0, rHpc = 0, prHpt = 1, prLpt = 1] = inp.x;
+  const { n1Rpm, n2Rpm, wf } = inp;
+  const p0 = c.ambient.pressurePa;
+  const f0 = freeStream(c.ambient);
+  const s2: Flow = { tt: f0.tt, pt: f0.pt };
+  const theta = (t: number) => Math.sqrt(t / T_STD);
+
+  const nFan = n1Rpm / theta(s2.tt) / ties.corrSpeed.fan;
+  const fan = compressorPoint(maps.fan, nFan, rFan);
+  const w2 = (fan.correctedFlow * (s2.pt / P_STD)) / theta(s2.tt);
+  const w13 = (w2 * bpr) / (1 + bpr);
+  const w21 = w2 / (1 + bpr);
+  const s13 = compress(s2, fan.pressureRatio, fan.efficiency);
+  const s21 = compress(
+    s2,
+    1 + ties.fanCorePrRatio * (fan.pressureRatio - 1),
+    fan.efficiency * ties.fanCoreEffRatio,
+  );
+
+  const nLpc = n1Rpm / theta(s21.tt) / ties.corrSpeed.lpc;
+  const lpc = compressorPoint(maps.lpc, nLpc, rLpc);
+  const wc21 = (w21 * theta(s21.tt)) / (s21.pt / P_STD);
+  const s24 = compress(s21, lpc.pressureRatio, lpc.efficiency);
+  const wVbv = (c.vbvFraction ?? 0) * w21;
+  const w25 = w21 - wVbv;
+
+  const nHpc = n2Rpm / theta(s24.tt) / ties.corrSpeed.hpc;
+  const hpc = compressorPoint(maps.hpc, nHpc, rHpc);
+  const wc25 = (w25 * theta(s24.tt)) / (s24.pt / P_STD);
+  const s3 = compress(s24, hpc.pressureRatio, hpc.efficiency);
+
+  const wBleed = c.customerBleedFraction * w25;
+  const wCool = cal.turbineCoolingFraction * w25;
+  const wComb = w25 - wBleed - wCool;
+  const h3 = enthalpy(s3.tt, 0);
+  const far4 = wf / wComb;
+  const w4 = wComb + wf;
+  const etaB = inp.lit ? cal.efficiencies.combustor : 0;
+  const h4 = (wComb * h3 + etaB * wf * cal.fuelLhvJPerKg) / w4;
+  const tt4 = temperatureFromEnthalpy(h4, far4);
+  const pt4 = s3.pt * (1 - cal.combustorPressureLossFraction);
+  const w41 = w4 + wCool;
+  const far41 = wf / (wComb + wCool);
+  const h41 = (w4 * h4 + wCool * h3) / w41;
+  const s41: Flow = { tt: temperatureFromEnthalpy(h41, far41), pt: pt4 };
+
+  const nHpt = n2Rpm / Math.sqrt(s41.tt) / ties.corrSpeed.hpt;
+  const hpt = turbinePoint(maps.hpt, nHpt, prHpt);
+  const fp41 = (w41 * Math.sqrt(s41.tt)) / s41.pt;
+  const s45 = expand(s41, prHpt, hpt.efficiency, far41);
+
+  const nLpt = n1Rpm / Math.sqrt(s45.tt) / ties.corrSpeed.lpt;
+  const lpt = turbinePoint(maps.lpt, nLpt, prLpt);
+  const fp45 = (w41 * Math.sqrt(s45.tt)) / s45.pt;
+  const s5 = expand(s45, prLpt, lpt.efficiency, far41);
+
+  // EGT probe after the calibrated share of LPT work, same stage efficiency
+  const h45 = h41 - s45.dh;
+  const h495 = h45 - cal.egtProbeLptWorkFraction * s5.dh;
+  const tt495 = temperatureFromEnthalpy(h495, far41);
+  const t495s = temperatureFromEnthalpy(h45 - (h45 - h495) / Math.max(lpt.efficiency, 1e-6), far41);
+  const pt495 =
+    s45.pt *
+    Math.exp((entropyFunction(t495s, far41) - entropyFunction(s45.tt, far41)) / gasConstant(far41));
+
+  const pt8 = s5.pt * (1 - cal.coreNozzlePtLoss);
+  const n8 = nozzle(pt8, s5.tt, far41, p0);
+  const w8 = n8.flux * ties.areas.core;
+
+  const w18 = w13 + wVbv;
+  const h13 = enthalpy(s13.tt, 0);
+  const h24 = enthalpy(s24.tt, 0);
+  const h18 = w18 > 0 ? (w13 * h13 + wVbv * h24) / w18 : h13;
+  const tt18 = temperatureFromEnthalpy(h18, 0);
+  const pt18 = s13.pt * (1 - cal.bypassDuctPtLoss);
+  const n18 = nozzle(pt18, tt18, 0, p0);
+  const w18n = n18.flux * ties.areas.bypass;
+
+  const fg =
+    w41 * n8.velocity +
+    (n8.staticPressure - p0) * ties.areas.core +
+    w18 * n18.velocity +
+    (n18.staticPressure - p0) * ties.areas.bypass;
+  const fn = fg - w2 * f0.v0;
+
+  const power = {
+    fan: w13 * s13.dh + w21 * s21.dh,
+    lpc: w21 * s24.dh,
+    hpc: w25 * s3.dh,
+    hpt: w41 * s45.dh,
+    lpt: w41 * s5.dh,
+  };
+  const etaM = cal.mechanicalEfficiency;
+  const netPowerHpW = etaM * power.hpt - power.hpc - c.powerExtractionW;
+  const netPowerLpW = etaM * power.lpt - power.fan - power.lpc;
+  const h5 = h45 - s5.dh;
+  const sc = ties.scale;
+  const residuals = [
+    (lpc.correctedFlow - wc21) / sc.wcLpc,
+    (hpc.correctedFlow - wc25) / sc.wcHpc,
+    (hpt.flowParameter - fp41) / sc.fpHpt,
+    (lpt.flowParameter - fp45) / sc.fpLpt,
+    (w8 - w41) / sc.wCore,
+    (w18n - w18) / sc.wBypass,
+  ];
+
+  const stations: Record<StationId, StationState> = {
+    '0': st(f0.pt, f0.tt, w2),
+    '1': st(s2.pt, s2.tt, w2),
+    '2': st(s2.pt, s2.tt, w2),
+    '13': st(s13.pt, s13.tt, w13),
+    '18': st(pt18, tt18, w18),
+    '19': st(pt18, tt18, w18),
+    '21': st(s21.pt, s21.tt, w21),
+    '24': st(s24.pt, s24.tt, w21),
+    '25': st(s24.pt, s24.tt, w25),
+    '3': st(s3.pt, s3.tt, w25),
+    '4': st(pt4, tt4, w4, far4),
+    '41': st(s41.pt, s41.tt, w41, far41),
+    '45': st(s45.pt, s45.tt, w41, far41),
+    '49.5': st(pt495, tt495, w41, far41),
+    '5': st(s5.pt, s5.tt, w41, far41),
+    '8': st(pt8, s5.tt, w41, far41),
+    '9': st(pt8, s5.tt, w41, far41),
+  };
+  return {
+    stations,
+    n1Rpm,
+    n2Rpm,
+    n1Percent: (100 * n1Rpm) / cal.n1ReferenceRpm,
+    n2Percent: (100 * n2Rpm) / cal.n2ReferenceRpm,
+    fuelFlowKgPerS: wf,
+    grossThrustN: fg,
+    netThrustN: fn,
+    tsfcKgPerNs: fn > 0 ? wf / fn : null,
+    bypassRatio: w13 / w21,
+    overallPressureRatio: s3.pt / s2.pt,
+    totalAirflowKgPerS: w2,
+    fan: { point: fan, speedFraction: nFan, rline: rFan },
+    lpc: { point: lpc, speedFraction: nLpc, rline: rLpc },
+    hpc: { point: hpc, speedFraction: nHpc, rline: rHpc },
+    hpt: { point: hpt, speedFraction: nHpt, pressureRatio: prHpt },
+    lpt: { point: lpt, speedFraction: nLpt, pressureRatio: prLpt },
+    power,
+    netPowerHpW,
+    netPowerLpW,
+    coreNozzleChoked: n8.choked,
+    bypassNozzleChoked: n18.choked,
+    energy: {
+      inW: w2 * f0.h0t + etaB * wf * cal.fuelLhvJPerKg,
+      outW:
+        w8 * h5 +
+        w18n * h18 +
+        wBleed * h3 +
+        (1 - etaM) * (power.hpt + power.lpt) +
+        c.powerExtractionW,
+    },
+    mass: { inKgPerS: w2 + wf, outKgPerS: w8 + w18n + wBleed },
+    residuals,
+  };
+}
+
+// ---------------------------------------------------------------------------------------
+// Design-point sizing (D1-2)
+
+interface DesignCycle {
+  readonly fpr: number;
+  readonly thrust: number;
+  readonly ties: DesignTies;
+  readonly comp: {
+    readonly fan: { wc: number; pr: number; eff: number };
+    readonly lpc: { wc: number; pr: number; eff: number };
+    readonly hpc: { wc: number; pr: number; eff: number };
+  };
+  readonly turb: {
+    readonly hpt: { fp: number; pr: number; eff: number };
+    readonly lpt: { fp: number; pr: number; eff: number };
+  };
+}
+
+function designCycle(cal: CycleCalibration, fpr: number): DesignCycle {
+  const e = cal.efficiencies;
+  const f0 = freeStream(cal.ambient);
+  const p0 = cal.ambient.pressurePa;
+  const s2: Flow = { tt: f0.tt, pt: f0.pt };
+  const w2 = cal.totalAirflowKgPerS;
+  const w13 = (w2 * cal.bypassRatio) / (1 + cal.bypassRatio);
+  const w21 = w2 / (1 + cal.bypassRatio);
+  const s13 = compress(s2, fpr, e.fanBypass);
+  const s21 = compress(s2, cal.fanCorePressureRatio, e.fanCore);
+  const s24 = compress(s21, cal.boosterPressureRatio, e.booster);
+  const prHpc = cal.overallPressureRatio / (cal.fanCorePressureRatio * cal.boosterPressureRatio);
+  const s3 = compress(s24, prHpc, e.hpc);
+  const wCool = cal.turbineCoolingFraction * w21;
+  const wComb = w21 - wCool;
+  const wf = cal.fuelFlowKgPerS;
+  const h3 = enthalpy(s3.tt, 0);
+  const h4 = (wComb * h3 + e.combustor * wf * cal.fuelLhvJPerKg) / (wComb + wf);
+  const w41 = wComb + wf + wCool;
+  const far41 = wf / (wComb + wCool);
+  const h41 = ((wComb + wf) * h4 + wCool * h3) / w41;
+  const s41: Flow = {
+    tt: temperatureFromEnthalpy(h41, far41),
+    pt: s3.pt * (1 - cal.combustorPressureLossFraction),
+  };
+  const pHpc = w21 * s3.dh;
+  const pLp = w13 * s13.dh + w21 * (s21.dh + s24.dh);
+  const etaM = cal.mechanicalEfficiency;
+  const prHpt = prForWork(s41, pHpc / (etaM * w41), e.hpt, far41);
+  const s45 = expand(s41, prHpt, e.hpt, far41);
+  const prLpt = prForWork(s45, pLp / (etaM * w41), e.lpt, far41);
+  const s5 = expand(s45, prLpt, e.lpt, far41);
+  const n8 = nozzle(s5.pt * (1 - cal.coreNozzlePtLoss), s5.tt, far41, p0);
+  const n18 = nozzle(s13.pt * (1 - cal.bypassDuctPtLoss), s13.tt, 0, p0);
+  const a8 = w41 / n8.flux;
+  const a18 = w13 / n18.flux;
+  const thrust =
+    w41 * n8.velocity +
+    (n8.staticPressure - p0) * a8 +
+    w13 * n18.velocity +
+    (n18.staticPressure - p0) * a18 -
+    w2 * f0.v0;
+  const th = (t: number) => Math.sqrt(t / T_STD);
+  return {
+    fpr,
+    thrust,
+    ties: {
+      fanCorePrRatio: (cal.fanCorePressureRatio - 1) / (fpr - 1),
+      fanCoreEffRatio: e.fanCore / e.fanBypass,
+      corrSpeed: {
+        fan: cal.n1Rpm / th(s2.tt),
+        lpc: cal.n1Rpm / th(s21.tt),
+        hpc: cal.n2Rpm / th(s24.tt),
+        hpt: cal.n2Rpm / Math.sqrt(s41.tt),
+        lpt: cal.n1Rpm / Math.sqrt(s45.tt),
+      },
+      scale: {
+        wcLpc: (w21 * th(s21.tt)) / (s21.pt / P_STD),
+        wcHpc: (w21 * th(s24.tt)) / (s24.pt / P_STD),
+        fpHpt: (w41 * Math.sqrt(s41.tt)) / s41.pt,
+        fpLpt: (w41 * Math.sqrt(s45.tt)) / s45.pt,
+        wCore: w41,
+        wBypass: w13,
+        powerHp: pHpc,
+        powerLp: pLp,
+      },
+      areas: { core: a8, bypass: a18 },
+    },
+    comp: {
+      fan: { wc: (w2 * th(s2.tt)) / (s2.pt / P_STD), pr: fpr, eff: e.fanBypass },
+      lpc: {
+        wc: (w21 * th(s21.tt)) / (s21.pt / P_STD),
+        pr: cal.boosterPressureRatio,
+        eff: e.booster,
+      },
+      hpc: { wc: (w21 * th(s24.tt)) / (s24.pt / P_STD), pr: prHpc, eff: e.hpc },
+    },
+    turb: {
+      hpt: { fp: (w41 * Math.sqrt(s41.tt)) / s41.pt, pr: prHpt, eff: e.hpt },
+      lpt: { fp: (w41 * Math.sqrt(s45.tt)) / s45.pt, pr: prLpt, eff: e.lpt },
+    },
+  };
+}
+
+/**
+ * Sizes the engine at the calibration's design point: the fan bypass pressure ratio is found
+ * (secant) so that net thrust equals cal.netThrustN at cal.fuelFlowKgPerS; the nozzle areas and
+ * the map scalars follow. Pure and deterministic.
+ */
+export function sizeEngine(cal: CycleCalibration, definition: EngineDefinition): SizedEngine {
+  let a = 1.5;
+  let b = 1.6;
+  let fa = designCycle(cal, a).thrust - cal.netThrustN;
+  let fb = designCycle(cal, b).thrust - cal.netThrustN;
+  for (let i = 0; i < 40 && Math.abs(fb) > 1e-9 * cal.netThrustN; i++) {
+    const c = b - (fb * (b - a)) / (fb - fa);
+    a = b;
+    fa = fb;
+    b = c;
+    fb = designCycle(cal, b).thrust - cal.netThrustN;
+  }
+  const d = designCycle(cal, b);
+  const maps = {
+    fan: scaleCompressorMap(FAN_MAP, {
+      correctedFlow: d.comp.fan.wc,
+      pressureRatio: d.comp.fan.pr,
+      efficiency: d.comp.fan.eff,
+    }),
+    lpc: scaleCompressorMap(LPC_MAP, {
+      correctedFlow: d.comp.lpc.wc,
+      pressureRatio: d.comp.lpc.pr,
+      efficiency: d.comp.lpc.eff,
+    }),
+    hpc: scaleCompressorMap(HPC_MAP, {
+      correctedFlow: d.comp.hpc.wc,
+      pressureRatio: d.comp.hpc.pr,
+      efficiency: d.comp.hpc.eff,
+    }),
+    hpt: scaleTurbineMap(HPT_MAP, {
+      flowParameter: d.turb.hpt.fp,
+      pressureRatio: d.turb.hpt.pr,
+      efficiency: d.turb.hpt.eff,
+    }),
+    lpt: scaleTurbineMap(LPT_MAP, {
+      flowParameter: d.turb.lpt.fp,
+      pressureRatio: d.turb.lpt.pr,
+      efficiency: d.turb.lpt.eff,
+    }),
+  };
+  const unknowns = [
+    FAN_MAP.design.rline,
+    cal.bypassRatio,
+    LPC_MAP.design.rline,
+    HPC_MAP.design.rline,
+    d.turb.hpt.pr,
+    d.turb.lpt.pr,
+    1,
+    1,
+    1,
+  ];
+  const conditions = { ambient: cal.ambient, customerBleedFraction: 0, powerExtractionW: 0 };
+  const point = gasPath(maps, d.ties, cal, conditions, {
+    n1Rpm: cal.n1Rpm,
+    n2Rpm: cal.n2Rpm,
+    wf: cal.fuelFlowKgPerS,
+    lit: true,
+    x: unknowns.slice(0, 6),
+  });
+  return {
+    calibration: cal,
+    definition,
+    maps,
+    design: {
+      point,
+      unknowns,
+      fanBypassPressureRatio: d.fpr,
+      coreNozzleAreaM2: d.ties.areas.core,
+      bypassNozzleAreaM2: d.ties.areas.bypass,
+      fanCorePrRatio: d.ties.fanCorePrRatio,
+      fanCoreEffRatio: d.ties.fanCoreEffRatio,
+      corrSpeed: d.ties.corrSpeed,
+      scale: d.ties.scale,
+    },
+  };
+}
+
+const tiesOf = (e: SizedEngine): DesignTies => ({
+  ...e.design,
+  areas: { core: e.design.coreNozzleAreaM2, bypass: e.design.bypassNozzleAreaM2 },
+});
+
+/** One evaluation of the gas path at given speeds, fuel flow and the six gas unknowns. */
+export function evaluateGasPath(
+  e: SizedEngine,
+  c: OperatingConditions,
+  n1Rpm: number,
+  n2Rpm: number,
+  wf: number,
+  x: readonly number[],
+  lit = true,
+): EnginePoint {
+  return gasPath(e.maps, tiesOf(e), e.calibration, c, { n1Rpm, n2Rpm, wf, lit, x });
+}
+
+/** C7 tolerance with a margin: the matching converges to max |residual| below this. */
+export const MATCH_TOLERANCE = 1e-10;
+/** Per-iteration step caps: R-lines, BPR, R-lines, turbine PRs, N1/N1des, N2/N2des, Wf/Wfdes. */
+const MAX_STEP = [0.3, 0.6, 0.3, 0.3, 0.3, 0.3, 0.04, 0.04, 0.2];
+/** C7's iteration budget (PHYSICS.md: at most 25). */
+export const MAX_NEWTON_ITERATIONS = 25;
+
+export interface GasPathSolution {
+  readonly point: EnginePoint;
+  readonly x: readonly number[];
+  readonly iterations: number;
+  readonly converged: boolean;
+  readonly maxResidual: number;
+}
+
+/** Solves the six gas-path residuals at given speeds and fuel flow (the transient's inner loop). */
+export function solveGasPath(
+  e: SizedEngine,
+  c: OperatingConditions,
+  n1Rpm: number,
+  n2Rpm: number,
+  wf: number,
+  guess: readonly number[],
+  lit = true,
+): GasPathSolution {
+  const r = newton(
+    (x) => [...evaluateGasPath(e, c, n1Rpm, n2Rpm, wf, x, lit).residuals],
+    guess.slice(0, 6),
+    {
+      tolerance: MATCH_TOLERANCE,
+      maxIterations: MAX_NEWTON_ITERATIONS,
+      maxStep: MAX_STEP.slice(0, 6),
+    },
+  );
+  return {
+    point: evaluateGasPath(e, c, n1Rpm, n2Rpm, wf, r.x, lit),
+    x: r.x,
+    iterations: r.iterations,
+    converged: r.converged,
+    maxResidual: r.maxResidual,
+  };
+}
+
+export type SteadySpec =
+  | { readonly kind: 'fuelFlow'; readonly value: number }
+  | { readonly kind: 'n1Percent'; readonly value: number }
+  | { readonly kind: 'n2Percent'; readonly value: number }
+  | { readonly kind: 'netThrust'; readonly value: number };
+
+export interface SteadySolution {
+  readonly point: EnginePoint;
+  /** [6 gas unknowns, N1/N1des, N2/N2des, Wf/Wfdes]: a warm start for the next solve. */
+  readonly unknowns: readonly number[];
+  readonly iterations: number;
+  readonly converged: boolean;
+  readonly maxResidual: number;
+}
+
+function specResidual(e: SizedEngine, p: EnginePoint, spec: SteadySpec): number {
+  switch (spec.kind) {
+    case 'fuelFlow':
+      return (p.fuelFlowKgPerS - spec.value) / e.calibration.fuelFlowKgPerS;
+    case 'n1Percent':
+      return (p.n1Percent - spec.value) / 100;
+    case 'n2Percent':
+      return (p.n2Percent - spec.value) / 100;
+    case 'netThrust':
+      return (p.netThrustN - spec.value) / e.calibration.netThrustN;
+  }
+}
+
+/** Steady (shaft-balanced) operating point meeting one specification. */
+export function solveSteady(
+  e: SizedEngine,
+  c: OperatingConditions,
+  spec: SteadySpec,
+  guess: readonly number[] = e.design.unknowns,
+): SteadySolution {
+  const cal = e.calibration;
+  const at = (x: readonly number[]): EnginePoint =>
+    evaluateGasPath(
+      e,
+      c,
+      (x[6] ?? 1) * cal.n1Rpm,
+      (x[7] ?? 1) * cal.n2Rpm,
+      (x[8] ?? 1) * cal.fuelFlowKgPerS,
+      x,
+    );
+  const r = newton(
+    (x) => {
+      const p = at(x);
+      return [
+        ...p.residuals,
+        p.netPowerHpW / e.design.scale.powerHp,
+        p.netPowerLpW / e.design.scale.powerLp,
+        specResidual(e, p, spec),
+      ];
+    },
+    guess,
+    { tolerance: MATCH_TOLERANCE, maxIterations: MAX_NEWTON_ITERATIONS, maxStep: MAX_STEP },
+  );
+  return {
+    point: at(r.x),
+    unknowns: r.x,
+    iterations: r.iterations,
+    converged: r.converged,
+    maxResidual: r.maxResidual,
+  };
+}
+
+/** N1 steps (%) of the continuation from the design point down to ground idle. */
+const IDLE_PATH = [90, 75, 60, 45, 35, 28, 24];
+
+/** Stabilised ground idle (the FADEC N2 floor), reached by continuation from the design point. */
+export function groundIdle(e: SizedEngine, c: OperatingConditions): SteadySolution {
+  let s = solveSteady(e, c, { kind: 'fuelFlow', value: e.calibration.fuelFlowKgPerS });
+  for (const n1 of IDLE_PATH) s = solveSteady(e, c, { kind: 'n1Percent', value: n1 }, s.unknowns);
+  return solveSteady(
+    e,
+    c,
+    { kind: 'n2Percent', value: e.calibration.groundIdleN2Percent },
+    s.unknowns,
+  );
+}
+
+/** C8: relative mass and energy imbalance of the whole engine (nozzle-computed exit flows). */
+export function balances(p: EnginePoint): { readonly mass: number; readonly energy: number } {
+  return {
+    mass: (p.mass.inKgPerS - p.mass.outKgPerS) / p.mass.inKgPerS,
+    energy: (p.energy.inW - p.energy.outW) / p.energy.inW,
+  };
+}
+
+/** FADEC display shunt (TCDS E.004 IV.1.1): ramps in linearly between the two N2 speeds. */
+export function egtShunt(def: EngineDefinition, n2Rpm: number): number {
+  const s = def.limits.egtShunt;
+  const k = (n2Rpm - s.rampStartN2Rpm) / (s.fullN2Rpm - s.rampStartN2Rpm);
+  return s.offsetK * Math.min(1, Math.max(0, k));
+}
+
+/** Cockpit EGT: T49.5 plus the display shunt, K. */
+export function displayedEgt(e: SizedEngine, p: EnginePoint): number {
+  return p.stations['49.5'].ttK + egtShunt(e.definition, p.n2Rpm);
+}
+
+/** Surge margins of the fan and the HPC at a point. */
+export function surgeMargins(
+  e: SizedEngine,
+  p: EnginePoint,
+): { readonly fan: number; readonly hpc: number } {
+  return { fan: surgeMargin(e.maps.fan, p.fan.point), hpc: surgeMargin(e.maps.hpc, p.hpc.point) };
+}
+
+/** Sanity: the ISA gas constant the contracts use differs from the thermo mixture by < 1e-4. */
+export const R_MISMATCH = Math.abs(gasConstant(0) / R_AIR - 1);
+
+/** The reference engine: CYCLE_CALIBRATION sized on the reference definition. */
+export const REFERENCE_ENGINE: SizedEngine = sizeEngine(CYCLE_CALIBRATION, ENGINE_DEFINITION);

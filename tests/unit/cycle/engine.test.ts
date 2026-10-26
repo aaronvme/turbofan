@@ -8,6 +8,7 @@ import {
   REFERENCE_ENGINE,
   balances,
   displayedEgt,
+  groundIdle,
   sizeEngine,
   solveSteady,
   type SteadySolution,
@@ -88,10 +89,7 @@ describe('off-design matching', () => {
   });
 
   // idle first (setup), then the counted sweep idle -> takeoff
-  const idle = solveSteady(engine, sls, {
-    kind: 'n2Percent',
-    value: CYCLE_CALIBRATION.groundIdleN2Percent,
-  });
+  const idle = groundIdle(engine, sls);
   const sweep: SteadySolution[] = [];
   const n = 16;
   let prev = idle;
