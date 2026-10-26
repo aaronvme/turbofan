@@ -273,6 +273,14 @@ describe('surge episode', { timeout: TIMEOUT_MS }, () => {
     expect(last(after).flags.surge).toBe(false);
     expect(last(after).hpc.surgeMarginFraction).toBeGreaterThan(0);
   });
+  it('an injected surge on a stopped or sub-idle engine is ignored (no pressurised HPC to surge)', () => {
+    const m = createCycleModel();
+    m.reset('shutdown', ISA_SLS);
+    m.injectFault('surge');
+    const s = m.step(0.05, inputs({ fuelLever: 'cutoff' }));
+    expect(s.flags.surge).toBe(false);
+    expect(validateCycleState(s, refs)).toEqual([]);
+  });
 });
 
 describe(
