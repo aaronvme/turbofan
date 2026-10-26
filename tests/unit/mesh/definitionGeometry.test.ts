@@ -63,7 +63,7 @@ describe('flowpathFromDefinition', () => {
     const x0 = truth.points[0]?.x ?? 0;
     let maxDev = 0;
     for (let k = 0; k <= 4000; k++) {
-      const x = x0 + ((xTE - x0) * k) / 4000;
+      const x = k === 4000 ? xTE : x0 + ((xTE - x0) * k) / 4000;
       const dev = (radiusAt(truth, x) ?? NaN) - closed.atX(x).r;
       if (x <= xTE - L) expect(Math.abs(dev), `x = ${x}`).toBeLessThan(1e-12);
       else {

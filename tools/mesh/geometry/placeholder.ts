@@ -36,13 +36,13 @@ function rows(
   x1: number,
   c0: number,
   c1: number,
-): BladeRow[] {
+): Omit<BladeRow, 'le' | 'te'>[] {
   const n = names.length;
   const chords = names.map((_, k) => c0 + ((c1 - c0) * k) / Math.max(1, n - 1));
   const chordSum = chords.reduce((s, c) => s + c, 0);
   const gapWeights = chords.slice(0, -1).map((c, k) => 0.5 * (c + (chords[k + 1] ?? c)));
   const lambda = (x1 - x0 - chordSum) / gapWeights.reduce((s, w) => s + w, 0);
-  const out: BladeRow[] = [];
+  const out: Omit<BladeRow, 'le' | 'te'>[] = [];
   let x = x0;
   names.forEach((name, k) => {
     const c = chords[k] ?? 0;
@@ -113,7 +113,7 @@ export function placeholderFlowpath(): FlowpathGeometry {
     { x: BYPASS_LIP.x, r: BYPASS_LIP.r, s: -0.42 },
   ]);
 
-  const bladeRows: BladeRow[] = [
+  const rowExtents: Omit<BladeRow, 'le' | 'te'>[] = [
     { name: 'Fan rotor', duct: 'fan', xLE: 0.03, xTE: 0.2 },
     { name: 'Fan OGV', duct: 'bypass', xLE: 0.62, xTE: 0.78 },
     ...rows('Booster', ['IGV', 'R1', 'S1', 'R2', 'S2', 'R3', 'S3'], 0.45, 0.8, 0.03, 0.03),
@@ -129,12 +129,29 @@ export function placeholderFlowpath(): FlowpathGeometry {
     ...rows('LPT', ['S1', 'R1', 'S2', 'R2', 'S3', 'R3', 'S4', 'R4'], 2.1, 2.5, 0.03, 0.045),
     { name: 'TRF struts', duct: 'core', xLE: 2.56, xTE: 2.63 },
   ];
+  // radial edges from wall to wall of each row's duct
+  const inner = { fan: new Polyline(hub), bypass: new Polyline(coreCowl), core: new Polyline(hub) };
+  const outerWall = {
+    fan: new Polyline(nacelleInner),
+    bypass: new Polyline(nacelleInner),
+    core: new Polyline(coreOuter),
+  };
+  const cut = (duct: BladeRow['duct'], x: number): BladeRow['le'] => ({
+    hub: inner[duct].atX(x),
+    tip: outerWall[duct].atX(x),
+  });
+  const bladeRows: BladeRow[] = rowExtents.map((r) => ({
+    ...r,
+    le: cut(r.duct, r.xLE),
+    te: cut(r.duct, r.xTE),
+  }));
 
   return {
     name: 'placeholder CFM56-7B-class flowpath (W0 mesh spike; not engine data)',
     fanTipDiameter: 1.55,
     curves: { hub, coreOuter, coreCowl, nacelleInner, nacelleOuter },
     bladeRows,
+    stations: [],
     combustor: { xStart: 1.65, xEnd: 1.92 },
   };
 }
