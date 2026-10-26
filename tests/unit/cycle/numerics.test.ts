@@ -83,6 +83,15 @@ describe('newton: exits without convergence', () => {
     expect(r.converged).toBe(false);
     expect(r.iterations).toBe(1);
     expect(r.x).toEqual([2]);
+    // the same with a residual that returns NaN instead of throwing
+    const g = (x: number[]) => {
+      const v = at(x, 0);
+      return [Math.abs(v - 2) > 1e-3 ? Number.NaN : v - 1];
+    };
+    const q = newton(g, [2], { tolerance: 1e-12, maxIterations: 20, maxStep: [10] });
+    expect(q.converged).toBe(false);
+    expect(q.x).toEqual([2]);
+    expect(q.maxResidual).toBe(1);
   });
 
   it('caps each unknown at its maxStep, which must cover every unknown', () => {
