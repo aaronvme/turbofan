@@ -141,4 +141,128 @@ describe('twoBoundary', () => {
     expect(() => twoBoundary('c', inner, outer, () => uniform(3))).toThrow();
     expect(() => twoBoundary('c', inner, inner.slice(), () => [0, 0.5, 0.9])).toThrow();
   });
+
+  it('says which rule a bad input breaks', () => {
+    const inner = edge((u) => ({ x: u, r: 1 }), uniform(4));
+    const outer = edge((u) => ({ x: u, r: 2 }), uniform(4));
+    const p = inner[0] as Pt;
+    const q = outer[0] as Pt;
+    expect(() => twoBoundary('c', inner, outer.slice(1), () => uniform(3))).toThrow(
+      'two-boundary rows disagree for c',
+    );
+    expect(() => twoBoundary('c', [p], [q], () => uniform(3))).toThrow(
+      'two-boundary rows disagree for c',
+    );
+    expect(() => twoBoundary('c', inner, outer, () => [1])).toThrow(
+      'two-boundary block c needs at least one cell across',
+    );
+    // column 2 breaks one rule at a time; the other columns are fine
+    const bad =
+      (f: number[]) =>
+      (i: number): number[] =>
+        i === 2 ? f : [0, 0.4, 0.7, 1];
+    const message = 'two-boundary fractions for c column 2 must run 0..1 with 4 entries';
+    expect(() => twoBoundary('c', inner, outer, bad([0, 0.4, 1]))).toThrow(message);
+    expect(() => twoBoundary('c', inner, outer, bad([0.1, 0.4, 0.7, 1]))).toThrow(message);
+    expect(() => twoBoundary('c', inner, outer, bad([0, 0.4, 0.7, 0.9]))).toThrow(message);
+    // the smallest legal block: one cell
+    expect(twoBoundary('c', [p, inner[1] as Pt], [q, outer[1] as Pt], () => [0, 1]).nj).toBe(1);
+  });
+
+  it('copies the inner and outer rows bitwise (no lerp round-off at the ends)', () => {
+    // 0.3 + (0.9 - 0.3) and 1.1 + (0.3 - 1.1) both round away from the end value
+    const inner: Pt[] = [
+      { x: 0.3, r: 1.1 },
+      { x: 0.35, r: 1.1 },
+    ];
+    const outer: Pt[] = [
+      { x: 0.9, r: 0.3 },
+      { x: 0.95, r: 0.3 },
+    ];
+    expect(0.3 + (0.9 - 0.3)).not.toBe(0.9);
+    const b = twoBoundary('c', inner, outer, () => [0, 0.5, 1]);
+    expect(node(b, 0, 2)).toEqual(outer[0]);
+    expect(node(b, 1, 2)).toEqual(outer[1]);
+    expect(node(b, 0, 0)).toEqual(inner[0]);
+  });
+});
+
+describe('tfi arc-length blending (W0M-I3)', () => {
+  /** Straight segment from a to b at fraction u, with exact end points. */
+  const lerp = (a: Pt, b: Pt, u: number): Pt =>
+    u === 0 ? a : u === 1 ? b : { x: a.x + u * (b.x - a.x), r: a.r + u * (b.r - a.r) };
+
+  /** Intersection of the lines a1-a2 and b1-b2. */
+  function intersect(a1: Pt, a2: Pt, b1: Pt, b2: Pt): Pt {
+    const d1 = { x: a2.x - a1.x, r: a2.r - a1.r };
+    const d2 = { x: b2.x - b1.x, r: b2.r - b1.r };
+    const w = { x: b1.x - a1.x, r: b1.r - a1.r };
+    const s = (w.x * d2.r - w.r * d2.x) / (d1.x * d2.r - d1.r * d2.x);
+    return { x: a1.x + s * d1.x, r: a1.r + s * d1.r };
+  }
+
+  it('puts each interior node where the lines joining opposite edge nodes cross', () => {
+    // A parallelogram with straight edges and a different clustering on every edge. Soni's
+    // arc-length blending makes node (i, j) the intersection of segment S_i-N_i with W_j-E_j
+    // (exactly, for straight edges and any affine image of the unit square).
+    const P00 = { x: 0, r: 0 };
+    const P10 = { x: 2, r: 0.3 };
+    const P01 = { x: 0.5, r: 1 };
+    const P11 = { x: 2.5, r: 1.3 };
+    const ni = 9;
+    const nj = 7;
+    const south = edge((u) => lerp(P00, P10, u), vinokur(ni, 0.02, 0.2));
+    const north = edge((u) => lerp(P01, P11, u), geometric(ni, 0.18));
+    const west = edge((v) => lerp(P00, P01, v), geometric(nj, 0.04));
+    const east = edge((v) => lerp(P10, P11, v), vinokur(nj, 0.25, 0.06));
+    const b = tfi('blend', south, north, west, east);
+    let worst = 0;
+    for (let j = 1; j < nj; j++) {
+      for (let i = 1; i < ni; i++) {
+        const q = intersect(south[i] as Pt, north[i] as Pt, west[j] as Pt, east[j] as Pt);
+        const p = node(b, i, j);
+        worst = Math.max(worst, Math.hypot(p.x - q.x, p.r - q.r));
+      }
+    }
+    expect(worst).toBeLessThan(1e-14);
+  });
+
+  it('names the corner that does not coincide (W0M-N5)', () => {
+    const { south, north, west, east } = curvedEdges(6, 4);
+    const moved = (pts: readonly Pt[], k: number, dx: number, dr: number): Pt[] =>
+      pts.map((p, m) => (m === k ? { x: p.x + dx, r: p.r + dr } : p));
+    // each corner once, with only x or only r off
+    expect(() => tfi('bad', moved(south, 0, 1e-9, 0), north, west, east)).toThrow(
+      'TFI corner mismatch at bad SW',
+    );
+    expect(() => tfi('bad', south, north, west, moved(east, 0, 0, 1e-9))).toThrow(
+      'TFI corner mismatch at bad SE',
+    );
+    expect(() => tfi('bad', south, moved(north, 0, 0, 1e-9), west, east)).toThrow(
+      'TFI corner mismatch at bad NW',
+    );
+    expect(() => tfi('bad', south, north, west, moved(east, 4, 1e-9, 0))).toThrow(
+      'TFI corner mismatch at bad NE',
+    );
+  });
+
+  it('checks the edge counts before the corners', () => {
+    const { south, north, west, east } = curvedEdges(6, 4);
+    const message = 'TFI edge counts disagree for block bad';
+    expect(() => tfi('bad', south, north.slice(1), west, east)).toThrow(message);
+    expect(() => tfi('bad', south, north, west, east.slice(1))).toThrow(message);
+    const sw = south[0] as Pt;
+    const nw = north[0] as Pt;
+    expect(() => tfi('bad', [sw], [nw], west, west)).toThrow(message);
+    expect(() => tfi('bad', south, south, [sw], [south[6] as Pt])).toThrow(message);
+    // the smallest legal block: one cell
+    const one = tfi(
+      'one',
+      [sw, south[6] as Pt],
+      [nw, north[6] as Pt],
+      [sw, nw],
+      [south[6] as Pt, north[6] as Pt],
+    );
+    expect([one.ni, one.nj]).toEqual([1, 1]);
+  });
 });

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { geometric, uniform } from '../../../tools/mesh/distribution';
-import { blockGeometry, meshQuality } from '../../../tools/mesh/metrics';
+import {
+  blockGeometry,
+  faceCellIJ,
+  meshQuality,
+  type BlockQuality,
+} from '../../../tools/mesh/metrics';
 import { tfi } from '../../../tools/mesh/tfi';
 import { connect } from '../../../tools/mesh/topology';
 import { BC, nodeIndex, type Block, type Patch } from '../../../tools/mesh/types';
@@ -197,5 +202,210 @@ describe('meshQuality', () => {
     const q = meshQuality({ blocks: [A, B], patches });
     expect(q[0]?.interfaceKinkMaxDeg).toBeCloseTo(30, 9);
     expect(q[1]?.interfaceOrthoMaxDeg).toBeCloseTo(30, 9);
+  });
+});
+
+/** Block from explicit node coordinate rows: node (i, j) at (xs[i], rs[j]) (axis-aligned). */
+function gridBlock(name: string, xs: readonly number[], rs: readonly number[]): Block {
+  const ni = xs.length - 1;
+  const nj = rs.length - 1;
+  const b: Block = {
+    name,
+    ni,
+    nj,
+    x: new Float64Array((ni + 1) * (nj + 1)),
+    r: new Float64Array((ni + 1) * (nj + 1)),
+  };
+  for (let j = 0; j <= nj; j++) {
+    for (let i = 0; i <= ni; i++) {
+      b.x[nodeIndex(b, i, j)] = xs[i] ?? NaN;
+      b.r[nodeIndex(b, i, j)] = rs[j] ?? NaN;
+    }
+  }
+  return b;
+}
+
+/** Centre (mean of the four nodes) of cell (i, j), as meshQuality reports locations. */
+function cellMean(b: Block, i: number, j: number): { x: number; r: number } {
+  const ks = [
+    nodeIndex(b, i, j),
+    nodeIndex(b, i + 1, j),
+    nodeIndex(b, i, j + 1),
+    nodeIndex(b, i + 1, j + 1),
+  ];
+  return {
+    x: 0.25 * ks.reduce((s, k) => s + (b.x[k] ?? NaN), 0),
+    r: 0.25 * ks.reduce((s, k) => s + (b.r[k] ?? NaN), 0),
+  };
+}
+
+/** Planar centroid and area of a simple polygon (shoelace), independent of blockGeometry. */
+function polygonCentroid(px: readonly number[], pr: readonly number[]): [number, number, number] {
+  let a = 0;
+  let cx = 0;
+  let cr = 0;
+  for (let k = 0; k < px.length; k++) {
+    const n = (k + 1) % px.length;
+    const x0 = px[k] ?? NaN;
+    const r0 = pr[k] ?? NaN;
+    const x1 = px[n] ?? NaN;
+    const r1 = pr[n] ?? NaN;
+    const w = x0 * r1 - x1 * r0;
+    a += w / 2;
+    cx += ((x0 + x1) * w) / 6;
+    cr += ((r0 + r1) * w) / 6;
+  }
+  return [cx / a, cr / a, a];
+}
+
+describe('blockGeometry centroids (W0M-I3)', () => {
+  it('puts the cell centre at the planar centroid of an irregular quadrilateral', () => {
+    // convex, non-symmetric quad P0 P1 P2 P3 (counter-clockwise) = nodes (0,0) (1,0) (1,1) (0,1)
+    const px = [0.1, 2.0, 1.6, 0.4];
+    const pr = [0.2, 0.35, 1.7, 1.1];
+    const b: Block = {
+      name: 'quad',
+      ni: 1,
+      nj: 1,
+      x: Float64Array.from([px[0] ?? 0, px[1] ?? 0, px[3] ?? 0, px[2] ?? 0]),
+      r: Float64Array.from([pr[0] ?? 0, pr[1] ?? 0, pr[3] ?? 0, pr[2] ?? 0]),
+    };
+    const g = blockGeometry(b);
+    const [cx, cr, a] = polygonCentroid(px, pr);
+    expect(g.area[0]).toBeCloseTo(a, 14);
+    expect(g.centreX[0]).toBeCloseTo(cx, 14);
+    expect(g.centreR[0]).toBeCloseTo(cr, 14);
+    expect(g.volR[0]).toBeCloseTo(a * cr, 14);
+    // the centroid is not the mean of the nodes for this shape
+    expect(Math.abs(cx - 0.25 * (0.1 + 2.0 + 1.6 + 0.4))).toBeGreaterThan(1e-3);
+  });
+
+  it('gets every centroid of a curved, stretched block right, away from the origin', () => {
+    const ni = 5;
+    const nj = 4;
+    const b = tfi(
+      'curved',
+      edge((u) => ({ x: 1 + 2 * u, r: 0.1 + 0.3 * u * (1 - u) }), geometric(ni, 0.08)),
+      edge((u) => ({ x: 1 + 2 * u + 0.4 * u * (1 - u), r: 1 }), uniform(ni)),
+      edge((v) => ({ x: 1 + 0.2 * v * (1 - v), r: 0.1 * (1 - v) + v }), geometric(nj, 0.1)),
+      edge((v) => ({ x: 3, r: 0.1 * (1 - v) + v }), uniform(nj)),
+    );
+    const g = blockGeometry(b);
+    for (let j = 0; j < nj; j++) {
+      for (let i = 0; i < ni; i++) {
+        const ks = [
+          nodeIndex(b, i, j),
+          nodeIndex(b, i + 1, j),
+          nodeIndex(b, i + 1, j + 1),
+          nodeIndex(b, i, j + 1),
+        ];
+        const [cx, cr, a] = polygonCentroid(
+          ks.map((k) => b.x[k] ?? NaN),
+          ks.map((k) => b.r[k] ?? NaN),
+        );
+        const c = j * ni + i;
+        expect(Math.abs((g.centreX[c] ?? NaN) - cx)).toBeLessThan(1e-14);
+        expect(Math.abs((g.centreR[c] ?? NaN) - cr)).toBeLessThan(1e-14);
+        expect(Math.abs((g.area[c] ?? NaN) / a - 1)).toBeLessThan(1e-12);
+      }
+    }
+  });
+});
+
+describe('meshQuality in-block measurements (W0M-I2)', () => {
+  const only = (b: Block): BlockQuality => {
+    const q = meshQuality({ blocks: [b], patches: [] })[0];
+    if (q === undefined) throw new Error('no quality');
+    return q;
+  };
+
+  it('measures an in-block stretching ratio along i, away from the last cell', () => {
+    // i spacings 1, 1, q, q, q: the only non-unit ratio is q, between cells 1 and 2
+    const q = 1.3;
+    const b = gridBlock('si', [0, 1, 2, 2 + q, 2 + 2 * q, 2 + 3 * q], [0, 1, 2, 3]);
+    const res = only(b);
+    expect(res.maxStretch).toBeCloseTo(q, 12);
+    expect(res.maxStretchAt.i).toBe(1);
+    expect(res.maxStretchAt.j).toBe(0);
+    expect(res.maxStretchAt.x).toBeCloseTo(cellMean(b, 1, 0).x, 14);
+    expect(res.maxStretchAt.r).toBeCloseTo(cellMean(b, 1, 0).r, 14);
+  });
+
+  it('measures a shrinking in-block stretching ratio along j, away from the last cell', () => {
+    // j spacings 1, 1, 1/q, 1/q: the ratio q is between cells 1 and 2 (shrinking)
+    const q = 1.2;
+    const b = gridBlock('sj', [0, 1, 2, 3], [0, 1, 2, 2 + 1 / q, 2 + 2 / q]);
+    const res = only(b);
+    expect(res.maxStretch).toBeCloseTo(q, 12);
+    expect(res.maxStretchAt.i).toBe(0);
+    expect(res.maxStretchAt.j).toBe(1);
+    expect(res.maxStretchAt.x).toBeCloseTo(cellMean(b, 0, 1).x, 14);
+    expect(res.maxStretchAt.r).toBeCloseTo(cellMean(b, 0, 1).r, 14);
+  });
+
+  it('reports the largest of several in-block ratios, not the last one measured', () => {
+    // i ratios 1.3 then 1.05 (measured last along i); j ratio 1.1 (measured after all i ratios)
+    const b = gridBlock('mix', [0, 1, 2.3, 2.3 + 1.365], [0, 1, 2.1]);
+    const res = only(b);
+    expect(res.maxStretch).toBeCloseTo(1.3, 12);
+    expect(res.maxStretchAt.i).toBe(0);
+  });
+
+  it('measures the skew of one displaced interior node', () => {
+    // moving node (3, 2) of a unit grid by d along x tilts the corners around it by atan(d)
+    const d = 0.25;
+    const b = gridBlock('skew', [0, 1, 2, 3, 4, 5, 6], [0, 1, 2, 3, 4]);
+    b.x[nodeIndex(b, 3, 2)] = 3 + d;
+    const res = only(b);
+    expect(res.maxSkewDeg).toBeCloseTo((Math.atan(d) * 180) / Math.PI, 9);
+    expect([2, 3]).toContain(res.maxSkewAt.i);
+    expect([1, 2]).toContain(res.maxSkewAt.j);
+    expect(res.maxSkewAt.x).toBeCloseTo(cellMean(b, res.maxSkewAt.i, res.maxSkewAt.j).x, 14);
+    // sin of the worst corner angle (90 +- atan d)
+    expect(res.minScaledJacobian).toBeCloseTo(1 / Math.hypot(1, d), 12);
+  });
+
+  it('measures the aspect ratio of wide and tall cells and says where the largest is', () => {
+    // column 2 is 3 wide (aspect 3 in row 0); row 1 is 1.5 tall (aspect 1.5 in column 0)
+    const b = gridBlock('ar', [0, 1, 2, 5, 6], [0, 1, 2.5]);
+    const res = only(b);
+    expect(res.aspectMax).toBeCloseTo(3, 12);
+    expect(res.aspectMaxAt.i).toBe(2);
+    expect(res.aspectMaxAt.j).toBe(0);
+    expect(res.aspectMaxAt.r).toBeCloseTo(0.5, 14);
+    expect(res.aspectMin).toBeCloseTo(1, 12);
+    const tall = only(gridBlock('tall', [0, 1, 2], [0, 1, 4, 5]));
+    expect(tall.aspectMax).toBeCloseTo(3, 12);
+    expect(tall.aspectMaxAt.j).toBe(1);
+  });
+
+  it('includes the stretching ratio across a j-face interface', () => {
+    // A = [0, 1] x [0, 1] with 0.5 m radial cells; B on top of it with 0.25 m radial cells
+    const A = gridBlock('A', [0, 0.5, 1], [0, 0.5, 1]);
+    const B = gridBlock('B', [0, 0.5, 1], [1, 1.25, 1.5]);
+    const patches: Patch[] = [];
+    connect(
+      patches,
+      { block: 0, face: 'jmax', start: 0, end: 2 },
+      { block: 1, face: 'jmin', start: 0, end: 2 },
+      'A|B',
+      false,
+    );
+    const q = meshQuality({ blocks: [A, B], patches });
+    expect(q[0]?.maxStretch).toBeCloseTo(2, 12);
+    expect(q[0]?.maxStretchAt.j).toBe(1);
+    expect(q[1]?.maxStretch).toBeCloseTo(2, 12);
+    expect(q[1]?.maxStretchAt.j).toBe(0);
+  });
+});
+
+describe('faceCellIJ', () => {
+  it('maps a face cell and a depth to cell indices on every face', () => {
+    const b = { ni: 5, nj: 3 };
+    expect(faceCellIJ(b, 'imin', 2, 1)).toEqual([1, 2]);
+    expect(faceCellIJ(b, 'imax', 2, 1)).toEqual([3, 2]);
+    expect(faceCellIJ(b, 'jmin', 4, 0)).toEqual([4, 0]);
+    expect(faceCellIJ(b, 'jmin', 4, 1)).toEqual([4, 1]);
+    expect(faceCellIJ(b, 'jmax', 4, 0)).toEqual([4, 2]);
   });
 });
