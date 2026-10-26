@@ -14,10 +14,8 @@
 import { ISA_SLS } from '../contracts/ambient';
 import { THRESHOLDS } from '../contracts/thresholds';
 import { factValue } from '../engine/facts';
-import { enthalpy } from '../thermo/gas';
 import {
   displayedEgt,
-  egtShunt,
   groundIdle,
   solveSteady,
   type CycleCalibration,
@@ -35,7 +33,10 @@ export type PartPowerParameterId =
   | 'vbvOpenBelowN2cPercent'
   | 'vbvClosedAboveN2cPercent'
   | 'vsvOffsetLowRad'
-  | 'vsvOffsetMidRad';
+  | 'vsvOffsetMidRad'
+  | 'hpcReynoldsExponent'
+  | 'hptClearanceLoss'
+  | 'egtProbeLptWorkFraction';
 
 export interface PartPowerParameter {
   readonly id: PartPowerParameterId;
@@ -111,6 +112,30 @@ export const PART_POWER_PARAMETERS: readonly PartPowerParameter[] = [
     unit: 'rad',
     reason: 'the same at 85 % N2c (the offset is 0 at and above 95 %, where the VSVs are open)',
   },
+  {
+    id: 'hpcReynoldsExponent',
+    lower: 0,
+    upper: 0.2,
+    unit: '1',
+    reason:
+      'D3-14 core-side loss: the LPT form on the HPC inlet; no compressor correlation was verified this round, so the turbine bound (Dunham and Came, -0.2) is reused as the upper end and 0 (no lapse) as the lower',
+  },
+  {
+    id: 'hptClearanceLoss',
+    lower: 0.02,
+    upper: 0.04,
+    unit: '1',
+    reason:
+      'D3-14 HPT tip-clearance growth at low power: points of efficiency at standstill, x (1 - (N2/N2des)^2); 2-4 points from the W1C-I1 range (Lattime and Steinetz, NASA/TM-2002-211794: ~1 % SFC and ~10 C EGT per 0.010 in of HPT clearance)',
+  },
+  {
+    id: 'egtProbeLptWorkFraction',
+    lower: 0.25,
+    upper: 0.45,
+    unit: '1',
+    reason:
+      'D3-14: station 49.5 sits after LPT stage 1 of 4, so the probe sees at least an equal share (0.25) of the LPT work; 0.45 is the decision upper bound',
+  },
 ];
 
 /** The fitted parameters of a calibration, in PART_POWER_PARAMETERS order. */
@@ -125,6 +150,9 @@ export function partPowerVector(cal: CycleCalibration): number[] {
     cal.vbv.closedAboveN2cPercent,
     at(pp.vsvOffsetRad, 0),
     at(pp.vsvOffsetRad, 1),
+    pp.hpcReynoldsExponent,
+    cal.clearanceEfficiencyLoss.hpt,
+    cal.egtProbeLptWorkFraction,
   ];
 }
 
@@ -135,6 +163,8 @@ export function withPartPower(cal: CycleCalibration, x: readonly number[]): Cycl
   }
   return {
     ...cal,
+    egtProbeLptWorkFraction: at(x, 10),
+    clearanceEfficiencyLoss: { ...cal.clearanceEfficiencyLoss, hpt: at(x, 9) },
     vbv: {
       maxFraction: at(x, 3),
       openBelowN2cPercent: at(x, 4),
@@ -146,6 +176,7 @@ export function withPartPower(cal: CycleCalibration, x: readonly number[]): Cycl
       boosterEfficiencyLoss: at(x, 1),
       lptReynoldsExponent: at(x, 2),
       vsvOffsetRad: [at(x, 6), at(x, 7), 0],
+      hpcReynoldsExponent: at(x, 8),
     },
   };
 }
@@ -327,43 +358,14 @@ export function evaluatePartPower(e: SizedEngine): PartPowerEvaluation {
   return { converged, points };
 }
 
-/**
- * W0C-I6 / D2-3: the EGT probe's share of the LPT work is the one that shows the measured 855 C
- * at the 25 C static takeoff run (N1 97.4 %, no bleed or extraction, as engine.test.ts checks
- * it). The part-power mechanisms move that point (its fan runs at 95 % corrected speed), so the
- * share is re-derived for every candidate instead of staying at the value fitted without them.
- * The share does not enter the gas path, so it follows from the solved point directly:
- * share = (h45 - h(T49.5 measured)) / (h45 - h5). Null if the point does not converge.
- */
-export function probeShareForStaticTakeoff(e: SizedEngine): number | null {
-  const run: OperatingConditions = {
-    ambient: GROUND_RUN.ambient,
-    customerBleedFraction: 0,
-    powerExtractionW: 0,
-  };
-  const s = solveSteady(e, run, { kind: 'n1Percent', value: factValue('staticTakeoffN1') });
-  if (!s.converged) return null;
-  const st = s.point.stations;
-  const far = st['45'].fuelAirRatio;
-  const t495 = factValue('staticTakeoffEgt') - egtShunt(e.definition, s.point.n2Rpm);
-  const h45 = enthalpy(st['45'].ttK, far);
-  return (h45 - enthalpy(t495, far)) / (h45 - enthalpy(st['5'].ttK, far));
-}
-
-/** The calibration the fit evaluates at x: the mechanisms plus the re-derived probe share. */
-export function partPowerCalibration(
-  e: SizedEngine,
-  x: readonly number[],
-): CycleCalibration | null {
-  const cal = withPartPower(e.calibration, x);
-  const share = probeShareForStaticTakeoff(withCalibration(e, cal));
-  return share === null ? null : { ...cal, egtProbeLptWorkFraction: share };
+/** The calibration the fit evaluates at x (D3-14: the probe share is one of the fitted values). */
+export function partPowerCalibration(e: SizedEngine, x: readonly number[]): CycleCalibration {
+  return withPartPower(e.calibration, x);
 }
 
 /** The fit's residual vector at x, or null where a solve does not converge. */
 export function partPowerResiduals(e: SizedEngine, x: readonly number[]): number[] | null {
   const cal = partPowerCalibration(e, x);
-  if (cal === null) return null;
   const ev = evaluatePartPower(withCalibration(e, cal));
   return ev.converged ? ev.points.map((p) => p.residual) : null;
 }

@@ -29,6 +29,10 @@ Reference variant: **CFM56-7B27/3** (Tech Insertion, "TI"), the 27,300 lbf ratin
 - [VBVPAT] US 9,982,598 B2, "Gas turbine engine variable bleed valve for ice extraction", General Electric, 29 May 2018: the fully open VBV position "is typically done at idle and part power engine operation"; "minimizing the amount of airflow bleed from the booster discharge and thereby minimizing the exhaust gas temperature (EGT)". https://patents.google.com/patent/US9982598B2/en (read 2026-10-26)
 - [VGV] A. Tsalavoutas, K. Mathioudakis, A. Stamatis, M. K. Smith, "Identifying Faults in the Variable Geometry System of a Gas Turbine Compressor", ASME GT2000-0033 (NTUA presentation slides): individual-vane and IGV mis-rig faults implanted on a test engine, up to an IGV +6 deg mis-rigging, whose signature is mainly a loss of compressor flow capacity. https://www.ltt.ntua.gr/images/PaperPresentations/GT2000-0033-pre.pdf (read 2026-10-26)
 - [AMDC] Turbine-loss Reynolds corrections. J. Dunham, P. M. Came, "Improvements to the Ainley-Mathieson method of turbine performance prediction", ASME J. Eng. Power 92 (1970) 252-256: profile and secondary loss x (Re / 2e5)^-0.2 for Re below 2e5 (the exponent as it is commonly cited; its reproduction in Taylor's Eq. 2-26 below is garbled in the PDF text, which does say the correction is for Re < 2e5). S. C. Kacker, U. Okapuu, "A Mean Line Prediction Method for Axial Flow Turbine Efficiency", ASME J. Eng. Power 104 (1982) 111-119: profile loss x (Re / 2e5)^-0.4 below Re 2e5, x 1 from 2e5 to 1e6, x (Re / 1e6)^-0.2 above (verified in the code listing of A. M. Taylor, "One Dimensional Mean Line Performance Prediction Program for Turbocharger Axial Turbines", PhD thesis, The University of Sheffield, White Rose eTheses 30828, read 2026-10-26).
+- [D3-14] Orchestrator decision D3-14 (on w1/cycle-calib-2's stop): add core-side mechanisms (combustion efficiency vs power from the EEDB emission indices, an HPC part-speed falloff, turbine tip-clearance growth), fit the EGT probe share in [0.25, 0.45], adopt a fit only if every other threshold and transient test still passes.
+- [ARP1533] SAE ARP1533, "Procedure for the Analysis and Evaluation of Gaseous Emissions from Aircraft Engines": derives emission indices and combustion efficiency from the measured CO, CO2, total hydrocarbon and NOx (https://www.sae.org/standards/content/arp1533c/; not read here; the relation used is the energy balance written out in "Part-power calibration (D3-11)").
+- [JANAF] M. W. Chase, NIST-JANAF Thermochemical Tables, 4th ed., J. Phys. Chem. Ref. Data Monograph 9, 1998: heats of formation at 298.15 K of CO2 (-393.52 kJ/mol) and CO (-110.53 kJ/mol).
+- [LS02] B. M. Lattime, B. M. Steinetz, "Turbine Engine Clearance Control Systems: Current Practices and Future Directions", NASA/TM-2002-211794 (the W1C-I1 clearance source).
 
 ## Published figures
 
@@ -50,6 +54,14 @@ Reference variant: **CFM56-7B27/3** (Tech Insertion, "TI"), the 27,300 lbf ratin
 | fuelFlowClimbOut | Fuel flow at the LTO climb-out setting (85 %) | 1.031 kg/s | 1.031 kg/s | [EEDB] 8CM066 | official |
 | fuelFlowApproach | Fuel flow at the LTO approach setting (30 %) | 0.343 kg/s | 0.343 kg/s | [EEDB] 8CM066 | official |
 | fuelFlowIdle | Fuel flow at the LTO idle setting (7 %) | 0.110 kg/s | 0.11 kg/s | [EEDB] 8CM066 | official |
+| eiCoTakeoff | CO emission index at the LTO takeoff setting (100 %) | 0.31 g/kg | 0.00031 kg/kg | [EEDB] 8CM066, "CO EI T/O (g/kg)" (test engine status NME, newly manufactured) | official |
+| eiCoClimbOut | CO emission index at the LTO climb-out setting (85 %) | 0.17 g/kg | 0.00017 kg/kg | [EEDB] 8CM066, "CO EI C/O (g/kg)" (test engine status NME, newly manufactured) | official |
+| eiCoApproach | CO emission index at the LTO approach setting (30 %) | 2.82 g/kg | 0.00282 kg/kg | [EEDB] 8CM066, "CO EI App (g/kg)" (test engine status NME, newly manufactured) | official |
+| eiCoIdle | CO emission index at the LTO idle setting (7 %) | 29.39 g/kg | 0.02939 kg/kg | [EEDB] 8CM066, "CO EI Idle (g/kg)" (test engine status NME, newly manufactured) | official |
+| eiHcTakeoff | HC emission index at the LTO takeoff setting (100 %) | 0.03 g/kg | 0.00003 kg/kg | [EEDB] 8CM066, "HC EI T/O (g/kg)" (test engine status NME, newly manufactured) | official |
+| eiHcClimbOut | HC emission index at the LTO climb-out setting (85 %) | 0.02 g/kg | 0.00002 kg/kg | [EEDB] 8CM066, "HC EI C/O (g/kg)" (test engine status NME, newly manufactured) | official |
+| eiHcApproach | HC emission index at the LTO approach setting (30 %) | 0.05 g/kg | 0.00005 kg/kg | [EEDB] 8CM066, "HC EI App (g/kg)" (test engine status NME, newly manufactured) | official |
+| eiHcIdle | HC emission index at the LTO idle setting (7 %) | 1.54 g/kg | 0.00154 kg/kg | [EEDB] 8CM066, "HC EI Idle (g/kg)" (test engine status NME, newly manufactured) | official |
 | tsfcTakeoff | TSFC, SLS takeoff: the C3 target | 0.376 (lb/h)/lbf | 1.0648e-5 kg/(N s) | derived: fuelFlowTakeoff / takeoffThrust = 1.293 / 121430 = 1.0648e-5 kg/(N s) = 0.3759 (lb/h)/lbf, per [D0-5] | estimate |
 | tsfcTakeoffAvWeek | TSFC at max power (2.7 % above tsfcTakeoff; not the model target) | 0.386 (lb/h)/lbf | 1.0934e-5 kg/(N s) | [AW08] | published |
 | coreNozzleArea | Core nozzle throat area A8 = A9 (convergent, choked at SLS takeoff) | sized | 0.1851 m² | derived: the w1/cycle design-point sizing per [D2-2] (0.1852 until the NASA TM-4513 N2 data of w1/cycle-calib moved it by -0.08 %), A8 = W5 / (choked mass flux at P8, T5), thermally perfect gas, ISA SLS takeoff at fuelFlowTakeoff and takeoffThrust; the constant-cp estimate below gives 0.1778 m² (-4.0 %) | estimate |
@@ -216,7 +228,7 @@ T49.5 (after LPT stage 1, equal stage work) comes out at 1174 K = 901 °C, i.e. 
 
 ## Model vs published (updated every wave)
 
-Model: the W1 cycle model (`src/cycle`, w1/cycle-calib; w1/cycle-calib-2 added the D3-11 part-power mechanisms but leaves them off, so no number in this table moved), ISA SLS static unless stated. Tests: tests/unit/cycle/engine.test.ts, c10.test.ts, c11.test.ts, offdesign.test.ts, surge.test.ts, model.test.ts and modelPaths.test.ts.
+Model: the W1 cycle model (`src/cycle`, w1/cycle-calib; w1/cycle-calib-2 added the D3-11/D3-14 part-power mechanisms and keeps only the EEDB combustion-efficiency table, which moved only the 7 % fuel flow), ISA SLS static unless stated. Tests: tests/unit/cycle/engine.test.ts, c10.test.ts, c11.test.ts, offdesign.test.ts, surge.test.ts, model.test.ts and modelPaths.test.ts.
 
 | Figure | Published | Model | Delta | Threshold (PHYSICS.md) |
 |---|---|---|---|---|
@@ -235,7 +247,7 @@ Model: the W1 cycle model (`src/cycle`, w1/cycle-calib; w1/cycle-calib-2 added t
 | Ground-run idle, position 1, OAT 25 C, N1 20.5 % | 466-493 C, N2 60.6 % (idleEgtLow/High, idleN2Low) | 466.1 C, N2 61.53 % | inside, +0.93 pt | C10: 436-523 C, ±1.5 points (pass) |
 | Ground-run idle, position 2, OAT 25 C, N1 21.0 % | 466-493 C, N2 60.7 % (idleEgtLow/High, idleN2High) | 461.4 C, N2 62.23 % | inside, +1.53 pt | C10: N2 fails by 0.03 pt (KNOWN FAIL, W1C-I1) |
 | MPA run, OAT 25 C, N1 65.0 % | 585 C, N2 89.3 % (mpaEgt, mpaN2) | 536.4 C, N2 86.71 % | -48.6 K, -2.59 pt | C10: fails both (KNOWN FAIL, W1C-I1) |
-| Fuel flow at 85 / 30 / 7 % of rated thrust (EEDB LTO points, ISA SLS test bed) | 1.031 / 0.343 / 0.110 kg/s (fuelFlowClimbOut, fuelFlowApproach, fuelFlowIdle) | 1.006 / 0.300 / 0.0985 kg/s | -2.5 / -12.4 / -10.5 % | C11 (D3-11): ±5 %. Climb-out passes; approach and idle FAIL (KNOWN FAIL, c11.test.ts). The D3-11 fit, not adopted, gives +0.4 / -7.6 / -7.2 % ("Part-power calibration (D3-11)"); -3.0 / -15.0 / -16.5 % before W1C-I1 |
+| Fuel flow at 85 / 30 / 7 % of rated thrust (EEDB LTO points, ISA SLS test bed) | 1.031 / 0.343 / 0.110 kg/s (fuelFlowClimbOut, fuelFlowApproach, fuelFlowIdle) | 1.005 / 0.301 / 0.0993 kg/s (with the D3-14 EEDB combustion-efficiency table) | -2.5 / -12.3 / -9.7 % | C11 (D3-11): ±5 %. Climb-out passes; approach and idle FAIL (KNOWN FAIL, c11.test.ts). The D3-14 fit, rejected, gives +0.6 / -6.4 / -4.3 % ("Part-power calibration (D3-11, D3-14)"); -3.0 / -15.0 / -16.5 % before W1C-I1 |
 | OPR at max climb thrust, 35,000 ft, M 0.8, ISA | 32.7 (overallPressureRatioMaxClimb), at 26511 N (maxClimbThrust) | 32.63 | -0.2 % | none (validation, offdesign.test.ts, 1 %) |
 
 ## Cycle model calibration (W1)
@@ -273,46 +285,74 @@ Part-power physics (W1C-I1, w1/cycle-calib). None of them changes the design poi
 
 What limited C10 after W1C-I1 (see docs/handoffs/w1-cycle-calib.md; D3-11 then authorised the part-power mechanisms of the next section, which do not close it either). At the MPA N1 the measured EGT (585 C displayed, T49.5 = 828 K) is above the model's own T45 (826 K), so no probe position can reach it: the model's core is about 50-80 K too cold at 65 % N1 and its N2 2.6 points low. That needs roughly 20 % more heat release per kg of core flow at a given N1, which the physical part-power mechanisms above (and customer bleed, a larger accessory load, the EGT probe's radiation error) do not supply within their ranges: the levers that raise N2 at a fixed N1 are LP-side losses (fan, booster, LPT efficiency 4-7 points below the scaled pyCycle maps at 65 % N1), which no public data supports. The EEDB fuel flows at 30 % and 7 % thrust (12 and 10 % above the model) point the same way: the generic maps make the part-power engine too efficient. Ground idle now matches within the band at position 1 and misses N2 by 0.03 point at position 2; idle sits where every map is extrapolated (fan below its lowest speed line, LPT far below its pressure-ratio range), so the idle match is sensitive to the extrapolation rules.
 
-## Part-power calibration (D3-11)
+## Part-power calibration (D3-11, D3-14)
 
-Decision [D3-11]: C10 at MPA and the EEDB part-power fuel flows (now the pre-registered C11) may be met only through physically real part-power mechanisms, each bounded to a plausible range with a stated reason and fitted to both datasets at once. w1/cycle-calib-2 implemented the mechanisms (`src/cycle/engine.ts`, each zero at the design point, so the sizing and C1-C3 do not depend on them), set their bounds before fitting (`src/cycle/partPower.ts`, `PART_POWER_PARAMETERS`) and fitted them (`tools/cycle/fit-part-power.ts`, which writes `src/cycle/partPowerFit.ts`; `tests/unit/cycle/partPower.test.ts` checks that the written values are the bounded optimum). **The fit does not meet C10 and C11 inside the bounds, so the reference calibration keeps the mechanisms off** (CYCLE_CALIBRATION; the fitted one is PART_POWER_FIT_CALIBRATION). What binds is below; the choice is the orchestrator's.
+Decisions [D3-11] and [D3-14]: C10 at MPA and the EEDB part-power fuel flows (the pre-registered C11) may be met only through physically real part-power mechanisms, each bounded to a plausible range with a stated reason and fitted to both datasets at once. A fit becomes the reference calibration only if every other threshold and transient test still passes.
+
+w1/cycle-calib-2 did the following:
+- It implemented the mechanisms in `src/cycle/engine.ts`, each zero at the design point, so the sizing and C1-C3 do not depend on them.
+- It set their bounds before fitting (`src/cycle/partPower.ts`, `PART_POWER_PARAMETERS`).
+- It fitted them with `tools/cycle/fit-part-power.ts`, which writes `src/cycle/partPowerFit.ts`. `tests/unit/cycle/partPower.test.ts` checks that the written values are the bounded optimum and pins its outcome.
+
+**Inside the bounds the fit meets C10 and C4 but not C11 at approach. It is not adopted: the transient model fails with it (below).** The reference calibration (CYCLE_CALIBRATION) carries only the EEDB combustion-efficiency table, which is data rather than a fit. The fitted calibration is PART_POWER_FIT_CALIBRATION, recorded as rejected.
 
 ### Mechanisms, bounds and reasons
 
 | Parameter | Bound | Fitted | Why this range (source) |
 |---|---|---|---|
-| Fan part-speed efficiency loss, both streams: the full loss at or below 87.5 % corrected speed, linear to 0 at 100 % (as a fraction of the design efficiency, so the map efficiency is scaled, never made negative) | 3.2-4.2 points | 4.2 (upper bound) | [SDT] Table 3: the R4 fan's operating-line efficiency falls from 100 % to 87.5 % speed by 1.16 (fan/OGV) or 0.82 (rotor alone) points and to 61.7 % by 2.56 or 1.83 points. On the model's own ISA SLS operating line the scaled pyCycle fan map instead rises 3.1 points at 87.5 % and 1.4 at 61.7 % (0.931 and 0.914 against 0.900 at design). Matching the SDT shape takes a loss of 3.9-4.2 (fan/OGV) or 3.2-3.9 (rotor alone) points. Below 61.7 % there are no data; the loss is held. `published` (the SDT data) / `estimate` (applying a 1/5-scale rig fan's trend to this engine) |
-| Booster part-speed efficiency loss, same form, on the booster's corrected speed | 0-4.2 points | 4.2 (upper bound) | No booster part-speed data were found. From the map as it is (0) up to the fan's measured falloff: the booster turns with the fan on the LP shaft and its inlet sees the fan root's part-speed incidence. `estimate` |
-| LPT Reynolds lapse exponent n: at the design efficiency's level (1 - eta) grows by (Re / Re_design)^-n, Re ~ P45 / (sqrt(T45) mu(T45)) (Sutherland) | 0-0.2 | 0.2 (upper bound) | [AMDC]: Dunham and Came correct profile and secondary loss by (Re / 2e5)^-0.2; Kacker and Okapuu apply none between Re 2e5 and 1e6 and (Re / 2e5)^-0.4 below. This LPT's blade Reynolds number (true chord 0.033-0.042 m from definition.ts, exit velocity about 1.3 x the mean blade speed) is about 5.5e5 at the inlet and 2.6e5 at the exit at ISA takeoff, so its rear stages cross 2e5 at part power. 0 is a Reynolds-insensitive turbine; 0.2 applies the Dunham-Came exponent to the whole (1 - eta), the upper end. `estimate` |
-| VBV maximum dump, fraction of booster flow | 0.10-0.30 | 0.276 (held by the booster-map guard) | Up to the dump that puts the ISA ground-idle booster on the choke edge of its map (R-line 2.92 at 0.30; the map ends at 3.0, where its efficiency at its lowest speed line is zero); at least enough to move the idle booster well off its stall line (R-line 1.60 with the VBV shut, 1.94 at 0.10). The fit also keeps every fitted booster point at R-line 2.9 or less (`BOOSTER_RLINE_LIMIT`). `estimate` |
-| VBV fully open below (corrected N2) | 61-75 % | 75 % (upper bound) | Fully open at ground idle (61 % N2c at ISA), as [QAR] Fig. 1 shows on the ground and [VBVPAT] has it at idle and part power; at most 5 points under the lowest closing speed. `estimate` |
-| VBV closed above (corrected N2) | 80-95 % | 95 % (upper bound) | Closed in climb and cruise ([QAR] Fig. 1; the model's cruise N2c is 98 % at N1 90 %, 35,000 ft, M 0.8) and partly open in descent ([QAR]; the model's N2c is 78-88 % at 35,000 ft, N1 50-70 %). `estimate` |
-| HPC VSV offset from the map's own schedule at and below 60 % N2c (positive = more closed) | -6 to +6 deg | -6 deg (lower bound: more open) | The HPC map was made with its donor compressor's VSV schedule, which is not this engine's; a difference larger than the 6 deg IGV mis-rig that [VGV] implant as a detectable fault would show as one. The flow effect is 0.688 per rad (1.2 % per degree) of the HPC's corrected flow at a given speed and R-line, from the velocity triangle of the definition's IGV (38.1 deg exit) and rotor 1 (57.4 deg inlet) at a fixed rotor-1 incidence; [VGV] report the same signature (mainly a loss of flow capacity). The efficiency effect is second order in the offset, of unknown sign, and is left out. `estimate` |
-| HPC VSV offset at 85 % N2c (0 at and above 95 %, linear between the knots) | -6 to +6 deg | +6 deg (upper bound: more closed) | As above. `estimate` |
-| EGT probe share of the LPT work (W0C-I6, D2-3) | not fitted | 0.416 (was 0.35) | Re-derived for every candidate as the share that shows the measured 855 C at the 25 C static takeoff run, the D2-3 rule: the fan loss acts at that point's 95 % corrected speed and makes the core hotter. |
+| Combustion efficiency vs corrected fuel flow (D3-14, data) | not fitted | idle -0.83 %, approach -0.06 %, climb-out and takeoff ~0, relative to takeoff | [EEDB] 8CM066 emission indices (rows eiCoTakeoff ... eiHcIdle). The inefficiency is the chemical energy left as CO and unburnt hydrocarbons over the fuel's: 1 - (EI_CO Q_CO + EI_HC Q_fuel) / (1000 Q_fuel), EI in g/kg, the energy balance behind [ARP1533]'s combustion efficiency. Q_CO = (393.52 - 110.53) kJ/mol / 28.01 g/mol = 10.10 MJ/kg [JANAF]; the hydrocarbons are taken at the fuel's heating value. The knots are the databank fuel flows (ISA SLS, so corrected = actual), held beyond them; the design point keeps its 0.995. |
+| Fan part-speed efficiency loss, both streams: full at or below 87.5 % corrected speed, linear to 0 at 100 % (a fraction of the design efficiency, so the map efficiency is scaled, never negative) | 3.2-4.2 points | 4.2 (upper bound) | [SDT] Table 3: the R4 fan's operating-line efficiency falls from 100 % to 87.5 % speed by 1.16 (fan/OGV) or 0.82 (rotor alone) points, and to 61.7 % by 2.56 or 1.83 points. On the model's own ISA SLS operating line, the scaled pyCycle fan map instead rises 3.1 points at 87.5 % and 1.4 at 61.7 %. Matching the SDT shape takes 3.2-4.2 points; below 61.7 % there are no data, so the loss is held. `published` / `estimate` |
+| Booster part-speed loss, the same form on its own corrected speed | 0-4.2 points | 4.2 (upper bound) | No booster data; capped at the fan's measured falloff (same LP shaft). `estimate` |
+| LPT Reynolds lapse exponent n: (1 - eta) x (Re / Re_design)^-n at the design efficiency's level, Re ~ P / (sqrt(T) mu), Sutherland | 0-0.2 | 0.2 (upper bound) | [AMDC]: Dunham-Came (Re / 2e5)^-0.2; Kacker-Okapuu applies none between 2e5 and 1e6. This LPT's Re is about 5.5e5 at its inlet and 2.6e5 at its exit at takeoff (estimate, from definition.ts chords). `estimate` |
+| HPC Reynolds lapse exponent (D3-14 HPC part-speed falloff), the same form on the HPC inlet (P25, T25) | 0-0.2 | 0.2 (upper bound) | No compressor correlation was verified this round, so the turbine bound [AMDC] is reused as the upper end and 0 as the lower. `estimate` |
+| HPT tip-clearance loss (D3-14), points at standstill x (1 - (N2 / N2_design)^2) | 2-4 points | 4 (upper bound) | The W1C-I1 range: [LS02], about 1 % SFC and 10 C EGT per 0.010 in of HPT clearance, with the running clearance opening as the rotor's centrifugal growth falls. `estimate` |
+| EGT probe share of the LPT work (D3-14, fitted) | 0.25-0.45 | 0.385 | Station 49.5 sits after LPT stage 1 of 4 ([TCDS] IV.1.1), so at least an equal share; 0.45 is D3-14's upper bound. It replaces the single-point W0C-I6 value 0.35 only if the fit is adopted. |
+| VBV maximum dump, fraction of booster flow | 0.10-0.30 | 0.284 (held by the booster-map guard) | Up to the ISA ground-idle booster on the choke edge of its map (R-line 2.92 at 0.30, map edge 3.0); at least enough to move the idle booster off its stall line (R-line 1.60 shut, 1.94 at 0.10). Every fitted booster point is kept at R-line 2.9 or less. `estimate` |
+| VBV fully open below / closed above (corrected N2) | 61-75 % / 80-95 % | 75 / 95 (upper bounds) | Fully open at ground idle ([QAR] Fig. 1, [VBVPAT]); closed in climb and cruise and partly open in descent ([QAR]; model cruise N2c 98 %, descent 78-88 %). `estimate` |
+| HPC VSV offset from the map's schedule at <= 60 % / 85 % N2c (0 at >= 95 %) | ±6 deg each | -6 deg (lower) / +6 deg (upper) | The map's donor schedule is not this engine's; a difference beyond the 6 deg IGV mis-rig that [VGV] implant as a detectable fault would show as one. Flow effect: 0.688 per rad (1.2 %/deg), from the IGV (38.1 deg) / rotor-1 (57.4 deg) velocity triangle at fixed incidence; the efficiency effect is second order and left out. `estimate` |
 
 ### Fit procedure
 
-Bounded least squares (`src/cycle/boundedLeastSquares.ts`, a projected Levenberg-Marquardt method in variables scaled to [0, 1], forward differences with a fixed step, deterministic), started at the middle of every bound. Residuals, each divided by its threshold's tolerance: C11 at 85 / 30 / 7 % (fuel flow error / 5 %), C10 N2 at takeoff, MPA and both idle positions (/ 1.5 points), C10 displayed EGT at takeoff and MPA (/ 30 K) and at both idle positions (distance outside the measured 466-493 C, / 30 K), and three guards that are zero when met: C4's ISA ground-idle N1 inside 20-22 % (/ 0.1 point), its EGT under 500 C (/ 3 K), and the booster R-line at every fitted point at most 2.9 (/ 0.05). Every point is solved by continuation from the design point, as the C10 and C11 tests do. The fit converges in 11 iterations at cost 3.48 (half the sum of squared residuals).
+Bounded least squares (`src/cycle/boundedLeastSquares.ts`): a projected Levenberg-Marquardt method in variables scaled to [0, 1], forward differences with a fixed step, deterministic, started at the middle of every bound.
 
-### Result: model vs measured at the bounded optimum
+The residuals are each divided by their threshold's tolerance:
+- C11 at 85 / 30 / 7 % (/ 5 %);
+- C10 N2 at four points (/ 1.5 points);
+- C10 EGT at takeoff and MPA (/ 30 K), and at idle as the distance outside the measured 466-493 C (/ 30 K);
+- three guards: C4 N1 inside 20-22 %, C4 EGT under 500 C, and the booster R-line at most 2.9.
 
-| Point | Measured / databank | Reference model (mechanisms off) | Bounded fit | Threshold |
+Every point is solved by continuation from the design point. Result: 15 iterations, cost 2.06.
+
+### Result: model vs measured
+
+| Point | Measured / databank | Reference model | Bounded fit (rejected) | Threshold |
 |---|---|---|---|---|
-| C11 climb-out, 85 % thrust, fuel flow | 1.031 kg/s | 1.006 (-2.5 %) | 1.036 (+0.4 %) | ±5 %: both pass |
-| C11 approach, 30 % | 0.343 kg/s | 0.300 (-12.4 %) | 0.317 (-7.6 %) | ±5 %: both FAIL |
-| C11 idle, 7 % | 0.110 kg/s | 0.0985 (-10.5 %) | 0.102 (-7.2 %) | ±5 %: both FAIL |
-| C10 takeoff N2 / EGT (N1 97.4 %) | 99.8 % / 855 C | 99.88 / 856.0 | 100.36 / 856.3 | ±1.5 / ±30 K: pass |
-| C10 MPA N2 / EGT (N1 65.0 %) | 89.3 % / 585 C | 86.71 / 536.4 | 88.02 / 550.7 | ±1.5 / ±30 K: N2 passes with the fit; EGT FAILS by 4.3 K (-34.3 K) |
-| C10 idle pos. 2 N2 / EGT (N1 21.0 %) | 60.7 % / 466-493 C | 62.23 / 461.4 | 61.53 / 459.4 | ±1.5 / 436-523 C: N2 passes with the fit |
-| C10 idle pos. 1 N2 / EGT (N1 20.5 %) | 60.6 % / 466-493 C | 61.53 / 466.1 | 60.76 / 463.9 | pass |
-| C4 ISA ground idle N1 / EGT | 20-22 % / under 500 C | 20.09 / 414.5 | 20.55 / 409.8 | pass |
+| C11 climb-out 85 % fuel flow | 1.031 kg/s | 1.005 (-2.5 %) | 1.037 (+0.6 %) | ±5 %: pass |
+| C11 approach 30 % | 0.343 kg/s | 0.301 (-12.3 %) | 0.321 (-6.4 %) | ±5 %: FAIL in both |
+| C11 idle 7 % | 0.110 kg/s | 0.0993 (-9.7 %) | 0.105 (-4.3 %) | ±5 %: reference FAIL, fit passes |
+| C10 takeoff N2 / EGT | 99.8 % / 855 C | 99.88 / 856.0 | 100.32 / 866.6 | pass |
+| C10 MPA N2 / EGT | 89.3 % / 585 C | 86.71 / 536.4 | 87.89 / 564.8 | reference FAIL both, fit passes |
+| C10 idle pos. 2 N2 / EGT | 60.7 % / 466-493 C | 62.23 / 461.3 | 61.21 / 475.1 | reference N2 FAIL, fit passes |
+| C10 idle pos. 1 N2 / EGT | 60.6 % / 466-493 C | 61.53 / 466.0 | 60.47 / 479.6 | pass |
+| C4 ISA ground idle N1 / EGT | 20-22 % / < 500 C | 20.09 / 414.4 | 20.75 / 422.0 | pass |
+
+(Reference: CYCLE_CALIBRATION with the EEDB combustion table, which moved the 7 % fuel flow from -10.5 to -9.7 % and nothing else visibly.)
 
 ### What binds, and by how much
 
-- Every bound binds: the fan and booster losses at 4.2 points, the LPT exponent at 0.2, the VBV schedule at its widest (fully open below 75 %, closed only above 95 % N2c), the VSV offsets at -6 / +6 deg; the VBV dump stops at the booster-map guard.
-- One lever at a time past its bound, the others at the fit (`--relax` diagnostic): only the fan loss reaches the C11 edge, at **8.0 points for approach and 8.7 points for idle, about twice the SDT-derived 4.2**. The booster loss (to 15 points), the LPT exponent (to 0.5), the VBV closing speed (to 99.5 % N2c), and the VSV offsets (to ±20 deg) do not reach it; opening the VBV fully above 78.8 % N2c drives the booster off its map.
-- All binding bounds opened by their own width at once (fan 5.2 points, booster 8.4, LPT exponent 0.4, VSV -10.4 / +16.3 deg, the VBV fully open up to 86 % and shut only above 99.2 % N2c, so open in cruise against [QAR]): C10 passes and C11 approach passes (-2.2 %), but C11 idle still misses (-5.8 %).
-- C10 MPA EGT against the probe rule: with the share held at its earlier 0.35 instead of re-derived, the same fit meets every C10 check (MPA 560.5 C) but shows 873.5 C at the 25 C static takeoff run, 18.5 K over the measured 855 C (outside the W0C-I6 calibration check's 15 K). Shares of about 0.375-0.383 keep both (0.38: takeoff 865.6 C, MPA 556.0 C).
-- Side effects: adopting the bounded fit (tried on a scratch copy, not committed) fails 11 transient-model tests in model.test.ts and modelPaths.test.ts, besides a regression pin in offdesign.test.ts. With the final fit the engine does not reach 95 % thrust inside the 33.73(a) slam's 10 s (10.4 kN) or the C5 window, and the steady-thrust and limiter tests no longer settle where they did; the VBV, open up to 75 % and shut only above 95 % N2c, drives the booster past the choke edge of its map in a slam deceleration and on a 45 C day (thermo range errors). An earlier fit with the same VSV offsets left the HPC a negative surge margin (-0.6 %) in the 33.73(a) slam: opening the VSVs 6 deg at idle spends the stall margin that the low-speed schedule exists to keep.
-- The fan loss that C11 needs also acts at idle, where it raises N2 at a given N1: the SDT loss alone (3.2 points, everything else off) already puts C4's ISA ground-idle N1 at 19.83 % (minimum 20 %) and idle position 2's N2 at 62.6 % (C10: 62.2 %). The fit offsets that by opening the VSVs 6 deg at idle.
+- Every fitted bound binds except the VBV dump, which the booster-map guard holds, and the probe share.
+- One lever at a time past its bound, the others at the fit: C11 approach reaches its -5 % edge only if
+  - the fan loss reaches 6.3 points (bound 4.2),
+  - or the booster loss 14.3 (4.2),
+  - or the LPT exponent 0.47 (0.2),
+  - or the HPC exponent 0.45 (0.2),
+  - or the HPT clearance loss 8.1 points (4),
+  - or the VSV offset at 85 % N2c +15.8 deg (6).
+
+  The VBV schedule cannot reach the edge: fully open above 78.8 % N2c, the booster leaves its map.
+- With every binding bound opened by its own width at once, C10 and C11 all pass (approach -4.5 %). That run uses fan 4.4, booster 5.7, LPT 0.21, HPC 0.22, clearance 4.2, VSV -6.2 / +9.1 deg, and a VBV fully open below 81 % and shut only above 99.1 % N2c, against [QAR], which shows it closed in cruise.
+- Why the fit is rejected: adopting it (on a scratch copy, not committed) fails 10 transient-model tests in model.test.ts and modelPaths.test.ts, besides a regression pin in offdesign.test.ts. The engine no longer reaches 95 % thrust inside the 33.73(a) slam's 10 s (10.7 kN) or C5's window, and the steady-thrust and limiter tests no longer settle where they did. In a slam deceleration and on a 45 C day, the VBV (open up to 75 %, shut only above 95 % N2c) drives the booster past its map's choke edge (thermo range errors). An earlier fit with the same VSV offsets left the HPC a -0.6 % surge margin in the 33.73(a) slam: opening the VSVs 6 deg at idle spends the stall margin that the low-speed schedule exists to keep. So the fit fails D3-14's adoption rule.
+
+### Likely cause of the residual gap
+
+See the PHYSICS.md fidelity ledger. [EEDB] 8CM066 is a newly manufactured engine on a test bed (test engine status NME), while the [WIDURI] run is an on-wing engine with an unknown and likely deteriorated condition. Deterioration raises EGT and fuel flow at a given N1, which is consistent with the model reading cold at MPA. The new-engine databank fuel flows at 30 and 7 % are not explained that way. There, the generic, scaled pyCycle maps make the part-power engine more efficient than the real one by more than the published part-speed trends allow.

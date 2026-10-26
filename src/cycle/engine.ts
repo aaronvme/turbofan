@@ -59,6 +59,9 @@ import { PART_POWER_FIT } from './partPowerFit';
 const T_STD = 288.15;
 const P_STD = 101325;
 
+/** Heating value of CO burnt to CO2, J/kg: (393.52 - 110.53) kJ/mol / 28.010 g/mol (JANAF). */
+export const CO_HEATING_VALUE_J_PER_KG = ((393.52 - 110.53) / 28.01) * 1e6;
+
 /** Every assumption of the cycle; CYCLE_CALIBRATION documents each value. */
 export interface CycleCalibration {
   readonly ambient: AmbientConditions;
@@ -147,6 +150,18 @@ export interface PartPowerCalibration {
   readonly vsvOffsetRad: readonly number[];
   /** Fractional HPC corrected-flow loss per rad of extra closure (vsvFlowSensitivity). */
   readonly vsvFlowLossPerRad: number;
+  /** HPC Reynolds lapse exponent, the same form as the LPT's on the HPC inlet (P25, T25). */
+  readonly hpcReynoldsExponent: number;
+  /**
+   * D3-14: combustion efficiency relative to the design point vs corrected fuel flow
+   * Wf / (delta2 sqrt(theta2)), kg/s: piecewise linear through the knots, held beyond them.
+   * Empty knots: 1 everywhere. The reference engine's knots are the EEDB LTO points
+   * (combustionEfficiencyTable).
+   */
+  readonly combustion: {
+    readonly correctedFuelFlowKgPerS: readonly number[];
+    readonly relativeEfficiency: readonly number[];
+  };
 }
 
 const dp = ENGINE_DEFINITION.designPoint;
@@ -185,6 +200,8 @@ export const W0_CALIBRATION: CycleCalibration = {
     vsvOffsetN2cPercent: [60, 85, 95],
     vsvOffsetRad: [0, 0, 0],
     vsvFlowLossPerRad: 0,
+    hpcReynoldsExponent: 0,
+    combustion: { correctedFuelFlowKgPerS: [], relativeEfficiency: [] },
   },
 };
 
@@ -225,6 +242,7 @@ export const CYCLE_CALIBRATION: CycleCalibration = {
   partPower: {
     ...W0_CALIBRATION.partPower,
     vsvFlowLossPerRad: vsvFlowSensitivity(ENGINE_DEFINITION),
+    combustion: combustionEfficiencyTable(factValue('fuelLhv')),
   },
 };
 
@@ -238,6 +256,10 @@ export const CYCLE_CALIBRATION: CycleCalibration = {
 export const PART_POWER_FIT_CALIBRATION: CycleCalibration = {
   ...CYCLE_CALIBRATION,
   egtProbeLptWorkFraction: PART_POWER_FIT.egtProbeLptWorkFraction,
+  clearanceEfficiencyLoss: {
+    ...CYCLE_CALIBRATION.clearanceEfficiencyLoss,
+    hpt: PART_POWER_FIT.hptClearanceLoss,
+  },
   vbv: {
     maxFraction: PART_POWER_FIT.vbvMaxFraction,
     openBelowN2cPercent: PART_POWER_FIT.vbvOpenBelowN2cPercent,
@@ -249,6 +271,7 @@ export const PART_POWER_FIT_CALIBRATION: CycleCalibration = {
     boosterEfficiencyLoss: PART_POWER_FIT.boosterEfficiencyLoss,
     lptReynoldsExponent: PART_POWER_FIT.lptReynoldsExponent,
     vsvOffsetRad: [PART_POWER_FIT.vsvOffsetLowRad, PART_POWER_FIT.vsvOffsetMidRad, 0],
+    hpcReynoldsExponent: PART_POWER_FIT.hpcReynoldsExponent,
   },
 };
 
@@ -307,6 +330,47 @@ export function vsvFlowSensitivity(def: EngineDefinition): number {
   const alpha1 = Math.abs(row('hpc-igv').exitMetalAngle.mid);
   const beta1 = Math.abs(row('hpc-r1').inletMetalAngle.mid);
   return 1 / Math.cos(alpha1) ** 2 / (Math.tan(beta1) + Math.tan(alpha1));
+}
+
+/**
+ * Combustion efficiency from the emission indices (g per kg of fuel): the chemical energy left
+ * in the exhaust as CO and unburnt hydrocarbons over the fuel's, the energy balance behind the
+ * combustion efficiency of SAE ARP1533: 1 - (EI_CO Q_CO + EI_HC Q_HC) / (1000 Q_fuel), with the
+ * hydrocarbons taken at the fuel's own heating value.
+ */
+export function combustionEfficiencyFromEmissions(
+  eiCoGPerKg: number,
+  eiHcGPerKg: number,
+  fuelLhvJPerKg: number,
+): number {
+  return (
+    1 -
+    (eiCoGPerKg * CO_HEATING_VALUE_J_PER_KG + eiHcGPerKg * fuelLhvJPerKg) / (1000 * fuelLhvJPerKg)
+  );
+}
+
+/**
+ * D3-14: the EEDB LTO points as the combustion-efficiency table, relative to takeoff: knots at
+ * the databank fuel flows (ISA SLS, so corrected = actual), values the emission-index
+ * efficiency over the takeoff one. The design point (the takeoff fuel flow) keeps 1.
+ */
+export function combustionEfficiencyTable(
+  fuelLhvJPerKg: number,
+): PartPowerCalibration['combustion'] {
+  const modes = [
+    ['fuelFlowIdle', 'eiCoIdle', 'eiHcIdle'],
+    ['fuelFlowApproach', 'eiCoApproach', 'eiHcApproach'],
+    ['fuelFlowClimbOut', 'eiCoClimbOut', 'eiHcClimbOut'],
+    ['fuelFlowTakeoff', 'eiCoTakeoff', 'eiHcTakeoff'],
+  ] as const;
+  const eta = modes.map(([, co, hc]) =>
+    combustionEfficiencyFromEmissions(1000 * factValue(co), 1000 * factValue(hc), fuelLhvJPerKg),
+  );
+  const top = at(eta, eta.length - 1);
+  return {
+    correctedFuelFlowKgPerS: modes.map(([wf]) => factValue(wf)),
+    relativeEfficiency: eta.map((e) => e / top),
+  };
 }
 
 /** Part-speed loss ramp: 1 at or below the knee, 0 at or above design speed, linear between. */
@@ -413,6 +477,8 @@ export interface DesignData {
     readonly fpCombustor: number;
     /** Design Reynolds number index of the LPT inlet (reynoldsIndex at P45, T45). */
     readonly reLpt: number;
+    /** The same at the HPC inlet (P25, T25). */
+    readonly reHpc: number;
   };
 }
 
@@ -594,9 +660,15 @@ function gasPath(
   // tip clearance opens as the centrifugal growth (~ N^2) falls off design
   const clearance = 1 - (n2Rpm / cal.n2Rpm) ** 2;
   const hpcMap = compressorPoint(maps.hpc, nHpc, rHpc);
+  // D3-14: Reynolds lapse of the HPC, the LPT's form on the HPC inlet
+  const reHpc = Math.max(1e-3, reynoldsIndex(s24.pt, s24.tt) / sc.reHpc);
+  const etaHpcDes = cal.efficiencies.hpc;
   const hpc = {
     ...hpcMap,
-    efficiency: hpcMap.efficiency - cal.clearanceEfficiencyLoss.hpc * clearance,
+    efficiency:
+      hpcMap.efficiency *
+        (1 - ((1 - etaHpcDes) / etaHpcDes) * (reHpc ** -pp.hpcReynoldsExponent - 1)) -
+      cal.clearanceEfficiencyLoss.hpc * clearance,
   };
   const wc25 = (w25 * theta(s24.tt)) / (s24.pt / P_STD);
   // D3-11: a VSV setting off the map's own schedule shifts the speed line in flow. The point and
@@ -612,7 +684,14 @@ function gasPath(
   const h3 = enthalpy(s3.tt, 0);
   const far4 = wf / wComb;
   const w4 = wComb + wf;
-  const etaB = inp.lit ? cal.efficiencies.combustor : 0;
+  // D3-14: combustion efficiency vs power from the EEDB emission indices (1 at design)
+  const comb = pp.combustion;
+  const wfCorrected = wf / (s2.pt / P_STD) / theta(s2.tt);
+  const etaRel =
+    comb.correctedFuelFlowKgPerS.length === 0
+      ? 1
+      : piecewiseLinear(comb.correctedFuelFlowKgPerS, comb.relativeEfficiency, wfCorrected);
+  const etaB = inp.lit ? cal.efficiencies.combustor * etaRel : 0;
   const h4 = (wComb * h3 + etaB * wf * cal.fuelLhvJPerKg) / w4;
   const tt4 = temperatureFromEnthalpy(h4, far4);
   // cold (friction and dump) losses go with the dynamic head, i.e. (W sqrt(Tt) / Pt)^2 (Walsh &
@@ -856,6 +935,7 @@ function designCycle(cal: CycleCalibration, fpr: number): DesignCycle {
         fpCoreNozzle: (w41 * Math.sqrt(s5.tt)) / s5.pt,
         fpCombustor: (wComb * Math.sqrt(s3.tt)) / s3.pt,
         reLpt: reynoldsIndex(s45.pt, s45.tt),
+        reHpc: reynoldsIndex(s24.pt, s24.tt),
       },
       areas: { core: a8, bypass: a18 },
     },

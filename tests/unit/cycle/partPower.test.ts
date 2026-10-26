@@ -13,8 +13,12 @@ import {
   sutherlandViscosity,
   vsvFlowSensitivity,
   vsvOffsetRad,
+  CO_HEATING_VALUE_J_PER_KG,
+  combustionEfficiencyFromEmissions,
+  combustionEfficiencyTable,
   type SizedEngine,
 } from '../../../src/cycle/engine';
+import { factValue } from '../../../src/engine/facts';
 import { boundedLeastSquares } from '../../../src/cycle/boundedLeastSquares';
 import {
   BOOSTER_RLINE_LIMIT,
@@ -23,10 +27,8 @@ import {
   PART_POWER_START,
   PART_POWER_UPPER,
   evaluatePartPower,
-  partPowerCalibration,
   partPowerResiduals,
   partPowerVector,
-  probeShareForStaticTakeoff,
   withCalibration,
   withPartPower,
 } from '../../../src/cycle/partPower';
@@ -42,14 +44,13 @@ import { lazy } from './fixtures';
 const eng = (): SizedEngine => referenceEngine();
 const fitted = (): number[] => PART_POWER_PARAMETERS.map((p) => PART_POWER_FIT[p.id]);
 const TIMEOUT_MS = 600_000;
-const OFF = [0, 0, 0, 0.2, 65, 88, 0, 0];
+const OFF = [0, 0, 0, 0.2, 65, 88, 0, 0, 0, 0.04, 0.35];
+const X11 = (head: readonly number[]) => [...head, ...OFF.slice(head.length)];
 const testBed = { ambient: ISA_SLS, customerBleedFraction: 0, powerExtractionW: 0 };
 
 describe('D3-11 part-power parameters and bounds', () => {
   it('every parameter has a non-empty bound and a stated reason', () => {
-    expect([...PART_POWER_PARAMETERS.map((p) => p.id), 'egtProbeLptWorkFraction']).toEqual(
-      Object.keys(PART_POWER_FIT),
-    );
+    expect(PART_POWER_PARAMETERS.map((p) => p.id)).toEqual(Object.keys(PART_POWER_FIT));
     for (const p of PART_POWER_PARAMETERS) {
       expect(p.lower, p.id).toBeLessThan(p.upper);
       expect(p.reason.length, p.id).toBeGreaterThan(40);
@@ -81,11 +82,13 @@ describe('D3-11 part-power parameters and bounds', () => {
       0, 0, 0,
     ]);
     expect(pp.vsvOffsetRad).toEqual([0, 0, 0]);
+    expect(pp.hpcReynoldsExponent).toBe(0);
     expect(CYCLE_CALIBRATION.egtProbeLptWorkFraction).toBe(0.35);
+    expect(CYCLE_CALIBRATION.clearanceEfficiencyLoss.hpt).toBe(0.04);
   });
 
   it('withPartPower and partPowerVector are inverses; a wrong length throws', () => {
-    const x = [0.035, 0.01, 0.1, 0.2, 65, 88, -0.05, 0.07];
+    const x = [0.035, 0.01, 0.1, 0.2, 65, 88, -0.05, 0.07, 0.1, 0.03, 0.4];
     expect(partPowerVector(withPartPower(CYCLE_CALIBRATION, x))).toEqual(x);
     expect(() => withPartPower(CYCLE_CALIBRATION, [1, 2])).toThrow(/2 values/);
   });
@@ -97,6 +100,26 @@ describe('D3-11 part-power parameters and bounds', () => {
     ]);
     expect(pp.vsvOffsetRad).toEqual([0, 0, 0]);
     expect(pp.vsvFlowLossPerRad).toBe(0);
+  });
+});
+
+describe('D3-14 combustion efficiency from the EEDB emission indices', () => {
+  it('CO heating value from the JANAF heats of formation, and the efficiency relation', () => {
+    // CO + 1/2 O2 -> CO2: (393.52 - 110.53) kJ/mol / 28.01 g/mol = 10.10 MJ/kg
+    expect(CO_HEATING_VALUE_J_PER_KG / 1e6).toBeCloseTo(10.103, 3);
+    expect(combustionEfficiencyFromEmissions(0, 0, 4.32e7)).toBe(1);
+    // 1 g of unburnt fuel per kg is 0.1 % of the fuel energy
+    expect(1 - combustionEfficiencyFromEmissions(0, 1, 4.32e7)).toBeCloseTo(1e-3, 12);
+  });
+
+  it('the 8CM066 table: idle about 0.83 % below takeoff, the design point at 1', () => {
+    const t = combustionEfficiencyTable(factValue('fuelLhv'));
+    expect(t.correctedFuelFlowKgPerS).toEqual([0.11, 0.343, 1.031, 1.293]);
+    expect(t.relativeEfficiency.at(-1)).toBe(1);
+    // idle: (29.39 x 10.10 + 1.54 x 43.2) / 43200 = 0.84 % inefficiency vs 0.010 % at takeoff
+    expect(1 - (t.relativeEfficiency[0] ?? 0)).toBeCloseTo(0.00831, 4);
+    expect(1 - (t.relativeEfficiency[1] ?? 0)).toBeCloseTo(0.0006, 4);
+    expect(CYCLE_CALIBRATION.partPower.combustion).toEqual(t);
   });
 });
 
@@ -121,7 +144,7 @@ describe('D3-11 mechanisms', () => {
   });
 
   it('the VSV offset is piecewise linear through its knots and zero at and above 95 % N2c', () => {
-    const cal = withPartPower(CYCLE_CALIBRATION, [0.035, 0, 0, 0.2, 65, 88, -0.06, 0.08]);
+    const cal = withPartPower(CYCLE_CALIBRATION, X11([0.035, 0, 0, 0.2, 65, 88, -0.06, 0.08]));
     expect(vsvOffsetRad(cal, 40)).toBeCloseTo(-0.06, 12);
     expect(vsvOffsetRad(cal, 60)).toBeCloseTo(-0.06, 12);
     expect(vsvOffsetRad(cal, 72.5)).toBeCloseTo(0.01, 12);
@@ -211,17 +234,6 @@ describe('D3-11 fit', { timeout: TIMEOUT_MS }, () => {
   const fitEngine = lazy(() => withCalibration(eng(), PART_POWER_FIT_CALIBRATION));
   const atFit = lazy(() => evaluatePartPower(fitEngine()));
 
-  it('the probe share is re-derived to the measured 855 C (W0C-I6) and stays above equal work', () => {
-    const share = probeShareForStaticTakeoff(fitEngine());
-    expect(share ?? NaN).toBeCloseTo(PART_POWER_FIT.egtProbeLptWorkFraction, 6);
-    // D2-3: LPT stage 1 does more than an equal (0.25) share of the four stages' work
-    expect(PART_POWER_FIT.egtProbeLptWorkFraction).toBeGreaterThan(0.25);
-    expect(partPowerCalibration(eng(), fitted())?.egtProbeLptWorkFraction ?? NaN).toBeCloseTo(
-      PART_POWER_FIT.egtProbeLptWorkFraction,
-      6,
-    );
-  });
-
   it('evaluates every fitted point (C11 x 3, C10 x 8, C4 x 2, the booster map guard)', () => {
     const ev = atFit();
     expect(ev.converged).toBe(true);
@@ -236,10 +248,10 @@ describe('D3-11 fit', { timeout: TIMEOUT_MS }, () => {
     expect(guard?.model ?? Infinity).toBeLessThanOrEqual(BOOSTER_RLINE_LIMIT + 0.05);
   });
 
-  it('at the bounded optimum C11 approach and idle and C10 MPA EGT still miss; the rest pass', () => {
+  it('at the bounded optimum C11 approach still misses; every C10, C11 and C4 check else passes', () => {
     // pins the D3-11 outcome reported in docs/handoffs/w1-cycle-calib-2.md: if a change makes
     // these reachable inside the bounds, this fails and the decision has to be revisited
-    const MISSES = ['C11 approach fuel flow', 'C11 idle fuel flow', 'C10 MPA EGT'];
+    const MISSES = ['C11 approach fuel flow'];
     for (const p of atFit().points) {
       if (MISSES.includes(p.id)) expect(p.residual, p.id).toBeLessThan(-1);
       else expect(Math.abs(p.residual), p.id).toBeLessThanOrEqual(1);

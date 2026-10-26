@@ -109,6 +109,8 @@ function convertSourceValue(text: string, siUnit: string): number | null {
       return siUnit === '%' ? v : v / 100;
     case '(lb/h)/lbf':
       return tsfcImperialToSi(v);
+    case 'g/kg':
+      return v / 1000;
     case 'kg/s':
     case 'kg':
     case 'rpm':
