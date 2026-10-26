@@ -12,9 +12,9 @@ describe('D0-1 protocol', () => {
     expect(OFFICIAL).toEqual({ name: 'official', warmupMs: 10_000, runMs: 60_000, runs: 3 });
   });
 
-  it('quick: about 5 s per configuration, still 3 runs so the same statistics apply', () => {
+  it('quick: 3 runs (repetitions) so the same statistics apply, about 3 s per run with its warm-up', () => {
     expect(QUICK.runs).toBe(3);
-    expect(QUICK.warmupMs + QUICK.runs * QUICK.runMs).toBe(5_000);
+    expect(QUICK.warmupMs + QUICK.runMs).toBe(3_000);
   });
 
   it('labels quick results as indicative and contaminated', () => {

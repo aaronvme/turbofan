@@ -2,7 +2,8 @@
 // warm-up, then `runs` runs of `runMs`; each frame and each (late) timestamp-query sample is
 // attributed to the run its frame started in. Rates are counts over the fixed run window.
 
-import { median, medianOfRuns, quantile, summarize, type Summary } from './stats';
+import { median, medianOfRuns, quantile, summarize, type Summary } from './stats.ts';
+import { frameHealth } from './validity.ts';
 
 export interface ProtocolTimes {
   readonly warmupMs: number;
@@ -24,8 +25,18 @@ export interface RunResult {
   readonly index: number;
   readonly frames: number;
   readonly frameTime: Summary;
-  /** Frames longer than 1.5 x the run's median frame time: at least one missed vsync. */
+  /**
+   * The display refresh interval the frames are judged against: the harness's idle probe, or
+   * without one the warm-up's median frame time. Never the run's own median, which is ~1 s in
+   * a run throttled to 1 Hz (W0G-I1).
+   */
+  readonly displayIntervalMs: number;
+  /** Frames longer than 1.5 display intervals: at least one missed vsync. */
   readonly longFrames: number;
+  /** Time in frames longer than 2.5 display intervals (spikes/lib/validity.ts). */
+  readonly throttledMs: number;
+  /** The longest span of consecutive such frames; the validity gate reads it. */
+  readonly longestThrottledMs: number;
   /**
    * How late each rAF callback started after its frame time (performance.now() - t), or null
    * if the caller gave no callback times. The timestamps are vsync-aligned, so a callback held
@@ -61,13 +72,17 @@ export class RunRecorder {
   private readonly p: ProtocolTimes;
   private readonly start: number;
   private readonly acc: RunAcc[];
+  private readonly displayMs: number | undefined;
+  private readonly warmupDeltas: number[] = [];
   private lastT: number | null = null;
   private current: Phase = 'warmup';
   private index = -1;
 
-  constructor(protocol: ProtocolTimes, startT: number) {
+  /** `displayIntervalMs`: the display's refresh interval, if measured (else the warm-up's). */
+  constructor(protocol: ProtocolTimes, startT: number, displayIntervalMs?: number) {
     this.p = protocol;
     this.start = startT;
+    this.displayMs = displayIntervalMs;
     this.acc = Array.from({ length: protocol.runs }, () => ({
       deltas: [],
       frames: 0,
@@ -121,6 +136,8 @@ export class RunRecorder {
       }
       this.current = 'run';
       this.index = r;
+    } else if (this.lastT !== null) {
+      this.warmupDeltas.push(t - this.lastT);
     }
     this.lastT = t;
     return this.current;
@@ -138,14 +155,19 @@ export class RunRecorder {
   results(): RunResult[] {
     if (this.current !== 'done') throw new Error('protocol not done yet');
     const sec = this.p.runMs / 1000;
+    const display =
+      this.displayMs ?? (this.warmupDeltas.length > 0 ? median(this.warmupDeltas) : null);
+    if (display === null) {
+      throw new Error('no display interval: pass one, or let the warm-up record frames');
+    }
     return this.acc.map((a, index) => {
       const total = a.gpuMs.reduce((s, x) => s + x, 0);
-      const typical = a.deltas.length > 0 ? median(a.deltas) : 0;
       return {
         index,
         frames: a.frames,
         frameTime: summarize(a.deltas),
-        longFrames: a.deltas.filter((d) => d > 1.5 * typical).length,
+        displayIntervalMs: display,
+        ...frameHealth(a.deltas, display),
         callbackDelay: a.delays.length > 0 ? summarize(a.delays) : null,
         fps: a.frames / sec,
         iterations: a.iterations,

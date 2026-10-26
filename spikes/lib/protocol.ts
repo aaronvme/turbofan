@@ -1,6 +1,8 @@
 // D0-1 GPU timing protocol (docs/reviews/LOG.md): on AC power, nothing else running, Chrome in
-// the foreground, 10 s warm-up, then the median of 3 runs of 60 s. `--quick` keeps the shape
-// (warm-up + 3 runs) but takes ~5 s per configuration; its numbers are only indicative.
+// the foreground, 10 s warm-up, then the median of 3 runs of 60 s. The harness runs the 3 runs
+// as 3 repetitions of the whole sweep in rotated order (W0G-I2, spikes/lib/order.ts), each run
+// after its own warm-up. `--quick` keeps the shape (3 repetitions of warm-up + run) but takes
+// ~3 s per run; its numbers are only indicative.
 
 export interface Protocol {
   readonly name: 'official' | 'quick';
@@ -17,7 +19,7 @@ export const DEFAULT_PORT = 5181;
 export function protocolLabel(p: Protocol): string {
   return p.name === 'quick'
     ? 'indicative, contaminated (D0-1): --quick run'
-    : 'official (D0-1): 10 s warm-up, median of 3 x 60 s';
+    : 'official (D0-1): 3 repetitions in rotated order, each a 10 s warm-up then 60 s; median per configuration';
 }
 
 export interface BenchArgs {
@@ -25,12 +27,15 @@ export interface BenchArgs {
   /** Configuration ids to run, or null for all. */
   readonly only: readonly string[] | null;
   readonly port: number;
+  /** Seed of the run-order generator, or null to draw one (the harness records it). */
+  readonly seed: number | null;
 }
 
 export function parseBenchArgs(argv: readonly string[]): BenchArgs {
   let protocol = OFFICIAL;
   let only: string[] | null = null;
   let port = DEFAULT_PORT;
+  let seed: number | null = null;
   for (const arg of argv) {
     if (arg === '--quick') {
       protocol = QUICK;
@@ -42,11 +47,16 @@ export function parseBenchArgs(argv: readonly string[]): BenchArgs {
     } else if (arg.startsWith('--port=')) {
       port = Number(arg.slice('--port='.length));
       if (!Number.isInteger(port) || port <= 0) throw new Error(`bad --port value in ${arg}`);
+    } else if (arg.startsWith('--seed=')) {
+      seed = Number(arg.slice('--seed='.length));
+      if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) {
+        throw new Error(`bad --seed value in ${arg} (an integer in 0..4294967295)`);
+      }
     } else {
-      throw new Error(`unknown argument ${arg} (expected --quick, --only=a,b, --port=N)`);
+      throw new Error(`unknown argument ${arg} (expected --quick, --only=a,b, --port=N, --seed=N)`);
     }
   }
-  return { protocol, only, port };
+  return { protocol, only, port, seed };
 }
 
 /** Output path for a harness run, stamped with the local start date and minute. */

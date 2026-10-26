@@ -36,6 +36,11 @@ export interface BenchConfig {
   readonly iterations: 'adaptive' | number;
   readonly protocol: ProtocolTimes;
   readonly particles: number;
+  /**
+   * The display refresh interval from the harness's idle rAF probe; long and throttled frames
+   * are counted against it (W0G-I1). Without it the warm-up's median frame time is used.
+   */
+  readonly displayIntervalMs?: number;
 }
 
 export interface AdapterReport {
@@ -205,7 +210,7 @@ export class BenchApp {
       let last: number | null = null;
       const frame = (t: number) => {
         const callbackAt = performance.now();
-        rec ??= new RunRecorder(config.protocol, t);
+        rec ??= new RunRecorder(config.protocol, t, config.displayIntervalMs);
         const k = scheduler ? scheduler.iterations : (config.iterations as number);
         const slot = ring.acquire();
         const encoder = device.createCommandEncoder();
