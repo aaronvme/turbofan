@@ -619,3 +619,54 @@ The JSON's `gitDirty: true` comes only from the throughput JSON of the run befor
   - 16x8 is a default, because the tile ranking is confounded by run order (W0G-I2).
 - (j) **D2-4:** the decision stands. Add the caveats above: no frame difference at 15 Hz (the gain is the rAF delay), the worker drops 60 frames per minute at 60 Hz, the solver ran 3 it/frame, and React was the development build.
 - (k) **Coordination:** w1/cycle adds `source: 'model'` once w1/contracts-fix is on main.
+
+## Critic pass 3: w0/gpu-spikes @d1cb041
+
+Reviewed 2026-10-26 by the pass-3 critic: the fix-round diff 175078a..d1cb041 (`spikes/lib/{validity,order,benchRun,protocol,visibility}.ts`, `spikes/bench/run.ts`, `spikes/scene/benchApp.ts`, the unit tests, `docs/GPU_FACTS.md`, `spikes/README.md`, `docs/bench/README.md`, `ci.yml`, the GPU and browser configs) and the main merge 175078a. Checklists applied: typescript-reviewer, silent-failure-hunter, pr-test-analyzer, security-review (the harness still runs fixed powershell/git commands and a 127.0.0.1 Vite server; chrome://version and CDP `Page.bringToFront` take no input; nothing found). **No benchmark was run** (D0-1).
+
+**Gates at HEAD** (rerun in the builder worktree; tracked files unchanged):
+- `npm test`: 1107 passed (48 files), exit 0.
+- `npm run lint`: clean. `npm run typecheck`: clean.
+- `npm run coverage`: lines 99.5 %, statements 98.55 %, branches 87.42 %, functions 99.39 %; `spikes/lib` lines 100 %, `validity.ts` 100 % on all four.
+- `npm run test:mesh`: 29 passed.
+- `npm run test:browser`: 14 passed (2 files).
+- `npm run test:gpu`: **14 passed, 1 failed** on the first run, while a Stryker run had 8 workers on the CPU: `tests/gpu/timestamp-ring.test.ts:78` (W0G-N7). The rerun in a quiet window is recorded below the trial merge.
+
+**Pass-2 findings, verified:**
+- **W0G-B1 FIXED (f375a68).** I recomputed both official tables from the recorded JSONs:
+  - M34: all nine rows (ms/it, p10, budget and achieved it/s, fps, frame p99, long frames), render GPU 3.6-3.8 ms, resample 0.066 / 0.131 / 0.262 ms, CPU 17 % before / 7.5-8.9 % during / 8 % after, the GPU-busy lists, code at 019683d.
+  - M35: all six rows, including long frames per run (138, 177, 187 and 60, 67, 51), rAF delay p95/p99, React commit p50/p95 and solver GPU per frame (4.46 / 4.26 / 4.06 / 4.13 / 6.36 / 5.77 ms).
+  - Every number matches. M29 and M31 are corrected; `spikes/README.md` exists; no "P1 needs the official run" line is left.
+- **W0G-I1 FIXED (f363280 RED, 9d7bd60, a0f162f).**
+  - Frames are judged against the probe's display interval, never the run's median.
+  - The harness refuses to start on a throttled probe, sends `Page.bringToFront` before every run, reruns an invalid run once, and stores an invalid configuration with `aggregate: null`.
+  - The gate is unit-tested on a synthetic 1 Hz run, the 80k-16x8 shape (invalid in all three runs) and the main-react60 shape (valid). D2-11 and D2-13 are implemented as decided (`validity.ts:106-121`).
+- **W0G-I2 FIXED (f363280, 9d7bd60).** `order.ts` gives a seeded Latin square for groups of three (each tile in each in-grid slot once, the grids rotated too), keeps compared configurations together, and fits the order effect within configurations. The seed and the orders go into the JSON.
+- **W0G-I3 FIXED (175078a):** both conflicts resolved as unions, as in my pass-2 trial merge.
+- **W0G-I4 FIXED (1e4535a):** `passWithNoTests` is gone from both configs. Note that w1/geometry's copy of `vitest.browser.config.ts` still has it; the trial merge takes this branch's version.
+- **D2-7 done (1e4535a):** `ci.yml:22` runs `npm run test:mesh`. It has never run on Linux: d1cb041 is not pushed (the last CI run on the branch is 8e4ffdc). The first Linux run of the asset-hash check (W1M-I1's open question) will be main's run after the merge, so watch it.
+- **N1, N2, N3 FIXED** (9d7bd60, f375a68). **N4 DEFERRED** to W2 with the reason in M32: accepted, since the test belongs to the production kernel.
+
+### Blocking
+None.
+
+### Important
+None.
+
+### Nits
+- **W0G-N5 OPEN: below 30 fps, the sustained-throttle rule calls a slow load "occluded".**
+  - Where: `spikes/lib/validity.ts:19-25`, `:106`.
+  - Failure:
+    - With vsync, a frame that needs more than two intervals arrives after three (50 ms at 60 Hz), which is above 2.5 intervals (41.75 ms).
+    - About ten such frames in a row (> 500 ms) make the run INVALID with the reason "window occluded or unfocused, or a stall", and the configuration loses its numbers.
+    - D2-13 wants exactly such a load reported as "below display rate". P1 is unaffected, since every valid row held 60 fps. But P2/L13 on a heavy preset (w1/geometry renders in about 20-23 ms today, see W1G-I3) could hit it.
+  - Fix: treat a delta as the occlusion signature only near 1 Hz (for example over 10 intervals or over 250 ms), and leave 3-10-interval cadences to the warning. Confirm the change with the orchestrator, since D2-11 fixed the rule's wording.
+- **W0G-N6 OPEN: two blind spots in the live path.**
+  - `run.ts:475` and `:491`: `page.evaluate` has no timeout, so a run whose rAF stops entirely hangs the harness (the handoff lists it as a gotcha). Fix: race it against warm-up + run + 30 s, and record the run as INVALID "stalled".
+  - `benchRun.ts:159`: without a probe interval, the recorder falls back to the warm-up's median. A warm-up that is throttled from the start (median ~1 s) then makes a 1 Hz run look healthy. Only the in-page `?demo` path uses the fallback. Fix: apply `displayIntervalMs()`'s 24-500 Hz check to the fallback too.
+- **W0G-N7 OPEN: a GPU-timing order assertion makes `test:gpu` flaky.**
+  - Where: `tests/gpu/timestamp-ring.test.ts:78` expects, in every delivered frame, the second pass (2048 workgroups) to time longer than the first (1024).
+  - Failure: under CPU load, the integrated GPU's clock moved between the passes: the first pass timed 0.97 ms and the second 0.38 ms, and the gate went red. CLAUDE.md asks for deterministic tests.
+  - Fix: compare the medians over the delivered frames, and give the second pass at least 8x the work, or assert only that both are finite and positive and leave the ratio to a bench.
+
+**Verdict w0/gpu-spikes @d1cb041: MERGE.** Every pass-2 finding is fixed or deferred with a reason, and the official evidence in GPU_FACTS matches the recorded files. The nits go to the next harness touch, before the next official run (P2/P3, L13). N7 goes there too, or to the w2/solver builder, who owns the GPU suite next.
