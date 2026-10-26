@@ -204,6 +204,19 @@ T49.5 (after LPT stage 1, equal stage work) comes out at 1174 K = 901 °C, i.e. 
 | Exhaust and plug | 2.37 to 3.40 | plug 0.335 to 0 / casing 0.452 to 0.390 | core nozzle lip at x = 2.75, A8 = 0.1852 m² (plug r = 0.3052 at the lip) |
 | Nacelle | -0.775 to 1.55 | outer radius up to 1.06 | nacelleMaxDiameter |
 
+### Exhaust plug against public data (D3-9, w1/lookdev-3, 2026-10-26)
+
+The definition's plug (`src/engine/definition.ts`, curve `plug`): base radius 0.3052 m at the core-nozzle lip (x = 2.75 m, set by A8 = 0.1852 m² inside the lip radius 0.39 m), a protrusion of 0.65 m beyond the lip (tip at x = 3.40 m, 0.98 m aft of the turbine-rear-frame flange), so 0.83 core-lip diameters; the mean half-angle from the lip to the tip is 25°, steepening from 12° near the lip to 45° at the tip (an ogive).
+
+| Plug figure | Published | Model | Source / status |
+|---|---|---|---|
+| Plug length (protrusion beyond the core-nozzle lip) | unknown | 0.65 m | none found |
+| Plug base diameter | unknown | 0.610 m (from A8) | none found; the model's value follows from A8 and the lip radius, both `estimate` |
+| Plug cone angle | unknown | 25° mean half-angle | none found |
+| Engine envelope that contains the plug | 2.508 m flange to flange (TCDS); the plug and the core nozzle hang aft of the TRF flange | plug tip 0.98 m aft of the TRF flange | [TCDS] |
+
+Searched on 2026-10-26: CFM56-7B plug, centerbody and primary-nozzle dimensions (web search; the [TCDS], [FICHE] and [AW08] tables give the engine envelope only; a 737NG exhaust-plug listing on shop.boeing.com is a protective cover whose size is its packaging, and a parts listing for the primary nozzle P/N 314A2610-62 gives no dimensions). No public figure exists for the plug's length, base diameter or cone angle, so under the facts rule the plug is **not reshaped**: changing one unsourced shape for another would not make it more correct, and A8 (pinned by tests/unit/engine/definition.test.ts) and the mesh are untouched. The orchestrator can reopen this with a source (the engine or airframe maintenance manuals, or a dimensioned public drawing).
+
 ## Model vs published (updated every wave)
 
 Model: the W1 cycle model (`src/cycle`, w1/cycle), ISA SLS static unless stated. Tests: tests/unit/cycle/engine.test.ts, model.test.ts and modelPaths.test.ts.
