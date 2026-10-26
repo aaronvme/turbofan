@@ -88,5 +88,8 @@ GATES @669178a (+ this handoff)
     - all 79.1 -> 92.2 % (1050 mutants).
   - The critic's combined pass-1 numbers were tfi 80.6 %, distribution 71.4 %, metrics 87.6 %, all 80.8 %.
   - The remaining distribution survivors are equivalent: bisection < vs <=, normalisation no-ops, Newton/damping internals that still converge, mutant 88.
-  - Default config with `--mutate` (full unit suite): see the line below.
+  - Default config, `npx stryker run --mutate tools/mesh/tfi.ts,tools/mesh/distribution.ts,tools/mesh/metrics.ts` (full unit suite, 11 min):
+    - tfi 100 %, distribution 98.9 %, metrics 99.2 %, all 99.25 %;
+    - 728 killed, 325 timeouts, 8 survived, of 1061.
+    - Stryker counts timeouts as detected, and many are mutants that only slow the smoke-mesh build, so the stage-1 figures are the stricter measure.
 - No new dependencies. No dev server or Chrome page left open.
