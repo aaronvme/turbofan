@@ -173,8 +173,21 @@ export async function createEngineView(o: EngineViewOptions): Promise<EngineView
     });
     return await assemble(o, device, renderer, errors, timing);
   } catch (e) {
-    if (renderer !== null) await Promise.resolve(renderer.dispose()).catch(() => undefined);
+    // a dispose failure on this path is attached to the init error, not dropped (W1L-N5)
+    let disposeError: unknown = null;
+    if (renderer !== null)
+      await Promise.resolve(renderer.dispose()).catch((d: unknown) => {
+        disposeError = d;
+      });
     device.destroy();
+    if (disposeError !== null) {
+      const what = (x: unknown) => (x instanceof Error ? x.message : 'non-Error value');
+      throw new AggregateError(
+        [e, disposeError],
+        `${what(e)} (and renderer.dispose failed: ${what(disposeError)})`,
+        { cause: e },
+      );
+    }
     throw e;
   }
 }
