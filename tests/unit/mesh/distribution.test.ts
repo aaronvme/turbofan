@@ -99,15 +99,16 @@ describe('maxRatio', () => {
   it('reports the largest adjacent spacing ratio in either direction', () => {
     expect(maxRatio([0, 1, 3, 4])).toBeCloseTo(2, 12);
     expect(maxRatio([0, 1, 2])).toBe(1);
-    // growing only, then shrinking only
-    expect(maxRatio([0, 1, 4])).toBeCloseTo(3, 12);
-    expect(maxRatio([0, 3, 4])).toBeCloseTo(3, 12);
+    // growing only, then shrinking only (no spacing of 1, so a/b and a*b differ)
+    expect(maxRatio([0, 2, 8])).toBeCloseTo(3, 12);
+    expect(maxRatio([0, 6, 8])).toBeCloseTo(3, 12);
   });
 
   it('reports a fold or a zero spacing as an infinite ratio (W0M-N2)', () => {
     expect(maxRatio([0, 0.5, 0.4, 1])).toBe(Infinity);
     expect(maxRatio([0, 0.5, 0.5, 1])).toBe(Infinity);
     expect(maxRatio([0, -0.1])).toBe(Infinity);
+    expect(maxRatio([0.5, 0.5])).toBe(Infinity);
   });
 });
 
@@ -180,6 +181,9 @@ describe('distribution input checks', () => {
     for (const ds0 of [0, -0.1, 1, 1.5]) {
       expect(() => geometric(4, ds0), String(ds0)).toThrow(/first spacing/);
     }
+    expect(() => geometric(0, 0.5)).toThrow(/positive integer/);
+    // one cell is always the whole length, whatever the first spacing says
+    expect(Array.from(geometric(1, 1))).toEqual([0, 1]);
   });
 
   it('finds ratios above 2 (the bracket grows)', () => {

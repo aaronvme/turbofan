@@ -396,6 +396,49 @@ describe('meshQuality in-block measurements (W0M-I2)', () => {
     expect(q[0]?.maxStretchAt.j).toBe(1);
     expect(q[1]?.maxStretch).toBeCloseTo(2, 12);
     expect(q[1]?.maxStretchAt.j).toBe(0);
+    // the radial grid lines run straight through the interface, square to it
+    expect(q[0]?.interfaceKinkMaxDeg).toBeLessThan(1e-9);
+    expect(q[1]?.interfaceKinkMaxDeg).toBeLessThan(1e-9);
+    expect(q[1]?.interfaceOrthoMaxDeg).toBeLessThan(1e-9);
+  });
+
+  it('compares the cells along the line that crosses an i-face interface', () => {
+    // A has 0.5 x 0.25 cells, B has 0.25 x 0.25: ratio 2 along x across x = 1, and 1 along r
+    const A = gridBlock('A', [0, 0.5, 1], [0, 0.25, 0.5]);
+    const B = gridBlock('B', [1, 1.25, 1.5], [0, 0.25, 0.5]);
+    const patches: Patch[] = [];
+    connect(
+      patches,
+      { block: 0, face: 'imax', start: 0, end: 2 },
+      { block: 1, face: 'imin', start: 0, end: 2 },
+      'A|B',
+      false,
+    );
+    const q = meshQuality({ blocks: [A, B], patches });
+    expect(q[0]?.maxStretch).toBeCloseTo(2, 12);
+    expect(q[0]?.maxStretchAt.i).toBe(1);
+    expect(q[1]?.maxStretch).toBeCloseTo(2, 12);
+    expect(q[1]?.maxStretchAt.i).toBe(0);
+  });
+
+  it('compares radial cell sizes within one column, not across columns', () => {
+    // node (i, j) at (i, j (1 + i / 2)): every column is uniform in j, but columns differ
+    const ni = 4;
+    const nj = 3;
+    const b: Block = {
+      name: 'fan-out',
+      ni,
+      nj,
+      x: new Float64Array((ni + 1) * (nj + 1)),
+      r: new Float64Array((ni + 1) * (nj + 1)),
+    };
+    for (let j = 0; j <= nj; j++) {
+      for (let i = 0; i <= ni; i++) {
+        b.x[nodeIndex(b, i, j)] = i;
+        b.r[nodeIndex(b, i, j)] = j * (1 + i / 2);
+      }
+    }
+    expect(only(b).maxStretch).toBeCloseTo(1, 12);
   });
 });
 

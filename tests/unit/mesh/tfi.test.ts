@@ -165,6 +165,7 @@ describe('twoBoundary', () => {
     expect(() => twoBoundary('c', inner, outer, bad([0, 0.4, 1]))).toThrow(message);
     expect(() => twoBoundary('c', inner, outer, bad([0.1, 0.4, 0.7, 1]))).toThrow(message);
     expect(() => twoBoundary('c', inner, outer, bad([0, 0.4, 0.7, 0.9]))).toThrow(message);
+    expect(() => twoBoundary('c', inner, outer, bad([0, 0.4, 0.7, 1, 1]))).toThrow(message);
     // the smallest legal block: one cell
     expect(twoBoundary('c', [p, inner[1] as Pt], [q, outer[1] as Pt], () => [0, 1]).nj).toBe(1);
   });
