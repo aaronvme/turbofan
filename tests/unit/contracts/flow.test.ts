@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { toHalfBits } from '../../../src/contracts/half';
+import { HALF_MAX, toHalfBits } from '../../../src/contracts/half';
 import {
   FIELD_EXTENTS,
   SOLVER_DOMAIN_MIN_D,
@@ -209,6 +209,18 @@ function halfRound(v: number): number {
 }
 
 describe('rasterizeField and sampleCpuField', () => {
+  it('W0C-N2: refuses a finite value beyond the f16 range instead of writing infinity', () => {
+    const tiny: FieldExtent = { ...FIELD_EXTENTS.far, width: 1, height: 1 };
+    const at = (patch: Partial<FieldSample>) => () =>
+      rasterizeField(tiny, REF, () => sample(patch));
+    expect(at({ uxMPerS: 1e6 })).toThrow(
+      /rasterizeField: velocity\[0\] 1000000 .* beyond the f16 range/,
+    );
+    expect(at({ uxMPerS: -65505 })).toThrow(/beyond the f16 range/);
+    expect(at({ pPa: REF.pInfPa * 1e6 })).toThrow(/state\[0\] .* beyond the f16 range/);
+    expect(at({ urMPerS: HALF_MAX })).not.toThrow();
+  });
+
   const tiny: FieldExtent = { id: 'near', width: 4, height: 2, xMin: 0, xMax: 4, rMin: 0, rMax: 2 };
   const linear = (x: number, r: number): FieldSample =>
     sample({ tK: 300 + 10 * x + r, uxMPerS: 2 * x, urMPerS: r, uthetaMPerS: 4 * r });

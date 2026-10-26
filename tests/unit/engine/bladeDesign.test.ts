@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DESIGN_LIMITS,
   axialVelocity,
   carterM,
   designRow,
@@ -236,6 +237,20 @@ describe('designRow', () => {
         { targetSolidity: 1 },
       ),
     ).toThrow(/axial velocity must be > 0 at both edges/);
+  });
+
+  it('W0C-N4: says so when the stagger or the blade count does not converge', () => {
+    const aero = stator(45 * DEG, 0);
+    expect(() => designRow(EDGES, aero, { targetSolidity: 1.2 }, { maxIterations: 1 })).toThrow(
+      /designRow: the stagger did not converge in 1 iterations/,
+    );
+    expect(() => designRow(EDGES, aero, { targetSolidity: 1.2 }, { maxCountPasses: 0 })).toThrow(
+      /designRow: the blade count did not settle in 0 passes/,
+    );
+    // the defaults converge, and a given count never needs a pass
+    expect(DESIGN_LIMITS).toEqual({ maxIterations: 200, maxCountPasses: 10 });
+    expect(designRow(EDGES, aero, { targetSolidity: 1.2 }).count).toBeGreaterThan(0);
+    expect(designRow(EDGES, aero, { count: 24 }, { maxCountPasses: 0 }).count).toBe(24);
   });
 
   it('W0C-I4: a row that does not turn needs no deviation, even at a tiny solidity', () => {

@@ -105,6 +105,21 @@ describe('the sim/UI boundary is structured-clone-safe plain data (D0-2)', () =>
     expect(findNonPlainData({ a: undefined, b: [true, false, 0, -1.5], c: bare })).toBeNull();
   });
 
+  it('W0C-N9: rejects non-enumerable properties and non-index keys on arrays', () => {
+    // structuredClone silently drops a non-enumerable property ...
+    const hidden = {};
+    Object.defineProperty(hidden, 'secret', { value: 1, enumerable: false });
+    expect(structuredClone(hidden)).toEqual({});
+    expect(findNonPlainData({ a: hidden })).toMatch(/^a\.secret: non-enumerable property/);
+    // ... and keeps extra keys on an array, where the check used to look away
+    const tagged = Object.assign([1, 2], { fn: () => 1 });
+    expect(() => structuredClone(tagged)).toThrow();
+    expect(findNonPlainData({ list: tagged })).toMatch(/^list\.fn: non-index key on an array/);
+    expect(findNonPlainData({ list: Object.assign([1], { n: Number.NaN }) })).toMatch(
+      /^list\.n: non-index key on an array/,
+    );
+  });
+
   it('allows shared (non-cyclic) references', () => {
     const shared = { v: 1 };
     expect(findNonPlainData({ a: shared, b: shared })).toBeNull();

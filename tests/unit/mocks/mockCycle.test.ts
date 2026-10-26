@@ -87,7 +87,25 @@ describe('mock cycle model: labelled, deterministic, plain data', () => {
       expect(Object.isFrozen(s.stations)).toBe(true);
     });
     expect(first).toEqual(copy);
-    expect(m.state()).toBe(m.step(0, { ...RUN, throttleLever: 1 }));
+  });
+
+  it('W0C-N6: a zero step (paused) keeps the time but takes the new inputs', () => {
+    const m = idleModel();
+    const before = m.state();
+    const paused = m.step(0, { ...RUN, throttleLever: 1 });
+    expect(paused.timeS).toBe(before.timeS);
+    expect(paused.n2Rpm).toBe(before.n2Rpm);
+    // the FADEC sees the lever moved while paused
+    expect(paused.fadec.limiter).toBe('accelSchedule');
+    expect(before.fadec.limiter).not.toBe('accelSchedule');
+    expect(m.state()).toBe(paused);
+  });
+
+  it('W0C-N6: refuses a step longer than a second instead of hanging', () => {
+    const m = idleModel();
+    // (a dt of 1e9 used to mean 5e10 substeps: a hang; 2 s shows the bound without one)
+    expect(() => m.step(2, RUN)).toThrow(/dtS 2 must be finite and in \[0, 1\] s/);
+    expect(() => m.step(1, RUN)).not.toThrow();
   });
 
   it('rejects invalid steps and inputs', () => {
