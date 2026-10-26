@@ -1,4 +1,4 @@
-w1/cycle: DONE except mutation testing, which is only partly run (see MUTATION). Every threshold (T1-T4, C1-C9) is green. C5 now starts at 15 % of rated takeoff thrust per D2-1 and takes 2.60 s. src/cycle branch coverage is about 99 %. (from w1/contracts-fix @3969af7; previous pass @b4acf7f; HEAD = the commit that adds this file)
+w1/cycle: DONE except mutation testing (partial: see MUTATION; it needs an orchestrator decision on cost). Every threshold (T1-T4, C1-C9) is green. C5 now starts at 15 % of rated takeoff thrust per D2-1 and takes 2.60 s. src/cycle branch coverage is 99.3 %. (from w1/contracts-fix @3969af7; previous pass @b4acf7f; HEAD = the commit that adds this file)
 
 DONE, earlier passes (each "(TDD)" commit came first and failed)
 - src/thermo: thermally perfect air and frozen Jet-A products from NASA 7-coefficient polynomials (GRI-Mech 3.0, Burcat). Provides cp, h, the entropy function, gamma, R, the T(h) and T(s,p) Newton inverses, and GAS_TABLES for the W2 WGSL generator. Test: tests/unit/thermo/gas.test.ts.
@@ -66,8 +66,20 @@ THRESHOLDS (measured on this HEAD)
 - C8: max imbalance 3.4e-11: pass.
 - C9: B 1.0 > B_crit 0.661 gives deep surge (min Phi -0.039) with a period +17.4 % of the Helmholtz period (limit 20 %). B 0.5 recovers (amplitude 5e-14): pass.
 
-MUTATION
-- (in progress at the time of writing; the final section replaces this line)
+MUTATION (Stryker 10.1.1, stryker.config.mjs unchanged): NOT COMPLETE, and no survivor has been killed yet
+- Run 1: `npm run mutate -- --incremental --concurrency 12` over all 14 files (2271 mutants). The dry run failed because the C5 test timed out at 120 s under instrumentation. Fixed in ec51f27 (600 s).
+- Run 2: `npx stryker run --incremental --concurrency 8 --dryRunTimeoutMinutes 90 --mutate "src/thermo/**/*.ts,src/cycle/at.ts,src/cycle/newton.ts,src/cycle/greitzer.ts"` (549 mutants).
+  - 394 of the 549 are static (72 %).
+  - The dry run took 19 min.
+  - I stopped it at 292/549 after 65 min. It still estimated about 2 h, and the shared 5-hour usage was at 74 %.
+  - At the stop: 33 survived and 7 timed out, so 259/292 = 88.7 % were detected. That figure covers the tested part only and is not a score.
+  - Stryker writes the survivor list and the incremental file only at the end, so there is no per-file report and no reports/stryker-incremental.json.
+- componentMaps, engine and model: not run.
+- DECIDE how to make mutation testing affordable on the cycle code:
+  - (a) a quiet multi-hour window running `npm run mutate -- --incremental --dryRunTimeoutMinutes 90`;
+  - (b) `--ignoreStatic`, which scores only the non-static mutants and drops most of thermo/engine/componentMaps, because the import-time sizing runs them;
+  - (c) a lazily built reference engine instead of the REFERENCE_ENGINE constant, so perTest coverage maps each mutant to the tests that use it (an API change other branches import);
+  - (d) a second Stryker config with a fast test subset for thermo and the numerics.
 
 NEXT
 1. Mutation testing at a usable cost (see GOTCHAS), then kill the remaining meaningful survivors.
@@ -96,5 +108,12 @@ GOTCHAS
 - The cycle tests take about 45 s plain. The whole suite takes about 150 s under coverage.
 - No new dependencies. No dev server, Chrome or GPU device was started. Scratch scripts live outside the repo.
 
-GATES
-- (filled in at the end of the pass)
+GATES @8de6587 (this commit adds the handoff only)
+- npm test: 1036 passed / 0 failed / 0 skipped (36 files, 62 s).
+- npm run lint: clean (eslint --max-warnings 0, prettier). npm run typecheck: clean.
+- npm run coverage: all 1036 tests pass, and every threshold passes.
+  - Overall: lines 99.53 %, statements 98.58 %, branches 90.05 %, functions 99.85 %.
+  - src/cycle: lines 100 %, branches 99.3 %, statements 99.9 %, functions 100 %.
+  - src/thermo: lines 100 %, branches 87.5 %.
+- npm run mutate: partial (see MUTATION).
+- The gitignored .stryker-tmp/ sandbox from the stopped run is still in the worktree. No Stryker, vitest, dev-server or Chrome process is left running.
