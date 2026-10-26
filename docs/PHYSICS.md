@@ -56,7 +56,7 @@ Upstream-to-downstream order along the core: 1, 2, 21, 24, 25, 3, 4, 41, 45, 49.
 
 ### 2.3 Synthesized blade rows and design-point estimate (W0)
 
-- **Design-point estimate** (`src/engine/designPoint.ts`): constant-cp, calorically perfect sections (cold γ = 1.4; hot cp = 1150 J/(kg K)), isentropic compressor and turbine efficiencies, fuel energy `η_b W_f LHV` into the combustor air, shaft balances with a 0.99 mechanical efficiency, convergent nozzles. It sizes A8 and A18 and gives the blade mean line its totals. It is not the cycle model.
+- **Design-point estimate** (`src/engine/designPoint.ts`): constant-cp, calorically perfect sections (cold γ = 1.4; hot cp = 1150 J/(kg K)), isentropic compressor and turbine efficiencies, fuel energy `η_b W_f LHV` into the combustor air, shaft balances with a 0.99 mechanical efficiency, convergent nozzles. It gives the blade mean line its totals; since D2-2 A8 and A18 come from the w1/cycle sizing (thermally perfect), 4.0 % / 1.0 % above this estimate's. It is not the cycle model.
 - **Blade synthesis** (`src/engine/bladeDesign.ts`): free vortex (r c_θ and c_x uniform across the span at each edge), equal stage work with a chosen mean-line reaction, c_x from continuity on the subsonic branch, zero incidence, Carter's rule δ = m θ / σⁿ with m = 0.23 (2a/c)² + ξ°/500 (a/c = 0.5), n = 1/2 for decelerating and 1 for accelerating rows; no deviation in turbine rows (follow-camber); stagger = mean of the metal angles; chord = meridional length / cos(stagger); counts from a target mid-span solidity except the 24 published fan blades. The Euler work Ω Δ(r c_θ) on the mean line equals each component's design work exactly.
 
 ## 3. Pre-registered thresholds

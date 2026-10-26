@@ -44,6 +44,9 @@ export const ENGINE_FACTS = {
   fuelFlowIdle: f(0.11, 'kg/s', 'official'),
   tsfcTakeoff: f(1.0648e-5, 'kg/(N s)', 'estimate'),
   tsfcTakeoffAvWeek: f(1.0934e-5, 'kg/(N s)', 'published'),
+  // the w1/cycle design-point sizing (D1-2, D2-2)
+  coreNozzleArea: f(0.1852, 'm²', 'estimate'),
+  bypassNozzleArea: f(0.9161, 'm²', 'estimate'),
   accelStartMaxThrustFraction: f(0.15, '', 'official'),
   fanDiameter: f(1.5494, 'm', 'official'),
   fanBladeCount: f(24, '', 'published'),
@@ -118,8 +121,6 @@ export const ENGINE_FACTS = {
   turbineCoolingFraction: f(0.12, '', 'unknown'),
   fuelLhv: f(4.32e7, 'J/kg', 'unknown'),
   t4Takeoff: f(1746, 'K', 'unknown'),
-  bypassNozzleArea: f(0.9067, 'm²', 'unknown'),
-  coreNozzleArea: f(0.1778, 'm²', 'unknown'),
   fanHubRadius: f(0.229, 'm', 'unknown'),
   fanTipClearance: f(0.002, 'm', 'unknown'),
   inletHighlightRadius: f(0.8, 'm', 'unknown'),
