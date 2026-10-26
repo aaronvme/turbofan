@@ -109,6 +109,16 @@ function environmentScene(): Scene {
   fill.position.set(-1, 1.5, 8);
   fill.lookAt(1, 0, 0);
   s.add(fill);
+  // two long horizontal strips along the engine: the classic product-shot highlight bands
+  // running the length of a cylinder (one high on the camera side, one low on the far side)
+  const bandHigh = softbox(9, 0.55, 14, [1, 0.99, 0.97]);
+  bandHigh.position.set(1.2, 3.4, 5.2);
+  bandHigh.lookAt(1.2, 0, 0);
+  s.add(bandHigh);
+  const bandLow = softbox(9, 0.45, 6, [0.95, 0.97, 1]);
+  bandLow.position.set(1.2, -0.2, -5.6);
+  bandLow.lookAt(1.2, 0, 0);
+  s.add(bandLow);
   // a low strip in front of the intake, for the lip's lower edge
   const front = softbox(5, 0.8, 6, [1, 1, 1]);
   front.position.set(-6.5, -0.4, 1.5);
@@ -152,7 +162,7 @@ export async function createStudio(renderer: WebGPURenderer): Promise<Studio> {
   const p = positionWorld;
   const d = length(vec2(p.x.sub(CENTRE_X), p.z));
   // a lit pool: neutral grey near the engine, falling off into a darker surround
-  const pool = mix(float(1), float(0.32), smoothstep(2.5, 13, d));
+  const pool = mix(float(1), float(0.2), smoothstep(2, 11, d));
   // contact shadow: a soft ellipse under the nacelle (its footprint ~ x -0.8..1.6, |z| < 1)
   const cx = p.x.sub(0.45).div(1.55);
   const cz = p.z.div(0.95);

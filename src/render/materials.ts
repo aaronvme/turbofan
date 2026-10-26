@@ -188,7 +188,7 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
   switch (kind) {
     case 'nacellePaint': {
       const white = vec3(0.78, 0.785, 0.79);
-      m = phys({ color: c3(0.78, 0.785, 0.79), metalness: 0, roughness: 0.34 });
+      m = phys({ color: c3(0.78, 0.785, 0.79), metalness: 0, roughness: 0.24 });
       satinPaint(m, 4e-6);
       // circumferential joints (inlet / fan cowl / reverser), hinge lines either side of the
       // top and the latch line at the bottom, fastener rows 12 mm aft of each joint
@@ -209,7 +209,9 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
       // a subtle large-scale paint variation, so the white is not a flat CG white
       const mottle = mx_fractal_noise_float(positionLocal.mul(1.7), 2, 2, 0.5).mul(0.015);
       m.colorNode = white.mul(float(1).sub(seam.mul(0.45))).add(mottle);
-      m.roughnessNode = float(0.34).add(seam.mul(0.3));
+      // handling marks: a broad, faint roughness variation breaks up the reflections
+      const smudge = mx_fractal_noise_float(positionLocal.mul(2.2), 2, 2, 0.5).mul(0.06);
+      m.roughnessNode = float(0.24).add(smudge).add(seam.mul(0.35));
       break;
     }
     case 'inletLip':
@@ -243,6 +245,16 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
       break;
     case 'cowlPaint':
       m = phys({ color: c3(0.34, 0.35, 0.36), metalness: 0, roughness: 0.45 });
+      {
+        // exhaust staining toward the core nozzle
+        const stain = smoothstep(1.9, 2.6, x).mul(
+          mx_fractal_noise_float(positionLocal.mul(vec3(2, 6, 6)), 2, 2, 0.5)
+            .mul(0.25)
+            .add(0.75),
+        );
+        m.colorNode = mix(vec3(0.34, 0.35, 0.36), vec3(0.16, 0.15, 0.14), stain.mul(0.55));
+        m.roughnessNode = float(0.45).add(stain.mul(0.15));
+      }
       break;
     case 'compressorCase':
       m = phys({ color: c3(0.3, 0.3, 0.29), metalness: 0.3, roughness: 0.6 });
