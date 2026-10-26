@@ -1,0 +1,182 @@
+// Critic pass 4, w1/lookdev @09c6a11: the closed-engine culling (src/geometry/visibility.ts)
+// must not change the picture. For every closed view (the realistic presets plus two orbit
+// poses a user can reach: straight into the intake and up the core nozzle from behind), the
+// frame with culling on is compared with the frame with culling off. The noise floor is the
+// same view rendered twice with culling on (TRAA jitter, the jittered blur samples): a culled
+// part that shows would push the on/off difference above it, in a cluster of tiles.
+//
+// A browser probe (real Chrome, WebGPU). From a checkout of the branch:
+//   cp docs/reviews/probes/w1l-culling.browser.probe.ts.txt tests/browser/zz-critic-w1l-culling.test.ts
+//   npx vitest run -c vitest.browser.config.ts tests/browser/zz-critic-w1l-culling.test.ts
+//   rm -r tests/browser/zz-critic-w1l-culling.test.ts zz-critic-out
+// It renders at quality `high` (what ships) and times nothing. A diff image per view (the
+// culling-off frame, dimmed, with the pixels culling changes in red) lands in zz-critic-out/ at
+// the project root. It FAILS at 09c6a11 (critic pass 4, W1L-I1): hero, fanIdle, fanTakeoff and
+// the two orbit poses change by 24-48 tiles; threeQuarterFront and side are at the noise floor.
+// Each view runs with and without shadow lookups, so a culled part's shadow is not the cause.
+
+import { afterAll, describe, expect, it } from 'vitest';
+import { commands } from 'vitest/browser';
+import { ENGINE_DEFINITION } from '../../src/engine/definition';
+import { createEngineView, type EngineView } from '../../src/render/engineView';
+import type { LookPresetId } from '../../src/render/presets';
+
+const W = 960;
+const H = 540;
+const TILE = 16;
+const THRESHOLD = 0.04; // luminance difference that counts as a changed pixel
+
+const nextFrame = () =>
+  new Promise<void>((resolve) => {
+    requestAnimationFrame(() => {
+      resolve();
+    });
+  });
+
+async function settle(view: EngineView, frames: number): Promise<void> {
+  for (let i = 0; i < frames; i++) {
+    view.frame(0); // dt 0: the spools and transitions hold still, only the jitter moves
+    await nextFrame();
+  }
+  await view.device.device.queue.onSubmittedWorkDone();
+}
+
+interface Grab {
+  readonly lum: Float32Array;
+  readonly rgba: Uint8ClampedArray;
+}
+
+/** Renders one frame and reads the canvas back in the same task (before it is presented). */
+function grab(view: EngineView, c: HTMLCanvasElement): Grab {
+  view.frame(0);
+  const copy = document.createElement('canvas');
+  copy.width = W;
+  copy.height = H;
+  const ctx = copy.getContext('2d');
+  if (ctx === null) throw new Error('no 2d context');
+  ctx.drawImage(c, 0, 0);
+  const px = ctx.getImageData(0, 0, W, H).data;
+  const lum = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++)
+    lum[i] =
+      (0.2126 * (px[4 * i] ?? 0) + 0.7152 * (px[4 * i + 1] ?? 0) + 0.0722 * (px[4 * i + 2] ?? 0)) /
+      255;
+  return { lum, rgba: px };
+}
+
+/** The culling-off frame, dimmed, with every pixel that culling changes in red (a PNG). */
+function diffImage(a: Grab, b: Grab): string {
+  const out = document.createElement('canvas');
+  out.width = W;
+  out.height = H;
+  const ctx = out.getContext('2d');
+  if (ctx === null) throw new Error('no 2d context');
+  const img = ctx.createImageData(W, H);
+  for (let i = 0; i < W * H; i++) {
+    const hit = Math.abs((a.lum[i] ?? 0) - (b.lum[i] ?? 0)) > THRESHOLD;
+    img.data[4 * i] = hit ? 255 : (b.rgba[4 * i] ?? 0) * 0.6;
+    img.data[4 * i + 1] = hit ? 0 : (b.rgba[4 * i + 1] ?? 0) * 0.6;
+    img.data[4 * i + 2] = hit ? 0 : (b.rgba[4 * i + 2] ?? 0) * 0.6;
+    img.data[4 * i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return out.toDataURL('image/png').split(',')[1] ?? '';
+}
+
+interface Diff {
+  readonly changed: number; // fraction of pixels
+  readonly worstTile: number; // largest fraction of changed pixels in one TILE x TILE tile
+  readonly tilesOver25: number; // tiles with more than 25 % of their pixels changed
+}
+
+function diff(ga: Grab, gb: Grab): Diff {
+  const a = ga.lum;
+  const b = gb.lum;
+  let changed = 0;
+  let worst = 0;
+  let over = 0;
+  for (let ty = 0; ty < H; ty += TILE)
+    for (let tx = 0; tx < W; tx += TILE) {
+      let n = 0;
+      let m = 0;
+      for (let y = ty; y < Math.min(H, ty + TILE); y++)
+        for (let x = tx; x < Math.min(W, tx + TILE); x++) {
+          m++;
+          if (Math.abs((a[y * W + x] ?? 0) - (b[y * W + x] ?? 0)) > THRESHOLD) n++;
+        }
+      changed += n;
+      worst = Math.max(worst, n / m);
+      if (n / m > 0.25) over++;
+    }
+  return { changed: changed / (W * H), worstTile: worst, tilesOver25: over };
+}
+
+type Pose = { preset: LookPresetId; camera?: [number, number, number]; target?: [number, number, number] };
+const POSES: Record<string, Pose> = {
+  threeQuarterFront: { preset: 'threeQuarterFront' },
+  side: { preset: 'side' },
+  hero: { preset: 'hero' },
+  fanIdle: { preset: 'fanIdle' },
+  fanTakeoff: { preset: 'fanTakeoff' },
+  // a user orbit: straight down the axis into the intake (booster inlet through the fan)
+  axialFront: { preset: 'fanIdle', camera: [-3.2, 0.06, 0.12], target: [0.6, 0, 0] },
+  // a user orbit: up the core nozzle from behind (the last LPT stage, and past it)
+  rearNozzle: { preset: 'side', camera: [5.4, 0.3, 0.45], target: [2.3, 0, 0] },
+};
+
+describe('W1L: closed-engine culling changes nothing visible', () => {
+  let view: EngineView | null = null;
+  afterAll(async () => {
+    if (view !== null) await view.dispose();
+  });
+
+  it('culling on vs off, against the on/on noise floor, every closed view', async () => {
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    document.body.appendChild(c);
+    view = await createEngineView({
+      gpu: navigator.gpu,
+      canvas: c,
+      definition: ENGINE_DEFINITION,
+      width: W,
+      height: H,
+      dpr: 1,
+      quality: 'high',
+    });
+    const rows: string[] = [];
+    const failures: string[] = [];
+    for (const [name, pose] of Object.entries(POSES)) {
+      // twice: with the key's shadow map, and with no shadow lookups at all (so a culled part
+      // that only casts a shadow inside the nacelle cannot be what differs)
+      for (const noShadow of [false, true]) {
+        view.setDebugFlags({ noShadow });
+        view.setPreset(pose.preset);
+        if (pose.camera && pose.target) view.setCameraPose(pose.camera, pose.target);
+        await settle(view, 40);
+        const a1 = grab(view, c);
+        await settle(view, 12);
+        const a2 = grab(view, c);
+        view.setDebugFlags({ noShadow, noCull: true });
+        await settle(view, 40);
+        const b = grab(view, c);
+        view.setDebugFlags({});
+        const floor = diff(a1, a2);
+        const cull = diff(a2, b);
+        const tag = `${name}${noShadow ? ' (no shadows)' : ''}`;
+        rows.push(
+          `${tag}: noise floor changed ${(100 * floor.changed).toFixed(3)} %, worst tile ${(100 * floor.worstTile).toFixed(1)} %, tiles>25% ${floor.tilesOver25} | culling on/off changed ${(100 * cull.changed).toFixed(3)} %, worst tile ${(100 * cull.worstTile).toFixed(1)} %, tiles>25% ${cull.tilesOver25}`,
+        );
+        if (cull.tilesOver25 > floor.tilesOver25 + 2 || cull.changed > floor.changed * 2 + 0.002)
+          failures.push(tag);
+        // the changed pixels in red (zz-critic-out/ at the project root; delete it afterwards)
+        await commands
+          .writeFile(`zz-critic-out/${name}${noShadow ? '-noshadow' : ''}.png`, diffImage(a2, b), 'base64')
+          .catch(() => undefined);
+      }
+    }
+    console.log(`W1L culling probe\n${rows.join('\n')}`);
+    expect(view.stats().errors).toEqual([]);
+    expect(failures, rows.join('\n')).toEqual([]);
+  });
+});
