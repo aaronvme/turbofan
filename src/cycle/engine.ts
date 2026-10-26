@@ -711,16 +711,32 @@ function designCycle(cal: CycleCalibration, fpr: number): DesignCycle {
  * the map scalars follow. Pure and deterministic.
  */
 export function sizeEngine(cal: CycleCalibration, definition: EngineDefinition): SizedEngine {
+  const tolerance = 1e-9 * cal.netThrustN;
+  const miss = (fpr: number): number => {
+    try {
+      return designCycle(cal, fpr).thrust - cal.netThrustN;
+    } catch (err) {
+      throw new Error(`sizing: the design cycle failed at fan PR ${fpr}: ${String(err)}`, {
+        cause: err,
+      });
+    }
+  };
   let a = 1.5;
   let b = 1.6;
-  let fa = designCycle(cal, a).thrust - cal.netThrustN;
-  let fb = designCycle(cal, b).thrust - cal.netThrustN;
-  for (let i = 0; i < 40 && Math.abs(fb) > 1e-9 * cal.netThrustN; i++) {
+  let fa = miss(a);
+  let fb = miss(b);
+  for (let i = 0; i < 40 && Math.abs(fb) > tolerance; i++) {
     const c = b - (fb * (b - a)) / (fb - fa);
     a = b;
     fa = fb;
     b = c;
-    fb = designCycle(cal, b).thrust - cal.netThrustN;
+    fb = miss(b);
+  }
+  // W1C-N3: an unreachable thrust (or a NaN) must not come back as a sized engine
+  if (!(Math.abs(fb) <= tolerance)) {
+    throw new Error(
+      `sizing: no fan pressure ratio gives ${cal.netThrustN} N (last miss ${fb} N at fan PR ${b})`,
+    );
   }
   const d = designCycle(cal, b);
   const maps = {
