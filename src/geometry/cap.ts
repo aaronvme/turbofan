@@ -6,6 +6,7 @@
 import type { MeshData } from './mesh';
 import type { P2 } from './profile';
 import { loopAreaCentroid } from './revolve';
+import { ix } from './num';
 
 const cross = (a: P2, b: P2, c: P2): number =>
   (b.x - a.x) * (c.r - a.r) - (b.r - a.r) * (c.x - a.x);
@@ -30,17 +31,17 @@ export function triangulateLoop(loop: readonly P2[]): Uint32Array {
   let i = 0;
   let guard = 0;
   while (remaining > 3) {
-    const a = prev[i] ?? 0;
-    const c = next[i] ?? 0;
+    const a = ix(prev, i);
+    const c = ix(next, i);
     const pa = pt(a);
     const pb = pt(i);
     const pc = pt(c);
     let ear = cross(pa, pb, pc) > 0;
     if (ear) {
-      for (let k = next[c] ?? 0; k !== a; k = next[k] ?? 0) {
+      for (let k = ix(next, c); k !== a; k = ix(next, k)) {
         const q = pt(k);
         // a reflex vertex inside the candidate would be cut off
-        if (cross(pt(prev[k] ?? 0), q, pt(next[k] ?? 0)) <= 0 && inTriangle(q, pa, pb, pc)) {
+        if (cross(pt(ix(prev, k)), q, pt(ix(next, k))) <= 0 && inTriangle(q, pa, pb, pc)) {
           if (!(q.x === pa.x && q.r === pa.r) && !(q.x === pc.x && q.r === pc.r)) {
             ear = false;
             break;
@@ -56,19 +57,19 @@ export function triangulateLoop(loop: readonly P2[]): Uint32Array {
       guard = 0;
       i = c;
     } else {
-      i = next[i] ?? 0;
+      i = ix(next, i);
       if (++guard > 2 * remaining) {
         // no ear found (a degenerate or self-touching loop): clip the flattest corner
-        out.push(prev[i] ?? 0, i, next[i] ?? 0);
-        next[prev[i] ?? 0] = next[i] ?? 0;
-        prev[next[i] ?? 0] = prev[i] ?? 0;
+        out.push(ix(prev, i), i, ix(next, i));
+        next[ix(prev, i)] = ix(next, i);
+        prev[ix(next, i)] = ix(prev, i);
         remaining--;
         guard = 0;
-        i = next[i] ?? 0;
+        i = ix(next, i);
       }
     }
   }
-  out.push(prev[i] ?? 0, i, next[i] ?? 0);
+  out.push(ix(prev, i), i, ix(next, i));
   return new Uint32Array(out);
 }
 

@@ -23,6 +23,7 @@ import {
 import { computeNormals, flipMesh, meshTopology, type MeshData } from './mesh';
 import type { P2 } from './profile';
 import type { AnnulusWalls } from './walls';
+import { ix } from './num';
 
 /** The parabola through (0, hub), (0.5, mid), (1, tip). */
 export function spanValue(v: SpanValues, eta: number): number {
@@ -189,9 +190,9 @@ export function loftBlade(
   let rMin = Infinity;
   let rMax = -Infinity;
   for (let v = 0; v < nVert; v++) {
-    const x = positions[3 * v] ?? 0;
-    const y = positions[3 * v + 1] ?? 0;
-    const z = positions[3 * v + 2] ?? 0;
+    const x = ix(positions, 3 * v);
+    const y = ix(positions, 3 * v + 1);
+    const z = ix(positions, 3 * v + 2);
     const th = Math.atan2(z, y);
     const r = Math.hypot(y, z);
     thetaMin = Math.min(thetaMin, th);
@@ -245,30 +246,18 @@ function spanTangents(mesh: MeshData, k: number, loop: number): void {
       a = base + Math.floor(loop / 2);
       b = base;
     }
-    let tx = (p[3 * a] ?? 0) - (p[3 * b] ?? 0);
-    let ty = (p[3 * a + 1] ?? 0) - (p[3 * b + 1] ?? 0);
-    let tz = (p[3 * a + 2] ?? 0) - (p[3 * b + 2] ?? 0);
-    const nx = nrm[3 * v] ?? 0;
-    const ny = nrm[3 * v + 1] ?? 0;
-    const nz = nrm[3 * v + 2] ?? 0;
+    let tx = ix(p, 3 * a) - ix(p, 3 * b);
+    let ty = ix(p, 3 * a + 1) - ix(p, 3 * b + 1);
+    let tz = ix(p, 3 * a + 2) - ix(p, 3 * b + 2);
+    const nx = ix(nrm, 3 * v);
+    const ny = ix(nrm, 3 * v + 1);
+    const nz = ix(nrm, 3 * v + 2);
     const d = tx * nx + ty * ny + tz * nz;
     tx -= d * nx;
     ty -= d * ny;
     tz -= d * nz;
-    let len = Math.hypot(tx, ty, tz);
-    if (!(len > 1e-12)) {
-      // degenerate direction: any unit vector orthogonal to the normal
-      tx = -ny;
-      ty = nx;
-      tz = 0;
-      len = Math.hypot(tx, ty, tz) || 1;
-      if (Math.hypot(nx, ny) < 1e-6) {
-        tx = 1;
-        ty = 0;
-        tz = 0;
-        len = 1;
-      }
-    }
+    // never zero on a lofted blade: the span and chord directions are not along the normal
+    const len = Math.hypot(tx, ty, tz) || 1;
     mesh.tangents[4 * v] = tx / len;
     mesh.tangents[4 * v + 1] = ty / len;
     mesh.tangents[4 * v + 2] = tz / len;

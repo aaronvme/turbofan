@@ -115,6 +115,16 @@ describe('caps (the cutaway cross-section faces)', () => {
     expect(t.degenerateTriangles).toBe(0);
   });
 
+  it('still returns n - 2 triangles for a degenerate (zero-area) loop', () => {
+    const flat: P2[] = [
+      { x: 0, r: 1 },
+      { x: 1, r: 1 },
+      { x: 2, r: 1 },
+      { x: 3, r: 1 },
+    ];
+    expect(triangulateLoop(flat).length).toBe(6);
+  });
+
   it('rejects a loop with fewer than three points', () => {
     expect(() => triangulateLoop(square.slice(0, 2))).toThrow();
   });

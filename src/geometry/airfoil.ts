@@ -17,6 +17,8 @@
 // the mean metal angle, which is the definition's stagger. Thickness is laid off normal to the
 // camber line. The chord is scaled so the section spans the requested meridional length.
 
+import { ix } from './num';
+
 export const PROFILE_FAMILIES = ['naca65', 'dca', 'turbine'] as const;
 export type ProfileFamily = (typeof PROFILE_FAMILIES)[number];
 
@@ -41,23 +43,21 @@ const NACA65_SLOPES: readonly number[] = (() => {
   const n = NACA65_X.length;
   const d: number[] = [];
   for (let i = 0; i + 1 < n; i++)
-    d.push(
-      ((NACA65_Y[i + 1] ?? 0) - (NACA65_Y[i] ?? 0)) / ((NACA65_X[i + 1] ?? 0) - (NACA65_X[i] ?? 0)),
-    );
-  const m: number[] = [d[0] ?? 0];
+    d.push((ix(NACA65_Y, i + 1) - ix(NACA65_Y, i)) / (ix(NACA65_X, i + 1) - ix(NACA65_X, i)));
+  const m: number[] = [ix(d, 0)];
   for (let i = 1; i + 1 < n; i++) {
-    const a = d[i - 1] ?? 0;
-    const b = d[i] ?? 0;
+    const a = ix(d, i - 1);
+    const b = ix(d, i);
     if (a * b <= 0) m.push(0);
     else {
-      const h0 = (NACA65_X[i] ?? 0) - (NACA65_X[i - 1] ?? 0);
-      const h1 = (NACA65_X[i + 1] ?? 0) - (NACA65_X[i] ?? 0);
+      const h0 = ix(NACA65_X, i) - ix(NACA65_X, i - 1);
+      const h1 = ix(NACA65_X, i + 1) - ix(NACA65_X, i);
       const w1 = 2 * h1 + h0;
       const w2 = h1 + 2 * h0;
       m.push((w1 + w2) / (w1 / a + w2 / b));
     }
   }
-  m.push(d[n - 2] ?? 0);
+  m.push(ix(d, n - 2));
   return m;
 })();
 
@@ -69,15 +69,15 @@ function naca65Percent(s: number): number {
   // the leading edge is round: y ~ sqrt(x) inside the first table interval
   if (x <= x1) return y1 * Math.sqrt(x / x1);
   let i = 1;
-  while (i + 2 < NACA65_X.length && (NACA65_X[i + 1] ?? 0) < x) i++;
-  const xa = NACA65_X[i] ?? 0;
-  const xb = NACA65_X[i + 1] ?? 0;
+  while (i + 2 < NACA65_X.length && ix(NACA65_X, i + 1) < x) i++;
+  const xa = ix(NACA65_X, i);
+  const xb = ix(NACA65_X, i + 1);
   const h = xb - xa;
   const t = (x - xa) / h;
-  const ya = NACA65_Y[i] ?? 0;
-  const yb = NACA65_Y[i + 1] ?? 0;
-  const ma = NACA65_SLOPES[i] ?? 0;
-  const mb = NACA65_SLOPES[i + 1] ?? 0;
+  const ya = ix(NACA65_Y, i);
+  const yb = ix(NACA65_Y, i + 1);
+  const ma = ix(NACA65_SLOPES, i);
+  const mb = ix(NACA65_SLOPES, i + 1);
   const t2 = t * t;
   const t3 = t2 * t;
   return (
@@ -161,8 +161,8 @@ function camberPoint(phi: (s: number) => number, s: number): BladeToBladePoint {
   const h = s / GL_PANELS;
   for (let k = 0; k < GL_PANELS; k++) {
     for (let q = 0; q < 4; q++) {
-      const u = (k + (GL_NODES[q] ?? 0)) * h;
-      const w = (GL_WEIGHTS[q] ?? 0) * h;
+      const u = (k + ix(GL_NODES, q)) * h;
+      const w = ix(GL_WEIGHTS, q) * h;
       const a = phi(u);
       m += w * Math.cos(a);
       t += w * Math.sin(a);

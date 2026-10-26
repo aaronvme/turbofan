@@ -7,10 +7,11 @@
 // - Normals come from the profile (exact for a surface of revolution), tangents run around the
 //   axis (lathe-turned surfaces: machining marks are circumferential), u = theta / 2 pi,
 //   v = arc length along the loop / total.
-// - The winding is chosen so the divergence-theorem volume is positive (outward faces).
+// - The loop is taken counter-clockwise, which makes the faces outward (positive volume).
 
-import { flipMesh, meshTopology, type MeshData } from './mesh';
+import type { MeshData } from './mesh';
 import type { P2 } from './profile';
+import { ix } from './num';
 
 export interface RevolveOptions {
   /** Columns around the axis (>= 3). */
@@ -66,7 +67,7 @@ export function revolveLoop(loop: readonly P2[], options: RevolveOptions): MeshD
   for (let i = 0; i < n; i++) {
     const a = at(i);
     const b = at(i + 1);
-    arc.push((arc[i] ?? 0) + Math.hypot(b.x - a.x, b.r - a.r));
+    arc.push(ix(arc, i) + Math.hypot(b.x - a.x, b.r - a.r));
   }
   const total = arc[n] ?? 1;
   // per loop vertex: [node used by the incoming segment, node used by the outgoing segment]
@@ -77,7 +78,7 @@ export function revolveLoop(loop: readonly P2[], options: RevolveOptions): MeshD
     const nIn = segNormal(i - 1);
     const nOut = segNormal(i);
     const turn = Math.acos(Math.max(-1, Math.min(1, nIn[0] * nOut[0] + nIn[1] * nOut[1])));
-    const v = (arc[i] ?? 0) / total;
+    const v = ix(arc, i) / total;
     if (turn > sharp) {
       inNode.push(nodes.length);
       nodes.push({ p: at(i), n: nIn, v });
@@ -108,7 +109,7 @@ export function revolveLoop(loop: readonly P2[], options: RevolveOptions): MeshD
     for (let j = 0; j < cols; j++) {
       const v = k * cols + j;
       const c = cosA[j] ?? 1;
-      const sn = sinA[j] ?? 0;
+      const sn = ix(sinA, j);
       positions[3 * v] = node.p.x;
       positions[3 * v + 1] = node.p.r * c;
       positions[3 * v + 2] = node.p.r * sn;
@@ -128,8 +129,8 @@ export function revolveLoop(loop: readonly P2[], options: RevolveOptions): MeshD
     const a = at(i);
     const b = at(i + 1);
     if (a.r === 0 && b.r === 0) continue; // on the axis: not a surface
-    const ka = outNode[i] ?? 0;
-    const kb = inNode[(i + 1) % n] ?? 0;
+    const ka = ix(outNode, i);
+    const kb = ix(inNode, (i + 1) % n);
     for (let j = 0; j < s; j++) {
       const a0 = ka * cols + j;
       const a1 = ka * cols + j + 1;
@@ -140,12 +141,6 @@ export function revolveLoop(loop: readonly P2[], options: RevolveOptions): MeshD
       else idx.push(a0, b0, b1, a0, b1, a1);
     }
   }
-  const mesh: MeshData = { positions, normals, uvs, tangents, indices: new Uint32Array(idx) };
-  if (meshTopology(mesh).signedVolume < 0) {
-    // keep the analytic normals: only the winding is wrong
-    const keep = Float32Array.from(mesh.normals);
-    flipMesh(mesh);
-    mesh.normals.set(keep);
-  }
-  return mesh;
+  // (a0, b0, b1) on a counter-clockwise loop faces outward: the tests pin a positive volume
+  return { positions, normals, uvs, tangents, indices: new Uint32Array(idx) };
 }

@@ -1,6 +1,8 @@
 // Indexed triangle meshes as plain typed arrays (worker-transferable, no three.js), plus the
 // checks the geometry tests rely on: watertightness, orientation and volume.
 
+import { ix } from './num';
+
 export interface MeshData {
   /** xyz per vertex, m (engine frame: x axial, y = r cos theta, z = r sin theta). */
   readonly positions: Float32Array;
@@ -53,19 +55,19 @@ export function meshTopology(mesh: Pick<MeshData, 'positions' | 'indices'>): Mes
   let degenerate = 0;
   let volume = 0;
   for (let t = 0; t + 2 < idx.length; t += 3) {
-    const i0 = idx[t] ?? 0;
-    const i1 = idx[t + 1] ?? 0;
-    const i2 = idx[t + 2] ?? 0;
-    const w = [weld[i0] ?? 0, weld[i1] ?? 0, weld[i2] ?? 0] as const;
-    const ax = p[3 * i0] ?? 0;
-    const ay = p[3 * i0 + 1] ?? 0;
-    const az = p[3 * i0 + 2] ?? 0;
-    const bx = p[3 * i1] ?? 0;
-    const by = p[3 * i1 + 1] ?? 0;
-    const bz = p[3 * i1 + 2] ?? 0;
-    const cx = p[3 * i2] ?? 0;
-    const cy = p[3 * i2 + 1] ?? 0;
-    const cz = p[3 * i2 + 2] ?? 0;
+    const i0 = ix(idx, t);
+    const i1 = ix(idx, t + 1);
+    const i2 = ix(idx, t + 2);
+    const w = [ix(weld, i0), ix(weld, i1), ix(weld, i2)] as const;
+    const ax = ix(p, 3 * i0);
+    const ay = ix(p, 3 * i0 + 1);
+    const az = ix(p, 3 * i0 + 2);
+    const bx = ix(p, 3 * i1);
+    const by = ix(p, 3 * i1 + 1);
+    const bz = ix(p, 3 * i1 + 2);
+    const cx = ix(p, 3 * i2);
+    const cy = ix(p, 3 * i2 + 1);
+    const cz = ix(p, 3 * i2 + 2);
     volume += (ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)) / 6;
     const ux = bx - ax;
     const uy = by - ay;
@@ -76,8 +78,8 @@ export function meshTopology(mesh: Pick<MeshData, 'positions' | 'indices'>): Mes
     const area = 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
     if (w[0] === w[1] || w[1] === w[2] || w[0] === w[2] || area < DEGENERATE_AREA) degenerate++;
     for (let e = 0; e < 3; e++) {
-      const a = w[e] ?? 0;
-      const b = w[(e + 1) % 3] ?? 0;
+      const a = ix(w, e);
+      const b = ix(w, (e + 1) % 3);
       if (a === b) continue;
       const map = a < b ? forward : backward;
       const key = Math.min(a, b) * n + Math.max(a, b);
@@ -111,29 +113,29 @@ export function meshTopology(mesh: Pick<MeshData, 'positions' | 'indices'>): Mes
 export function computeNormals(positions: Float32Array, indices: Uint32Array): Float32Array {
   const acc = new Float64Array(positions.length);
   for (let t = 0; t + 2 < indices.length; t += 3) {
-    const i0 = indices[t] ?? 0;
-    const i1 = indices[t + 1] ?? 0;
-    const i2 = indices[t + 2] ?? 0;
-    const ux = (positions[3 * i1] ?? 0) - (positions[3 * i0] ?? 0);
-    const uy = (positions[3 * i1 + 1] ?? 0) - (positions[3 * i0 + 1] ?? 0);
-    const uz = (positions[3 * i1 + 2] ?? 0) - (positions[3 * i0 + 2] ?? 0);
-    const vx = (positions[3 * i2] ?? 0) - (positions[3 * i0] ?? 0);
-    const vy = (positions[3 * i2 + 1] ?? 0) - (positions[3 * i0 + 1] ?? 0);
-    const vz = (positions[3 * i2 + 2] ?? 0) - (positions[3 * i0 + 2] ?? 0);
+    const i0 = ix(indices, t);
+    const i1 = ix(indices, t + 1);
+    const i2 = ix(indices, t + 2);
+    const ux = ix(positions, 3 * i1) - ix(positions, 3 * i0);
+    const uy = ix(positions, 3 * i1 + 1) - ix(positions, 3 * i0 + 1);
+    const uz = ix(positions, 3 * i1 + 2) - ix(positions, 3 * i0 + 2);
+    const vx = ix(positions, 3 * i2) - ix(positions, 3 * i0);
+    const vy = ix(positions, 3 * i2 + 1) - ix(positions, 3 * i0 + 1);
+    const vz = ix(positions, 3 * i2 + 2) - ix(positions, 3 * i0 + 2);
     const nx = uy * vz - uz * vy;
     const ny = uz * vx - ux * vz;
     const nz = ux * vy - uy * vx;
     for (const i of [i0, i1, i2]) {
-      acc[3 * i] = (acc[3 * i] ?? 0) + nx;
-      acc[3 * i + 1] = (acc[3 * i + 1] ?? 0) + ny;
-      acc[3 * i + 2] = (acc[3 * i + 2] ?? 0) + nz;
+      acc[3 * i] = ix(acc, 3 * i) + nx;
+      acc[3 * i + 1] = ix(acc, 3 * i + 1) + ny;
+      acc[3 * i + 2] = ix(acc, 3 * i + 2) + nz;
     }
   }
   const out = new Float32Array(positions.length);
   for (let v = 0; v < positions.length / 3; v++) {
-    const x = acc[3 * v] ?? 0;
-    const y = acc[3 * v + 1] ?? 0;
-    const z = acc[3 * v + 2] ?? 0;
+    const x = ix(acc, 3 * v);
+    const y = ix(acc, 3 * v + 1);
+    const z = ix(acc, 3 * v + 2);
     const len = Math.hypot(x, y, z);
     if (len > 0) {
       out[3 * v] = x / len;
@@ -163,7 +165,7 @@ export function mergeMeshes(meshes: readonly MeshData[]): MeshData {
     uvs.set(m.uvs, pu);
     tangents.set(m.tangents, pt);
     const base = pv / 3;
-    for (let i = 0; i < m.indices.length; i++) indices[pi + i] = (m.indices[i] ?? 0) + base;
+    for (let i = 0; i < m.indices.length; i++) indices[pi + i] = ix(m.indices, i) + base;
     pv += m.positions.length;
     pu += m.uvs.length;
     pt += m.tangents.length;
@@ -176,9 +178,9 @@ export function mergeMeshes(meshes: readonly MeshData[]): MeshData {
 export function flipMesh(mesh: MeshData): void {
   const idx = mesh.indices;
   for (let t = 0; t + 2 < idx.length; t += 3) {
-    const a = idx[t + 1] ?? 0;
-    idx[t + 1] = idx[t + 2] ?? 0;
+    const a = ix(idx, t + 1);
+    idx[t + 1] = ix(idx, t + 2);
     idx[t + 2] = a;
   }
-  for (let i = 0; i < mesh.normals.length; i++) mesh.normals[i] = -(mesh.normals[i] ?? 0);
+  for (let i = 0; i < mesh.normals.length; i++) mesh.normals[i] = -ix(mesh.normals, i);
 }
