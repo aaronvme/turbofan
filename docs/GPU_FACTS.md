@@ -181,7 +181,7 @@ Evidence for M27-M29: the worker probe (`spikes/worker/workerProbe.ts`, run insi
   - The positivity fallback (first order) acts per face side, not per cell.
   - The gauge is `p' = rho R T - pInf`, with no `T'` gauge.
   - What matches the plan's design: 2 vec4 state buffers x 3 copies, 8 storage bindings, a TX x TY tile plus a 2-cell halo of primitives in workgroup memory with shared face fluxes, a ghost index map with BC codes, Newton for T, MUSCL/van Albada, real SLAU2, the per-radian radial source, local dt and the RK3 update.
-  - Correctness is pinned by `tests/gpu/stage-kernel.test.ts`: it matches the f64 reference cell by cell, is identical across tiles and across block splits, preserves quiescent and freestream flow, and stays finite for 200 iterations of a pulse.
+  - Correctness is pinned by `tests/gpu/stage-kernel.test.ts`: it matches the f64 reference cell by cell, is identical across tiles and across block splits, preserves quiescent and freestream flow, and stays finite for 200 iterations of a pulse. The reference comparison covers one iteration with absolute tolerances (1 Pa, 1e-2 m/s), enough for a cost model; W2's kernel test should compare several iterations with relative errors on the real mesh (W0G-N4).
 - **M33 (N). Render hand-off texture encoding (D0-4).**
   - Texture A is `rgba16float` ((p - pInf)/pInf, (rho - rhoInf)/rhoInf, u, v).
   - Freestream reads back within 1e-6 (0.1 Pa); the old `p / pInf` encoding read 0.99951 (49 Pa off) because the f16 step below 1 is 2^-11.
