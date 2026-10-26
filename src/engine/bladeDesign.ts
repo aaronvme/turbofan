@@ -227,12 +227,36 @@ export function designRow(
 
   solve();
   if (givenCount === undefined) {
-    const solidityCount = () => countFor(chordOf(stagger).mid, targetSolidity ?? 1);
-    for (let pass = 0; pass < maxCountPasses && solidityCount() !== count; pass++) {
-      count = solidityCount();
-      solve();
+    const target = targetSolidity ?? 1;
+    const solidityCount = () => countFor(chordOf(stagger).mid, target);
+    // each visited count with how far its own mid solidity is from the target
+    const visited: [number, number][] = [];
+    let settled = false;
+    for (let pass = 0; pass < maxCountPasses && !settled; pass++) {
+      const next = solidityCount();
+      if (next === count) {
+        settled = true;
+        break;
+      }
+      const solidityMid = (chordOf(stagger).mid * count) / (2 * Math.PI * rRow.mid);
+      visited.push([count, Math.abs(solidityMid - target)]);
+      const cycleStart = visited.findIndex(([c]) => c === next);
+      if (cycleStart >= 0) {
+        // A rounding limit cycle: the target sits on a blade-count boundary, where count c
+        // gives a chord that asks for c + 1 and back. Keep the member whose own mid solidity
+        // is nearest the target (W0C-N4); ties keep the first visited.
+        const [best] = visited.slice(cycleStart).reduce((a, b) => (b[1] < a[1] ? b : a));
+        if (best !== count) {
+          count = best;
+          solve();
+        }
+        settled = true;
+      } else {
+        count = next;
+        solve();
+      }
     }
-    if (solidityCount() !== count)
+    if (!settled && solidityCount() !== count)
       throw new Error(`designRow: the blade count did not settle in ${maxCountPasses} passes`);
   }
 
