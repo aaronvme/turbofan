@@ -40,6 +40,41 @@ const JANAF_DH: Record<string, Record<number, number>> = {
   CO2: { 500: 8.305, 1000: 33.397, 1500: 61.705, 2000: 91.439 },
   H2O: { 500: 6.925, 1000: 26.0, 1500: 48.151, 2000: 72.79 },
 };
+/** JANAF cp below 300 K, J/(mol K), same tables (W1C-N1: air on a cold day or at altitude). */
+const JANAF_CP_LOW: Record<string, Record<number, number>> = {
+  N2: { 200: 29.107, 250: 29.111 },
+  O2: { 200: 29.106, 250: 29.201 },
+  Ar: { 200: 20.786, 250: 20.786 },
+  CO2: { 200: 32.359, 250: 34.893 },
+};
+
+/**
+ * Stoichiometric C12H23 products in USSA 1976 dry air, mole fractions, from Cantera 3.2.0's
+ * chemical equilibrium of the stoichiometric mixture at 1000 K (complete combustion there), run by
+ * tools/thermo/cantera_crosscheck.py (D3-5). By hand: C12H23 + 17.75 O2 -> 12 CO2 + 11.5 H2O with
+ * 17.75 / 0.20948 mol of air gives CO2 13.3 %, H2O 12.7 %, N2 73.1 %, Ar 0.87 %. This composition
+ * is the T3 reference's, independent of PRODUCT_MOLE_FRACTIONS (W1C-I4, W1C-N2).
+ */
+const FROZEN_PRODUCTS: Readonly<Record<string, number>> = {
+  N2: 0.731241,
+  Ar: 0.008747,
+  CO2: 0.132916,
+  H2O: 0.127096,
+};
+/** Cantera 3.2.0 (nasa_gas.yaml, McBride, Gordon & Reno, NASA TM-4513) values, same script. */
+const CANTERA = {
+  stoichiometricFar: 0.068173,
+  airCp: {
+    200: 1003.076,
+    250: 1002.939,
+    288.15: 1004.207,
+    300: 1004.833,
+    500: 1029.908,
+    1000: 1140.662,
+    1500: 1208.627,
+  } as Record<number, number>,
+  productsCp: { 1000: 1261.472, 1500: 1358.463, 2000: 1419.168 } as Record<number, number>,
+};
 
 /**
  * A frozen ideal mixture, mass basis, J/(kg K): sum x_i cp_i / sum x_i M_i. This is how NASA
@@ -82,6 +117,15 @@ describe('T1: cp of air vs NIST-JANAF', () => {
   }
 });
 
+describe('W1C-N1: air cp below 300 K vs NIST-JANAF (extra T1-style points, T1 tolerance)', () => {
+  for (const t of [200, 250]) {
+    it(`${t} K within ${T1.maxRelativeError.token}`, () => {
+      const ref = referenceMixture(AIR_MOLE_FRACTIONS, JANAF_CP_LOW, t, 1);
+      expect(Math.abs(cp(t, 0) / ref - 1)).toBeLessThan(T1.maxRelativeError.value);
+    });
+  }
+});
+
 describe('T2: gamma of air vs NIST-JANAF', () => {
   for (const t of AIR_TEMPS) {
     it(`${t} K within ${THRESHOLDS.T2.values.maxRelativeError.token}`, () => {
@@ -99,11 +143,33 @@ describe('T2: gamma of air vs NIST-JANAF', () => {
   });
 });
 
-describe('T3: cp of stoichiometric Jet-A products vs a frozen CEA-style mixture', () => {
+describe('T3: cp of stoichiometric Jet-A products vs JANAF mixed at the frozen product composition', () => {
   for (const t of PRODUCT_TEMPS) {
     it(`${t} K within ${T3.maxRelativeError.token}`, () => {
-      const ref = referenceMixture(PRODUCT_MOLE_FRACTIONS, JANAF_CP, t, 1);
+      const ref = referenceMixture(FROZEN_PRODUCTS, JANAF_CP, t, 1);
       expect(Math.abs(cp(t, STOICH_FAR) / ref - 1)).toBeLessThan(T3.maxRelativeError.value);
+    });
+  }
+  it('the model products are the frozen stoichiometric composition (to 1e-5 mole fraction)', () => {
+    expect(Object.keys(PRODUCT_MOLE_FRACTIONS).sort()).toEqual(Object.keys(FROZEN_PRODUCTS).sort());
+    for (const [s, x] of Object.entries(FROZEN_PRODUCTS)) {
+      expect(
+        Math.abs((PRODUCT_MOLE_FRACTIONS[s as keyof typeof PRODUCT_MOLE_FRACTIONS] ?? 0) - x),
+      ).toBeLessThan(1e-5);
+    }
+    expect(Math.abs(STOICH_FAR - CANTERA.stoichiometricFar)).toBeLessThan(1e-5);
+  });
+});
+
+describe('D3-5: independent Cantera cross-check (tools/thermo/cantera_crosscheck.py), T1/T3 tolerance', () => {
+  for (const [t, ref] of Object.entries(CANTERA.airCp)) {
+    it(`air cp at ${t} K`, () => {
+      expect(Math.abs(cp(Number(t), 0) / ref - 1)).toBeLessThan(T1.maxRelativeError.value);
+    });
+  }
+  for (const [t, ref] of Object.entries(CANTERA.productsCp)) {
+    it(`stoichiometric products cp at ${t} K`, () => {
+      expect(Math.abs(cp(Number(t), STOICH_FAR) / ref - 1)).toBeLessThan(T3.maxRelativeError.value);
     });
   }
 });
