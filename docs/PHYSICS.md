@@ -82,8 +82,11 @@ Upstream-to-downstream order along the core: 1, 2, 21, 24, 25, 3, 4, 41, 45, 49.
 | C8 | Mass and energy balance across the whole engine at every matched point | within 1e-6 relative |
 | C9 | Greitzer model, B above critical: deep-surge limit cycle appears; B below critical: rotating-stall-free recovery | qualitative, plus cycle period within 20% of the Helmholtz estimate |
 | C10 | Measured ground-run points, [WIDURI] Table 7 (OAT 25 °C, 1008 hPa, 14 ft): at the measured N1 of ground idle (20.5 / 21.0 %), MPA (65.0 %) and takeoff (97.4 %) | the model's displayed EGT within ±30 K of the measured value (idle: inside the measured 466-493 °C range widened by 30 K on each side, i.e. 436-523 °C; MPA 585 ± 30 °C; takeoff 855 ± 30 °C) and N2 within ±1.5 points of the measured value (idle 60.6 / 60.7 %, MPA 89.3 %, takeoff 99.8 %) |
+| C11 | Fuel flow at the EEDB LTO settings 7 / 30 / 85% rated thrust (ISA SLS) | within ±5% of the databank |
 
 C10 was added by decision D3-3 (critic pass 3, question l) before any code was tuned to it; it adds a check and loosens none. The ±30 K band roughly covers engine-to-engine scatter and the measurement itself. The measured values are ENGINE_FACTS rows (idleN1Low ... staticTakeoffEgt, runUpOat, runUpPressure).
+
+C11 was added by decision D3-11 before any part-power calibration was tuned to it; it adds a check and loosens none. The three settings are the ICAO LTO thrust settings of the engine's databank row ([EEDB] 8CM066, test bed, ISA SLS, no bleed or power extraction): the model runs at 0.07, 0.30 and 0.85 x eedbRatedThrust and its fuel flow is compared with fuelFlowIdle, fuelFlowApproach and fuelFlowClimbOut (ENGINE_FACTS rows). The 100 % setting is the sizing point (C3) and is not repeated here. D3-11 also says how C10 and C11 may be met: only through bounded, physically real part-power mechanisms (the VBV schedule, the HPC VSV schedule, the part-speed efficiency trends of the fan, booster and LPT maps), fitted to both datasets at once.
 
 ### 3.3 Flow solver validation ladder
 | ID | Case | Pass |

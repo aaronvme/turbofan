@@ -50,8 +50,8 @@ const physics = readPhysicsThresholds();
 
 describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
   it('finds the full pre-registered set in PHYSICS.md', () => {
-    // T1-T4, C1-C10 (C10 by D3-3), L1-L13, P1-P3
-    expect(physics.length).toBe(4 + 10 + 13 + 3);
+    // T1-T4, C1-C11 (C10 by D3-3, C11 by D3-11), L1-L13, P1-P3
+    expect(physics.length).toBe(4 + 11 + 13 + 3);
   });
 
   it('has exactly the same IDs, in the same order', () => {
@@ -88,6 +88,10 @@ describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
     expect(THRESHOLDS.C7.values.maxNewtonIterations.value).toBe(25);
     expect(THRESHOLDS.C10.values.maxEgtErrorK.value).toBe(30);
     expect(THRESHOLDS.C10.values.maxN2ErrorPoints.value).toBe(1.5);
+    expect(THRESHOLDS.C11.values.maxRelativeError.value).toBe(0.05);
+    expect(THRESHOLDS.C11.values.idleThrustPercent.value).toBe(7);
+    expect(THRESHOLDS.C11.values.approachThrustPercent.value).toBe(30);
+    expect(THRESHOLDS.C11.values.climbOutThrustPercent.value).toBe(85);
     expect(THRESHOLDS.L1.values.iterations.value).toBe(20_000);
     expect(THRESHOLDS.L12.values.t4ErrorK.value).toBe(10);
     expect(THRESHOLDS.P1.values.minIterationsPerS.value).toBe(150);
@@ -100,6 +104,7 @@ describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
     expect(THRESHOLDS.C4.targetsFrom).toBe('ENGINE_FACTS');
     expect(THRESHOLDS.C6.targetsFrom).toBe('ENGINE_FACTS');
     expect(THRESHOLDS.C10.targetsFrom).toBe('ENGINE_FACTS');
+    expect(THRESHOLDS.C11.targetsFrom).toBe('ENGINE_FACTS');
     expect(THRESHOLDS.T1.targetsFrom).toBe('PHYSICS');
   });
 });

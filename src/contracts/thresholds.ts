@@ -179,6 +179,21 @@ export const THRESHOLDS = {
       maxN2ErrorPoints: pass(1.5, 'points', '±1.5 points'),
     },
   },
+  // D3-11: the EEDB LTO fuel flows; the databank values themselves are ENGINE_FACTS rows
+  C11: {
+    id: 'C11',
+    section: '3.2',
+    checkText: 'Fuel flow at the EEDB LTO settings 7 / 30 / 85% rated thrust (ISA SLS)',
+    passText: 'within ±5% of the databank',
+    targetsFrom: 'ENGINE_FACTS',
+    values: {
+      maxRelativeError: pass(0.05, '1', '±5%'),
+      // % of the rated thrust (eedbRatedThrust)
+      idleThrustPercent: check(7, '%', '7 /'),
+      approachThrustPercent: check(30, '%', '30 /'),
+      climbOutThrustPercent: check(85, '%', '/ 85'),
+    },
+  },
 
   // 3.3 Flow solver validation ladder
   L1: {
