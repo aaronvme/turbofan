@@ -268,3 +268,48 @@ describe('surge episode', { timeout: TIMEOUT_MS }, () => {
     expect(last(after).hpc.surgeMarginFraction).toBeGreaterThan(0);
   });
 });
+
+describe(
+  'W1C-N5: steady vs transitory EGT limits, the N1 limiter at the corner',
+  { timeout: TIMEOUT_MS },
+  () => {
+    const redline = factValue('egtTakeoffLimit');
+    const transient = factValue('egtTransientLimit');
+    const allowance = factValue('egtTransientDuration');
+
+    it('a 45 C day at full lever: the 960 C band for at most 20 s, then a steady EGT under the 950 C redline', () => {
+      const hot = { ...ISA_SLS, temperatureK: 273.15 + 45 };
+      const m = createCycleModel();
+      m.reset('groundIdle', hot);
+      const states = run(m, 40, 0.05, () => inputs({ throttleLever: 1, ambient: hot }));
+      let above = 0;
+      let longest = 0;
+      for (const s of states) {
+        expect(s.egtDisplayedK).toBeLessThan(transient);
+        above = s.egtDisplayedK > redline ? above + 0.05 : 0;
+        longest = Math.max(longest, above);
+        expect(s.flags.egtExceedance).toBe(false);
+      }
+      expect(longest).toBeLessThanOrEqual(allowance + 0.05);
+      for (const s of states.slice(-100)) expect(s.egtDisplayedK).toBeLessThan(redline);
+    });
+
+    it('egtExceedance stays clear through the allowed transitory peak of a ground-idle slam', () => {
+      const m = createCycleModel();
+      m.reset('groundIdle', ISA_SLS);
+      const states = run(m, 10, 0.02, () => inputs({ throttleLever: 1 }));
+      expect(Math.max(...states.map((s) => s.egtDisplayedK))).toBeGreaterThan(redline);
+      for (const s of states) expect(s.flags.egtExceedance).toBe(false);
+    });
+
+    it('the 30 C flat-rating corner makes rated takeoff thrust in the transient model too', () => {
+      const corner = { ...ISA_SLS, temperatureK: factValue('flatRatingTemperature') };
+      const m = createCycleModel();
+      m.reset('groundIdle', corner);
+      const end = last(run(m, 25, 0.05, () => inputs({ throttleLever: 1, ambient: corner })));
+      expect(end.fadec.limiter).toBe('n1Target');
+      expect(end.netThrustN / factValue('takeoffThrust')).toBeGreaterThan(0.998);
+      expect(end.n1Rpm).toBeLessThanOrEqual(factValue('n1MaxRpm'));
+    });
+  },
+);
