@@ -1,0 +1,130 @@
+// Critic pass 3, w1/cycle @5d17120. Each test prints or pins what the critic observed for a
+// finding. Run from a checkout of the branch (see vitest.probes.config.mjs).
+import { appendFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+
+/** Probe output goes to the file named by PROBE_OUT (vitest swallows console output here). */
+const log = (line: string) => appendFileSync(process.env.PROBE_OUT ?? 'probe-out.txt', `${line}
+`);
+import { ISA_SLS } from '../../../src/contracts/ambient';
+import { factValue } from '../../../src/engine/facts';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
+import { cp, gasConstant } from '../../../src/thermo/gas';
+import { AIR_MOLE_FRACTIONS } from '../../../src/thermo/gas';
+import { MOLAR_MASS } from '../../../src/thermo/species';
+import {
+  CYCLE_CALIBRATION,
+  REFERENCE_ENGINE,
+  displayedEgt,
+  groundIdle,
+  sizeEngine,
+  solveSteady,
+} from '../../../src/cycle/engine';
+import { criticalB, simulateSurge } from '../../../src/cycle/greitzer';
+
+const E = REFERENCE_ENGINE;
+const sls = { ambient: ISA_SLS, customerBleedFraction: 0, powerExtractionW: 0 };
+
+/** NIST-JANAF cp, J/(mol K), below 300 K (tables N-023, O-029, Ar-001, C-095). */
+const JANAF_LOW: Record<string, Record<number, number>> = {
+  N2: { 200: 29.107, 250: 29.111 },
+  O2: { 200: 29.106, 250: 29.201 },
+  Ar: { 200: 20.786, 250: 20.786 },
+  CO2: { 200: 32.359, 250: 34.893 },
+};
+
+describe('W1C-N: air cp below the 300 K floor of the N2/Ar polynomials', () => {
+  it('prints the error at 200 / 250 / 288.15 K', () => {
+    for (const t of [200, 250]) {
+      let num = 0;
+      let m = 0;
+      for (const [s, x] of Object.entries(AIR_MOLE_FRACTIONS)) {
+        num += (x ?? 0) * (JANAF_LOW[s]?.[t] ?? NaN);
+        m += ((x ?? 0) * MOLAR_MASS[s as keyof typeof MOLAR_MASS]) / 1000;
+      }
+      const ref = num / m;
+      log(`air cp ${t} K: model ${cp(t, 0).toFixed(2)} JANAF-mix ${ref.toFixed(2)} err ${(100 * (cp(t, 0) / ref - 1)).toFixed(3)} %`);
+    }
+    expect(gasConstant(0)).toBeGreaterThan(287);
+  });
+});
+
+describe('design point and calibration numbers', () => {
+  it('prints the design stations and the sized nozzle areas', () => {
+    const p = E.design.point;
+    const s = p.stations;
+    log(
+      `T3 ${s['3'].ttK.toFixed(1)} T4 ${s['4'].ttK.toFixed(1)} T41 ${s['41'].ttK.toFixed(1)} T45 ${s['45'].ttK.toFixed(1)} T49.5 ${s['49.5'].ttK.toFixed(1)} EGTdisp ${(displayedEgt(E, p) - 273.15).toFixed(1)} C, FPR ${E.design.fanBypassPressureRatio.toFixed(4)}`,
+    );
+    log(
+      `A8 sized ${E.design.coreNozzleAreaM2.toFixed(6)} fact ${factValue('coreNozzleArea')}; A18 sized ${E.design.bypassNozzleAreaM2.toFixed(6)} fact ${factValue('bypassNozzleArea')}`,
+    );
+    log(`HPC PR ${p.hpc.point.pressureRatio.toFixed(3)} HPT PR ${p.hpt.pressureRatio.toFixed(3)} LPT PR ${p.lpt.pressureRatio.toFixed(3)}`);
+  });
+
+  it('the MPA point (WIDURI Table 7: N1 65.0 %, N2 89.3 %, EGT 585 C at OAT 25 C) is not tested; prints the model', () => {
+    const run = {
+      ambient: { temperatureK: factValue('runUpOat'), pressurePa: factValue('runUpPressure'), machNumber: 0 },
+      customerBleedFraction: 0,
+      powerExtractionW: 0,
+    };
+    const s = solveSteady(E, run, { kind: 'n1Percent', value: factValue('mpaN1') });
+    log(
+      `MPA: converged ${s.converged} N2 ${s.point.n2Percent.toFixed(2)} % (meas ${factValue('mpaN2')}), EGT ${(displayedEgt(E, s.point) - 273.15).toFixed(1)} C (meas ${(factValue('mpaEgt') - 273.15).toFixed(1)})`,
+    );
+    const i = groundIdle(E, { ...run });
+    log(
+      `idle at 25 C: N1 ${i.point.n1Percent.toFixed(2)} N2 ${i.point.n2Percent.toFixed(2)} EGT ${(displayedEgt(E, i.point) - 273.15).toFixed(1)} C (meas ${(factValue('idleEgtLow') - 273.15).toFixed(0)}-${(factValue('idleEgtHigh') - 273.15).toFixed(0)})`,
+    );
+  });
+});
+
+describe('C7 robustness: cold starts (no continuation)', () => {
+  it('prints solveSteady from the design guess at fixed N1', () => {
+    for (const n1 of [95, 85, 70, 55, 40, 30, 24]) {
+      const s = solveSteady(E, sls, { kind: 'n1Percent', value: n1 });
+      log(`cold N1 ${n1}: converged ${s.converged} iters ${s.iterations} maxRes ${s.maxResidual.toExponential(2)}`);
+    }
+  });
+  it('prints takeoff-thrust solves across ambient temperatures', () => {
+    for (const t of [233.15, 253.15, 273.15, 303.15, 313.15, 323.15]) {
+      const s = solveSteady(E, { ...sls, ambient: { ...ISA_SLS, temperatureK: t } }, {
+        kind: 'netThrust',
+        value: factValue('takeoffThrust'),
+      });
+      log(`OAT ${(t - 273.15).toFixed(0)} C: converged ${s.converged} iters ${s.iterations} N1 ${s.point.n1Percent.toFixed(2)} EGT ${(displayedEgt(E, s.point) - 273.15).toFixed(1)} C`);
+    }
+  });
+});
+
+describe('W1C-I: Greitzer B and the surge period', () => {
+  it('prints the physical B and the episode period in ms at takeoff', () => {
+    const p = E.design.point;
+    const t3 = p.stations['3'].ttK;
+    const a = Math.sqrt(1.36 * gasConstant(0) * t3);
+    const omegaH = a * Math.sqrt(0.1589 / (0.1 * 0.6));
+    const rTip = 0.316;
+    const u = (p.n2Rpm * 2 * Math.PI) / 60 * rTip;
+    const bPhys = u / (2 * omegaH * 0.6);
+    const params = { psi0: 0.3, h: 0.18, w: 0.25, gammaT: 0.5, b: 1 };
+    const r = simulateSurge(params, 0.05, 400);
+    log(
+      `omegaH ${omegaH.toFixed(0)} rad/s, Helmholtz period ${((2 * Math.PI) / omegaH * 1000).toFixed(2)} ms, model surge period ${(((r.periodXi ?? NaN) / omegaH) * 1000).toFixed(2)} ms, B_phys ${bPhys.toFixed(3)} vs B_crit ${criticalB(params).toFixed(3)} (model uses B = 1)`,
+    );
+    expect(bPhys).toBeLessThan(criticalB(params));
+  });
+});
+
+describe('W1C-N: sizeEngine does not report a non-converged secant', () => {
+  it('prints what an unreachable thrust does', () => {
+    for (const k of [1.2, 1.6, 2, 5]) {
+      try {
+        const e = sizeEngine({ ...CYCLE_CALIBRATION, netThrustN: k * CYCLE_CALIBRATION.netThrustN }, ENGINE_DEFINITION);
+        log(`${k}x thrust: returned, design net thrust ${e.design.point.netThrustN.toFixed(0)} N vs asked ${(k * CYCLE_CALIBRATION.netThrustN).toFixed(0)}, FPR ${e.design.fanBypassPressureRatio.toFixed(3)}`);
+      } catch (err) {
+        log(`${k}x thrust: threw ${String(err).slice(0, 80)}`);
+      }
+    }
+    expect(true).toBe(true);
+  });
+});
