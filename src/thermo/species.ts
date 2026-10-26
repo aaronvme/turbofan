@@ -1,11 +1,16 @@
 // NASA 7-coefficient polynomials (cp/R = a1 + a2 T + a3 T^2 + a4 T^3 + a5 T^4, two ranges split
 // at 1000 K) for the five species of dry air and its Jet-A combustion products.
 //
-// Source: the GRI-Mech 3.0 thermodynamic data file thermo30.dat (G. P. Smith et al., UC Berkeley,
-// http://combustion.berkeley.edu/gri-mech/version30/files30/thermo30.dat), whose N2, O2, Ar, CO2
-// and H2O entries are A. Burcat's NASA-format polynomials (Burcat & Ruscic, "Third Millennium
-// Ideal Gas and Condensed Phase Thermochemical Database", ANL-05/20, TAE 960, 2005), the same
-// format as NASA Glenn's (McBride, Gordon & Reno, NASA TM-4513, 1993). a6 and a7 are not used:
+// Sources:
+// - O2, Ar, CO2 and H2O: the GRI-Mech 3.0 thermodynamic data file thermo30.dat (G. P. Smith et al.,
+//   UC Berkeley, http://combustion.berkeley.edu/gri-mech/version30/files30/thermo30.dat), NASA-format
+//   polynomials valid from 200 K (Ar: constant cp, exact at any T).
+// - N2: B. J. McBride, S. Gordon and M. A. Reno, "Coefficients for Calculating Thermodynamic and
+//   Transport Properties of Individual Species", NASA TM-4513, 1993, entry TPIS78, 200-1000-6000 K,
+//   as distributed in Cantera 3.2.0's nasa_gas.yaml. GRI's own N2 entry (dated 1986) is valid only
+//   from 300 K and ran 0.8 % low in cp at 200 K against JANAF (W1C-N1); ISA SLS (288.15 K) and any
+//   cold day or altitude far field sit below 300 K.
+// a6 and a7 are not used:
 // enthalpy and entropy are integrated from cp with continuity at the range break (src/thermo/gas.ts),
 // so h(T) is exactly the integral of cp(T) (threshold T4).
 //
@@ -18,16 +23,22 @@ export const R_UNIVERSAL = 8.314462618;
 export type SpeciesId = 'N2' | 'O2' | 'Ar' | 'CO2' | 'H2O';
 
 export interface Nasa7Species {
-  /** 200 (300 for N2 and Ar) to 1000 K: a1..a7. */
+  /** 200 to 1000 K: a1..a7. */
   readonly low: readonly number[];
-  /** 1000 to 3500 (5000 for N2 and Ar) K: a1..a7. */
+  /** 1000 to 3500 (6000 for N2, any T for Ar) K: a1..a7. */
   readonly high: readonly number[];
 }
 
 export const SPECIES: Readonly<Record<SpeciesId, Nasa7Species>> = {
   N2: {
-    low: [3.298677, 1.4082404e-3, -3.963222e-6, 5.641515e-9, -2.444854e-12, -1020.8999, 3.950372],
-    high: [2.92664, 1.4879768e-3, -5.68476e-7, 1.0097038e-10, -6.753351e-15, -922.7977, 5.980528],
+    low: [
+      3.53100528, -1.23660987e-4, -5.02999437e-7, 2.43530612e-9, -1.40881235e-12, -1046.97628,
+      2.96747468,
+    ],
+    high: [
+      2.95257626, 1.39690057e-3, -4.92631691e-7, 7.86010367e-11, -4.60755321e-15, -923.948645,
+      5.87189252,
+    ],
   },
   O2: {
     low: [

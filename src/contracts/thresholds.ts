@@ -63,7 +63,8 @@ export const THRESHOLDS = {
   T3: {
     id: 'T3',
     section: '3.1',
-    checkText: 'cp of stoichiometric Jet-A products at 1000, 1500, 2000 K vs a NASA CEA reference',
+    checkText:
+      'cp of stoichiometric Jet-A products at 1000, 1500, 2000 K vs JANAF species tables mixed at the frozen stoichiometric Jet-A product composition (the method CEA uses for a frozen mixture)',
     passText: 'within 0.5%',
     targetsFrom: 'PHYSICS',
     values: {

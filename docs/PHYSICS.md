@@ -19,7 +19,7 @@ The thresholds in this file were set by the orchestrator on 2026-10-24, before a
 
 ## 2. Equations (summary; builders expand each section with the exact form they implement)
 
-- **Gas:** thermally perfect, cp(T, FAR) from NASA 7-coefficient polynomials for air and stoichiometric Jet-A products, frozen composition. One TypeScript module (`src/thermo`) is used by the cycle model and code-generated into WGSL constants.
+- **Gas:** thermally perfect, cp(T, FAR) from NASA 7-coefficient polynomials for air and stoichiometric Jet-A products, frozen composition. One TypeScript module (`src/thermo`) is used by the cycle model and code-generated into WGSL constants. Frozen means complete combustion and no dissociation. Cantera 3.2.0 (`tools/thermo/cantera_crosscheck.py`, NASA TM-4513 species data, D3-5) puts the error of that at 0.23 % in cp at the cycle's hottest gas (combustor exit at SLS takeoff, 1641 K, 2.8 MPa, FAR 0.0245); it grows to 19 % for stoichiometric products at 2000 K and 1 atm, a state the engine never reaches. The same script reproduces the model's frozen cp within 0.05 % (air 200-1500 K, products 1000-2000 K) and its product composition within 1e-6.
 - **Cycle:** component maps (pyCycle-derived, scaled), Newton–Raphson matching of mass-flow and work residuals; transients integrate `J dω/dt = τ_turbine − τ_compressor` per shaft.
 - **Flow:** per-radian, r-weighted finite volume for the axisymmetric Euler equations with swirl. Conserved state (ρ′, ρu_x, ρu_r, ρ r u_θ, η) plus ρZ (fuel-air ratio), with ρ′ = ρ − ρ∞ and η = ρ(h₀ − h₀∞) − p′ (gauge variables). SLAU2 fluxes, MUSCL (van Albada), point-implicit sources, 3-stage RK with local time stepping (steady) or SSP-RK3 (physical time). Hall–Thollet body force with blockage for compressor rows, follow-camber relaxation for turbine rows, heat release `η_b W_f LHV` in the combustor. v1 turbulence: Euler in the engine, Prandtl free-shear eddy viscosity `ν_t = 0.028 ΔU r½` in the plume.
 
@@ -66,7 +66,7 @@ Upstream-to-downstream order along the core: 1, 2, 21, 24, 25, 3, 4, 41, 45, 49.
 |---|---|---|
 | T1 | cp of air at 300, 500, 1000, 1500 K vs NASA/JANAF tables | within 0.5% |
 | T2 | γ of air at the same temperatures | within 0.5% |
-| T3 | cp of stoichiometric Jet-A products at 1000, 1500, 2000 K vs a NASA CEA reference | within 0.5% |
+| T3 | cp of stoichiometric Jet-A products at 1000, 1500, 2000 K vs JANAF species tables mixed at the frozen stoichiometric Jet-A product composition (the method CEA uses for a frozen mixture) | within 0.5% |
 | T4 | h(T) integrates cp(T): h(T2) − h(T1) vs numeric integral | within 1e-6 relative |
 
 ### 3.2 Cycle (targets come from `docs/ENGINE_FACTS.md`, each with its source)
