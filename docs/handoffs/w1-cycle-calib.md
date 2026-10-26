@@ -1,4 +1,4 @@
-w1/cycle-calib: DONE except C10 at MPA (and idle position 2 N2 by 0.03 point), which physically justified changes cannot meet: KNOWN FAIL, needs an orchestrator decision. Every other T1-T4 and C1-C10 check passes. (from main ca0f264; HEAD = the commit that adds this file)
+w1/cycle-calib: STOP-CLEAN at 82 % usage; DONE except mutation scores (D2-15 setup done, runs not completed) and C10 at MPA (and idle position 2 N2 by 0.03 point), which physically justified changes cannot meet: KNOWN FAIL, needs an orchestrator decision. Every other T1-T4 and C1-C10 check passes. (from main ca0f264; HEAD = the commit that adds this file)
 
 DONE (each "(TDD)" commit came first and failed, except the guard tests noted)
 - D3-3 / C10 pre-registered: 6009cdd, its own commit before any tuning. PHYSICS.md 3.2 row C10 and the thresholds.ts mirror (maxEgtErrorK 30 K, maxN2ErrorPoints 1.5), worded as D3-3; thresholds.test counts 4 + 10 + 13 + 3. The WIDURI Table 7 rows (idle 20.5/21.0 % N1, 60.6/60.7 % N2, 466/493 C; MPA 65.0 / 89.3 / 585; takeoff 97.4 / 99.8 / 855; 25 C, 1008 hPa) were already ENGINE_FACTS / facts.ts rows.
@@ -65,11 +65,16 @@ THRESHOLDS (this HEAD)
 - Engine surge (D3-4): at SLS takeoff B = 0.187 and omega_H = 1012 rad/s, so the Helmholtz period is 6.2 ms. The deep surge has reverse flow and a period of about 15 ms (2.2-3.0 Helmholtz periods; B < 1 makes it a relaxation oscillation). An injected surge lasts about 0.11 s, or 7 cycles.
 - C10: see the table.
 
-MUTATION
-- (filled in below)
+MUTATION (D2-15): NOT COMPLETE. The setup is done; no full score yet.
+- The setup: ignoreStatic, incremental and dryRunTimeoutMinutes 60 in stryker.config.mjs; referenceEngine() lazy and memoized; lazy test fixtures; vitest.stryker.config.ts runs only the thermo/cycle/flow suites.
+- Run 1: `npm run mutate -- --concurrency 4` with the full unit suite. 2602 mutants. Stopped after 33 min still in the dry run: Stryker's vitest runner runs the files one after another, and the instrumented simulations are slow.
+- Run 2: the same command with the scoped suite. 2610 mutants. Stopped after 30 min, again still in the dry run. The transient-model simulations in model.test.ts and modelPaths.test.ts dominate.
+- Run 3: a targeted run with temporary configs (not committed): mutate thermo + at/newton/componentMaps/greitzer/surgeSystem/engine, with tests thermo, numerics, maps, surge, offdesign, engine and c10. The dry run passed (133 tests in 2 min 47 s; 1376 mutants after ignoreStatic). I stopped it at 6/1376 for the usage brake, with no survivors so far. Stryker's ETA was not yet meaningful.
+- What the orchestrator needs to schedule: a quiet multi-hour window for `npm run mutate -- --concurrency 8`. model.ts is only affordable there: each of its mutants reruns the 10-60 s instrumented simulations. Then a rerun with incremental.
 
 NEXT
 1. The orchestrator decides on C10 (options above).
+1b. Mutation: run `npx stryker run` with a 2-file override like run 3 (thermo + engine numerics, excluding model.test.ts and modelPaths.test.ts) in a quiet window, then the full `npm run mutate`, then kill the survivors that matter. No per-file scores exist yet.
 2. The plan file still says "100-300 ms" surge cycles (D3-4 wording). It is outside the repo, so it was not edited here.
 3. The critic's probes under docs/reviews/probes import REFERENCE_ENGINE, which is now referenceEngine(); they need that rename to run on this branch.
 
@@ -78,4 +83,9 @@ GOTCHAS
 - vitest.config is unchanged. Stryker uses the same suite. The ignored static mutants are the import-time GAS_TABLES build and the module constants.
 - No new npm dependencies. The Cantera venv is at C:\Users\Aaron\scratch\w1cc\venv-cantera (outside the repo). Scratch probe scripts are in C:\Users\Aaron\scratch\w1cc. No dev server, Chrome or GPU device was started.
 
-GATES @<filled in>
+GATES @fa2a4a5 (the code commits; the handoff commit adds only this file)
+- npm test: 1482 passed, 3 expected fail (the C10 KNOWN FAIL markers), 0 failed, 64 files.
+- npm run lint: clean (eslint --max-warnings 0, prettier). npm run typecheck: clean.
+- npm run coverage: lines 98.56 %, statements 97.64 %, branches 87.88 %, functions 98.39 %. src/cycle: lines 99.77 %, branches 95.87 %. src/thermo: lines 100 %, branches 87.5 %.
+- npm run test:mesh: 29 passed (after the D2-2 redo and `npm run mesh`).
+- bench:* not run (per the brief). No GPU, browser or e2e code was touched.
