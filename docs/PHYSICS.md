@@ -8,7 +8,7 @@ The thresholds in this file were set by the orchestrator on 2026-10-24, before a
 |---|---|---|
 | N1, N2, EGT, fuel flow, thrust, TSFC, station Pt/Tt/W | **Simulated** | 0-D transient cycle model (`src/cycle`) |
 | Start sequence, accel/decel, limiters | **Simulated** | FADEC-like controller + shaft dynamics |
-| Surge cycles (100-300 ms) | **Simulated** | Greitzer lumped compression-system model |
+| Surge cycles (period from the derived Helmholtz frequency) | **Simulated** | Greitzer lumped compression-system model on the engine's own HPC system (D3-4, `src/cycle/surgeSystem.ts`): B from the HPC duct, the combustor plenum and the rotor tip speed at the current N2, the post-surge characteristic a cubic extension of the scaled HPC map. At SLS takeoff B = 0.19 and the Helmholtz period is 6.2 ms; a surge is a deep surge (reverse flow) with a period of about 15 ms |
 | Meridional p, T, rho, velocity incl. swirl; choking; jet plume | **Simulated** | 2D axisymmetric + swirl solver (`src/flow`), body-force blade rows, combustor heat source |
 | First 10-30 ms of a surge bang / light-off pressure wave | **Simulated** (slow motion) | solver physical-time mode |
 | Particles, cut-plane fields, schlieren, heat haze | **Derived** from the simulated field | resampled solver textures |
