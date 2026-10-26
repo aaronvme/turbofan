@@ -185,10 +185,12 @@ export function deepFreeze<T>(value: T): T {
 export function nextSnapshot(previous: SimSnapshot | null, parts: SnapshotParts): SimSnapshot {
   const bad = findNonPlainData(parts);
   if (bad !== null) throw new Error(`snapshot is not plain data: ${bad}`);
+  // stamped after the copy: SnapshotParts omits these keys only at the type level, and parts
+  // spread from the previous snapshot still carry its version (W0C-I1)
   const snapshot: SimSnapshot = {
+    ...structuredClone(parts),
     schemaVersion: SIM_SCHEMA_VERSION,
     version: (previous?.version ?? 0) + 1,
-    ...structuredClone(parts),
   };
   return deepFreeze(snapshot);
 }
