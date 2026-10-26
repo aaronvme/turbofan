@@ -18,7 +18,8 @@ const cone: P2[] = [
 ];
 const pappus = (loop: P2[]) => {
   const { area, centroid } = loopAreaCentroid(loop);
-  return 2 * Math.PI * area * centroid.r;
+  // the sign of the area follows the loop orientation; the volume of the solid does not
+  return Math.abs(2 * Math.PI * area * centroid.r);
 };
 
 describe('revolveLoop', () => {
