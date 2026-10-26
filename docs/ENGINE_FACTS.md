@@ -210,7 +210,7 @@ T49.5 (after LPT stage 1, equal stage work) comes out at 1174 K = 901 °C, i.e. 
 
 ## Model vs published (updated every wave)
 
-Model: the W1 cycle model (`src/cycle`, w1/cycle), ISA SLS static unless stated. Tests: tests/unit/cycle/engine.test.ts, model.test.ts and modelPaths.test.ts.
+Model: the W1 cycle model (`src/cycle`, w1/cycle-calib), ISA SLS static unless stated. Tests: tests/unit/cycle/engine.test.ts, c10.test.ts, offdesign.test.ts, surge.test.ts, model.test.ts and modelPaths.test.ts.
 
 | Figure | Published | Model | Delta | Threshold (PHYSICS.md) |
 |---|---|---|---|---|
@@ -219,17 +219,22 @@ Model: the W1 cycle model (`src/cycle`, w1/cycle), ISA SLS static unless stated.
 | SLS takeoff OPR | 29 (overallPressureRatio) | 29.00 | 0.0 % | C2: within 3 % |
 | SLS takeoff total airflow | 359.245 kg/s (totalAirflow) | 359.245 kg/s | 0.0 % | C2: within 3 % |
 | SLS takeoff TSFC | 1.0648e-5 kg/(N s) (tsfcTakeoff, estimate) | 1.0648e-5 kg/(N s) | 0.0 % | C3: within 3 % |
-| Ground idle N1 | 20-22 % (idleN1Min, idleN1Max) | 20.5 % | inside | C4: inside the range |
+| Ground idle N1 | 20-22 % (idleN1Min, idleN1Max) | 20.09 % | inside | C4: inside the range |
 | Ground idle N2 | 60-62 % (idleN2Min, idleN2Max) | 61.0 % (FADEC floor) | inside | C4: inside the range |
-| Ground idle EGT | below 773.15 K (idleEgtMax) | 592 K (319 C displayed) | inside; 150 K below the measured 466-493 C | C4: inside the range |
-| 15 % to 95 % rated takeoff thrust, lever to maximum in 1 s (33.73(b), D2-1) | 5.0 s | 2.60 s; peak displayed EGT 946.5 C (limit 960 C), min HPC surge margin 0.106, no surge | 2.40 s margin | C5: ≤ 5.0 s |
-| Ground idle (1.0 % thrust) to rated takeoff, lever to maximum in 1 s (33.73(a)) | no overtemperature (displayed EGT below 960 C, egtTransientLimit) or surge | peak 958.3 C, min HPC surge margin 0.025, no surge; 95 % thrust at 5.22 s (no time limit applies) | 1.7 K under | 33.73(a) check in model.test.ts (not a PHYSICS.md threshold) |
-| Takeoff EGT (displayed), 30 C corner (D1-1) | below 1223.15 K (egtTakeoffLimit) | 1195.7 K (922.5 C) | 27.5 K margin | C6: below the redline |
-| Static takeoff run, OAT 25 C, N1 97.4 % | 855 C EGT, N2 99.8 % (staticTakeoffEgt, staticTakeoffN2) | 853.1 C, N2 99.9 % | -1.9 K, +0.1 pt | calibration target (W0C-I6) |
+| Ground idle EGT | below 773.15 K (idleEgtMax) | 687.7 K (414.5 C displayed), at 2.9 % of rated thrust | inside | C4: inside the range |
+| 15 % to 95 % rated takeoff thrust, lever to maximum in 1 s (33.73(b), D2-1) | 5.0 s | 2.68 s; peak displayed EGT 953.9 C (limit 960 C), min HPC surge margin 0.096, no surge | 2.32 s margin | C5: ≤ 5.0 s |
+| Ground idle (2.9 % thrust) to rated takeoff, lever to maximum in 1 s (33.73(a)) | no overtemperature (displayed EGT below 960 C, egtTransientLimit) or surge | peak 958.2 C, min HPC surge margin 0.034, no surge; 95 % thrust at 5.84 s (no time limit applies) | 1.8 K under | 33.73(a) check in model.test.ts (not a PHYSICS.md threshold) |
+| Takeoff EGT (displayed), 30 C corner (D1-1) | below 1223.15 K (egtTakeoffLimit) | 1193.5 K (920.3 C), N1 103.50 % | 29.7 K margin | C6: below the redline |
+| Static takeoff run, OAT 25 C, N1 97.4 % | 855 C EGT, N2 99.8 % (staticTakeoffEgt, staticTakeoffN2) | 856.0 C, N2 99.88 % | +1.0 K, +0.08 pt | C10: ±30 K, ±1.5 points (pass; the calibration point, W0C-I6) |
+| Ground-run idle, position 1, OAT 25 C, N1 20.5 % | 466-493 C, N2 60.6 % (idleEgtLow/High, idleN2Low) | 466.1 C, N2 61.53 % | inside, +0.93 pt | C10: 436-523 C, ±1.5 points (pass) |
+| Ground-run idle, position 2, OAT 25 C, N1 21.0 % | 466-493 C, N2 60.7 % (idleEgtLow/High, idleN2High) | 461.4 C, N2 62.23 % | inside, +1.53 pt | C10: N2 fails by 0.03 pt (KNOWN FAIL, W1C-I1) |
+| MPA run, OAT 25 C, N1 65.0 % | 585 C, N2 89.3 % (mpaEgt, mpaN2) | 536.4 C, N2 86.71 % | -48.6 K, -2.59 pt | C10: fails both (KNOWN FAIL, W1C-I1) |
+| Fuel flow at 85 / 30 / 7 % of rated thrust (EEDB LTO points, test bed) | 1.031 / 0.343 / 0.110 kg/s (fuelFlowClimbOut, fuelFlowApproach, fuelFlowIdle) | 1.006 / 0.300 / 0.0985 kg/s | -2.5 / -12.4 / -10.5 % | none (validation; -3.0 / -15.0 / -16.5 % before W1C-I1) |
+| OPR at max climb thrust, 35,000 ft, M 0.8, ISA | 32.7 (overallPressureRatioMaxClimb), at 26511 N (maxClimbThrust) | 32.63 | -0.2 % | none (validation, offdesign.test.ts, 1 %) |
 
 ## Cycle model calibration (W1)
 
-The W1 model is thermally perfect (src/thermo) and map-based (pyCycle maps, NOTICE). It takes every W0 assumption above unchanged (pressure ratios, efficiencies, losses, cooling, LHV) except the two rows below. Its own sized outputs replace the W0 estimate's derived values for the cycle; since D2-2 the definition's flowpath carries the sized nozzle areas too (coreNozzleArea, bypassNozzleArea).
+The W1 model is thermally perfect (src/thermo) and map-based (pyCycle maps, NOTICE). It takes every W0 assumption above unchanged at the design point (pressure ratios, efficiencies, losses, cooling, LHV) except the two calibrated rows below; off design it adds the part-power physics at the end of this section. Its own sized outputs replace the W0 estimate's derived values for the cycle; since D2-2 the definition's flowpath carries the sized nozzle areas too (coreNozzleArea, bypassNozzleArea).
 
 Sized at ISA SLS takeoff (D1-2): the fan bypass pressure ratio is solved so that net thrust equals takeoffThrust at fuelFlowTakeoff, so C1 and C3 close exactly and BPR, OPR and airflow are inputs.
 
@@ -248,6 +253,16 @@ Calibrated parameters (W0C-I6), each a model assumption with no public value, bo
 | Parameter | W0 | W1 | Confidence | Plausible range and why |
 |---|---|---|---|---|
 | N1 at ISA SLS rated takeoff | 100 % (5175 rpm) | 101 % (5227 rpm) | estimate (calibrated) | not published. With 100 % the model's N2 at the measured run (N1 97.4 %, 25 C) is 100.3 % against 99.8 % measured; 101 % gives 99.9 %. Above about 101.5 % the 30 C corner would exceed the 104 % TCDS N1 limit. |
-| Share of LPT work upstream of the EGT probe (station 49.5) | 0.25 (equal work over 4 stages) | 0.35 | estimate (calibrated; accepted by D2-3) | Station 49.5 is the LPT stage 2 nozzle ([TCDS] IV.1.1), so the probe sees the gas after stage 1 of 4. Stage 1 does more than an equal share of the LPT work: the last stage is usually lightly loaded to keep the exhaust swirl low, so the first stages carry more than 0.25 each (the flowpath's rising mean radius pulls the other way, and no stage split is published). 0.35 is fitted to the measured 855 C ([WIDURI]); it also absorbs any low reading of the probe (thermocouple radiation to the cooler vanes). An energy balance pins T45 (1200.6 K at ISA takeoff) from the fuel flow and T25 alone, so efficiencies and cooling flows cannot move the EGT by the 36 K needed without leaving their ranges. |
+| Share of LPT work upstream of the EGT probe (station 49.5) | 0.25 (equal work over 4 stages) | 0.35 | estimate (calibrated; accepted by D2-3) | Station 49.5 is the LPT stage 2 nozzle ([TCDS] IV.1.1), so the probe sees the gas after stage 1 of 4. Stage 1 does more than an equal share of the LPT work: the last stage is usually lightly loaded to keep the exhaust swirl low, so the first stages carry more than 0.25 each (the flowpath's rising mean radius pulls the other way, and no stage split is published). 0.35 is fitted to the measured 855 C ([WIDURI]); per D2-3 it is a stage-work share, not a thermocouple error term. An energy balance pins T45 (1200.6 K at ISA takeoff) from the fuel flow and T25 alone, so efficiencies and cooling flows cannot move the EGT by the 36 K needed without leaving their ranges. |
 
-Model choices that matter for the comparison: ground idle is a FADEC N2 floor of 61 %; idle EGT is 150 K below the measured ground run because the model has no customer bleed, accessory load or VBV flow at idle (an on-wing run has all three); the VBV opening is reported but not fed to the gas path.
+Part-power physics (W1C-I1, w1/cycle-calib). None of them changes the design point, so the sizing, C1-C3 and the 0.35 probe share are untouched; each is a model assumption (`estimate`) with its reason and range:
+
+| Parameter | Before | Now | Plausible range and why |
+|---|---|---|---|
+| Mechanical loss off design | (1 - 0.99) of the turbine power at every point | (1 - 0.99) of the design turbine power x (N / N_design)^2 per spool | Bearings, seals, windage, the gearbox and the engine's own pumps lose power as a drag torque that rises with speed (viscous friction ~ N^2, windage ~ N^3, rolling bearings ~ N^1.5), not in proportion to the turbine's power. Exponent 1.5-3; 2 is the middle. At ground idle the HP loss is ~85 kW instead of ~8 kW. |
+| Bypass duct, core nozzle and combustor pressure losses | fixed fractions of Pt (1.5 / 1 / 5 %) | the same at design, x (W sqrt(Tt) / Pt / design)^2 off design | Cold friction and dump losses scale with the dynamic head (Walsh & Fletcher 5.10-5.11). With the fixed 1.5 % the bypass duct ate the whole fan pressure rise at idle (fan PR 1.018) and put the fan past its stall line (R-line 0.92); now the fan sits at R-line 1.7 and ground idle makes 2.9 % of rated thrust (was 1.0 %). |
+| VBV in the gas path | reported, not fed | vbvMaxFraction of the booster flow below vbvOpenBelowN2c (70 %), closed above vbvClosedAboveN2c (85 %), linear between | The schedule the model already displayed; the dumped air leaves the core at booster exit and enters the bypass stream. |
+| Tip-clearance efficiency loss, HPC / HPT | none | 3 / 4 points x (1 - (N2 / N2_design)^2) | Running clearances open as the rotor's centrifugal growth (~ N^2) falls; ~1 % SFC and ~10 C EGT per 0.010 in of extra HPT clearance (Lattime & Steinetz, NASA/TM-2002-211794). 2-4 points at standstill; the upper half is used because HPC 2 / HPT 3 leaves C4's ISA idle N1 at 19.92 % (0.08 under the minimum) once the duct losses scale with the dynamic head. |
+| Ground-run loads for C10 | none | groundRunAccessoryLoad 40 kW, groundRunCustomerBleed 0 (unknown rows above) | An on-wing run carries the aircraft's electrical and hydraulic loads; [WIDURI] does not state the bleed configuration. |
+
+What limits C10 (see docs/handoffs/w1-cycle-calib.md). At the MPA N1 the measured EGT (585 C displayed, T49.5 = 828 K) is above the model's own T45 (826 K), so no probe position can reach it: the model's core is about 50-80 K too cold at 65 % N1 and its N2 2.6 points low. That needs roughly 20 % more heat release per kg of core flow at a given N1, which the physical part-power mechanisms above (and customer bleed, a larger accessory load, the EGT probe's radiation error) do not supply within their ranges: the levers that raise N2 at a fixed N1 are LP-side losses (fan, booster, LPT efficiency 4-7 points below the scaled pyCycle maps at 65 % N1), which no public data supports. The EEDB fuel flows at 30 % and 7 % thrust (12 and 10 % above the model) point the same way: the generic maps make the part-power engine too efficient. Ground idle now matches within the band at position 1 and misses N2 by 0.03 point at position 2; idle sits where every map is extrapolated (fan below its lowest speed line, LPT far below its pressure-ratio range), so the idle match is sensitive to the extrapolation rules.
