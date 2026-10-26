@@ -139,11 +139,25 @@ export interface DesignedRow {
 type Spans = Record<Span, number>;
 const spans = (f: (s: Span) => number): Spans => ({ hub: f('hub'), mid: f('mid'), tip: f('tip') });
 
-const MAX_ITERATIONS = 200;
 const ANGLE_TOLERANCE = 1e-14;
-const MAX_COUNT_PASSES = 10;
 
-export function designRow(edges: RowEdges, aero: RowAerodynamics, shape: RowShape): DesignedRow {
+/**
+ * Iteration limits: the stagger fixed point and the count passes stop here and throw rather
+ * than return an unconverged row (W0C-N4). Real rows converge in a few dozen iterations.
+ */
+export interface DesignLimits {
+  readonly maxIterations: number;
+  readonly maxCountPasses: number;
+}
+export const DESIGN_LIMITS: DesignLimits = { maxIterations: 200, maxCountPasses: 10 };
+
+export function designRow(
+  edges: RowEdges,
+  aero: RowAerodynamics,
+  shape: RowShape,
+  limits: Partial<DesignLimits> = {},
+): DesignedRow {
+  const { maxIterations, maxCountPasses } = { ...DESIGN_LIMITS, ...limits };
   const { leadingEdge: le, trailingEdge: te } = edges;
   if (!(aero.inlet.cxMPerS > 0 && aero.exit.cxMPerS > 0))
     throw new Error('designRow: the axial velocity must be > 0 at both edges');
@@ -193,32 +207,37 @@ export function designRow(edges: RowEdges, aero: RowAerodynamics, shape: RowShap
   };
 
   const solve = (): void => {
-    for (let i = 0; i < MAX_ITERATIONS; i++) {
+    for (let i = 0; i < maxIterations; i++) {
       const chord = chordOf(stagger);
       const d = spans((s) => carterDeviation(s, chord[s]));
-      const next = spans((s) => (a1[s] + metalExit(s, d[s])) / 2);
+      const exit = spans((s) => metalExit(s, d[s]));
+      // past 90 deg the stagger -> chord map has no meaning (cos <= 0): stop at once
+      for (const s of SPANS) {
+        if (!(Math.abs(exit[s]) < Math.PI / 2))
+          throw new Error(`designRow: exit metal angle at the ${s} is beyond 90 deg`);
+      }
+      const next = spans((s) => (a1[s] + exit[s]) / 2);
       const change = Math.max(...SPANS.map((s) => Math.abs(next[s] - stagger[s])));
       stagger = next;
       deviation = d;
       if (change < ANGLE_TOLERANCE) return;
     }
+    throw new Error(`designRow: the stagger did not converge in ${maxIterations} iterations`);
   };
 
   solve();
   if (givenCount === undefined) {
-    for (let pass = 0; pass < MAX_COUNT_PASSES; pass++) {
-      const next = countFor(chordOf(stagger).mid, targetSolidity ?? 1);
-      if (next === count) break;
-      count = next;
+    const solidityCount = () => countFor(chordOf(stagger).mid, targetSolidity ?? 1);
+    for (let pass = 0; pass < maxCountPasses && solidityCount() !== count; pass++) {
+      count = solidityCount();
       solve();
     }
+    if (solidityCount() !== count)
+      throw new Error(`designRow: the blade count did not settle in ${maxCountPasses} passes`);
   }
 
+  // checked inside solve(): the last iteration's exit metal angles are within +-90 deg
   const exitMetal = spans((s) => metalExit(s, deviation[s]));
-  for (const s of SPANS) {
-    if (!(Math.abs(exitMetal[s]) < Math.PI / 2))
-      throw new Error(`designRow: exit metal angle at the ${s} is beyond 90 deg`);
-  }
   const chord = chordOf(stagger);
   return {
     count,
