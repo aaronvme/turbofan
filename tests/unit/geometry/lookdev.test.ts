@@ -94,8 +94,9 @@ describe.each(PRESETS)('quality preset %s (W1G-I1)', (id) => {
       if (vis.rows.has(r.row.id)) closed += rowTriangles(r);
     expect(total).toBeLessThanOrEqual(TRIANGLE_BUDGET[id].total);
     expect(closed).toBeLessThanOrEqual(TRIANGLE_BUDGET[id].closed);
-    // the culling is worth having: the closed engine draws well under half of the model
-    expect(closed / total).toBeLessThan(0.5);
+    // the culling is still worth having: the HPC, combustor, HPT, cases and disks go (about a
+    // third of the model once every booster and LPT row is kept, W1L-I1)
+    expect(closed / total).toBeLessThan(0.7);
   });
 });
 
@@ -134,6 +135,11 @@ describe('closed-engine culling (LD-6)', () => {
     // (the critic's pixel probe saw booster rows 2-4 and LPT stages 1-3 culled)
     for (const r of def.bladeRows.filter((k) => k.component === 'booster' || k.component === 'lpt'))
       expect(vis.rows.has(r.id), r.id).toBe(true);
+    // and, past the booster, the transition duct's walls and the fan-frame struts in it (the
+    // pixel test, tests/browser/culling.test.ts, saw them through the fan gaps)
+    expect(vis.rows.has('fan-frame-strut')).toBe(true);
+    for (const id of ['case-transition', 'transition-inner'])
+      expect(vis.parts.has(id), id).toBe(true);
   });
 
   it('drops what the cowls and the inner body hide: the core rows, cases, liner, disks and shafts', () => {
@@ -155,15 +161,20 @@ describe('closed-engine culling (LD-6)', () => {
       'hpc-s9',
       'hpt-n1',
       'hpt-r1',
-      'fan-frame-strut',
     ])
       expect(vis.rows.has(id), id).toBe(false);
   });
 
   it('hides only what lies fully inside the inner body, or inside the core cowl between the sight limits', () => {
     const lim = closedViewLimits(def);
-    // W1L-I1: the limits sit aft of the booster's last row and ahead of the first LPT row
+    // W1L-I1: the limits sit aft of the booster's last row (at the HPC inlet) and ahead of
+    // the first LPT row
     const rowsOf = (c: string) => def.bladeRows.filter((r) => r.component === c);
+    for (const r of rowsOf('hpc'))
+      expect(lim.xFront, r.id).toBeLessThanOrEqual(Math.min(r.leadingEdge.hub.x, r.leadingEdge.tip.x));
+    expect(lim.xFront).toBeGreaterThanOrEqual(
+      def.flowpath.components.find((c) => c.id === 'hpc')?.xStart ?? Infinity,
+    );
     for (const r of rowsOf('booster'))
       expect(lim.xFront, r.id).toBeGreaterThanOrEqual(
         Math.max(r.trailingEdge.hub.x, r.trailingEdge.tip.x),

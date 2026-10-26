@@ -5,10 +5,11 @@
 // Something is hidden when it lies wholly
 // - inside the inner body (strictly below the hub surface: disks, bores, shafts), which is a
 //   closed shell from the spinner to the plug tip; or
-// - inside the core cowl between two sight limits: through the fan one sees the booster
-//   inlet (IGV, first rotor and stator), through the core nozzle the last LPT stage. The
-//   limits are the trailing edge of the first booster stator and the leading edge of the last
-//   LPT stator.
+// - inside the core cowl between two sight limits: aft of the booster's last row and ahead of
+//   the first LPT row. Through the fan gaps one sees every booster row (pass 4, W1L-I1: the
+//   old limit at the first booster stator culled rows 2-4, which show beside the hub), and
+//   up the core nozzle every LPT stage (stages 1-3 show through the last one). The HPC, the
+//   combustor, the HPT, the cases between and the disks are what stays culled.
 // Everything else is drawn. The tests pin both directions.
 
 import type { EngineDefinition } from '../contracts/engine';
@@ -29,16 +30,13 @@ const HUB_SHELL = 0.004;
 const COWL_SKIN = 0.006;
 
 export function closedViewLimits(def: EngineDefinition): ClosedViewLimits {
-  const rows = def.bladeRows;
-  const boosterStators = rows.filter((r) => r.component === 'booster' && r.kind === 'stator');
-  const lptStators = rows.filter((r) => r.component === 'lpt' && r.kind === 'stator');
-  const s1 = boosterStators[0];
-  const last = lptStators[lptStators.length - 1];
-  if (s1 === undefined || last === undefined)
-    throw new Error('visibility: needs a booster stator and an LPT stator');
+  const booster = def.bladeRows.filter((r) => r.component === 'booster');
+  const lpt = def.bladeRows.filter((r) => r.component === 'lpt');
+  if (booster.length === 0 || lpt.length === 0)
+    throw new Error('visibility: needs booster and LPT rows');
   return {
-    xFront: Math.max(s1.trailingEdge.hub.x, s1.trailingEdge.tip.x),
-    xRear: Math.min(last.leadingEdge.hub.x, last.leadingEdge.tip.x),
+    xFront: Math.max(...booster.map((r) => Math.max(r.trailingEdge.hub.x, r.trailingEdge.tip.x))),
+    xRear: Math.min(...lpt.map((r) => Math.min(r.leadingEdge.hub.x, r.leadingEdge.tip.x))),
   };
 }
 

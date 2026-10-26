@@ -1,0 +1,80 @@
+// Frame read-back helpers for the browser image tests (culling, fan blur): render a frame
+// and copy the canvas in the same task, before it is presented, then compare luminance.
+
+import type { EngineView } from '../../../src/render/engineView';
+
+export const nextFrame = () =>
+  new Promise<void>((resolve) => {
+    requestAnimationFrame(() => {
+      resolve();
+    });
+  });
+
+/** Renders `frames` frames at dt 0 (the spools and transitions hold still, only jitter moves). */
+export async function settle(view: EngineView, frames: number): Promise<void> {
+  for (let i = 0; i < frames; i++) {
+    view.frame(0);
+    await nextFrame();
+  }
+  await view.device.device.queue.onSubmittedWorkDone();
+}
+
+export interface Grab {
+  readonly w: number;
+  readonly h: number;
+  /** Rec. 709 luminance of the displayed (tone-mapped, sRGB) pixels, 0..1. */
+  readonly lum: Float32Array;
+  readonly rgba: Uint8ClampedArray;
+}
+
+/** Renders one frame and reads the canvas back before it is presented. */
+export function grab(view: EngineView, c: HTMLCanvasElement): Grab {
+  view.frame(0);
+  const w = c.width;
+  const h = c.height;
+  const copy = document.createElement('canvas');
+  copy.width = w;
+  copy.height = h;
+  const ctx = copy.getContext('2d');
+  if (ctx === null) throw new Error('no 2d context');
+  ctx.drawImage(c, 0, 0);
+  const px = ctx.getImageData(0, 0, w, h).data;
+  const lum = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++)
+    lum[i] =
+      (0.2126 * (px[4 * i] ?? 0) + 0.7152 * (px[4 * i + 1] ?? 0) + 0.0722 * (px[4 * i + 2] ?? 0)) /
+      255;
+  return { w, h, lum, rgba: px };
+}
+
+export const TILE = 16;
+
+export interface Diff {
+  /** Fraction of pixels whose luminance differs by more than the threshold. */
+  readonly changed: number;
+  /** Largest fraction of changed pixels in one TILE x TILE tile. */
+  readonly worstTile: number;
+  /** Tiles with more than 25 % of their pixels changed. */
+  readonly tilesOver25: number;
+}
+
+export function diff(a: Grab, b: Grab, threshold: number): Diff {
+  const { w, h } = a;
+  let changed = 0;
+  let worst = 0;
+  let over = 0;
+  for (let ty = 0; ty < h; ty += TILE)
+    for (let tx = 0; tx < w; tx += TILE) {
+      let n = 0;
+      let m = 0;
+      for (let y = ty; y < Math.min(h, ty + TILE); y++)
+        for (let x = tx; x < Math.min(w, tx + TILE); x++) {
+          m++;
+          if (Math.abs((a.lum[y * w + x] ?? 0) - (b.lum[y * w + x] ?? 0)) > threshold) n++;
+        }
+      changed += n;
+      worst = Math.max(worst, n / m);
+      if (n / m > 0.25) over++;
+    }
+  return { changed: changed / (w * h), worstTile: worst, tilesOver25: over };
+}
