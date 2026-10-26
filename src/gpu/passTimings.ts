@@ -74,9 +74,60 @@ export interface PassMedians {
   readonly cpu: number;
 }
 
-/** The last `window` frames' pass timings. */
+/** One frame's GPU ms per pass group and CPU ms. */
+export interface FrameSample {
+  readonly gpu: PassMs;
+  readonly cpu: number;
+}
+
+export interface Spread {
+  readonly p10: number;
+  readonly p50: number;
+  readonly p90: number;
+}
+
+/** Every frame of one timing run (W1L-I4: not a rolling window). */
+export interface RunSummary {
+  readonly frames: number;
+  readonly gpu: Readonly<Record<PassGroup, Spread>>;
+  /** Of the per-frame GPU totals. */
+  readonly gpuTotal: Spread;
+  readonly cpu: Spread;
+}
+
+/** Quantile by linear interpolation between order statistics (R type 7); NaN when empty. */
+export function quantile(xs: readonly number[], q: number): number {
+  if (xs.length === 0) return Number.NaN;
+  const s = [...xs].sort((x, y) => x - y);
+  const h = (s.length - 1) * q;
+  const lo = Math.floor(h);
+  const a = s[lo] ?? Number.NaN;
+  const b = s[Math.min(lo + 1, s.length - 1)] ?? a;
+  return a + (h - lo) * (b - a);
+}
+
+const spread = (xs: readonly number[]): Spread => ({
+  p10: quantile(xs, 0.1),
+  p50: quantile(xs, 0.5),
+  p90: quantile(xs, 0.9),
+});
+
+export function summarizeRun(frames: readonly FrameSample[]): RunSummary {
+  const gpu = {} as Record<PassGroup, Spread>;
+  for (const g of PASS_GROUPS) gpu[g] = spread(frames.map((f) => f.gpu[g]));
+  const totals = frames.map((f) => PASS_GROUPS.reduce((t, g) => t + f.gpu[g], 0));
+  return {
+    frames: frames.length,
+    gpu,
+    gpuTotal: spread(totals),
+    cpu: spread(frames.map((f) => f.cpu)),
+  };
+}
+
+/** The last `window` frames' pass timings (the overlay), plus every frame of a timing run. */
 export class RollingPassStats {
   private readonly frames: { gpu: PassMs; total: number; cpu: number }[] = [];
+  private run: FrameSample[] | null = null;
   constructor(private readonly window: number) {
     if (!(Number.isInteger(window) && window > 0)) throw new Error('RollingPassStats: window > 0');
   }
@@ -86,6 +137,19 @@ export class RollingPassStats {
     for (const g of PASS_GROUPS) total += gpu[g];
     this.frames.push({ gpu, total, cpu: cpuMs });
     if (this.frames.length > this.window) this.frames.shift();
+    this.run?.push({ gpu, cpu: cpuMs });
+  }
+
+  /** Starts recording every frame pushed from now on (a timing run). */
+  beginRun(): void {
+    this.run = [];
+  }
+
+  /** The frames recorded since beginRun (empty if none), and stops recording. */
+  endRun(): FrameSample[] {
+    const r = this.run ?? [];
+    this.run = null;
+    return r;
   }
 
   medians(): PassMedians {

@@ -12,7 +12,13 @@
 // quote.
 
 import { InspectorBase, type Object3D, type WebGPURenderer } from 'three/webgpu';
-import { passGroupOf, RollingPassStats, sumByGroup, type PassMedians } from '../gpu/passTimings';
+import {
+  passGroupOf,
+  RollingPassStats,
+  sumByGroup,
+  type FrameSample,
+  type PassMedians,
+} from '../gpu/passTimings';
 
 interface PoolInternals {
   readonly timestampQueryPool?: {
@@ -38,6 +44,10 @@ export interface PassTimer {
   /** Call after the frame is submitted, with the CPU ms it took. */
   endFrame(cpuMs: number): void;
   medians(): PassMedians;
+  /** Records every frame from now on (a timing run, W1L-I4). */
+  beginRun(): void;
+  /** The frames since beginRun; stops recording. */
+  endRun(): FrameSample[];
   readonly enabled: boolean;
 }
 
@@ -105,5 +115,9 @@ export function createPassTimer(
         });
     },
     medians: () => stats.medians(),
+    beginRun: () => {
+      stats.beginRun();
+    },
+    endRun: () => stats.endRun(),
   };
 }
