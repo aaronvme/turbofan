@@ -20,7 +20,64 @@ export interface MeshAsset {
   readonly version: number;
   readonly cellCount: number;
   readonly blockCount: number;
+  /** The rectangle the mesh covers; both render extents must lie inside it (W0M-I5). */
+  readonly domain: SolverDomain;
   readonly bytes: ArrayBuffer;
+}
+
+/**
+ * The solver domain (docs/MESH.md, boundary conditions): inflow at x = xIn, outflow at
+ * x = xOut, the characteristic far-field boundary at r = rOut, the axis at r = 0. The engine
+ * walls are holes inside it (fluidFraction 0 in the render textures).
+ */
+export interface SolverDomain {
+  readonly xIn: number;
+  readonly xOut: number;
+  readonly rOut: number;
+}
+
+/**
+ * The domain size docs/MESH.md requires, in fan tip diameters D: at least 5 D upstream of the
+ * nacelle highlight, 5 D radially above the largest nacelle radius, and 20 D downstream of the
+ * core nozzle lip. The mesher rounds these outwards (MESH.md D7).
+ */
+export const SOLVER_DOMAIN_MIN_D = { upstream: 5, radial: 5, downstream: 20 } as const;
+
+/**
+ * The smallest domain a mesh of this engine may have (SOLVER_DOMAIN_MIN_D), with D from the
+ * fan rotor's leading-edge tip. Render extents sized inside it hold solver data in every texel
+ * for any conforming mesh.
+ */
+export function minimumSolverDomain(def: EngineDefinition): SolverDomain {
+  const fan = def.bladeRows.find((r) => r.component === 'fan' && r.kind === 'rotor');
+  const highlight = def.flowpath.curves.nacelleInner.points[0];
+  const coreLip = def.flowpath.curves.coreOuter.points.at(-1);
+  if (fan === undefined || highlight === undefined || coreLip === undefined)
+    throw new Error('minimumSolverDomain: needs a fan rotor, a nacelle highlight and a core lip');
+  const d = 2 * fan.leadingEdge.tip.r;
+  const nacelleMaxR = Math.max(...def.flowpath.curves.nacelleOuter.points.map((p) => p.r));
+  return {
+    xIn: highlight.x - SOLVER_DOMAIN_MIN_D.upstream * d,
+    xOut: coreLip.x + SOLVER_DOMAIN_MIN_D.downstream * d,
+    rOut: nacelleMaxR + SOLVER_DOMAIN_MIN_D.radial * d,
+  };
+}
+
+/**
+ * Problems if any texel of the extent lies outside the domain (empty when inside). The W2
+ * resample has no data there, so a mesh whose domain fails this must be rejected on load.
+ */
+export function fieldExtentDomainProblems(extent: FieldExtent, domain: SolverDomain): string[] {
+  const problems: string[] = [];
+  const p = (msg: string) => problems.push(`${extent.id}: ${msg}`);
+  if (extent.xMin < domain.xIn)
+    p(`xMin ${extent.xMin} is upstream of the inflow xIn ${domain.xIn}`);
+  if (extent.xMax > domain.xOut)
+    p(`xMax ${extent.xMax} is downstream of the outflow xOut ${domain.xOut}`);
+  if (extent.rMin < 0) p(`rMin ${extent.rMin} is below the axis`);
+  if (extent.rMax > domain.rOut)
+    p(`rMax ${extent.rMax} is beyond the far-field boundary rOut ${domain.rOut}`);
+  return problems;
 }
 
 export interface FlowSolverInit {
@@ -153,12 +210,15 @@ export interface FieldExtent {
 
 /**
  * near: the engine and the start of the jets, 7 m x 1.75 m at 6.8 mm texels.
- * far: 8 m (>5 fan diameters) upstream to 32 m (~20 D) downstream, 10 m radially,
- * 78 mm texels, for the plume and the intake streamtube.
+ * far: 8 m (>5 fan diameters) upstream to 32 m (~20 D) downstream and 8.44 m radially, in
+ * 78 mm square texels, for the plume and the intake streamtube. Both lie inside the minimum
+ * solver domain of the reference engine (x -8.52..33.74 m, r_out 8.81 m; the W0 placeholder
+ * mesh: -8.46..34.01 m, 8.75 m), so every texel holds solver data (W0M-I5; it used to reach
+ * r = 10 m). 108 rows keep the texels square at the 512-column x spacing.
  */
 export const FIELD_EXTENTS: Readonly<Record<FieldExtentId, FieldExtent>> = {
   near: { id: 'near', width: 1024, height: 256, xMin: -2, xMax: 5, rMin: 0, rMax: 1.75 },
-  far: { id: 'far', width: 512, height: 128, xMin: -8, xMax: 32, rMin: 0, rMax: 10 },
+  far: { id: 'far', width: 512, height: 108, xMin: -8, xMax: 32, rMin: 0, rMax: 8.4375 },
 };
 
 /** The ambient state the gauge channels are relative to. */

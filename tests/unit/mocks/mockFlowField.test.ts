@@ -107,7 +107,7 @@ describe('mock flow field: layout and encoding (D0-4)', () => {
     );
     expect(exact.pPa / REF.pInfPa).toBeGreaterThan(5); // mid-HPC
     // far upstream the gauge values are tiny and the texel is ambient to f16 precision
-    const far = texel(takeoff.far, -7.9, 9.9);
+    const far = texel(takeoff.far, -7.9, FIELD_EXTENTS.far.rMax - 0.1); // the upstream top corner
     expect(Math.abs(far.s[0] ?? 1)).toBeLessThan(1e-4);
     expect(Math.abs(far.s[1] ?? 1)).toBeLessThan(1e-4);
   });
