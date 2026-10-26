@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DESIGN_LIMITS,
+  nearestInCycle,
   axialVelocity,
   carterM,
   designRow,
@@ -263,6 +264,11 @@ describe('designRow', () => {
     for (let k = 0; k <= 600; k++) {
       const target = 1 + k * 0.001;
       const row = designRow(EDGES, aero, { targetSolidity: target });
+      // whatever the path, the returned row is solved for its own count (not left on the
+      // stagger of another count it visited)
+      const own = designRow(EDGES, aero, { count: row.count });
+      expect(row.stagger.mid).toBeCloseTo(own.stagger.mid, 12);
+      expect(row.chord.mid).toBeCloseTo(own.chord.mid, 12);
       const asked = Math.round((2 * Math.PI * R_MID * target) / row.chord.mid);
       if (asked === row.count) continue;
       flipFlops++;
@@ -272,16 +278,37 @@ describe('designRow', () => {
       );
       // the other neighbour flips back: this really is a two-count cycle
       expect(Math.round((2 * Math.PI * R_MID * target) / other.chord.mid)).toBe(row.count);
-      // the returned row is solved for its own count, not left on the other member's stagger
-      const own = designRow(EDGES, aero, { count: row.count });
-      expect(row.stagger.mid).toBeCloseTo(own.stagger.mid, 12);
-      expect(row.chord.mid).toBeCloseTo(own.chord.mid, 12);
       // a flip-flop takes more than one pass to recognise
       expect(() =>
         designRow(EDGES, aero, { targetSolidity: target }, { maxCountPasses: 1 }),
       ).toThrow(/did not settle in 1 passes/);
     }
     expect(flipFlops).toBeGreaterThan(0);
+  });
+
+  it('W0C-N4: nearestInCycle keeps the cycle member nearest the target, the first on a tie', () => {
+    // history of [count, |own mid solidity - target|] in visit order
+    expect(nearestInCycle([[70, 0.001]], 71)).toBeNull(); // 71 not seen yet: keep going
+    // 70 is nearer but was only on the way in; the cycle is 72 -> 73 -> 72
+    expect(
+      nearestInCycle(
+        [
+          [70, 0.001],
+          [72, 0.02],
+          [73, 0.01],
+        ],
+        72,
+      ),
+    ).toBe(73);
+    expect(
+      nearestInCycle(
+        [
+          [60, 0.01],
+          [61, 0.01],
+        ],
+        60,
+      ),
+    ).toBe(60);
   });
 
   it('W0C-N4: a count that is right at once needs no pass at all', () => {
