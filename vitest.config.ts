@@ -6,7 +6,9 @@ import { defineConfig } from 'vitest/config';
 //
 // Coverage covers the pure modules. render/, ui/, app/ and the audio worklet are exercised
 // by the browser and e2e suites instead, so logic that can be pure must live in a pure
-// module (see CLAUDE.md).
+// module (see CLAUDE.md). The spikes' pure helpers (spikes/lib: statistics, protocol, mesh,
+// kernel generation) are covered too; their GPU and page code is exercised by test:gpu,
+// test:browser and the bench harness.
 const CORE = { lines: 90, functions: 90, branches: 85, statements: 90 };
 
 export default defineConfig({
@@ -17,7 +19,7 @@ export default defineConfig({
       provider: 'v8',
       // tools/mesh is the offline mesher: pure TypeScript, unit-tested like src; its command-line
       // scripts only wire files to the tested modules
-      include: ['src/**/*.ts', 'tools/mesh/**/*.ts'],
+      include: ['src/**/*.ts', 'tools/mesh/**/*.ts', 'spikes/lib/**/*.ts'],
       exclude: [
         'src/**/*.test.ts',
         'src/**/*.d.ts',

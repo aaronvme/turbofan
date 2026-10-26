@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Spike (d): main thread vs worker under React load</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #0b0d10;
+        color: #cfd6de;
+        font:
+          11px/1.2 ui-monospace,
+          Consolas,
+          monospace;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #ui {
+        position: fixed;
+        right: 0;
+        top: 0;
+        width: 46vw;
+        max-height: 100vh;
+        overflow: hidden;
+        background: rgba(10, 12, 16, 0.55);
+      }
+      .panel {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2px;
+      }
+      .gauge {
+        position: relative;
+        width: 120px;
+        padding: 1px 2px;
+        font-variant-numeric: tabular-nums;
+      }
+      .gauge .bar {
+        height: 2px;
+        background: #4aa3ff;
+      }
+      .gauge svg {
+        display: block;
+        color: #7fd1ff;
+      }
+      table {
+        font-variant-numeric: tabular-nums;
+        border-collapse: collapse;
+      }
+      td {
+        padding: 0 4px;
+        text-align: right;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="ui"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

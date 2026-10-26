@@ -17,3 +17,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run coverage
+      # D2-7: the mesh generator's checks (vitest.mesh.config.ts). test:gpu and test:browser stay
+      # local: they need the Arc GPU and a headed Chrome, which CI does not have.
+      - run: npm run test:mesh
