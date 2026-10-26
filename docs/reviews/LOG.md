@@ -1214,3 +1214,68 @@ New probe: `docs/reviews/probes/w1k-calib.probe.ts.txt` (the reference at every 
 - The wording is D3-3's and D3-11's, word for word (C10: idle 436-523 C, MPA 585 ± 30 C, takeoff 855 ± 30 C, N2 ± 1.5 points at 60.6 / 60.7 / 89.3 / 99.8 %; C11: 7 / 30 / 85 % rated thrust, ISA SLS, ± 5 %). `thresholds.test.ts` pins 30 K, 1.5 points, 0.05, 7 / 30 / 85 and the count 4 + 11 + 13 + 3.
 - T3 is reworded per D3-5 at 041cf2d, with PHYSICS.md and `thresholds.ts` changed together. The tolerance stays 0.5 %.
 - Across the stack the `thresholds.ts` diff only adds lines. Nothing was loosened. The surge ledger row's "100-300 ms" became "period from the derived Helmholtz frequency" (D3-4).
+
+**Physics: the mechanisms, their sources and bounds.** None acts at the design point. `partPower.test.ts:213-230` checks that on the rejected fit: the sizing is identical to 1e-12, there is no VBV or VSV offset, and the design residual is under 1e-9. C1-C3 pass.
+- **Combustion efficiency from the EEDB EIs (D3-14 (a), in the reference).**
+  - The rows (8CM066: CO 0.31 / 0.17 / 2.82 / 29.39 g/kg, HC 0.03 / 0.02 / 0.05 / 1.54 g/kg) are `official` ENGINE_FACTS rows, with the NME test-engine status stated.
+  - eta = 1 - (EI_CO Q_CO + EI_HC Q_fuel) / (1000 Q_fuel) is the ARP1533 energy balance. Q_CO = (393.52 - 110.53) / 28.01 = 10.10 MJ/kg is right (JANAF).
+  - By hand: idle 0.841 % against 0.0103 % at takeoff, so -0.83 % relative; approach -0.06 %. Both are pinned in `partPower.test.ts:115-123`.
+  - The design knot is the takeoff fuel flow, so the relative efficiency is exactly 1 at the sizing point and is held above it. It enters the C8 books: `engine.ts:837` uses the same `etaB`.
+  - It is data, not a fit, so putting it in the reference does not break the adoption rule, and every gate passes with it. The corrected-fuel-flow key leaves out the pressure effect at altitude (W1K-N3).
+- **Fan / booster part-speed loss.**
+  - [SDT] Table 3 (the R4 fan at 61.7 / 87.5 / 100 % speed) against the map's +3.1 / +1.4 point rise on the model's own operating line gives the 3.2-4.2 point loss. The arithmetic checks.
+  - The form scales the map efficiency by (1 - loss / eta_des), so no efficiency goes negative.
+  - The booster's 0-4.2 range has no data; it is capped at the fan's falloff, and the text says so (`estimate`).
+- **LPT Reynolds lapse.** (1 - eta) grows by (Re/Re_des)^-n, with Re ~ P / (sqrt(T) mu) at a fixed corrected point, which is the right index at constant Mach. n = 0-0.2 comes from Dunham-Came ([AMDC]). The implementation gives exactly 1 - eta_new = (1 - eta)(Re ratio)^-n at the design level. Floored at 1e-3 for standstill.
+- **HPC Reynolds lapse.** It reuses the turbine bound because no compressor correlation was verified. This is marked `estimate` honestly, and it acts only in the rejected fit (W1K-N5).
+- **HPT clearance.** k (1 - (N2/N2des)^2), 2-4 points, from [LS02]. The reference already had 4 points from W1C-I1, and the fit lands on the same 4.
+- **VBV / VSV.**
+  - The VBV dump leaves at h24 and joins the bypass stream, conserving mass and energy (C8 at a VBV point, `offdesign.test.ts:67`).
+  - The VSV flow sensitivity, 0.688 per rad, comes from the definition's IGV / rotor-1 velocity triangle and is checked against a numerical derivative.
+  - The ±6 deg bound uses [VGV]'s implanted mis-rig as "beyond this it would read as a fault". That is a defensible upper bound, and the text states it.
+  - Both schedules use N2 corrected to T2, while the [QAR] CFM schedule is on N2K25 (W1K-N2).
+- **Probe share.** It is fitted in [0.25, 0.45] per D3-14 and lands at 0.385, inside. The reference keeps the D2-3 value 0.35, which is also inside.
+- **W1C-I1's own mechanisms (cycle-calib).** Mechanical loss ~ N^2, (1/eta_m - 1) of the design compressor power, which is exact at design. The cold duct and combustor losses go with (W sqrt T / P)^2 (Walsh & Fletcher 5.10-5.11). The silent 0.5 cap on the cold losses is W1K-N4.
+
+**The fit tool and the solver.**
+- `tools/cycle/fit-part-power.ts` is deterministic and documented in its header and in ENGINE_FACTS "Fit procedure": a fixed start (the middle of each bound), fixed forward differences, no randomness. `--relax` is a diagnostic only and never written.
+- `boundedLeastSquares.ts` is a standard projected LM in scaled variables. Its tests cover a row swap, a singular matrix, Rosenbrock, the active bound, a failed step, the backward difference, a failed Jacobian, determinism and onStep. The 69.9 % branch figure is mostly `?? 0` arms.
+- "No descent step at any damping" is reported as `converged` (W1K-N1).
+- `partPower.test.ts:261-276` checks that two more LM iterations from the committed values gain under 0.1 % in cost and move every value less than 1 % of its bound width. That is a fair bounded-optimum check.
+
+**The adoption rule (D3-14).**
+- `CYCLE_CALIBRATION` (`engine.ts:213-249`) spreads `W0_CALIBRATION.partPower`. The fan and booster losses, both Reynolds exponents and the VSV offsets are 0. The probe share stays 0.35, and the VBV comes from the `unknown` facts rows (0.25 / 70 / 85 %).
+- Only the combustion table and the VSV sensitivity, which does nothing at zero offset, are added.
+- `partPowerFit.ts` is read only by `PART_POWER_FIT_CALIBRATION`, which is used in no `src` module, only in `partPower.test.ts`. `partPower.test.ts:79-88` pins the reference with its mechanisms off.
+- **The rejected fit is not in the reference.** The text around it says otherwise in places (W1K-I1).
+- The rejection itself (10 transient tests fail on the fit) was run on a scratch copy. The critic reran the 33.73(a) slam on the committed fit (probe `w1k-calib`): it surges and hangs at 10.7 kN, so the rejection is right, though its recorded reason is incomplete (W1K-I2).
+
+**Pass-3 items.**
+- **W1C-I2 / D3-4: CLOSED.** `surgeSystem.ts` derives A_c, L_c = A_c * integral dx/A, V_p (stations 3-4) and the rotor-1 tip from the definition. B = U / (2 omega_H L_c) at the current N2 (0.187 at SLS takeoff, omega_H 1012 rad/s, Helmholtz period 6.2 ms). The cubic peak sits on the map's stall point. The throttle goes through the matched point, and the episode ends on the Greitzer state's recovery, capped at 5 s. `surge.test.ts:109-120` asserts B > criticalB inside the surge line and reverse flow at the derived period. criticalB's closed form, RK4 order 4 and Helmholtz with L != 1 kill the pass-3 greitzer survivors. The ledger row is reworded per D3-4.
+- **W1C-I3: CLOSED.** `engine.test.ts:71-90` pins the sized A8 / A18 to the facts within 5e-4 and the station 8 / 18 annuli within 1e-9. D2-2 was redone (0.1851 / 0.9162 m^2), with the mesh regenerated and `test:mesh` at 29/29.
+- **W1C-I4: CLOSED** (mutation follows D3-13). `offdesign.test.ts` adds:
+  - C7/C8 with bleed + extraction + VBV, at M 0.25, and at 35 kft M 0.8 at the published max-climb thrust, with the pressure thrust recomposed and OPR 32.63 against 32.7;
+  - a design residual under 1e-9;
+  - the throat against an independent max-flux search;
+  - the surge margin at a hand-computed point;
+  - the product composition against Cantera within 1e-5;
+  - the shunt ramp.
+- **W1C-I1: ACCEPTED as the D3-15 gap.** The part-power physics is in, and the residual is in the ledger.
+- **N1-N5: CLOSED.**
+  - N1: N2 from TM-4513, with JANAF at 200 / 250 K and +0.001 % at 200 K against Cantera.
+  - N2: T3 reworded per D3-5, with an independent frozen composition.
+  - N3: the sizing secant throws on a miss.
+  - N4: the comments fixed and at() used.
+  - N5: 955 C for at most 20 s, then 945 C, with a time-aware `egtExceedance`. The N1 limiter is 0.5 point under 104 %, and the 30 C corner makes rated thrust.
+
+**The Cantera cross-check (D3-5)** is documented: `tools/thermo/cantera_crosscheck.py`, a venv outside the repo, and the printed values carried into `gas.test.ts`.
+- It is independent of the model: nasa_gas.yaml, Cantera's own mixing, and the product composition from Cantera's equilibrium at 1000 K. My hand check gives CO2 13.29 %, H2O 12.71 %, N2 73.12 %, Ar 0.87 %, matching.
+- The dissociation note in PHYSICS.md 2 (0.23 % at 1641 K and 2.8 MPa) comes from the same script.
+
+**The fidelity-ledger entry** (PHYSICS.md 1) is honest:
+- the bounded fit's result (C11 approach -6.4 %) and why it is rejected;
+- the reference's gap (MPA 536 vs 585 C, N2 2.6 points low, EEDB -12 % / -10 %);
+- the likely cause (generic scaled pyCycle maps too efficient at part power);
+- the dataset difference (NME test bed vs an on-wing, likely deteriorated engine).
+
+The ENGINE_FACTS "What binds" and "Likely cause" sections agree with it.
