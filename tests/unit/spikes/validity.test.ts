@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { RunRecorder } from '../../../spikes/lib/benchRun';
 import {
   LONG_FRAME_FACTOR,
-  MAX_MEDIAN_FACTOR,
+  BELOW_RATE_MEDIAN_FACTOR,
   MAX_THROTTLED_STRETCH_MS,
   THROTTLE_FACTOR,
   combineValidity,
@@ -81,7 +81,7 @@ describe('runValidity (D0-1 gate, W0G-I1)', () => {
   };
 
   it('a normal 60 Hz run is valid', () => {
-    expect(runValidity(ok, 0)).toEqual({ valid: true, reasons: [] });
+    expect(runValidity(ok, 0)).toEqual({ valid: true, reasons: [], warnings: [] });
   });
 
   it('a run with a throttled stretch longer than the limit is invalid', () => {
@@ -92,11 +92,15 @@ describe('runValidity (D0-1 gate, W0G-I1)', () => {
     expect(runValidity({ ...ok, longestThrottledMs: 500 }, 0).valid).toBe(true);
   });
 
-  it('a run whose median frame misses vsync (a 30 Hz throttle) is invalid', () => {
-    expect(MAX_MEDIAN_FACTOR).toBe(1.5);
+  it('D2-13: a run whose median frame misses vsync stays valid, with a below-display-rate warning', () => {
+    // A configuration that genuinely cannot hold the display rate is a real result; occlusion
+    // is caught by the sustained-throttle rule.
+    expect(BELOW_RATE_MEDIAN_FACTOR).toBe(1.5);
     const v = runValidity({ ...ok, frameTime: { p50: 33.3 } }, 0);
-    expect(v.valid).toBe(false);
-    expect(v.reasons.join()).toMatch(/median frame 33\.3 ms/);
+    expect(v.valid).toBe(true);
+    expect(v.reasons).toEqual([]);
+    expect(v.warnings.join()).toMatch(/below display rate: median frame 33\.3 ms/);
+    expect(runValidity({ ...ok, frameTime: { p50: 25 } }, 0).warnings).toEqual([]);
   });
 
   it('a hidden page is invalid', () => {
@@ -137,19 +141,20 @@ describe('runValidity (D0-1 gate, W0G-I1)', () => {
     expect(combineValidity(runs.map((r) => runValidity(r, 0)))).toEqual({
       valid: true,
       reasons: [],
+      warnings: [],
     });
   });
 });
 
 describe('combineValidity', () => {
-  it('is valid only if every part is, and keeps every reason', () => {
-    expect(combineValidity([])).toEqual({ valid: true, reasons: [] });
+  it('is valid only if every part is, and keeps every reason and warning', () => {
+    expect(combineValidity([])).toEqual({ valid: true, reasons: [], warnings: [] });
     expect(
       combineValidity([
-        { valid: true, reasons: [] },
-        { valid: false, reasons: ['a'] },
-        { valid: false, reasons: ['b'] },
+        { valid: true, reasons: [], warnings: ['w'] },
+        { valid: false, reasons: ['a'], warnings: [] },
+        { valid: false, reasons: ['b'], warnings: ['x'] },
       ]),
-    ).toEqual({ valid: false, reasons: ['a', 'b'] });
+    ).toEqual({ valid: false, reasons: ['a', 'b'], warnings: ['w', 'x'] });
   });
 });
