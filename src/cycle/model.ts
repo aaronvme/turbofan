@@ -50,6 +50,7 @@ import {
   solveGasPath,
   solveSteady,
   surgeMargins,
+  vbvScheduleFraction,
   type EnginePoint,
   type OperatingConditions,
   type SizedEngine,
@@ -96,8 +97,13 @@ const TF_EGT = TD_EGT / 3;
  * steady point chatter between the EGT and N1 loops.
  */
 const EGT_ERROR_SCALE_K = 150;
-/** Accel/decel schedules as multiples of the steady Wf/P3 at the same corrected N2. */
-const ACCEL_FACTOR = 2.2;
+/**
+ * Accel/decel schedules as multiples of the steady Wf/P3 at the same corrected N2. 1.8 (2.2
+ * before W1C-I1) keeps a ground-idle slam out of surge (min HPC margin 0.034) now that the idle
+ * working line carries the part-power losses: the HP mechanical loss, the clearance penalty and
+ * the VBV dump raise the low-speed HPC operating line, so the steady Wf/P3 sits closer to surge.
+ */
+const ACCEL_FACTOR = 1.8;
 /** The accel schedule opens up by this much more between 68 and 80 % corrected N2. */
 const ACCEL_FACTOR_HIGH = 0.3;
 /** Limiter loops run at this multiple of K_LOOP, so they bite hard near their limits only. */
@@ -626,9 +632,11 @@ class TurbofanCycleModel implements CycleModel {
       expansion(r, a.lpt.pressureRatio);
     const t5 = temperatureFromEnthalpy(h45 - pLpt / w41, far41);
     const t495 = temperatureFromEnthalpy(h45 - (cal.egtProbeLptWorkFraction * pLpt) / w41, far41);
-    const etaM = cal.mechanicalEfficiency;
-    const netHp = etaM * pHpt - a.power.hpc * r * r * r - c.powerExtractionW;
-    const netLp = etaM * pLpt - (a.power.fan + a.power.lpc) * q * q * q;
+    // mechanical losses follow the spool speed as in the gas path (engine.ts), so the two agree
+    const mech = cal.mechanicalLossSpeedExponent;
+    const netHp =
+      pHpt - a.mechanicalLossW.hp * r ** mech - a.power.hpc * r * r * r - c.powerExtractionW;
+    const netLp = pLpt - a.mechanicalLossW.lp * q ** mech - (a.power.fan + a.power.lpc) * q * q * q;
     const pt4 = p3 * (1 - cal.combustorPressureLossFraction);
     // pressures below the anchor's expansion are not resolved; never below ambient
     const pt45 = Math.max(p0, pt4 / pr(r, a.hpt.pressureRatio));
@@ -751,7 +759,8 @@ class TurbofanCycleModel implements CycleModel {
       fan: snap.fan,
       hpc,
       vsvClosureRad: Math.max(0, vsvClosure),
-      vbvOpenFraction: clamp((85 - n2c) / 15, 0, 1),
+      vbvOpenFraction:
+        cal.vbv.maxFraction > 0 ? vbvScheduleFraction(cal, n2c) / cal.vbv.maxFraction : 0,
       starterEngaged: this.starterOn,
       ignitersOn: this.igniters,
       combustorLit: this.lit,

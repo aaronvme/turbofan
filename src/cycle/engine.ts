@@ -93,6 +93,23 @@ export interface CycleCalibration {
   readonly egtProbeLptWorkFraction: number;
   /** FADEC ground-idle N2 floor, % of the 100 % speed. */
   readonly groundIdleN2Percent: number;
+  /**
+   * The mechanical loss (bearings, seals, windage, gearbox and the engine's own pumps) is
+   * (1 - mechanicalEfficiency) of the turbine power at the design point and scales with spool
+   * speed to this power off design (a drag torque rising with speed), not with turbine power.
+   */
+  readonly mechanicalLossSpeedExponent: number;
+  /**
+   * Running tip clearance opens as the rotor's centrifugal growth (proportional to N^2) falls:
+   * isentropic efficiency loss k (1 - (N2 / N2_design)^2) for the HPC and the HPT.
+   */
+  readonly clearanceEfficiencyLoss: { readonly hpc: number; readonly hpt: number };
+  /** VBV schedule: maxFraction of the booster flow dumped below openBelow, none above closedAbove (corrected N2, %). */
+  readonly vbv: {
+    readonly maxFraction: number;
+    readonly openBelowN2cPercent: number;
+    readonly closedAboveN2cPercent: number;
+  };
 }
 
 const dp = ENGINE_DEFINITION.designPoint;
@@ -120,6 +137,9 @@ export const W0_CALIBRATION: CycleCalibration = {
   n2ReferenceRpm: dp.n2Rpm,
   egtProbeLptWorkFraction: 0.25,
   groundIdleN2Percent: 61,
+  mechanicalLossSpeedExponent: 1,
+  clearanceEfficiencyLoss: { hpc: 0, hpt: 0 },
+  vbv: { maxFraction: 0, openBelowN2cPercent: 70, closedAboveN2cPercent: 85 },
 };
 
 /**
@@ -132,10 +152,26 @@ export const CYCLE_CALIBRATION: CycleCalibration = {
   // (N2 99.9 % vs 99.8 % measured at N1 97.4 %; 100.3 % with 100 %) and keeps the 30 C corner at
   // 103.4 % N1, under the 104 % TCDS limit.
   n1Rpm: 1.01 * dp.n1Rpm,
-  // Effective EGT probe position: equal stage work would put it at 0.25 of the LPT work; 0.35
-  // also absorbs the thermocouple's radiation and sampling error (about 20 K at 1100 K gas). Fitted
-  // to the measured 855 C at N1 97.4 %, OAT 25 C (WIDURI Table 7).
+  // Effective EGT probe position (D2-3): station 49.5 sits after LPT stage 1 of 4, and stage 1
+  // does more than an equal (0.25) share of the LPT work. Fitted to the measured 855 C at N1
+  // 97.4 %, OAT 25 C (WIDURI Table 7).
   egtProbeLptWorkFraction: 0.35,
+  // W1C-I1, the part-power physics (ENGINE_FACTS "Cycle model calibration (W1)", each with its
+  // plausible range). None changes the design point, so C1-C3 and the sizing are unchanged.
+  // Drag-type losses: viscous friction torque ~ N gives power ~ N^2 (windage ~ N^3, rolling
+  // bearings ~ N^1.5); 2 is the middle.
+  mechanicalLossSpeedExponent: 2,
+  // ~1 % SFC and ~10 C EGT per 0.010 in of extra HPT tip clearance (Lattime & Steinetz, NASA/TM-
+  // 2002-211794); the rotor growth lost between takeoff and idle is a few tenths of a mm, partly
+  // offset by the cooler case: 2-4 points at standstill. The upper half (HPC 3, HPT 4 points,
+  // about 2 at ground idle) keeps C4's idle N1 inside its range once the duct losses scale with
+  // the dynamic head (19.9 % with HPC 2 / HPT 3).
+  clearanceEfficiencyLoss: { hpc: 0.03, hpt: 0.04 },
+  vbv: {
+    maxFraction: factValue('vbvMaxFraction'),
+    openBelowN2cPercent: factValue('vbvOpenBelowN2c'),
+    closedAboveN2cPercent: factValue('vbvClosedAboveN2c'),
+  },
 };
 
 export interface OperatingConditions {
@@ -143,8 +179,25 @@ export interface OperatingConditions {
   /** Customer bleed, fraction of HPC inlet flow (leaves at HPC exit). */
   readonly customerBleedFraction: number;
   readonly powerExtractionW: number;
-  /** Booster variable bleed valve dump, fraction of booster flow (default 0). */
+  /**
+   * Booster variable bleed valve dump, fraction of booster flow. Default: the FADEC schedule
+   * (vbvScheduleFraction); a number overrides it (a stuck or rigged-off valve).
+   */
   readonly vbvFraction?: number;
+}
+
+/** The scheduled VBV dump, fraction of booster flow, at a corrected N2 (% of the 100 % speed). */
+export function vbvScheduleFraction(cal: CycleCalibration, n2CorrectedPercent: number): number {
+  const v = cal.vbv;
+  const open =
+    (v.closedAboveN2cPercent - n2CorrectedPercent) /
+    (v.closedAboveN2cPercent - v.openBelowN2cPercent);
+  return v.maxFraction * Math.min(1, Math.max(0, open));
+}
+
+/** Corrected N2 the FADEC schedules on, % of the 100 % speed (corrected to the inlet T2). */
+export function correctedN2Percent(cal: CycleCalibration, n2Rpm: number, t2K: number): number {
+  return (100 * n2Rpm) / cal.n2ReferenceRpm / Math.sqrt(t2K / T_STD);
 }
 
 export interface MapState<P> {
@@ -178,6 +231,10 @@ export interface EnginePoint {
     readonly hpt: number;
     readonly lpt: number;
   };
+  /** Mechanical losses of each spool, W (CycleCalibration.mechanicalLossSpeedExponent). */
+  readonly mechanicalLossW: { readonly hp: number; readonly lp: number };
+  /** VBV dump, kg/s (booster exit to the bypass duct). */
+  readonly vbvFlowKgPerS: number;
   /** Shaft power surplus after compressors, extraction and mechanical losses, W. */
   readonly netPowerHpW: number;
   readonly netPowerLpW: number;
@@ -218,6 +275,10 @@ export interface DesignData {
     readonly wBypass: number;
     readonly powerHp: number;
     readonly powerLp: number;
+    /** Design W sqrt(Tt) / Pt (SI) of the ducts whose cold loss scales with its square. */
+    readonly fpBypassDuct: number;
+    readonly fpCoreNozzle: number;
+    readonly fpCombustor: number;
   };
 }
 
@@ -343,7 +404,12 @@ function gasPath(
   c: OperatingConditions,
   inp: PathInputs,
 ): EnginePoint {
-  const [rFan = 0, bpr = 0, rLpc = 0, rHpc = 0, prHpt = 1, prLpt = 1] = inp.x;
+  const rFan = at(inp.x, 0);
+  const bpr = at(inp.x, 1);
+  const rLpc = at(inp.x, 2);
+  const rHpc = at(inp.x, 3);
+  const prHpt = at(inp.x, 4);
+  const prLpt = at(inp.x, 5);
   const { n1Rpm, n2Rpm, wf } = inp;
   const p0 = c.ambient.pressurePa;
   const f0 = freeStream(c.ambient);
@@ -366,11 +432,18 @@ function gasPath(
   const lpc = compressorPoint(maps.lpc, nLpc, rLpc);
   const wc21 = (w21 * theta(s21.tt)) / (s21.pt / P_STD);
   const s24 = compress(s21, lpc.pressureRatio, lpc.efficiency);
-  const wVbv = (c.vbvFraction ?? 0) * w21;
+  const vbv = c.vbvFraction ?? vbvScheduleFraction(cal, correctedN2Percent(cal, n2Rpm, s2.tt));
+  const wVbv = vbv * w21;
   const w25 = w21 - wVbv;
 
   const nHpc = n2Rpm / theta(s24.tt) / ties.corrSpeed.hpc;
-  const hpc = compressorPoint(maps.hpc, nHpc, rHpc);
+  // tip clearance opens as the centrifugal growth (~ N^2) falls off design
+  const clearance = 1 - (n2Rpm / cal.n2Rpm) ** 2;
+  const hpcMap = compressorPoint(maps.hpc, nHpc, rHpc);
+  const hpc = {
+    ...hpcMap,
+    efficiency: hpcMap.efficiency - cal.clearanceEfficiencyLoss.hpc * clearance,
+  };
   const wc25 = (w25 * theta(s24.tt)) / (s24.pt / P_STD);
   const s3 = compress(s24, hpc.pressureRatio, hpc.efficiency);
 
@@ -383,14 +456,25 @@ function gasPath(
   const etaB = inp.lit ? cal.efficiencies.combustor : 0;
   const h4 = (wComb * h3 + etaB * wf * cal.fuelLhvJPerKg) / w4;
   const tt4 = temperatureFromEnthalpy(h4, far4);
-  const pt4 = s3.pt * (1 - cal.combustorPressureLossFraction);
+  // cold (friction and dump) losses go with the dynamic head, i.e. (W sqrt(Tt) / Pt)^2 (Walsh &
+  // Fletcher, Gas Turbine Performance, 2nd ed., 5.10-5.11); capped so that a Newton probe far
+  // from the root cannot drive a duct's exit pressure negative
+  const coldLoss = (design: number, w: number, tt: number, pt: number, ref: number): number =>
+    Math.min(0.5, design * ((w * Math.sqrt(tt)) / pt / ref) ** 2);
+  const sc = ties.scale;
+  const pt4 =
+    s3.pt * (1 - coldLoss(cal.combustorPressureLossFraction, wComb, s3.tt, s3.pt, sc.fpCombustor));
   const w41 = w4 + wCool;
   const far41 = wf / (wComb + wCool);
   const h41 = (w4 * h4 + wCool * h3) / w41;
   const s41: Flow = { tt: temperatureFromEnthalpy(h41, far41), pt: pt4 };
 
   const nHpt = n2Rpm / Math.sqrt(s41.tt) / ties.corrSpeed.hpt;
-  const hpt = turbinePoint(maps.hpt, nHpt, prHpt);
+  const hptMap = turbinePoint(maps.hpt, nHpt, prHpt);
+  const hpt = {
+    ...hptMap,
+    efficiency: hptMap.efficiency - cal.clearanceEfficiencyLoss.hpt * clearance,
+  };
   const fp41 = (w41 * Math.sqrt(s41.tt)) / s41.pt;
   const s45 = expand(s41, prHpt, hpt.efficiency, far41);
 
@@ -408,7 +492,7 @@ function gasPath(
     s45.pt *
     Math.exp((entropyFunction(t495s, far41) - entropyFunction(s45.tt, far41)) / gasConstant(far41));
 
-  const pt8 = s5.pt * (1 - cal.coreNozzlePtLoss);
+  const pt8 = s5.pt * (1 - coldLoss(cal.coreNozzlePtLoss, w41, s5.tt, s5.pt, sc.fpCoreNozzle));
   const n8 = nozzle(pt8, s5.tt, far41, p0);
   const w8 = n8.flux * ties.areas.core;
 
@@ -417,7 +501,7 @@ function gasPath(
   const h24 = enthalpy(s24.tt, 0);
   const h18 = w18 > 0 ? (w13 * h13 + wVbv * h24) / w18 : h13;
   const tt18 = temperatureFromEnthalpy(h18, 0);
-  const pt18 = s13.pt * (1 - cal.bypassDuctPtLoss);
+  const pt18 = s13.pt * (1 - coldLoss(cal.bypassDuctPtLoss, w13, s13.tt, s13.pt, sc.fpBypassDuct));
   const n18 = nozzle(pt18, tt18, 0, p0);
   const w18n = n18.flux * ties.areas.bypass;
 
@@ -435,11 +519,19 @@ function gasPath(
     hpt: w41 * s45.dh,
     lpt: w41 * s5.dh,
   };
-  const etaM = cal.mechanicalEfficiency;
-  const netPowerHpW = etaM * power.hpt - power.hpc - c.powerExtractionW;
-  const netPowerLpW = etaM * power.lpt - power.fan - power.lpc;
+  // the design loss is (1 - eta_m) of the turbine power, i.e. (1 / eta_m - 1) of the compressor
+  // power the sizing balanced; off design it follows the spool speed
+  const lossAt = (designCompressorW: number, speedRatio: number): number =>
+    (1 / cal.mechanicalEfficiency - 1) *
+    designCompressorW *
+    speedRatio ** cal.mechanicalLossSpeedExponent;
+  const mechanicalLossW = {
+    hp: lossAt(sc.powerHp, n2Rpm / cal.n2Rpm),
+    lp: lossAt(sc.powerLp, n1Rpm / cal.n1Rpm),
+  };
+  const netPowerHpW = power.hpt - mechanicalLossW.hp - power.hpc - c.powerExtractionW;
+  const netPowerLpW = power.lpt - mechanicalLossW.lp - power.fan - power.lpc;
   const h5 = h45 - s5.dh;
-  const sc = ties.scale;
   const residuals = [
     (lpc.correctedFlow - wc21) / sc.wcLpc,
     (hpc.correctedFlow - wc25) / sc.wcHpc,
@@ -487,6 +579,8 @@ function gasPath(
     hpt: { point: hpt, speedFraction: nHpt, pressureRatio: prHpt },
     lpt: { point: lpt, speedFraction: nLpt, pressureRatio: prLpt },
     power,
+    mechanicalLossW,
+    vbvFlowKgPerS: wVbv,
     netPowerHpW,
     netPowerLpW,
     coreNozzleChoked: n8.choked,
@@ -497,7 +591,8 @@ function gasPath(
         w8 * h5 +
         w18n * h18 +
         wBleed * h3 +
-        (1 - etaM) * (power.hpt + power.lpt) +
+        mechanicalLossW.hp +
+        mechanicalLossW.lp +
         c.powerExtractionW,
     },
     mass: { inKgPerS: w2 + wf, outKgPerS: w8 + w18n + wBleed },
@@ -588,6 +683,9 @@ function designCycle(cal: CycleCalibration, fpr: number): DesignCycle {
         wBypass: w13,
         powerHp: pHpc,
         powerLp: pLp,
+        fpBypassDuct: (w13 * Math.sqrt(s13.tt)) / s13.pt,
+        fpCoreNozzle: (w41 * Math.sqrt(s5.tt)) / s5.pt,
+        fpCombustor: (wComb * Math.sqrt(s3.tt)) / s3.pt,
       },
       areas: { core: a8, bypass: a18 },
     },

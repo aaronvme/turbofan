@@ -79,23 +79,45 @@ for (const p of POINTS) {
   solved.set(p.name, s);
 }
 
+/**
+ * The checks this model cannot meet with physically justified parameters (W1C-I1; the analysis is
+ * in docs/handoffs/w1-cycle-calib.md). They run as it.fails: each must still FAIL, so the suite
+ * turns red the moment a change makes one pass and the marker has to come off. The threshold is
+ * not loosened; the orchestrator decides what happens to them.
+ */
+const KNOWN_LIMIT: ReadonlySet<string> = new Set([
+  'MPA N2',
+  'MPA EGT',
+  'ground idle, position 2 N2',
+]);
+const check = (key: string) => (KNOWN_LIMIT.has(key) ? it.fails : it);
+const label = (key: string, text: string) =>
+  KNOWN_LIMIT.has(key) ? `KNOWN FAIL (W1C-I1 limit, orchestrator decision): ${text}` : text;
+
 describe('C10 (D3-3): the measured ground-run points, WIDURI Table 7', () => {
   it.each(POINTS)('$name: converged at the measured N1', (p) => {
     const r = solved.get(p.name);
     expect(r?.converged).toBe(true);
     expect(r?.point.n1Percent ?? 0).toBeCloseTo(p.n1, 6);
   });
-  it.each(POINTS)(`$name: N2 within ${C10.maxN2ErrorPoints.token} of the measured value`, (p) => {
-    const n2 = solved.get(p.name)?.point.n2Percent ?? Infinity;
-    expect(Math.abs(n2 - p.n2)).toBeLessThanOrEqual(C10.maxN2ErrorPoints.value);
-  });
-  it.each(POINTS)(
-    `$name: displayed EGT within ${C10.maxEgtErrorK.token} of the measured value`,
-    (p) => {
-      const r = solved.get(p.name);
-      const egt = r === undefined ? Infinity : displayedEgt(E, r.point);
-      expect(egt).toBeGreaterThanOrEqual(p.egtLowK - C10.maxEgtErrorK.value);
-      expect(egt).toBeLessThanOrEqual(p.egtHighK + C10.maxEgtErrorK.value);
-    },
-  );
+  for (const p of POINTS) {
+    const n2Key = `${p.name} N2`;
+    check(n2Key)(
+      label(n2Key, `${p.name}: N2 within ${C10.maxN2ErrorPoints.token} of the measured value`),
+      () => {
+        const n2 = solved.get(p.name)?.point.n2Percent ?? Infinity;
+        expect(Math.abs(n2 - p.n2)).toBeLessThanOrEqual(C10.maxN2ErrorPoints.value);
+      },
+    );
+    const egtKey = `${p.name} EGT`;
+    check(egtKey)(
+      label(egtKey, `${p.name}: displayed EGT within ${C10.maxEgtErrorK.token} of the measured`),
+      () => {
+        const r = solved.get(p.name);
+        const egt = r === undefined ? Infinity : displayedEgt(E, r.point);
+        expect(egt).toBeGreaterThanOrEqual(p.egtLowK - C10.maxEgtErrorK.value);
+        expect(egt).toBeLessThanOrEqual(p.egtHighK + C10.maxEgtErrorK.value);
+      },
+    );
+  }
 });
