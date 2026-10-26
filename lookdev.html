@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Turbofan look-dev</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #050607;
+        overflow: hidden;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #hud {
+        position: fixed;
+        left: 16px;
+        bottom: 14px;
+        font:
+          500 12px/1.4 ui-monospace,
+          'Cascadia Mono',
+          monospace;
+        color: rgba(220, 226, 232, 0.72);
+        letter-spacing: 0.02em;
+        font-variant-numeric: tabular-nums;
+        pointer-events: none;
+      }
+      body.clean #hud {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="hud"></div>
+    <script type="module" src="/src/lookdev/main.ts"></script>
+  </body>
+</html>
