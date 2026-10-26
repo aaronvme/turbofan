@@ -94,9 +94,9 @@ describe.each(PRESETS)('quality preset %s (W1G-I1)', (id) => {
       if (vis.rows.has(r.row.id)) closed += rowTriangles(r);
     expect(total).toBeLessThanOrEqual(TRIANGLE_BUDGET[id].total);
     expect(closed).toBeLessThanOrEqual(TRIANGLE_BUDGET[id].closed);
-    // the culling is still worth having: the HPC, combustor, HPT, cases and disks go (about a
-    // third of the model once every booster and LPT row is kept, W1L-I1)
-    expect(closed / total).toBeLessThan(0.7);
+    // once every row that shows is kept (W1L-I1), the closed engine culls only the combustor,
+    // the HPT and what the inner body hides: a small saving, but never a visible one
+    expect(closed / total).toBeLessThan(0.95);
   });
 });
 
@@ -131,24 +131,22 @@ describe('closed-engine culling (LD-6)', () => {
       'trf-strut',
     ])
       expect(vis.rows.has(id), id).toBe(true);
-    // W1L-I1: every booster row shows through the fan and every LPT row up the core nozzle
-    // (the critic's pixel probe saw booster rows 2-4 and LPT stages 1-3 culled)
-    for (const r of def.bladeRows.filter((k) => k.component === 'booster' || k.component === 'lpt'))
+    // W1L-I1: every booster and HPC row shows through the fan and every LPT row up the core
+    // nozzle (the critic's pixel probe saw booster rows 2-4 and LPT stages 1-3 culled; the
+    // pixel test, tests/browser/culling.test.ts, then saw the transition duct, the fan-frame
+    // struts and the HPC through the gaps: the main pass has no rotors, so its depth reaches
+    // past every rotor row)
+    for (const r of def.bladeRows.filter((k) => ['booster', 'hpc', 'lpt'].includes(k.component)))
       expect(vis.rows.has(r.id), r.id).toBe(true);
-    // and, past the booster, the transition duct's walls and the fan-frame struts in it (the
-    // pixel test, tests/browser/culling.test.ts, saw them through the fan gaps)
     expect(vis.rows.has('fan-frame-strut')).toBe(true);
-    for (const id of ['case-transition', 'transition-inner'])
+    for (const id of ['case-transition', 'transition-inner', 'case-hpc', 'hpc-drum'])
       expect(vis.parts.has(id), id).toBe(true);
   });
 
-  it('drops what the cowls and the inner body hide: the core rows, cases, liner, disks and shafts', () => {
+  it('drops what the cowls and the inner body hide: the combustor, the HPT, the disks and shafts', () => {
     for (const id of [
-      'case-hpc',
-      'case-combustor',
       'case-hpt',
       'combustor-liner',
-      'hpc-drum',
       'lp-shaft',
       'hp-shaft',
       'disk-hpc-r5',
@@ -156,26 +154,19 @@ describe('closed-engine culling (LD-6)', () => {
       'disk-lpt-r4',
     ])
       expect(vis.parts.has(id), id).toBe(false);
-    for (const id of [
-      'hpc-r1',
-      'hpc-s9',
-      'hpt-n1',
-      'hpt-r1',
-    ])
-      expect(vis.rows.has(id), id).toBe(false);
+    for (const id of ['hpt-n1', 'hpt-r1']) expect(vis.rows.has(id), id).toBe(false);
   });
 
   it('hides only what lies fully inside the inner body, or inside the core cowl between the sight limits', () => {
     const lim = closedViewLimits(def);
-    // W1L-I1: the limits sit aft of the booster's last row (at the HPC inlet) and ahead of
-    // the first LPT row
+    // W1L-I1: the limits sit at the combustor inlet (aft of every booster and HPC row) and
+    // ahead of the first LPT row
     const rowsOf = (c: string) => def.bladeRows.filter((r) => r.component === c);
-    for (const r of rowsOf('hpc'))
-      expect(lim.xFront, r.id).toBeLessThanOrEqual(Math.min(r.leadingEdge.hub.x, r.leadingEdge.tip.x));
-    expect(lim.xFront).toBeGreaterThanOrEqual(
-      def.flowpath.components.find((c) => c.id === 'hpc')?.xStart ?? Infinity,
-    );
-    for (const r of rowsOf('booster'))
+    for (const r of rowsOf('hpt'))
+      expect(lim.xFront, r.id).toBeLessThanOrEqual(
+        Math.min(r.leadingEdge.hub.x, r.leadingEdge.tip.x),
+      );
+    for (const r of [...rowsOf('booster'), ...rowsOf('hpc')])
       expect(lim.xFront, r.id).toBeGreaterThanOrEqual(
         Math.max(r.trailingEdge.hub.x, r.trailingEdge.tip.x),
       );
@@ -190,7 +181,7 @@ describe('closed-engine culling (LD-6)', () => {
     // on the hub surface itself, ahead of the front sight limit: seen through the fan
     expect(hiddenWhenClosed([{ x: 0.3, r: w.hub.radiusAt(0.3) }], w, lim)).toBe(false);
     // inside the core cowl between the limits: hidden; the same radius ahead of xFront: seen
-    expect(hiddenWhenClosed([{ x: 1.2, r: w.coreOuter.radiusAt(1.2) }], w, lim)).toBe(true);
+    expect(hiddenWhenClosed([{ x: 1.6, r: w.coreOuter.radiusAt(1.6) }], w, lim)).toBe(true);
     expect(
       hiddenWhenClosed(
         [{ x: lim.xFront - 0.01, r: w.coreOuter.radiusAt(lim.xFront - 0.01) }],
@@ -202,8 +193,8 @@ describe('closed-engine culling (LD-6)', () => {
     expect(
       hiddenWhenClosed(
         [
-          { x: 1.2, r: 0.28 },
-          { x: 1.2, r: w.coreCowl.radiusAt(1.2) + 0.01 },
+          { x: 1.6, r: 0.28 },
+          { x: 1.6, r: w.coreCowl.radiusAt(1.6) + 0.01 },
         ],
         w,
         lim,

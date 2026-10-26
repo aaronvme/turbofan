@@ -46,8 +46,8 @@ export const GEOMETRY_QUALITY = {
  * these, so a finer loft is a deliberate budget change.
  */
 export const TRIANGLE_BUDGET = {
-  test: { total: 260_000, closed: 130_000 },
-  high: { total: 1_800_000, closed: 1_120_000 },
+  test: { total: 260_000, closed: 215_000 },
+  high: { total: 1_800_000, closed: 1_560_000 },
 } as const satisfies Readonly<
   Record<keyof typeof GEOMETRY_QUALITY, { total: number; closed: number }>
 >;

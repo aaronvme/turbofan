@@ -5,11 +5,14 @@
 // Something is hidden when it lies wholly
 // - inside the inner body (strictly below the hub surface: disks, bores, shafts), which is a
 //   closed shell from the spinner to the plug tip; or
-// - inside the core cowl between two sight limits: aft of the booster's last row and ahead of
-//   the first LPT row. Through the fan gaps one sees every booster row (pass 4, W1L-I1: the
-//   old limit at the first booster stator culled rows 2-4, which show beside the hub), and
-//   up the core nozzle every LPT stage (stages 1-3 show through the last one). The HPC, the
-//   combustor, the HPT, the cases between and the disks are what stays culled.
+// - inside the core cowl between two sight limits: the combustor inlet and the first LPT
+//   row. Through the fan gaps one sees every booster row, the transition duct and its
+//   fan-frame struts, and the HPC (pass 4, W1L-I1: the old limit at the first booster stator
+//   culled booster rows 2-4, which show beside the hub). The rotors are drawn by their own
+//   pass, so the main pass's depth reaches past every rotor row into the HPC; the pixel test
+//   tests/browser/culling.test.ts pins what shows. Up the core nozzle one sees every LPT
+//   stage (stages 1-3 show through the last one). The combustor, the HPT and what the inner
+//   body hides (disks, bores, shafts) are what stays culled.
 // Everything else is drawn. The tests pin both directions.
 
 import type { EngineDefinition } from '../contracts/engine';
@@ -30,12 +33,12 @@ const HUB_SHELL = 0.004;
 const COWL_SKIN = 0.006;
 
 export function closedViewLimits(def: EngineDefinition): ClosedViewLimits {
-  const booster = def.bladeRows.filter((r) => r.component === 'booster');
+  const hpc = def.flowpath.components.find((c) => c.id === 'combustor');
   const lpt = def.bladeRows.filter((r) => r.component === 'lpt');
-  if (booster.length === 0 || lpt.length === 0)
-    throw new Error('visibility: needs booster and LPT rows');
+  if (hpc === undefined || lpt.length === 0)
+    throw new Error('visibility: needs an HPC and LPT rows');
   return {
-    xFront: Math.max(...booster.map((r) => Math.max(r.trailingEdge.hub.x, r.trailingEdge.tip.x))),
+    xFront: hpc.xStart,
     xRear: Math.min(...lpt.map((r) => Math.min(r.leadingEdge.hub.x, r.leadingEdge.tip.x))),
   };
 }

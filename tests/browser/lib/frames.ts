@@ -78,3 +78,23 @@ export function diff(a: Grab, b: Grab, threshold: number): Diff {
     }
   return { changed: changed / (w * h), worstTile: worst, tilesOver25: over };
 }
+
+/** Frame b, dimmed, with every pixel that differs from a in red: base64 PNG. */
+export function diffImage(a: Grab, b: Grab, threshold: number): string {
+  const { w, h } = a;
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  const ctx = out.getContext('2d');
+  if (ctx === null) throw new Error('no 2d context');
+  const img = ctx.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) {
+    const hit = Math.abs((a.lum[i] ?? 0) - (b.lum[i] ?? 0)) > threshold;
+    img.data[4 * i] = hit ? 255 : (b.rgba[4 * i] ?? 0) * 0.6;
+    img.data[4 * i + 1] = hit ? 0 : (b.rgba[4 * i + 1] ?? 0) * 0.6;
+    img.data[4 * i + 2] = hit ? 0 : (b.rgba[4 * i + 2] ?? 0) * 0.6;
+    img.data[4 * i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return out.toDataURL('image/png').split(',')[1] ?? '';
+}

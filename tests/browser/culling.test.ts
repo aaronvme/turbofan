@@ -6,16 +6,18 @@
 //
 // Noise tolerance (stated): a pixel "differs" when its displayed luminance changes by more
 // than 0.04; a tile differs when more than 25 % of its 16 x 16 pixels do. The noise floor is
-// the same view rendered twice with culling on (TRAA jitter, the stochastic fan samples). The
+// the same view rendered twice with culling on, 41 frames apart (TRAA jitter, the stochastic
+// fan samples), and the on/off pair is the same distance apart. The
 // culling on/off comparison must show NO differing tile beyond the floor's count, and no more
 // differing pixels than twice the floor plus 0.1 % of the frame. A culled row that shows
 // makes a cluster of 24-48 differing tiles (the probe, at 09c6a11).
 
 import { afterAll, describe, expect, it } from 'vitest';
+import { commands } from 'vitest/browser';
 import { ENGINE_DEFINITION } from '../../src/engine/definition';
 import { createEngineView, type EngineView } from '../../src/render/engineView';
 import type { LookPresetId } from '../../src/render/presets';
-import { diff, grab, settle } from './lib/frames';
+import { diff, diffImage, grab, settle } from './lib/frames';
 
 const W = 960;
 const H = 540;
@@ -66,7 +68,9 @@ describe('W1L-I1: closed-engine culling changes nothing visible', () => {
       if (pose.camera && pose.target) view.setCameraPose(pose.camera, pose.target);
       await settle(view, 40);
       const a1 = grab(view, c);
-      await settle(view, 12);
+      // the floor pair and the on/off pair are the same number of frames apart (the jitter
+      // sequences repeat every 64 frames; a closer pair would understate the noise)
+      await settle(view, 40);
       const a2 = grab(view, c);
       view.setDebugFlags({ noCull: true });
       await settle(view, 40);
@@ -77,8 +81,15 @@ describe('W1L-I1: closed-engine culling changes nothing visible', () => {
       rows.push(
         `${name}: floor ${(100 * floor.changed).toFixed(3)} % px, ${floor.tilesOver25} tiles | on/off ${(100 * cull.changed).toFixed(3)} % px, ${cull.tilesOver25} tiles, worst tile ${(100 * cull.worstTile).toFixed(1)} %`,
       );
-      if (cull.tilesOver25 > floor.tilesOver25 || cull.changed > 2 * floor.changed + 0.001)
+      if (cull.tilesOver25 > floor.tilesOver25 || cull.changed > 2 * floor.changed + 0.001) {
         failures.push(name);
+        // the culling-off frame, dimmed, with the pixels culling changes in red
+        await commands.writeFile(
+          `test-results/culling/${name}.png`,
+          diffImage(a2, b, THRESHOLD),
+          'base64',
+        );
+      }
     }
     console.log(`W1L-I1 culling\n${rows.join('\n')}`);
     expect(view.stats().errors).toEqual([]);
