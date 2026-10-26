@@ -123,6 +123,13 @@ describe('W0C-I4: validateEngineDefinition, identity and curves', () => {
     expect(t).not.toMatch(/spinner must start on the axis/);
     const plug = text(withCurve('plug', { points: [] }));
     expect(plug).not.toMatch(/plug must end on the axis/);
+    // the trailing-edge and nozzle-lip checks skip a side that has no points
+    expect(text(withCurve('nacelleOuter', { points: [] }))).toMatch(
+      /curve nacelleOuter: needs at least 2 points/,
+    );
+    expect(text(withCurve('coreOuter', { points: [] }))).toMatch(
+      /curve coreOuter: needs at least 2 points/,
+    );
   });
 
   it('a missing inner wall curve does not crash the wall-thickness check', () => {
@@ -288,6 +295,12 @@ describe('W0C-I4: validateEngineDefinition, blade rows', () => {
     const t = text(withComponent('booster', { hub: 'plug' }));
     expect(t).toMatch(/component booster: hub plug does not cover/);
     expect(t).not.toMatch(/row b-s1: .*outside the annulus/);
+    // even with its tip through the casing: without a hub radius there is no annulus to test
+    const through = text(
+      withComponent('booster', { hub: 'plug' }),
+      withRow('b-s1', { leadingEdge: { hub: { x: 1.2, r: 0.3 }, tip: { x: 1.2, r: 0.55 } } }),
+    );
+    expect(through).not.toMatch(/row b-s1: .*outside the annulus/);
   });
 
   it('a blade edge below the hub', () => {

@@ -272,8 +272,23 @@ describe('designRow', () => {
       );
       // the other neighbour flips back: this really is a two-count cycle
       expect(Math.round((2 * Math.PI * R_MID * target) / other.chord.mid)).toBe(row.count);
+      // the returned row is solved for its own count, not left on the other member's stagger
+      const own = designRow(EDGES, aero, { count: row.count });
+      expect(row.stagger.mid).toBeCloseTo(own.stagger.mid, 12);
+      expect(row.chord.mid).toBeCloseTo(own.chord.mid, 12);
+      // a flip-flop takes more than one pass to recognise
+      expect(() =>
+        designRow(EDGES, aero, { targetSolidity: target }, { maxCountPasses: 1 }),
+      ).toThrow(/did not settle in 1 passes/);
     }
     expect(flipFlops).toBeGreaterThan(0);
+  });
+
+  it('W0C-N4: a count that is right at once needs no pass at all', () => {
+    // a turbine row has no deviation, so the first stagger, chord and count are final
+    const aero: RowAerodynamics = { ...stator(0, -65 * DEG, 200), deviation: 'none' };
+    const once = designRow(EDGES, aero, { targetSolidity: 1.2 }, { maxCountPasses: 0 });
+    expect(once.count).toBe(designRow(EDGES, aero, { targetSolidity: 1.2 }).count);
   });
 
   it('W0C-I4: a row that does not turn needs no deviation, even at a tiny solidity', () => {
