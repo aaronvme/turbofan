@@ -38,8 +38,8 @@ describe('spanValue', () => {
     expect(spanValue(v, 0)).toBe(1);
     expect(spanValue(v, 0.5)).toBe(4);
     expect(spanValue(v, 1)).toBe(2);
-    // the parabola through (0,1), (0.5,4), (1,2)
-    expect(spanValue(v, 0.25)).toBeCloseTo(1 + 9.5 * 0.25 - 8.5 * 0.0625, 12);
+    // the parabola through (0, 1), (0.5, 4), (1, 2): 1 + 11 eta - 10 eta^2
+    expect(spanValue(v, 0.25)).toBeCloseTo(1 + 11 * 0.25 - 10 * 0.0625, 12);
   });
 });
 

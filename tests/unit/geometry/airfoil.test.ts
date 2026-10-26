@@ -29,7 +29,10 @@ describe('thickness distributions', () => {
     for (let k = 0; k <= 1000; k++) peak = Math.max(peak, halfThickness(family, k / 1000, 0.1));
     expect(peak / 0.05 - 1).toBeLessThan(0.01);
     expect(peak / 0.05 - 1).toBeGreaterThan(-0.01);
-    expect(halfThickness(family, 0.3, 0.2)).toBeCloseTo(2 * halfThickness(family, 0.3, 0.1), 12);
+    // thicker sections are thicker everywhere; NACA forms scale linearly, a DCA does not
+    expect(halfThickness(family, 0.3, 0.2)).toBeGreaterThan(halfThickness(family, 0.3, 0.1));
+    if (family !== 'dca')
+      expect(halfThickness(family, 0.3, 0.2)).toBeCloseTo(2 * halfThickness(family, 0.3, 0.1), 12);
   });
 
   it('puts the peak where each family has it: NACA 65 at 40 %, DCA at 50 %, turbine at 30 %', () => {

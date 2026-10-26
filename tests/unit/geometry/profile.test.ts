@@ -1,67 +1,99 @@
 import { describe, expect, it } from 'vitest';
-import { catmullRom, maxRadialDeviation, WallCurve } from '../../../src/geometry/profile';
-import { componentWalls, engineWalls } from '../../../src/geometry/walls';
+import {
+  distanceToPolyline,
+  maxDistanceToPolyline,
+  maxRadialDeviation,
+  monotoneInX,
+  roundedPolyline,
+  WallCurve,
+} from '../../../src/geometry/profile';
+import {
+  componentWalls,
+  engineWalls,
+  WALL_BLEND,
+  type EngineWall,
+} from '../../../src/geometry/walls';
 import { ENGINE_DEFINITION as def } from '../../../src/engine/definition';
-import { radiusAt, type CurveId } from '../../../src/contracts/engine';
+import type { CurveId } from '../../../src/contracts/engine';
 
-describe('catmullRom', () => {
+describe('roundedPolyline', () => {
   const pts = [
     { x: 0, r: 0 },
     { x: 1, r: 1 },
     { x: 2, r: 0.5 },
     { x: 3, r: 2 },
   ];
+  const o = { blend: 0.2, samplesPerFillet: 8 };
 
-  it('passes exactly through every control point', () => {
-    const dense = catmullRom(pts, { samplesPerSegment: 8 });
-    expect(dense.length).toBe(3 * 8 + 1);
-    pts.forEach((p, i) => {
-      expect(dense[i * 8]).toEqual(p);
-    });
+  it('starts and ends on the end points and stays on each segment between the fillets', () => {
+    const d = roundedPolyline(pts, o);
+    expect(d[0]).toEqual(pts[0]);
+    expect(d[d.length - 1]).toEqual(pts[3]);
+    // the segment midpoints are untouched: the polyline itself
+    const ref = (x: number) => {
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const a = pts[i];
+        const b = pts[i + 1];
+        if (a !== undefined && b !== undefined && x >= a.x && x <= b.x)
+          return a.r + ((x - a.x) * (b.r - a.r)) / (b.x - a.x);
+      }
+      return null;
+    };
+    const wall = new WallCurve(d);
+    for (const x of [0.5, 1.5, 2.5]) expect(wall.radiusAt(x)).toBeCloseTo(ref(x) ?? Number.NaN, 12);
+    // and never further from the polyline than the fillet sag d sin(turn / 2) / 2
+    expect(maxRadialDeviation(d, ref)).toBeLessThan(0.2);
   });
 
-  it('is C1: the chord direction turns smoothly at interior control points', () => {
-    const dense = catmullRom(pts, { samplesPerSegment: 64 });
-    const turn = (i: number) => {
-      const a = dense[i - 1];
-      const b = dense[i];
-      const c = dense[i + 1];
-      if (a === undefined || b === undefined || c === undefined) throw new Error('range');
+  it('is C1: no sample turns much more than its neighbours', () => {
+    const d = roundedPolyline(pts, { blend: 0.3, samplesPerFillet: 32 });
+    const turns: number[] = [];
+    for (let i = 1; i + 1 < d.length; i++) {
+      const a = d[i - 1];
+      const b = d[i];
+      const c = d[i + 1];
+      if (a === undefined || b === undefined || c === undefined) continue;
       const t1 = Math.atan2(b.r - a.r, b.x - a.x);
       const t2 = Math.atan2(c.r - b.r, c.x - b.x);
-      return Math.abs(t2 - t1);
-    };
-    // a polyline turns by tens of degrees at samples 64 and 128; the spline by about one step
-    expect(turn(64)).toBeLessThan(0.05);
-    expect(turn(128)).toBeLessThan(0.05);
+      turns.push(Math.abs(t2 - t1));
+    }
+    // a polyline would turn by 0.6-1.0 rad at once; the fillets spread it over 32 samples
+    expect(Math.max(...turns)).toBeLessThan(0.08);
   });
 
-  it('uses phantom neighbours to set the end tangents', () => {
-    const free = catmullRom(pts, { samplesPerSegment: 16 });
-    const bent = catmullRom(pts, { samplesPerSegment: 16, before: { x: 1, r: -1 } });
-    expect(bent[0]).toEqual(free[0]);
-    expect(bent[16]).toEqual(free[16]);
-    expect(bent[4]).not.toEqual(free[4]);
-    expect(bent.slice(32)).toEqual(free.slice(32)); // only the first segment changes
-    const tail = catmullRom(pts, { samplesPerSegment: 16, after: { x: 2, r: 9 } });
-    expect(tail.slice(0, 33)).toEqual(free.slice(0, 33));
-    expect(tail[44]).not.toEqual(free[44]);
+  it('a phantom neighbour rounds the end and starts the curve at the fillet apex', () => {
+    const free = roundedPolyline(pts, o);
+    const lip = roundedPolyline(pts, { ...o, before: { x: 1, r: -1 } });
+    const other = roundedPolyline([pts[0] ?? { x: 0, r: 0 }, { x: 1, r: -1 }], {
+      ...o,
+      before: pts[1],
+    });
+    expect(lip[0]).not.toEqual(free[0]);
+    expect(lip[0]?.x).toBeCloseTo(other[0]?.x ?? Number.NaN, 12);
+    expect(lip[0]?.r).toBeCloseTo(other[0]?.r ?? Number.NaN, 12);
+    expect(lip.slice(-12)).toEqual(free.slice(-12));
+    const tail = roundedPolyline(pts, { ...o, after: { x: 4, r: 0 } });
+    expect(tail[tail.length - 1]).not.toEqual(pts[3]);
   });
 
-  it('draws a straight segment for two points', () => {
-    const d = catmullRom(
+  it('keeps a two-point curve straight', () => {
+    const d = roundedPolyline(
       [
         { x: 0, r: 0 },
         { x: 2, r: 2 },
       ],
-      { samplesPerSegment: 4 },
+      o,
     );
-    for (const p of d) expect(p.r).toBeCloseTo(p.x, 12);
+    expect(d).toEqual([
+      { x: 0, r: 0 },
+      { x: 2, r: 2 },
+    ]);
   });
 
-  it('rejects a curve with fewer than two points or a bad sample count', () => {
-    expect(() => catmullRom([{ x: 0, r: 0 }], { samplesPerSegment: 4 })).toThrow();
-    expect(() => catmullRom(pts, { samplesPerSegment: 0 })).toThrow();
+  it('rejects bad options', () => {
+    expect(() => roundedPolyline([{ x: 0, r: 0 }], o)).toThrow();
+    expect(() => roundedPolyline(pts, { ...o, samplesPerFillet: 1 })).toThrow();
+    expect(() => roundedPolyline(pts, { ...o, blend: 0 })).toThrow();
   });
 });
 
@@ -90,7 +122,27 @@ describe('WallCurve', () => {
     ).toThrow(/increase/);
     expect(() => new WallCurve([{ x: 0, r: 1 }])).toThrow();
   });
+  it('measures distances to a polyline', () => {
+    const line = [
+      { x: 0, r: 0 },
+      { x: 1, r: 0 },
+    ];
+    expect(distanceToPolyline({ x: 0.5, r: 2 }, line)).toBe(2);
+    expect(distanceToPolyline({ x: 2, r: 0 }, line)).toBe(1);
+    expect(maxDistanceToPolyline([{ x: -3, r: 4 }], line)).toBe(5);
+  });
+
   it('measures the largest radial deviation from a reference', () => {
+    expect(
+      monotoneInX([
+        { x: 0, r: 0 },
+        { x: -1, r: 1 },
+        { x: 1, r: 1 },
+      ]),
+    ).toEqual([
+      { x: 0, r: 0 },
+      { x: 1, r: 1 },
+    ]);
     expect(maxRadialDeviation(w.samples, () => 1)).toBe(1);
     expect(maxRadialDeviation(w.samples, (x) => (x > 2 ? null : 1))).toBe(1);
   });
@@ -108,9 +160,20 @@ describe('the engine walls (smoothed definition curves)', () => {
     }
   });
 
-  it('passes through every definition point', () => {
-    const check = (id: CurveId, wall: WallCurve) => {
-      for (const p of curves[id].points) expect(wall.radiusAt(p.x)).toBeCloseTo(p.r, 9);
+  it('is the definition polyline away from the vertices, and within 3 mm of every vertex', () => {
+    const check = (id: CurveId, wall: EngineWall) => {
+      const pts = curves[id].points;
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        if (p === undefined) continue;
+        expect(distanceToPolyline(p, wall.path), `${id} point ${i}`).toBeLessThan(0.003);
+        const q = pts[i + 1];
+        // the middle of a segment longer than two fillet legs is the segment itself
+        if (q !== undefined && Math.hypot(q.x - p.x, q.r - p.r) > 2 * WALL_BLEND + 1e-3) {
+          const xm = (p.x + q.x) / 2;
+          expect(wall.radiusAt(xm)).toBeCloseTo((p.r + q.r) / 2, 9);
+        }
+      }
     };
     check('coreOuter', walls.coreOuter);
     check('coreCowl', walls.coreCowl);
@@ -119,18 +182,22 @@ describe('the engine walls (smoothed definition curves)', () => {
     for (const id of ['spinner', 'coreInner', 'plug'] as const) check(id, walls.hub);
   });
 
-  it('stays within a few mm of the definition polylines away from the rounded lips', () => {
-    // the splitter and the highlight are rounded on purpose: skip the first 30 mm there
-    const dev = (id: CurveId, wall: WallCurve, skip = 0) =>
-      maxRadialDeviation(
-        wall.samples.filter((p) => p.x > (curves[id].points[0]?.x ?? 0) + skip),
-        (x) => radiusAt(curves[id], x),
-      );
-    expect(dev('coreOuter', walls.coreOuter, 0.03)).toBeLessThan(0.003);
-    expect(dev('coreCowl', walls.coreCowl, 0.03)).toBeLessThan(0.003);
-    expect(dev('nacelleInner', walls.nacelleInner, 0.03)).toBeLessThan(0.003);
-    expect(dev('nacelleOuter', walls.nacelleOuter, 0.03)).toBeLessThan(0.006);
-    expect(dev('coreInner', walls.hub)).toBeLessThan(0.003);
+  it('stays within 3 mm of the definition polylines everywhere', () => {
+    const dev = (id: CurveId, wall: EngineWall) =>
+      maxDistanceToPolyline(wall.path, curves[id].points);
+    expect(dev('coreOuter', walls.coreOuter)).toBeLessThan(0.003);
+    expect(dev('coreCowl', walls.coreCowl)).toBeLessThan(0.003);
+    expect(dev('nacelleInner', walls.nacelleInner)).toBeLessThan(0.003);
+    expect(dev('nacelleOuter', walls.nacelleOuter)).toBeLessThan(0.003);
+    const hubLine = [...curves.spinner.points, ...curves.coreInner.points, ...curves.plug.points];
+    expect(maxDistanceToPolyline(walls.hub.path, hubLine)).toBeLessThan(0.003);
+  });
+
+  it('keeps the whole lip path (which may turn back in x) and a monotone wall from it', () => {
+    expect(walls.nacelleOuter.path.length).toBeGreaterThanOrEqual(
+      walls.nacelleOuter.samples.length,
+    );
+    expect(monotoneInX(walls.nacelleOuter.path)).toEqual(walls.nacelleOuter.samples);
   });
 
   it('keeps every component annulus open (hub below casing)', () => {
