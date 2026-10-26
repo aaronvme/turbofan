@@ -2,14 +2,14 @@ w0/gpu-spikes: DONE, fix round for critic pass 2 (FIX FIRST @8e4ffdc); every W0G
 
 DONE (W0G ID -> commit)
 - W0G-I3 -> 175078a: main (b5c2736) merged into the branch once (orchestrator-authorized exception to CLAUDE.md). Both conflicts resolved as unions: `.prettierignore` ignores `docs/bench/` and `docs/mesh/`; the coverage include is `src`, `tools/mesh`, `spikes/lib`.
-- W0G-I1 -> f363280 (TDD, RED), 9d7bd60 (GREEN), 9a75238 (comment).
+- W0G-I1 -> f363280 (TDD, RED), 9d7bd60 (GREEN), 9a75238 (comment); D2-13 -> 0a81fe0 (TDD, RED), a0f162f (GREEN).
   - `spikes/lib/validity.ts` (pure, 100% covered, `tests/unit/spikes/validity.test.ts`). Frames are judged against the display interval, never the run's own median.
     - long frame: over 1.5 intervals;
     - throttled: over 2.5 intervals.
   - A run is INVALID if:
     - throttled frames last more than 500 ms in a row;
-    - or its median frame is over 1.5 intervals (a 30 Hz throttle);
     - or the page was hidden.
+  - D2-13: a median frame over 1.5 intervals is a "below display rate" WARNING, not INVALID (`Validity.warnings`, `BELOW_RATE_MEDIAN_FACTOR`). It is printed next to the numbers and stored per repetition; the config keeps its aggregate.
   - Tests:
     - a synthetic 1 Hz run (the old rule reported 0 long frames: the RED evidence);
     - the official 80k-16x8 shape (60 Hz, then 1 Hz from 52 s) is invalid in all 3 runs;
@@ -43,18 +43,16 @@ DONE (W0G ID -> commit)
 
 NEXT
 1. Critic pass 3 on this branch.
-2. Orchestrator decisions (below).
+2. The orchestrator updates D0-1's wording on main (D2-12).
 3. After the merge, the orchestrator's next official runs (P2/P3, L13) use the fixed harness. Before them, a `--quick` smoke run in a quiet window. No benchmark was run in this round (D0-1); the live harness path is untested end to end. Smoke-checked in a throwaway script:
    - chrome://version `#command_line` (45 switches);
    - CDP `Page.bringToFront` across navigations;
    - the about:blank rAF probe: 16.70 ms.
 
-ORCHESTRATOR DECISIONS
-- (a) **Gate rule.** The critic suggested "fps < 0.95 x refresh or median > 1.1 x period". The fps rule would have invalidated the valid official main-react60 row (56.6 fps < 57). So the gate uses a sustained-throttle rule instead: more than 500 ms in a row of frames over 2.5 intervals, or a median over 1.5 intervals. Confirm the thresholds.
-- (b) **Protocol shape.** Each of the 3 runs now has its own 10 s warm-up, interleaved across the sweep (W0G-I2).
-  - It still reads as "10 s warm-up, then 3 runs of 60 s" per configuration, but D0-1's wording could say so explicitly.
-  - Official durations become ~33 min (throughput) and ~23 min (worker), from 29 and 19.5.
-- (c) The median rule also marks a configuration INVALID when a real load cannot hold the display rate, not only under a 30 Hz throttle. The reason text names both causes. Keep it as INVALID, or demote it to a warning?
+ORCHESTRATOR DECISIONS (answered: D2-11..D2-13)
+- (a) Gate rule: accepted (D2-11). The critic's "fps < 0.95 x refresh" would have invalidated the valid official main-react60 row (56.6 fps); the gate is the sustained-throttle rule (more than 500 ms in a row of frames over 2.5 intervals) or a hidden page.
+- (b) Protocol shape: accepted (D2-12). Each of the 3 runs has its own 10 s warm-up, interleaved across the sweep; official durations ~33 min (throughput) and ~23 min (worker). The orchestrator updates D0-1's wording on main.
+- (c) Median rule: a WARNING, not INVALID (D2-13), done in 0a81fe0/a0f162f. A 30 Hz throttle now shows only as that warning (see the D0-1 checklist in `spikes/README.md`).
 
 GOTCHAS
 - Node runs `spikes/bench/run.ts` with type stripping. Every `spikes/lib` module it imports at runtime (benchRun, validity, order, stats, protocol, system) must use `.ts` extensions in its relative imports.
@@ -62,10 +60,11 @@ GOTCHAS
 - An invalid configuration has `aggregate: null` in new JSON files. Readers must check `validity.valid` and never fall back to the per-repetition numbers.
 - Ports: harness default 5181 (+1 for COOP/COEP). This round started no dev server; no Chrome or server is left running.
 
-GATES @9a75238 (the commits after it are docs only)
+GATES @a0f162f (npm test, lint, typecheck rerun after D2-13; the commits after it are docs only)
 - npm test: 1107 passed (48 files)
 - npm run lint: clean (eslint --max-warnings 0 + prettier)
 - npm run typecheck: clean
+- The suites below ran @9a75238; D2-13 touched only `spikes/lib/validity.ts` (unit-tested), the harness and docs
 - npm run coverage: lines 99.5%, statements 98.55%, branches 87.42%, functions 99.39%; all thresholds pass. New modules: validity.ts 100% on all four metrics, order.ts lines 100% / branches 87.5%, benchRun.ts lines 100% / branches 92.2%.
 - npm run test:mesh: 29 passed (2 files)
 - npm run test:gpu: 15 passed (4 files)

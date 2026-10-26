@@ -37,8 +37,9 @@ The official runs before the W0G fixes took 29 min (throughput, 2026-10-25 22:18
 4. Brings Chrome to the front (CDP `Page.bringToFront`) before every run.
 5. Judges every run against the display interval (`spikes/lib/validity.ts`). A run is INVALID when:
    - frames longer than 2.5 display intervals last more than 500 ms in a row (an occluded or unfocused window at ~1 Hz, or a stall);
-   - its median frame is longer than 1.5 intervals (a 30 Hz throttle, or a load that cannot hold the display rate);
    - or the page was hidden.
+
+   A run whose median frame is longer than 1.5 intervals stays valid and gets a "below display rate" WARNING (D2-13): a load that cannot hold the display rate is a real result. A 30 Hz throttle shows up only as this warning. Warnings are printed next to the numbers and stored in `validity.warnings`.
 
    An invalid run is rerun once. A configuration with a run that is still invalid is printed and stored as INVALID, with `aggregate: null`. Long frames are counted against the display interval (over 1.5 intervals), never against the run's own median.
 6. Writes `docs/bench/<kind>-<local date>-<HHMM>-<official|quick>.json` and prints a per-run line, a summary (the median of the 3 repetitions per configuration) and the order effect on ms/it (% per slot and over the sweep).
@@ -59,7 +60,7 @@ Before:
 - [ ] Notifications off (Do not disturb), so no toast takes focus. No other window over Chrome. Don't touch the machine until the summary prints.
 
 After:
-- [ ] Look for INVALID rows and rerun lines in the summary; `rejectedAttempts` should be empty or explained.
+- [ ] Look for INVALID rows, rerun lines and WARNING notes in the summary; `rejectedAttempts` should be empty or explained. A "below display rate" warning on a configuration that should hold 60 fps points to a 30 Hz throttle (energy saver): check the power source and rerun.
 - [ ] `conditions.display.hz` matches `conditions.gpu[].currentRefreshHz`.
 - [ ] `gpuBusyBefore`/`gpuBusyAfter` list at most dwm and the terminal; CPU load stays low before, during and after; `gitDirty` is false.
 - [ ] Commit the JSON as recorded (Prettier ignores `docs/bench/`). Write any annotation in `docs/bench/README.md`; never edit a recorded file.
