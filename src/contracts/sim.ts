@@ -152,10 +152,11 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 
 /**
  * Returns the path and reason of the first value that is not plain data, or null if the
- * whole value is plain data: null, booleans, finite numbers, strings, dense arrays and
- * objects whose prototype is Object.prototype or null, with data properties only, nested
- * without cycles. undefined is allowed (optional fields). structuredClone would silently
- * turn class instances into plain objects and throws on functions; this catches both.
+ * whole value is plain data: null, booleans, finite numbers, strings, dense arrays without
+ * extra keys and objects whose prototype is Object.prototype or null, with enumerable data
+ * properties only, nested without cycles. undefined is allowed (optional fields).
+ * structuredClone would silently turn class instances into plain objects, drop non-enumerable
+ * properties and throw on functions; this catches all three (W0C-N9).
  */
 export function findNonPlainData(value: unknown): string | null {
   const ancestors = new Set<object>();
@@ -194,6 +195,12 @@ export function findNonPlainData(value: unknown): string | null {
     try {
       if (isArray) {
         const arr = obj as readonly unknown[];
+        // structuredClone copies extra keys on an array, so they would escape the checks below
+        const extra = Object.getOwnPropertyNames(arr).find(
+          (k) => k !== 'length' && !(String(Number(k)) === k && Number(k) < arr.length),
+        );
+        if (extra !== undefined)
+          return `${path === '' ? extra : `${path}.${extra}`}: non-index key on an array`;
         for (let i = 0; i < arr.length; i++) {
           const p = `${path}[${i}]`;
           if (!(i in arr)) return `${p}: hole in array`;
@@ -205,6 +212,7 @@ export function findNonPlainData(value: unknown): string | null {
       for (const [key, desc] of Object.entries(Object.getOwnPropertyDescriptors(obj))) {
         const p = path === '' ? key : `${path}.${key}`;
         if (!('value' in desc)) return `${p}: accessor property`;
+        if (desc.enumerable !== true) return `${p}: non-enumerable property`;
         const bad = visit(desc.value, p);
         if (bad !== null) return bad;
       }
