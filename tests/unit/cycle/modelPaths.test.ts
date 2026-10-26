@@ -14,7 +14,11 @@ import {
 import type { EngineDefinition } from '../../../src/contracts/engine';
 import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 import { factValue } from '../../../src/engine/facts';
-import { createCycleModel } from '../../../src/cycle/model';
+import {
+  N1_LIMIT_MARGIN_PERCENT,
+  N2_LIMIT_MARGIN_PERCENT,
+  createCycleModel,
+} from '../../../src/cycle/model';
 
 /** Simulation tests take 1-10 s each; Stryker's instrumented runs are several times slower. */
 const TIMEOUT_MS = 600_000;
@@ -39,7 +43,6 @@ const last = (s: readonly CycleState[]): CycleState => {
 };
 
 /** The FADEC's own margin under each overspeed redline (model.ts: limit - 1 %). */
-const OVERSPEED_MARGIN_PERCENT = 1;
 
 describe('CycleModel.step input checks', () => {
   it('rejects invalid inputs and time steps without advancing the state', () => {
@@ -67,7 +70,10 @@ describe('FADEC limiters and schedules', { timeout: TIMEOUT_MS }, () => {
     expect(s.fadec.n1TargetPercent).toBeGreaterThan(isa.fadec.n1TargetPercent);
     expect(s.fadec.limiter).toBe('n1Max');
     expect(s.n1Rpm).toBeLessThanOrEqual(factValue('n1MaxRpm'));
-    expect(s.n1Percent).toBeCloseTo((100 * factValue('n1MaxRpm')) / refs.n1Rpm - 1, 1);
+    expect(s.n1Percent).toBeCloseTo(
+      (100 * factValue('n1MaxRpm')) / refs.n1Rpm - N1_LIMIT_MARGIN_PERCENT,
+      1,
+    );
     // past the flat rating corner the engine can no longer make rated thrust
     expect(s.netThrustN).toBeLessThan(factValue('takeoffThrust'));
     expect(s.netThrustN).toBeGreaterThan(0.9 * factValue('takeoffThrust'));
@@ -95,7 +101,7 @@ describe('FADEC limiters and schedules', { timeout: TIMEOUT_MS }, () => {
     );
     const end = last(s);
     expect(end.fadec.limiter).toBe('n2Max');
-    expect(end.n2Percent).toBeCloseTo(99 - OVERSPEED_MARGIN_PERCENT, 1);
+    expect(end.n2Percent).toBeCloseTo(99 - N2_LIMIT_MARGIN_PERCENT, 1);
     for (const x of s) expect(x.n2Rpm).toBeLessThanOrEqual(n2Max);
   });
 
@@ -306,10 +312,12 @@ describe(
       const corner = { ...ISA_SLS, temperatureK: factValue('flatRatingTemperature') };
       const m = createCycleModel();
       m.reset('groundIdle', corner);
-      const end = last(run(m, 25, 0.05, () => inputs({ throttleLever: 1, ambient: corner })));
-      expect(end.fadec.limiter).toBe('n1Target');
+      const states = run(m, 25, 0.05, () => inputs({ throttleLever: 1, ambient: corner }));
+      const end = last(states);
+      // the corner's rated N1 sits on the N1 limiter's target, so either loop may hold it
+      expect(['n1Target', 'n1Max']).toContain(end.fadec.limiter);
       expect(end.netThrustN / factValue('takeoffThrust')).toBeGreaterThan(0.998);
-      expect(end.n1Rpm).toBeLessThanOrEqual(factValue('n1MaxRpm'));
+      for (const s of states) expect(s.n1Rpm).toBeLessThanOrEqual(factValue('n1MaxRpm'));
     });
   },
 );

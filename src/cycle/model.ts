@@ -92,8 +92,11 @@ const SUBIDLE_N2_PERCENT = 57;
 /** FADEC gains: integrator rate per unit fractional error (1/s), rate-feedback time (s). */
 const K_LOOP = 2;
 const TD = 0.7;
-/** Rate feedback of the overspeed limiters, s (short, so they act only near the limit). */
-const TD_LIMIT = 0.3;
+/**
+ * Rate feedback of the overspeed limiters, s (short, so they act only near the limit). 0.5 (0.3
+ * before W1C-N5) holds a slam overshoot to about 0.1 point, which the 0.5-point N1 margin needs.
+ */
+const TD_LIMIT = 0.5;
 /**
  * Rate feedback of the EGT limiter, s: the lead that stops the fuel ramp before the 960 C
  * transient limit instead of after it (the EGT rises at several hundred K/s in a slam accel).
@@ -119,6 +122,16 @@ const EGT_ERROR_SCALE_K = 150;
 const ACCEL_FACTOR = 1.8;
 /** The accel schedule opens up by this much more between 68 and 80 % corrected N2. */
 const ACCEL_FACTOR_HIGH = 0.3;
+/**
+ * Overspeed limiter targets sit this many points under the TCDS N1 / N2 limits. N1: 0.5: the
+ * 30 C flat-rating corner (rated thrust at 103.5 % N1) is at the limiter target, so the transient
+ * model makes rated thrust there (W1C-N5); a corner slam overshoots the target by 0.1 point with
+ * TD_LIMIT 0.5 (0.5 with 0.3, which took N1 to 104.02 %).
+ */
+export const N1_LIMIT_MARGIN_PERCENT = 0.5;
+export const N2_LIMIT_MARGIN_PERCENT = 1;
+/** The EGT limiter aims this far under the active displayed-EGT limit, K. */
+const EGT_LIMIT_MARGIN_K = 5;
 /** Limiter loops run at this multiple of K_LOOP, so they bite hard near their limits only. */
 const K_LIMIT_FACTOR = 4;
 const DECEL_FACTOR = 0.6;
@@ -283,6 +296,12 @@ class TurbofanCycleModel implements CycleModel {
   private fuelOnTime: number | null = null;
   private hungTimer = 0;
   private egtPrev: number | null = null;
+  /**
+   * Time the displayed EGT has spent above the takeoff redline, s. TCDS E.004 VI note 4 allows
+   * the 960 C transitory limit for 20 s; after that the limiter aims under the redline. The
+   * allowance renews once EGT is back under the maximum-continuous limit.
+   */
+  private egtAboveRedlineS = 0;
   private dEgt = 0;
   private flags: CycleFlags = {
     surge: false,
@@ -320,6 +339,7 @@ class TurbofanCycleModel implements CycleModel {
     this.fuelOnTime = null;
     this.hungTimer = 0;
     this.egtPrev = null;
+    this.egtAboveRedlineS = 0;
     this.dEgt = 0;
     this.flags = {
       ...this.flags,
@@ -378,6 +398,14 @@ class TurbofanCycleModel implements CycleModel {
 
   // -------------------------------------------------------------------------------------
 
+  /** The displayed-EGT limit in force: transitory while the 20 s allowance lasts, else the redline. */
+  private egtLimitK(): number {
+    const lim = this.definition.limits;
+    return this.egtAboveRedlineS < lim.egtTransientDurationS
+      ? lim.egtTransientK
+      : Math.min(lim.egtTransientK, lim.egtTakeoffRedlineK);
+  }
+
   private pct1(): number {
     return (100 * this.n1) / this.e.calibration.n1ReferenceRpm;
   }
@@ -403,6 +431,8 @@ class TurbofanCycleModel implements CycleModel {
     const dEgtRaw = this.egtPrev === null ? 0 : (egt - this.egtPrev) / dt;
     this.dEgt += ((dEgtRaw - this.dEgt) * dt) / TF_EGT;
     this.egtPrev = egt;
+    if (egt > lim.egtTakeoffRedlineK) this.egtAboveRedlineS += dt;
+    else if (egt <= lim.egtMaxContinuousK) this.egtAboveRedlineS = 0;
     const p3 = prev.stations['3'].ptPa;
 
     // starter and start sequence
@@ -486,14 +516,29 @@ class TurbofanCycleModel implements CycleModel {
       const caps: [FadecLimiter, number][] = [
         [
           'n1Max',
-          loop((100 * lim.n1MaxRpm) / cal.n1ReferenceRpm - 1, this.pct1(), this.dn1, 100, TD_LIMIT),
+          loop(
+            (100 * lim.n1MaxRpm) / cal.n1ReferenceRpm - N1_LIMIT_MARGIN_PERCENT,
+            this.pct1(),
+            this.dn1,
+            100,
+            TD_LIMIT,
+          ),
         ],
         [
           'n2Max',
-          loop((100 * lim.n2MaxRpm) / cal.n2ReferenceRpm - 1, n2p, this.dn2, 100, TD_LIMIT),
+          loop(
+            (100 * lim.n2MaxRpm) / cal.n2ReferenceRpm - N2_LIMIT_MARGIN_PERCENT,
+            n2p,
+            this.dn2,
+            100,
+            TD_LIMIT,
+          ),
         ],
-        // TCDS E.004 VI note 4: 960 C transitory at takeoff for up to 20 s
-        ['egtMax', loop(lim.egtTransientK - 5, egt, this.dEgt, EGT_ERROR_SCALE_K, TD_EGT)],
+        // TCDS E.004 VI note 4: 960 C transitory at takeoff for up to 20 s, then the redline
+        [
+          'egtMax',
+          loop(this.egtLimitK() - EGT_LIMIT_MARGIN_K, egt, this.dEgt, EGT_ERROR_SCALE_K, TD_EGT),
+        ],
       ];
       for (const [name, rLimit] of caps) {
         const r = K_LIMIT_FACTOR * rLimit;
@@ -810,8 +855,14 @@ class TurbofanCycleModel implements CycleModel {
       ...this.flags,
       n1Overspeed: this.n1 > lim.n1MaxRpm,
       n2Overspeed: this.n2 > lim.n2MaxRpm,
+      // W1C-N5: above the transitory limit at any time, or above the redline for longer than the
+      // 20 s the TCDS allows
       egtExceedance:
-        egtDisplayed > (this.mode === 'start' ? lim.egtStartLimitK : lim.egtTakeoffRedlineK),
+        this.mode === 'start'
+          ? egtDisplayed > lim.egtStartLimitK
+          : egtDisplayed > lim.egtTransientK ||
+            (egtDisplayed > lim.egtTakeoffRedlineK &&
+              this.egtAboveRedlineS > lim.egtTransientDurationS),
     };
     return {
       timeS: this.t,
