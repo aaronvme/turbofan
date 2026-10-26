@@ -142,6 +142,23 @@ describe('transient model: shaft dynamics and FADEC', { timeout: 120_000 }, () =
     }
   });
 
+  it('33.73(a): ground idle to rated takeoff, lever moved in 1 s, without overtemperature or surge', () => {
+    // 33.73(a) sets no time, but asks for no overtemperature, surge or stall from the minimum
+    // lever position, which is a harsher start than C5's 15 %
+    const m = createCycleModel();
+    m.reset('groundIdle', ISA_SLS);
+    const states = run(m, 10, 0.02, (t) => inputs({ throttleLever: Math.min(1, t) }));
+    expect(states[states.length - 1]?.netThrustN ?? 0).toBeGreaterThan(
+      THRESHOLDS.C5.values.thrustFraction.value * factValue('takeoffThrust'),
+    );
+    for (const s of states) {
+      expect(validateCycleState(s, refs)).toEqual([]);
+      expect(s.flags.surge).toBe(false);
+      expect(s.hpc.surgeMarginFraction).toBeGreaterThan(0);
+      expect(s.egtDisplayedK).toBeLessThan(factValue('egtTransientLimit'));
+    }
+  });
+
   it('leverForNetThrust: the lever that holds a steady thrust, monotonic, 0..1', () => {
     const takeoff = factValue('takeoffThrust');
     const a = leverForNetThrust(0.3 * takeoff, ISA_SLS);
