@@ -4,7 +4,7 @@
 import { R_AIR, type AmbientConditions } from './ambient';
 import type { CycleState } from './cycle';
 import type { EngineDefinition } from './engine';
-import { fromHalfBits, toHalfBits } from './half';
+import { HALF_MAX, fromHalfBits, toHalfBits } from './half';
 import { SOLVER_REDUCTION_STATIONS, type SolverReductionStationId } from './stations';
 
 /** tracking: local time stepping toward the cycle-model targets; physical: SSP-RK3 in real time (slow motion). */
@@ -365,8 +365,19 @@ export function rasterizeField(
       }
       const k = 4 * (j * extent.width + i);
       for (let ch = 0; ch < 4; ch++) {
-        state[k + ch] = toHalfBits(enc.state[ch] ?? 0);
-        velocity[k + ch] = toHalfBits(enc.velocity[ch] ?? 0);
+        for (const [name, texel, out] of [
+          ['state', enc.state, state],
+          ['velocity', enc.velocity, velocity],
+        ] as const) {
+          const v = texel[ch] ?? 0;
+          // toHalfBits would silently write infinity (W0C-N2)
+          if (Math.abs(v) > HALF_MAX) {
+            throw new Error(
+              `rasterizeField: ${name}[${ch}] ${v} at x=${c.x.toFixed(4)}, r=${c.r.toFixed(4)} is beyond the f16 range (|v| <= ${HALF_MAX})`,
+            );
+          }
+          out[k + ch] = toHalfBits(v);
+        }
       }
     }
   }
