@@ -128,3 +128,21 @@ describe('W1C-N: sizeEngine does not report a non-converged secant', () => {
     expect(true).toBe(true);
   });
 });
+
+describe('W1C: the EGT limiter aims at the 960 C transient limit, so a steady EGT can sit above the 950 C redline', () => {
+  it('prints steady full-lever EGT and the selected limiter on hot days', { timeout: 600_000 }, async () => {
+    const { createCycleModel } = await import('../../../src/cycle/model');
+    const { DEFAULT_CYCLE_INPUTS } = await import('../../../src/contracts/cycle');
+    for (const oat of [30, 40, 45, 50]) {
+      const ambient = { ...ISA_SLS, temperatureK: 273.15 + oat };
+      const m = createCycleModel();
+      m.reset('groundIdle', ambient);
+      let s = m.state();
+      for (let i = 0; i < 1500; i++) {
+        s = m.step(0.02, { ...DEFAULT_CYCLE_INPUTS, ambient, fuelLever: 'run', ignition: 'auto', throttleLever: Math.min(1, (i * 0.02) / 1) });
+      }
+      log(`OAT ${oat} C, lever 1 after 30 s: N1 ${s.n1Percent.toFixed(2)} %, EGT ${(s.egtDisplayedK - 273.15).toFixed(1)} C, limiter ${s.fadec.limiter}, egtExceedance ${String(s.flags.egtExceedance)}, thrust ${(s.netThrustN / 1000).toFixed(1)} kN`);
+    }
+    expect(true).toBe(true);
+  });
+});

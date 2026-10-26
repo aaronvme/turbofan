@@ -659,7 +659,7 @@ None.
   - Failure:
     - With vsync, a frame that needs more than two intervals arrives after three (50 ms at 60 Hz), which is above 2.5 intervals (41.75 ms).
     - About ten such frames in a row (> 500 ms) make the run INVALID with the reason "window occluded or unfocused, or a stall", and the configuration loses its numbers.
-    - D2-13 wants exactly such a load reported as "below display rate". P1 is unaffected, since every valid row held 60 fps. But P2/L13 on a heavy preset (w1/geometry renders in about 20-23 ms today, see W1G-I3) could hit it.
+    - D2-13 wants exactly such a load reported as "below display rate". P1 is unaffected, since every valid row held 60 fps. But P2/L13 on a heavy preset (w1/geometry renders in about 20-23 ms today, see W1G-I2) could hit it.
   - Fix: treat a delta as the occlusion signature only near 1 Hz (for example over 10 intervals or over 250 ms), and leave 3-10-interval cadences to the warning. Confirm the change with the orchestrator, since D2-11 fixed the rule's wording.
 - **W0G-N6 OPEN: two blind spots in the live path.**
   - `run.ts:475` and `:491`: `page.evaluate` has no timeout, so a run whose rAF stops entirely hangs the harness (the handoff lists it as a gotcha). Fix: race it against warm-up + run + 30 s, and record the run as INVALID "stalled".
@@ -670,3 +670,159 @@ None.
   - Fix: compare the medians over the delivered frames, and give the second pass at least 8x the work, or assert only that both are finite and positive and leave the ratio to a bench.
 
 **Verdict w0/gpu-spikes @d1cb041: MERGE.** Every pass-2 finding is fixed or deferred with a reason, and the official evidence in GPU_FACTS matches the recorded files. The nits go to the next harness touch, before the next official run (P2/P3, L13). N7 goes there too, or to the w2/solver builder, who owns the GPU suite next.
+
+## Critic pass 3: w1/cycle @5d17120
+
+Reviewed 2026-10-26 by the pass-3 critic: the branch diff from 3969af7 (`src/thermo/{gas,species}.ts`, `src/cycle/{at,componentMaps,engine,greitzer,model,newton}.ts`, `src/cycle/maps/*`, the six test files, NOTICE, the ENGINE_FACTS changes, the handoff). Checklists applied: typescript-reviewer, silent-failure-hunter, pr-test-analyzer, security-review (pure numerics, no I/O; nothing found).
+
+New probe: `docs/reviews/probes/w1c-cycle.probe.ts.txt`. It covers air cp below 300 K, the design stations, the part-power ground-run points, cold-start Newton solves, hot-day EGT, the Greitzer B and the sizing secant. Its output goes to the file named by `PROBE_OUT`, because vitest 5 swallowed `console.log` here.
+
+**Gates at HEAD** (rerun in the builder worktree; tracked files unchanged):
+- `npm test`: 1036 passed (36 files), exit 0, 53 s.
+- `npm run lint`: clean. `npm run typecheck`: clean.
+- `npm run coverage`: lines 99.53 %, statements 98.58 %, branches 90.05 %, functions 99.85 %. `src/cycle`: lines 100 %, branches 99.27 %. `src/thermo`: lines 100 %, branches 87.5 %.
+- The branch has no `test:mesh` (it predates w1/mesh); see the trial merge.
+
+**Thermo vs its sources (T1-T4).**
+- I checked all ten NASA-7 coefficient sets in `species.ts` against GRI-Mech 3.0 `thermo30.dat` (N2, O2, AR, CO2, H2O): identical.
+- The test's JANAF references match JANAF (N-023, O-029, Ar-001, C-095, H-064): cp at 300/500/1000/1500/2000 K and H − H298 at 500-2000 K.
+- The air composition (USSA 1976, four species renormalised), the C12H23 Jet-A formula and the stoichiometric FAR 0.0682 are right.
+- h and the entropy function integrate cp analytically, with continuity at 1000 K (T4 2e-15).
+- Two caveats, W1C-N1 and N2: N2's polynomial is valid only from 300 K, and T3's reference is a frozen JANAF mixture rather than a CEA run.
+
+**pyCycle port: provenance, attribution, numbers, scaling.**
+- I downloaded `pycycle/maps/{Fan,LPC,HPC,HPT,LPT}_map.py` at the cited commit ee7e161 and parsed them without executing anything.
+- The kept slice is identical to the TypeScript for every map: every axis and every Wc/eff/PR (and Wp/eff) table entry, the design points (Fan 0.99 / 2.20 / 1.754; LPC 1.00 / 2.15 / 1.969; HPC 0.976 / 2.05 / 10.894; HPT and LPT Np 100 / PR 6.0) and RlineStall 1.0.
+- The Fan and LPC alpha slices are duplicates. The HPC/HPT/LPT second slices differ and are dropped, as NOTICE states.
+- NOTICE and the per-file headers give the source, the commit, the licence and the changes.
+- The scaling is pyCycle's: s_Wc = Wc_des / WcMap_des, PR − 1 scaled, s_eff, speed as a fraction of design (turbines likewise with Wp).
+- The licence-text and NOTICE-merge point is W1G-N4.
+
+**Design point and calibration.**
+- C1-C3 close **exactly by construction**: the fan bypass PR (1.537) is solved so that thrust equals takeoffThrust at the EEDB fuel flow, and BPR, OPR and airflow are inputs. So they validate the sizing, not the model. The model's evidence has to come from points it was not fitted to (W1C-I1).
+- Design stations: T3 810.6 K, T4 1641 K, T41 1551 K, T45 1200.6 K, T49.5 1109.6 K (866.5 °C displayed); HPC PR 11.05, HPT PR 3.50, LPT PR 3.15. All plausible for the class.
+- **N1 101 % at ISA takeoff:** justified, and no threshold is touched. It reproduces the 25 °C run's N2 (99.9 % vs 99.8 % measured), and it keeps the 30 °C corner at 103.44 % N1, under the 104 % TCDS limit. The plausible window is narrow: above about 101.5 % the corner breaks 104 %.
+- **The probe fraction 0.35 (D2-3) is fitted to one point** (855 °C at N1 97.4 %). It reproduces that point (853.1 °C), but the other published points miss (W1C-I1).
+- **Comment rot:** `engine.ts:135-137` still says 0.35 "also absorbs the thermocouple's radiation and sampling error", which D2-3 explicitly rejected (W1C-N4).
+
+**C5 (D2-1) and the EGT limiter.**
+- The test starts from a stabilised 14.9 % of rated thrust (N1 moved < 0.05 points over the last second) and moves the lever to maximum in 1 s. It times 95 % thrust from the lever start: 2.60 s, against ≤ 5.0 s (unchanged).
+- It also asserts no surge, valid states and displayed EGT below the 960 °C transient limit throughout.
+- The EGT-limiter work (rate feedback, a TD/3 derivative filter, error scale 300 → 150 K) is controller tuning, not a threshold.
+- The self-imposed 33.73(a) ground-idle slam passes at 958.3 °C against 960 °C, a 1.7 K margin.
+- **The limiter's setpoint is the transient limit minus 5 K** (`model.ts:462`, 955 °C), not the 950 °C redline. So a steady point can sit above the redline: the probe runs a 45 °C day at full lever for 30 s and gets 951.8 °C with `egtExceedance` set (W1C-N5).
+
+**The Greitzer bug, verified (0d93ac3 RED, 0d43dbb).**
+- `equilibrium()` used to bracket only [0, 2W], so a wide-open throttle returned the characteristic's peak, which is not an equilibrium.
+- It now doubles the bracket until the throttle line is crossed. It terminates, because the cubic goes to −∞ and the throttle flow is odd in Ψ.
+- The test pins a falling-branch equilibrium, criticalB = ∞ there, and stability at B = 5.
+- The model's own surge parameters are unchanged. But see W1C-I2.
+
+**Newton robustness (C7) and conservation (C8).**
+- The C7 sweep (warm-started continuation) converges in ≤ 7 iterations to 7e-12.
+- Cold solves from the design guess, with no continuation, also converge at every N1 from 95 to 24 %, in 5-24 iterations. The 24 is at N1 24 %, at the edge of the 25-iteration budget.
+- Rated-thrust solves converge from −40 to +50 °C OAT in 4-10 iterations.
+- Failures are reported: a non-finite residual is caught in the line search, a singular Jacobian ends the solve as not converged, and `at()` replaced the `?? 0` fallbacks.
+- C8 (3.4e-11) closes the books: in = w2 h0t + η_b Wf LHV; out = nozzle flows × total enthalpy, bleed at h3, mechanical loss, extraction.
+- **Only zero bleed, zero extraction, zero VBV and Mach 0 are ever tested** (W1C-I4).
+
+**`source: 'model'` (D2-10):** `model.ts:230` sets it, and `model.test.ts` asserts it.
+
+**Mutation testing** (Stryker 10.1.1, perTest, concurrency 8, scratch configs in the cycle worktree, removed afterwards). Per D2-15 the full cycle suite under instrumentation takes hours, so I ran two targeted jobs, each under 15 minutes, with test subsets chosen so the static mutants are affordable:
+- **Run A**:
+  - mutate `src/thermo/gas.ts`, `src/cycle/{at,newton,componentMaps,engine}.ts`;
+  - tests `thermo/gas`, `cycle/numerics`, `cycle/maps`, `cycle/engine` (72 tests);
+  - 1081 mutants, 992 static (92 %), 9 min 56 s.
+  - Scores: gas.ts **88.89 %**, at.ts **100 %**, newton.ts **89.73 %**, componentMaps.ts **82.08 %**, engine.ts **69.63 %**, all **80.52 %** (732 killed, 12 timeouts, 167 survived, 13 no coverage, 157 runtime errors excluded).
+  - engine.ts and componentMaps.ts are lower bounds: the model tests were left out, because each would add minutes per static mutant.
+- **Run B**: mutate `src/cycle/greitzer.ts`, tests `cycle/model.test.ts`. 134 mutants, 2 min 9 s, dry run 48 s.
+  - Score: greitzer.ts **83.58 %** (109 killed, 3 timeouts, 22 survived).
+  - Survivors that matter:
+    - the critical-B formula: the slope and the throttle derivative (`greitzer.ts:35`, `:65`), because the tests only bracket B_crit between 0.5 and 1;
+    - the RK4 stage combination (`:76-81`: sign and half-step mutants still converge at dxi = 0.01);
+    - `helmholtzFrequency`'s V·L vs V/L (`:131`), invisible because the test uses L = 1.
+  - Fix: assert criticalB against its closed form for the test parameters, an RK4 convergence-order or linear-decay check, and the Helmholtz test with L ≠ 1.
+- **Not run:** `model.ts`, the FADEC. Each of its mutants needs the 20-50 s simulation tests, so it is hours of work. That goes to the cycle round, after D2-15's lazy fixture and `ignoreStatic`.
+- I read every survivor. Most are equivalent:
+  - tolerance and loop edges;
+  - Hermite end cases at x exactly on a node;
+  - Newton line-search and finite-difference details that still converge;
+  - residual normalisers;
+  - corrected-flow and corrected-speed factors that are exactly 1 at ISA SLS;
+  - string literals.
+- The ones that matter are W1C-I4.
+
+### Blocking
+None.
+
+### Important
+- **W1C-I1 OPEN: the model matches only the point it was calibrated on. It runs 80-150 K cold at part power and idle.**
+  - Where: probe `w1c-cycle`. The comparison points are WIDURI Table 7, the same on-wing ground run as the calibration (OAT 25 °C, 1008 hPa).
+  - MPA (N1 65.0 %): model N2 87.2 % vs 89.3 % measured, displayed EGT 503.5 °C vs 585 °C (−81.5 K).
+  - Idle: 338 °C vs 466 / 493 °C (−128 to −155 K). At ISA the handoff reports 319 °C.
+  - `mpaN1`, `mpaN2`, `mpaEgt`, `idleEgtLow` and `idleEgtHigh` are in `facts.ts`, but no test uses them. C4 passes only because `idleEgtMax` is an upper bound (500 °C).
+  - Failure: the cockpit EGT, the station strip and the T-s diagram read far too cold at idle and part power, which is where the start, idle and approach scenarios live. WIDURI's start peak (492 °C) cannot come out right from an idle that is 150 K low.
+  - Fix (cycle round):
+    - model the part-power loads the handoff already lists: customer bleed and accessory extraction as ground-run defaults, combustion efficiency falling at idle, VBV flow into the gas path;
+    - re-check the 0.35 probe share against all three points rather than one;
+    - add the MPA and idle points as validation tests, with tolerances the orchestrator sets (decision (l)).
+  - Not a threshold failure. Allowed after merge.
+- **W1C-I2 OPEN: the surge model does not earn the ledger's "Simulated, 100-300 ms surge cycles".**
+  - What the model does:
+    - B is fixed at 1 (`model.ts:119`), and the cubic characteristic is generic: it is not derived from the HPC map.
+    - The episode lasts a fixed 0.3 s (`SURGE_EPISODE_S`). The Greitzer state only modulates station 3 for display.
+  - From the model's own numbers at takeoff:
+    - ωH = 915 rad/s (`HPC_DUCT`, T3 810.6 K), so the Helmholtz period is 6.9 ms and the model's surge oscillation period 8.1 ms;
+    - B = U / (2 ωH Lc) = 0.44 (HPC tip r 0.316 m), below B_crit = 0.661. So by Greitzer's own criterion this compression system would recover rather than deep-surge.
+  - C9 passes because it tests the generic system at chosen B values: it checks the integrator, not the engine.
+  - Failure: the fidelity ledger (PHYSICS §1) and the plan promise simulated 100-300 ms surge cycles. The app would show about 8 ms oscillations inside a scripted 0.3 s window, labelled "Simulated".
+  - Fix, decision (m):
+    - (a) derive B and the characteristic from the engine (U, ωH, Lc; Ψ and Φ from the HPC speed line), end the episode on the Greitzer state's recovery, and check the period against the ledger; or
+    - (b) relabel the ledger row (a Helmholtz-scale oscillation in a scripted episode, "Synthesized from a lumped model") and correct the plan's 100-300 ms.
+  - Allowed after merge: W3 scenarios are the consumer.
+- **W1C-I3 OPEN (cross-branch): nothing ties the cycle's sized A8/A18 to the definition's after D2-2.**
+  - Where: `tests/unit/cycle/engine.test.ts:66-67` only requires |sized / fact − 1| < 0.15. After the merge the facts are 0.1852 / 0.9161 and the sizing gives 0.185182 / 0.916069.
+  - Failure: any recalibration in the cycle round (I1, D2-15's fixture) moves the sized areas, while the flowpath, the mesh and the 3D geometry keep the old ones, silently. The W3 coupling (L12, thrust ±2 %) would then run a solver nozzle that differs from the cycle's.
+  - Fix: after the merge, pin |sized / fact − 1| < 5e-4 (the four-digit rounding), with a message saying to redo D2-2 (facts, then `npm run mesh`). Also update the stale text that the merge leaves:
+    - ENGINE_FACTS "Cycle model calibration": "Until then the cycle uses its own sized areas and the definition keeps 0.1778 / 0.9067 m²", and "the definition's flowpath still uses the W0 placeholders";
+    - the test name "near the W0 placeholders".
+  - Owner: the cycle round, right after the merge.
+- **W1C-I4 OPEN: the gas path is only tested at static, no-bleed, no-extraction conditions. Mutants that matter survive.**
+  - Run A survivors, with what they show:
+    - **Off-design paths never run.** No cycle test uses Mach > 0, a customer bleed, a power extraction or a VBV fraction. Survivors include: free-stream v0, h0t and pt (`engine.ts:303-307`); bleed, cooling and VBV flows (`:369-379`, `:415-418`); extraction (`:439`); bleed in the C8 books (`:497-503`); bypass pressure thrust (`:425`, `:563-566`, zero only while the bypass is unchoked).
+    - **The gas path at the design unknowns is never compared with the sizing cycle.** `wCool = fraction / w25` (`:378`, a 12 % cooling flow dropped to 0.2 %) survives. C1's 3 % is too loose to see it, and the design-point reproduction test compares the mutated path with itself.
+    - **The nozzle's thermally perfect throat iteration can be deleted** (`:282-287`, the calorically perfect first guess stays). The sizing re-closes the thrust, and only the loose 15 % area check is left.
+    - **The surge margin's value is unpinned.** `(prSurge − pr) × pr` and the bracket and bisection mutants survive (`componentMaps.ts:175-183`). The tests check only zero on the stall line and > 0.05 on R-line 2, yet C5's "min HPC surge margin 0.106" and the model's surge trigger rest on it.
+    - **The product composition is unpinned.** `N2: AIR_PER_FUEL / xAir('N2')` survives (`gas.ts:59`), because T3's reference mixes JANAF at the model's own mole fractions. Pin the fractions against independent values: CO2 13.3 %, H2O 12.7 %, N2 73.1 %, Ar 0.87 % for C12H23 with stoichiometric dry air.
+    - Minor: the display-shunt ramp (`engine.ts:846-847`, never tested between 8300 and 8500 rpm N2); the inverse range check (`gas.ts:191`, no test that an out-of-range h throws).
+  - Fix: one test per item:
+    - C7/C8 at a bleed + extraction + VBV point and at Mach 0.25 (no thresholds needed beyond C7/C8 themselves);
+    - max |residual| < 1e-9 for the gas path at the design unknowns;
+    - the choked flux against an independent thermally perfect throat;
+    - the surge margin on a hand-computed map point;
+    - the product mole fractions;
+    - the shunt at 8400 rpm.
+  - Then the full mutation score after D2-15. Allowed after merge, in the cycle round.
+
+### Nits
+- **W1C-N1 OPEN: air cp below 300 K.**
+  - Where: `species.ts`. GRI's N2 polynomial (dated 1986) is valid from 300 K, but `T_MIN_K` is 200 (`gas.ts:28`). Argon is exact at any T.
+  - The probe against JANAF: −0.45 % at 250 K, −0.82 % at 200 K. ISA SLS (288.15 K) already sits on the extrapolated piece, at about −0.2 %. A −40 °C day, or an altitude far field in W2's GAS_TABLES codegen, would exceed T1's 0.5 %.
+  - The header also calls the N2 entry Burcat 2005, which it is not.
+  - Fix: Burcat's 200-1000 K N2, and two extra T1-style checks at 220 and 250 K (extra points, not a threshold change).
+- **W1C-N2 OPEN: T3's reference is not a CEA run.** It is a frozen, complete-combustion mixture of JANAF species at the model's own composition (the handoff says so). That tests the polynomial fit, not the frozen-composition assumption, and the composition itself is unpinned (I4). Fix: one CEA frozen run at the stoichiometric point, or reword T3's reference in PHYSICS with a ledger note (no dissociation). Orchestrator wording, decision (n).
+- **W1C-N3 OPEN: `sizeEngine` does not report a non-converged secant.** `engine.ts:620-627` stops after 40 iterations without a check. For 1.2x and 1.6x the rated thrust it returns a SizedEngine whose design net thrust is NaN (probe); 2x throws in thermo. C1 guards the reference engine, so this is a nit. Fix: throw when |fb| is above the tolerance or not finite.
+- **W1C-N4 OPEN: comment rot and silent defaults.**
+  - `engine.ts:135-137` (the thermocouple wording against D2-3);
+  - `componentMaps.ts:11` (points to `src/cycle/match.ts`, which does not exist);
+  - `engine.ts:346` destructures the unknowns with `= 0` / `= 1` defaults, where the rest of the module uses `at()`.
+- **W1C-N5 OPEN: EGT limits, steady vs transient.**
+  - The limiter aims at 955 °C (`model.ts:462`), so a steady point can sit above the 950 °C takeoff redline: 45 °C day, 951.8 °C, `egtExceedance` on (probe).
+  - `egtExceedance` compares against 950 °C with no time, so it also fires during the 1 s of the allowed 960 °C transient.
+  - Related: the N1 limiter aims 1 point under the 104 % TCDS limit (`model.ts:455`). At the 30 °C flat-rating corner, the transient model at full lever is N1-limited at 103.00 % and gives 120.9 kN, 0.4 % short of rated takeoff thrust, which the steady C6 solve reaches at 103.44 % (probe).
+  - Fix: a steady setpoint at or below 950 °C minus a margin, with the 960 °C band allowed for at most 20 s (TCDS note 4), and a time-aware flag. Let the N1 limiter sit closer to 104 %, or place the corner rating inside it. Expect to retune the 1.7 K slam margin once I1 lands.
+
+**Verdict w1/cycle @5d17120: MERGE.**
+- No threshold was loosened. C5 follows D2-1. The thermo data, the pyCycle numbers and the scaling match their sources. The Newton and C8 machinery is robust, and nothing is swallowed.
+- I explicitly allow I1-I4 after the merge, assigned to the planned **cycle fix round** together with D2-15 and the full mutation score: I3 first, then I4, then I1 (needs decision (l)); I2 needs decision (m).
+- The nits go to the same round.
