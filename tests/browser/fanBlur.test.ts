@@ -153,7 +153,7 @@ describe('W1L-I3: the fan blur matches a 64-still box-shutter reference', () => 
       if (traa.mae > LIMITS.traa.mae || traa.tile > LIMITS.traa.tile)
         failures.push(`${shot} shipped`);
     }
-    console.log(`W1L-I3 fan blur\n${rows.join('\n')}`);
+    console.warn(`W1L-I3 fan blur\n${rows.join('\n')}`);
     expect(v.stats().errors).toEqual([]);
     expect(failures, rows.join('\n')).toEqual([]);
   });

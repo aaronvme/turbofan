@@ -100,7 +100,7 @@ describe('W1L-I1: closed-engine culling changes nothing visible', () => {
           );
         }
       }
-    console.log(`W1L-I1 culling\n${rows.join('\n')}`);
+    console.warn(`W1L-I1 culling\n${rows.join('\n')}`);
     expect(view.stats().errors).toEqual([]);
     expect(failures, rows.join('\n')).toEqual([]);
   });

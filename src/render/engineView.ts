@@ -22,7 +22,7 @@ import { easeInOut, explodeOffsets } from '../geometry/explode';
 import { advanceAngle, shutterBlurAngle } from '../geometry/motion';
 import { closedViewVisibility } from '../geometry/visibility';
 import { requestSimDevice, type GpuErrorReport, type SimDevice } from '../gpu/device';
-import type { PassMedians } from '../gpu/passTimings';
+import type { FrameSample, PassMedians } from '../gpu/passTimings';
 import { createMockCycle, mockSteadyState, MOCK_LABEL } from '../mocks/mockCycle';
 import { buildEngineScene, type EngineScene } from './engineScene';
 import { createLookUniforms, createMaterials, type LookUniforms } from './materials';
@@ -78,6 +78,10 @@ export interface EngineView {
   /** Advances the simulation clock by dt seconds and renders one frame. */
   frame(dtS: number): void;
   stats(): EngineViewStats;
+  /** Records every frame's pass timings from now on (a D0-1 timing run, W1L-I4). */
+  beginTimingRun(): void;
+  /** The frames since beginTimingRun; stops recording. */
+  endTimingRun(): FrameSample[];
   dispose(): Promise<void>;
 }
 
@@ -348,6 +352,12 @@ async function assemble(
         timings: timer.medians(),
         timestamps: timer.enabled,
       };
+    },
+    beginTimingRun() {
+      timer.beginRun();
+    },
+    endTimingRun() {
+      return timer.endRun();
     },
     async dispose() {
       post.dispose();

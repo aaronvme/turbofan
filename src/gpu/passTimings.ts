@@ -9,7 +9,7 @@
 // [ ... ]"), an RTT node "<name> [ RTT ]", the shadow map "Shadow Map [ <light> ]"
 // (plus "VSM..." blurs), and the RenderPipeline's final quad "Render Pipeline".
 
-import { MAX_PASS_MS } from './timestamps';
+import { MAX_PASS_MS } from './timestamps.ts';
 
 export const PASS_GROUPS = [
   'shadow',
@@ -128,8 +128,11 @@ export function summarizeRun(frames: readonly FrameSample[]): RunSummary {
 export class RollingPassStats {
   private readonly frames: { gpu: PassMs; total: number; cpu: number }[] = [];
   private run: FrameSample[] | null = null;
-  constructor(private readonly window: number) {
+  private readonly window: number;
+  // no parameter property: Node's type stripping (tools/lookdev/capture.ts imports this) rejects it
+  constructor(window: number) {
     if (!(Number.isInteger(window) && window > 0)) throw new Error('RollingPassStats: window > 0');
+    this.window = window;
   }
 
   push(gpu: PassMs, cpuMs: number): void {

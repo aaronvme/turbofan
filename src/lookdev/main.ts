@@ -5,7 +5,7 @@
 
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { ENGINE_DEFINITION } from '../engine/definition';
-import { PASS_GROUPS, type PassMedians } from '../gpu/passTimings';
+import { PASS_GROUPS, type FrameSample, type PassMedians } from '../gpu/passTimings';
 import { createEngineView, type DebugFlags, type EngineView } from '../render/engineView';
 import type { PostDebug } from '../render/post';
 import { LOOK_PRESET_IDS, LOOK_PRESETS, type LookMode, type LookPresetId } from '../render/presets';
@@ -27,8 +27,21 @@ interface LookdevApi {
   renderFrames(n: number): Promise<void>;
   /** Renders n frames and returns the per-pass GPU and CPU medians over them. */
   timeFrames(n: number): Promise<PassMedians>;
+  /** Renders for `ms`, one frame per animation frame (a warm-up). */
+  renderFor(ms: number): Promise<void>;
+  /** One timing run of `ms` (W1L-I4): every frame's passes, the rAF intervals, hidden time. */
+  timeRun(ms: number): Promise<TimingRun>;
+  /** What the page can tell about the conditions (D0-1): battery, adapter, user agent. */
+  conditions(): Promise<Record<string, unknown>>;
   pause(paused: boolean): void;
   stats(): ReturnType<EngineView['stats']>;
+}
+
+export interface TimingRun {
+  readonly frames: FrameSample[];
+  readonly rafDeltas: number[];
+  readonly hiddenMs: number;
+  readonly events: string[];
 }
 
 const params = new URLSearchParams(location.search);
@@ -154,6 +167,78 @@ async function main(): Promise<void> {
         await nextFrame();
       }
       await view.device.device.queue.onSubmittedWorkDone();
+    },
+    async renderFor(ms) {
+      paused = true;
+      const end = performance.now() + ms;
+      while (performance.now() < end) {
+        view.frame(1 / 60);
+        await nextFrame();
+      }
+      await view.device.device.queue.onSubmittedWorkDone();
+    },
+    async timeRun(ms) {
+      paused = true;
+      const events: string[] = [];
+      let hiddenMs = 0;
+      let hiddenSince = document.hidden ? performance.now() : -1;
+      const onVis = () => {
+        const t = performance.now();
+        events.push(`${document.visibilityState} at ${t.toFixed(0)}`);
+        if (document.hidden && hiddenSince < 0) hiddenSince = t;
+        if (!document.hidden && hiddenSince >= 0) {
+          hiddenMs += t - hiddenSince;
+          hiddenSince = -1;
+        }
+      };
+      const onBlur = () => events.push(`blur at ${performance.now().toFixed(0)}`);
+      const onFocus = () => events.push(`focus at ${performance.now().toFixed(0)}`);
+      document.addEventListener('visibilitychange', onVis);
+      window.addEventListener('blur', onBlur);
+      window.addEventListener('focus', onFocus);
+      const rafDeltas: number[] = [];
+      view.beginTimingRun();
+      let last = performance.now();
+      const end = last + ms;
+      while (last < end) {
+        view.frame(1 / 60);
+        await nextFrame();
+        const t = performance.now();
+        rafDeltas.push(t - last);
+        last = t;
+      }
+      // the last frames' timestamp read-backs land during the next few frames
+      for (let i = 0; i < 4; i++) {
+        view.frame(1 / 60);
+        await nextFrame();
+      }
+      const frames = view.endTimingRun();
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('focus', onFocus);
+      if (hiddenSince >= 0) hiddenMs += performance.now() - hiddenSince;
+      return { frames, rafDeltas, hiddenMs, events };
+    },
+    async conditions() {
+      const nav = navigator as Navigator & {
+        getBattery?: () => Promise<{ charging: boolean; level: number }>;
+      };
+      const battery = nav.getBattery ? await nav.getBattery() : null;
+      const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+      const info = adapter?.info;
+      return {
+        userAgent: navigator.userAgent,
+        battery: battery ? { charging: battery.charging, level: battery.level } : 'unavailable',
+        adapter: info
+          ? {
+              vendor: info.vendor,
+              architecture: info.architecture,
+              device: info.device,
+              description: info.description,
+            }
+          : 'unavailable',
+        timestamps: view.stats().timestamps,
+      };
     },
     async timeFrames(n) {
       paused = true;
