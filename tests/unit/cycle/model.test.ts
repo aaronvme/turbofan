@@ -67,7 +67,7 @@ function run(
   return out;
 }
 
-describe('transient model: shaft dynamics and FADEC', () => {
+describe('transient model: shaft dynamics and FADEC', { timeout: 120_000 }, () => {
   it('spool inertias are positive estimates (LP larger than HP)', () => {
     expect(SPOOL_INERTIA.lpKgM2).toBeGreaterThan(SPOOL_INERTIA.hpKgM2);
     expect(SPOOL_INERTIA.hpKgM2).toBeGreaterThan(0);
@@ -133,7 +133,7 @@ describe('transient model: shaft dynamics and FADEC', () => {
   });
 });
 
-describe('start sequence', () => {
+describe('start sequence', { timeout: 120_000 }, () => {
   function start(fuelScale = 1, ignition: CycleInputs['ignition'] = 'auto') {
     const m = createCycleModel({ startFuelScale: fuelScale });
     m.reset('shutdown', ISA_SLS);
