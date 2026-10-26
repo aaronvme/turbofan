@@ -5,14 +5,19 @@
 
 import {
   AgXToneMapping,
+  BackSide,
   DirectionalLight,
   EquirectangularReflectionMapping,
+  Mesh,
+  MeshBasicNodeMaterial,
   PerspectiveCamera,
+  SphereGeometry,
   Vector3,
   WebGPURenderer,
   type DataTexture,
 } from 'three/webgpu';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
+import { mix, positionWorld, smoothstep, vec3 } from 'three/tsl';
 import { DEFAULT_CYCLE_INPUTS, type CycleInputs } from '../contracts/cycle';
 import type { EngineDefinition } from '../contracts/engine';
 import { buildEngineGeometry, GEOMETRY_QUALITY } from '../geometry/engineGeometry';
@@ -36,6 +41,7 @@ export interface EngineViewOptions {
   readonly hdriUrl: string;
   readonly quality?: keyof typeof GEOMETRY_QUALITY;
   readonly onError?: (r: GpuErrorReport) => void;
+  readonly debug?: 'rotorAlpha' | 'rotorBlur' | 'ao' | 'visible' | null;
 }
 
 export interface EngineViewStats {
@@ -79,7 +85,9 @@ export async function createEngineView(o: EngineViewOptions): Promise<EngineView
   });
   await renderer.init();
   renderer.toneMapping = AgXToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 1.5;
+  // the rotor pass must start transparent: its alpha is the blade coverage
+  renderer.setClearColor(0x000000, 0);
   renderer.setPixelRatio(o.dpr);
   renderer.setSize(o.width, o.height, false);
 
@@ -92,13 +100,20 @@ export async function createEngineView(o: EngineViewOptions): Promise<EngineView
   hdri.mapping = EquirectangularReflectionMapping;
   for (const s of [scene.main, scene.rotors]) {
     s.environment = hdri;
-    s.environmentIntensity = 0.9;
+    s.environmentIntensity = 1.35;
     s.environmentRotation.set(0, 2.2, 0);
   }
-  scene.main.background = hdri;
-  scene.main.backgroundBlurriness = 0.55;
-  scene.main.backgroundIntensity = 0.22;
-  scene.main.backgroundRotation.set(0, 2.2, 0);
+  // a dark studio sweep around the engine (the HDRI lights and reflects; it is not shown)
+  const dirUp = positionWorld.normalize().y;
+  const backdropMat = new MeshBasicNodeMaterial({ side: BackSide, depthWrite: false });
+  backdropMat.colorNode = mix(
+    vec3(0.05, 0.054, 0.06),
+    vec3(0.004, 0.0045, 0.005),
+    smoothstep(-0.35, 0.6, dirUp),
+  );
+  const backdrop = new Mesh(new SphereGeometry(80, 48, 24), backdropMat);
+  backdrop.position.set(1.2, 0, 0);
+  scene.main.add(backdrop);
   const key = new DirectionalLight(0xfff4e8, 1.6);
   key.position.set(-2, 4, 3);
   const keyR = key.clone();
@@ -117,9 +132,14 @@ export async function createEngineView(o: EngineViewOptions): Promise<EngineView
     {
       x: (fanRow.leadingEdge.hub.x + fanRow.trailingEdge.tip.x) / 2,
       rHub: fanRow.leadingEdge.hub.r,
-      rTip: fanRow.leadingEdge.tip.r,
+      // out to the casing and a little past it: at an oblique view the swept blade tips
+      // project beyond the tip radius on the mid-chord disc
+      rTip: fanRow.leadingEdge.tip.r + 0.04,
+      pitch: (2 * Math.PI) / fanRow.count,
+      xFore: Math.min(fanRow.leadingEdge.hub.x, fanRow.leadingEdge.tip.x) - 0.004,
+      xAft: Math.max(fanRow.trailingEdge.hub.x, fanRow.trailingEdge.tip.x) + 0.03,
     },
-    { blurSamples: 24, aoStrength: 0.85, bloomStrength: 0.12 },
+    { blurSamples: 24, aoStrength: 0.85, bloomStrength: 0.12, debug: o.debug ?? null },
   );
 
   const cycle = createMockCycle(def);

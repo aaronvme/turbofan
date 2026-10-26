@@ -16,6 +16,7 @@
 
 import {
   Color,
+  InstancedMesh,
   MeshPhysicalNodeMaterial,
   MeshStandardNodeMaterial,
   type Node,
@@ -108,10 +109,24 @@ function phys(p: PhysParams): MeshPhysicalNodeMaterial {
   return m;
 }
 
-/** Heat-tint film thickness, nm: varies along x and around, the oxide colours of hot metal. */
-function heatFilm(u: LookUniforms, scale: number): F {
-  const n = mx_fractal_noise_float(positionLocal.mul(vec3(6, 10, 10)), 3, 2, 0.5);
-  return mix(float(120), float(560).add(n.mul(180)), u.heat.mul(scale));
+/**
+ * Heat tint: the straw-bronze-blue oxide colours of nickel alloy that ran hot, as a colour
+ * ramp over a low-frequency noise (an interference film reads as rainbow camouflage at this
+ * scale), plus a weak first-order iridescence for the angle-dependent sheen.
+ */
+function heatTint(base: Node<'vec3'>, u: LookUniforms, amount: number): Node<'vec3'> {
+  const n = mx_fractal_noise_float(positionLocal.mul(vec3(2.5, 6, 6)), 3, 2, 0.5)
+    .mul(0.5)
+    .add(0.5);
+  const straw = vec3(0.62, 0.5, 0.32);
+  const bronze = vec3(0.45, 0.3, 0.2);
+  const blue = vec3(0.26, 0.3, 0.42);
+  const ramp = mix(mix(straw, bronze, smoothstep(0.25, 0.55, n)), blue, smoothstep(0.6, 0.9, n));
+  return mix(base, base.mul(ramp).mul(1.6), u.heat.mul(amount));
+}
+
+function heatFilm(): Node<'float'> {
+  return float(320).add(mx_noise_float(positionLocal.mul(4)).mul(40));
 }
 
 function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
@@ -198,23 +213,21 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
       m.anisotropyNode = vec2(0.6, 0);
       break;
     case 'combustorCase':
-      m = phys({ color: c3(0.55, 0.51, 0.45), metalness: 1, roughness: 0.36, iridescence: 0.7 });
-      m.iridescenceThicknessNode = heatFilm(u, 0.6);
+      m = phys({ color: c3(0.55, 0.51, 0.45), metalness: 1, roughness: 0.36, iridescence: 0.15 });
+      m.iridescenceThicknessNode = heatFilm();
+      m.colorNode = heatTint(vec3(0.55, 0.51, 0.45), u, 0.5);
       break;
     case 'turbineCase':
-      m = phys({ color: c3(0.52, 0.47, 0.4), metalness: 1, roughness: 0.4, iridescence: 0.9 });
-      m.iridescenceThicknessNode = heatFilm(u, 0.85);
+      m = phys({ color: c3(0.52, 0.47, 0.4), metalness: 1, roughness: 0.4, iridescence: 0.2 });
+      m.iridescenceThicknessNode = heatFilm();
+      m.colorNode = heatTint(vec3(0.52, 0.47, 0.4), u, 0.8);
       break;
     case 'exhaust':
     case 'plug': {
-      const plug = kind === 'plug';
-      m = phys({
-        color: plug ? c3(0.42, 0.39, 0.35) : c3(0.47, 0.43, 0.38),
-        metalness: 1,
-        roughness: 0.46,
-        iridescence: 1,
-      });
-      m.iridescenceThicknessNode = heatFilm(u, 1);
+      const base = kind === 'plug' ? vec3(0.42, 0.39, 0.35) : vec3(0.47, 0.43, 0.38);
+      m = phys({ color: c3(0.45, 0.41, 0.37), metalness: 1, roughness: 0.46, iridescence: 0.2 });
+      m.iridescenceThicknessNode = heatFilm();
+      m.colorNode = heatTint(base, u, 1);
       const soot = mx_fractal_noise_float(positionLocal.mul(vec3(3, 14, 14)), 4, 2, 0.5)
         .mul(0.5)
         .add(0.5);
@@ -231,7 +244,7 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
       });
       m.colorNode = spinnerSpiral();
       // the spinner turns with the fan and is drawn (and blurred) in the rotor pass
-      m.mrtNode = mrt({ blur: vec4(u.lpBlur, 0, 0, 1) });
+      m.mrtNode = mrt({ blur: vec4(u.lpBlur, TWO_PI, 0, 1) });
       break;
     }
     case 'drum':
@@ -355,13 +368,10 @@ function rowSurface(kind: RowMaterial, u: LookUniforms): MeshPhysicalNodeMateria
         color: c3(0.58, 0.52, 0.43),
         metalness: 1,
         roughness: 0.38,
-        iridescence: 1,
+        iridescence: 0.3,
       });
-      m.iridescenceThicknessNode = mix(
-        float(180),
-        float(520),
-        span.mul(0.7).add(chord.mul(0.3)),
-      ).mul(u.heat.mul(0.8).add(0.2));
+      m.iridescenceThicknessNode = mix(float(260), float(380), span);
+      m.colorNode = heatTint(vec3(0.58, 0.52, 0.43), u, kind === 'lptVane' ? 0.7 : 0.5);
       return m;
     }
   }
@@ -403,8 +413,12 @@ export function createMaterials(u: LookUniforms): MaterialSet {
         );
         m.positionNode = bladeHide(u, rowAngle, tMin, tMax);
         if (spool !== null) {
-          // the rotor pass records the angle this spool turns while the shutter is open
-          m.mrtNode = mrt({ blur: vec4(spool === 'lp' ? u.lpBlur : u.hpBlur, 0, 0, 1) });
+          // the rotor pass records the angle this spool turns while the shutter is open and
+          // the row's blade pitch (the image is periodic in it: see src/render/post.ts)
+          const pitch = uniform(0).onObjectUpdate(({ object }) =>
+            object instanceof InstancedMesh ? TWO_PI / object.count : TWO_PI,
+          );
+          m.mrtNode = mrt({ blur: vec4(spool === 'lp' ? u.lpBlur : u.hpBlur, pitch, 0, 1) });
         }
         return m;
       }),

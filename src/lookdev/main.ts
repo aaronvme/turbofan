@@ -44,6 +44,7 @@ async function main(): Promise<void> {
     dpr: devicePixelRatio,
     hdriUrl: '/hdri/aircraft_workshop_01_1k.hdr',
     quality: params.get('quality') === 'test' ? 'test' : 'high',
+    debug: (params.get('debug') as 'rotorAlpha' | 'rotorBlur' | 'ao' | 'visible' | null) ?? null,
   });
   const controls = new OrbitControls(view.camera, canvas);
   controls.enableDamping = true;

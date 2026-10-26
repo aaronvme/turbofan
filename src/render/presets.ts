@@ -45,8 +45,8 @@ export const LOOK_PRESETS = {
     bokehScale: 0.8,
   },
   exploded: {
-    camera: [0.8, 2.1, 7.6],
-    target: [1.75, 0, 0],
+    camera: [0.6, 1.6, 5.4],
+    target: [1.7, 0, 0],
     fovDeg: 30,
     mode: 'exploded',
     throttle: 0,
