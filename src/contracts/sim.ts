@@ -68,9 +68,27 @@ export function advanceClock(
 // ---------------------------------------------------------------------------------------
 // Snapshot
 
+/**
+ * unavailable: no WebGPU, or the solver was never started. initialising: compiling pipelines
+ * and uploading the mesh. running: stepping. diverged: the solver produced a non-finite number
+ * or detected divergence itself. lost: the GPUDevice was lost or raised an uncaptured error.
+ */
+export const FLOW_RUN_STATUSES = [
+  'unavailable',
+  'initialising',
+  'running',
+  'diverged',
+  'lost',
+] as const;
+export type FlowRunStatus = (typeof FLOW_RUN_STATUSES)[number];
+
+/** The states that are failures and must say why (CLAUDE.md: surface errors, never swallow). */
+const FAILED_FLOW_STATUSES: readonly FlowRunStatus[] = ['diverged', 'lost'];
+
 export interface FlowStatus {
-  /** False until the solver is initialised (or when WebGPU is unavailable). */
-  readonly available: boolean;
+  readonly status: FlowRunStatus;
+  /** Why the solver failed; required for diverged and lost, else null or a note. */
+  readonly error: string | null;
   readonly mode: SolverMode;
   readonly stats: FlowStepStats | null;
   readonly reduction: StationReduction | null;
@@ -211,6 +229,71 @@ function sourcesProblems(sources: unknown): string[] {
   return problems;
 }
 
+function flowStatusProblems(flow: unknown): string[] {
+  if (!isRecord(flow)) return ['flow must be an object'];
+  const { status, error } = flow;
+  const problems: string[] = [];
+  if (!(typeof status === 'string' && (FLOW_RUN_STATUSES as readonly string[]).includes(status)))
+    problems.push(`flow.status "${String(status)}" must be one of ${FLOW_RUN_STATUSES.join(', ')}`);
+  if (!(error === null || typeof error === 'string'))
+    problems.push('flow.error must be a string or null');
+  else if (
+    (FAILED_FLOW_STATUSES as readonly unknown[]).includes(status) &&
+    !(typeof error === 'string' && error.length > 0)
+  )
+    problems.push(`flow.error must say why the solver is ${String(status)}`);
+  return problems;
+}
+
+/** The first non-finite number in solver output, as "path is value"; null if there is none. */
+function firstNonFinite(value: unknown, path: string): string | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? null : `${path} is ${value}`;
+  if (!isRecord(value)) return null;
+  for (const [key, child] of Object.entries(value)) {
+    const bad = firstNonFinite(child, `${path}.${key}`);
+    if (bad !== null) return bad;
+  }
+  return null;
+}
+
+const finiteOrNull = (v: number | null): number | null =>
+  v !== null && Number.isFinite(v) ? v : null;
+
+/**
+ * Maps non-finite solver output onto the failure channel (W0C-I5): the status becomes
+ * diverged with the offending path in error (a solver that already reports diverged or lost
+ * keeps its own status and message), the nullable stats (GPU time, residual) become null,
+ * stats with a non-finite counter and a reduction with any non-finite value are dropped. A
+ * status with only finite numbers is returned as is. nextSnapshot applies this, so one bad
+ * solver number cannot stop snapshot publication for the cycle and the UI.
+ */
+export function sanitizeFlowStatus(flow: FlowStatus): FlowStatus {
+  const statsBad = firstNonFinite(flow.stats, 'stats');
+  const reductionBad = firstNonFinite(flow.reduction, 'reduction');
+  if (statsBad === null && reductionBad === null) return flow;
+  let stats = flow.stats;
+  if (stats !== null && statsBad !== null) {
+    const nulled: FlowStepStats = {
+      ...stats,
+      gpuTimeMs: finiteOrNull(stats.gpuTimeMs),
+      residualDensityL2: finiteOrNull(stats.residualDensityL2),
+    };
+    stats = firstNonFinite(nulled, 'stats') === null ? nulled : null;
+  }
+  const keepOwn =
+    FAILED_FLOW_STATUSES.includes(flow.status) &&
+    typeof flow.error === 'string' &&
+    flow.error.length > 0;
+  const found = [statsBad, reductionBad].filter((b) => b !== null).join(', ');
+  return {
+    ...flow,
+    status: keepOwn ? flow.status : 'diverged',
+    error: keepOwn ? flow.error : `solver produced a non-finite number: ${found}`,
+    stats,
+    reduction: reductionBad === null ? flow.reduction : null,
+  };
+}
+
 /** Freezes value and everything reachable from it; returns the same object. */
 export function deepFreeze<T>(value: T): T {
   const seen = new WeakSet<object>();
@@ -225,13 +308,19 @@ export function deepFreeze<T>(value: T): T {
 }
 
 /**
- * Builds the next snapshot: copies the parts (so the snapshot shares nothing with sim
- * internals), stamps schema and version, checks plain data and deep-freezes it.
+ * Builds the next snapshot: maps non-finite solver output onto the flow failure channel
+ * (sanitizeFlowStatus), copies the parts (so the snapshot shares nothing with sim internals),
+ * stamps schema and version, checks plain data, sources and flow status, and deep-freezes it.
+ * Anything else that is not plain data (a NaN in the cycle state, a function) still throws:
+ * that is a bug in the sim, not a solver result.
  */
-export function nextSnapshot(previous: SimSnapshot | null, parts: SnapshotParts): SimSnapshot {
+export function nextSnapshot(previous: SimSnapshot | null, input: SnapshotParts): SimSnapshot {
+  const parts: SnapshotParts = isRecord(input.flow)
+    ? { ...input, flow: sanitizeFlowStatus(input.flow) }
+    : input;
   const bad = findNonPlainData(parts);
   if (bad !== null) throw new Error(`snapshot is not plain data: ${bad}`);
-  const problems = sourcesProblems(parts.sources);
+  const problems = [...sourcesProblems(parts.sources), ...flowStatusProblems(parts.flow)];
   if (problems.length > 0) throw new Error(`snapshot ${problems.join('; ')}`);
   // stamped after the copy: SnapshotParts omits these keys only at the type level, and parts
   // spread from the previous snapshot still carry its version (W0C-I1)
