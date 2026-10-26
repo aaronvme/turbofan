@@ -93,6 +93,8 @@ export interface DebugFlags {
   readonly noPost?: boolean;
   /** The post chain without TRAA (the fan-blur reference test compares un-accumulated frames). */
   readonly noTraa?: boolean;
+  /** Write half the linear radiance (no tone map, no sRGB): image tests average light. */
+  readonly linear?: boolean;
   /** Extra LP spool angle, rad (the fan-blur reference renders stills across the exposure). */
   readonly lpPhase?: number;
 }
@@ -168,31 +170,15 @@ async function assemble(
 
   const camera = new PerspectiveCamera(30, o.width / o.height, 0.05, 200);
   const fanRow = def.bladeRows.find((r) => r.id === 'fan');
-  const fanGeo = geo.rows.find((r) => r.row.id === 'fan');
-  if (fanRow === undefined || fanGeo === undefined) throw new Error('engineView: no fan row');
-  const post: LookPipeline = createPipeline(
-    renderer,
-    scene.main,
-    scene.rotors,
-    camera,
-    uniforms,
-    {
-      rHub: fanGeo.blade.rMin,
-      rTip: fanGeo.blade.rMax + 0.002,
-      pitch: (2 * Math.PI) / fanRow.count,
-      xFore: fanGeo.blade.xMin - 0.002,
-      xAft: fanGeo.blade.xMax + 0.002,
-    },
-    {
-      fanSamples: 8,
-      rotorSamples: 8,
-      fanPlanes: 4,
-      aoStrength: 0.9,
-      bloomStrength: 0.06,
-      bloomThreshold: 1.6,
-      debug: o.debug ?? null,
-    },
-  );
+  if (fanRow === undefined) throw new Error('engineView: no fan row');
+  const fanPitch = (2 * Math.PI) / fanRow.count;
+  const post: LookPipeline = createPipeline(renderer, scene.main, scene.rotors, camera, {
+    rotorSamples: 8,
+    aoStrength: 0.9,
+    bloomStrength: 0.06,
+    bloomThreshold: 1.6,
+    debug: o.debug ?? null,
+  });
 
   const cycle = createMockCycle(def);
   cycle.reset('groundIdle');
@@ -208,6 +194,7 @@ async function assemble(
   let lastCut = -1;
   let lastExplode = -1;
   let flags: DebugFlags = {};
+  let fanFrame = 0;
   const target = new Vector3(0.5, 0, 0);
 
   const inputs = (): CycleInputs => ({
@@ -278,7 +265,7 @@ async function assemble(
       const cove = studio.stage.getObjectByName('cyclorama');
       if (cove) cove.visible = f.noStage !== true;
       renderer.shadowMap.enabled = f.noShadow !== true;
-      studio.key.shadow.needsUpdate = true;
+      for (const l of studio.shadowLights) l.shadow.needsUpdate = true;
     },
     frame(dtS) {
       const t0 = performance.now();
@@ -292,6 +279,20 @@ async function assemble(
       for (const g of scene.spoolGroups.hp) g.rotation.x = hp;
       uniforms.lpBlur.value = shutterBlurAngle(st.n1Rpm, shutterDeg, FPS);
       uniforms.hpBlur.value = shutterBlurAngle(st.n2Rpm, shutterDeg, FPS);
+      // the fan's time copies spread over the exposure, re-jittered every frame (golden-ratio
+      // sequence) so the pixels' instants cover the shutter interval (W1L-I3). Up to two
+      // pitches the exposure is exact; beyond, one pitch (the image is periodic in it, so
+      // only the per-blade jitter differs) keeps the copies at distinct phases
+      const fanSpan = uniforms.lpBlur.value <= 2 * fanPitch ? uniforms.lpBlur.value : fanPitch;
+      const fanLive = fanSpan > 1e-5;
+      fanFrame = (fanFrame + 1) % 1_000_000;
+      const j = (fanFrame * 0.6180339887498949) % 1;
+      const nCopies = scene.fanTimeCopies.length;
+      uniforms.fanCopies.value = fanLive ? nCopies : 1;
+      scene.fanTimeCopies.forEach((m, k) => {
+        m.visible = fanLive || k === 0;
+        m.rotation.x = fanLive ? ((k + j) / nCopies - 0.5) * fanSpan : 0;
+      });
 
       const step = dtS / TRANSITION_S;
       cut = Math.max(0, Math.min(1, cut + (mode === 'cutaway' ? step : -step)));
@@ -308,7 +309,8 @@ async function assemble(
         b.rotation.x = wedge.center + wedge.halfWidth;
       }
       // the static shadow map follows the engine only while it moves (mode transitions)
-      if (cut !== lastCut || explode !== lastExplode) studio.key.shadow.needsUpdate = true;
+      if (cut !== lastCut || explode !== lastExplode)
+        for (const l of studio.shadowLights) l.shadow.needsUpdate = true;
       lastCut = cut;
       lastExplode = explode;
       const offsets = explodeOffsets(def, explode, EXPLODE_GAP);
@@ -327,7 +329,7 @@ async function assemble(
 
       post.focusDistance.value = camera.position.distanceTo(target);
       if (flags.noPost === true) renderer.render(scene.main, camera);
-      else post.render(flags.noTraa !== true);
+      else post.render(flags.noTraa !== true, flags.linear === true);
       timer.endFrame(performance.now() - t0);
     },
     stats() {

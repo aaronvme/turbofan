@@ -37,9 +37,11 @@ import {
   floor,
   Fn,
   fract,
+  frameId,
   fwidth,
   hash,
   instanceIndex,
+  interleavedGradientNoise,
   length,
   max,
   min,
@@ -52,6 +54,7 @@ import {
   positionLocal,
   positionView,
   positionWorld,
+  screenCoordinate,
   select,
   sign,
   smoothstep,
@@ -72,7 +75,12 @@ export interface LookUniforms {
   readonly hpBlur: UniformNode<'float', number>;
   /** 0..1: how hot the hot section is drawn (heat tint only, not emission). */
   readonly heat: UniformNode<'float', number>;
+  /** Fan time copies a pixel chooses among this frame (1 when the fan is still). */
+  readonly fanCopies: UniformNode<'float', number>;
 }
+
+/** Time-offset copies of the fan drawn per frame (stochastic blur, src/render/post.ts). */
+export const FAN_TIME_SAMPLES = 8;
 
 export function createLookUniforms(): LookUniforms {
   return {
@@ -81,6 +89,7 @@ export function createLookUniforms(): LookUniforms {
     lpBlur: uniform(0),
     hpBlur: uniform(0),
     heat: uniform(1),
+    fanCopies: uniform(FAN_TIME_SAMPLES),
   };
 }
 
@@ -314,7 +323,8 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
  * Indirect-light occlusion per part family. The studio light is image based and has no
  * visibility, so surfaces deep inside the nacelle or the core would be lit by the whole
  * environment and read washed out in the cutaway; GTAO only covers the small scale. These
- * factors stand in for the cavity occlusion (direct light keeps the key's shadow map).
+ * factors stand in for the cavity occlusion (direct light keeps the key's shadow map, in the
+ * rotor pass too: src/render/studio.ts, rotor shadow proxies).
  */
 const CAVITY: Readonly<Record<PartMaterial, number>> = {
   inletLip: 1,
@@ -401,6 +411,25 @@ function bladeHide(
     const hidden = u.cutHalf.greaterThan(0).and(mid.lessThan(u.cutHalf.add(half)));
     return select(hidden, vec3(0, 0, 0), positionLocal);
   })();
+}
+
+/**
+ * Stochastic time sampling of the fan (W1L-I3): each pixel keeps the fragments of one of the
+ * fan's time copies (userData.timeSample), chosen per pixel and frame by interleaved gradient
+ * noise (well spread in every 3 x 3 neighbourhood, so TRAA's colour clamp spans the samples
+ * and keeps the history). Within that copy the depth test is the ordinary one.
+ */
+function fanTimeMask(u: LookUniforms): Node<'bool'> {
+  const sample = uniform(0).onObjectUpdate(({ object }) =>
+    Number(object?.userData.timeSample ?? 0),
+  );
+  const f = float(frameId.mod(64));
+  const pick = floor(
+    interleavedGradientNoise(screenCoordinate.xy.add(vec2(f.mul(5.588), f.mul(3.117)))).mul(
+      u.fanCopies,
+    ),
+  ).min(u.fanCopies.sub(1));
+  return pick.equal(sample);
 }
 
 /** Per-blade variation in [-1, 1] (V2: identical blades give one identical highlight each). */
@@ -497,7 +526,10 @@ export function createMaterials(u: LookUniforms): MaterialSet {
     row: (kind, spool) =>
       get(`row:${kind}:${String(spool)}`, () => {
         const m = rowSurface(kind, u);
-        const rowAngle = uniform(0).onObjectUpdate(({ object }) => object?.parent?.rotation.x ?? 0);
+        // the row group's spool angle plus the mesh's own turn (a fan time copy's offset)
+        const rowAngle = uniform(0).onObjectUpdate(
+          ({ object }) => (object?.parent?.rotation.x ?? 0) + (object?.rotation.x ?? 0),
+        );
         const tMin = uniform(0).onObjectUpdate(({ object }) =>
           Number(object?.userData.thetaMin ?? 0),
         );
@@ -518,6 +550,7 @@ export function createMaterials(u: LookUniforms): MaterialSet {
           m.mrtNode = mrt({
             blur: vec4(spool === 'lp' ? u.lpBlur : u.hpBlur, pitch, fanFlag, 1),
           });
+          if (kind === 'fanBlade') m.maskNode = fanTimeMask(u);
         }
         return m;
       }),

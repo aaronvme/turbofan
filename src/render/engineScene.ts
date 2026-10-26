@@ -24,7 +24,8 @@ import type { EngineGeometry } from '../geometry/engineGeometry';
 import type { MeshData } from '../geometry/mesh';
 import { instanceMatrices } from '../geometry/rows';
 import type { ClosedViewSet } from '../geometry/visibility';
-import type { MaterialSet } from './materials';
+import { FAN_TIME_SAMPLES, type MaterialSet } from './materials';
+import { ROTOR_SHADOW_LAYER } from './studio';
 
 export interface EngineScene {
   readonly main: Scene;
@@ -40,6 +41,8 @@ export interface EngineScene {
   readonly skins: readonly Object3D[];
   /** Cap meshes: [start face, end face] per part. */
   readonly caps: readonly (readonly [Mesh, Mesh])[];
+  /** The fan's time copies (stochastic blur, src/render/post.ts); index = userData.timeSample. */
+  readonly fanTimeCopies: readonly InstancedMesh[];
   /** Objects the closed engine never shows (src/geometry/visibility.ts): culled in realistic mode. */
   readonly closedHidden: readonly Object3D[];
   readonly triangles: number;
@@ -82,6 +85,7 @@ export function buildEngineScene(
   const skins: Object3D[] = [];
   const caps: [Mesh, Mesh][] = [];
   const closedHidden: Object3D[] = [];
+  const fanTimeCopies: InstancedMesh[] = [];
   const disposables: BufferGeometry[] = [];
   let triangles = 0;
 
@@ -94,12 +98,22 @@ export function buildEngineScene(
     const mesh = new Mesh(g, materials.part(p.spec.material));
     mesh.name = p.spec.id;
     mesh.castShadow = true;
-    mesh.receiveShadow = p.spec.material !== 'spinner';
+    mesh.receiveShadow = true;
     // outer skins first: they fill the depth buffer, so the cases and internals behind them
     // fail the early depth test instead of being shaded and overdrawn (the opaque pass is
     // fill-bound, not triangle-bound)
     mesh.renderOrder = p.spec.skin ? 0 : 1;
     if (!closed.parts.has(p.spec.id)) closedHidden.push(mesh);
+    // the part as a shadow proxy for the rotor pass's lights (W1L-I2, src/render/studio.ts)
+    if (p.spec.material !== 'spinner') {
+      const proxy = new Mesh(g, materials.part(p.spec.material));
+      proxy.name = `shadowProxy:${p.spec.id}`;
+      proxy.layers.set(ROTOR_SHADOW_LAYER);
+      proxy.castShadow = true;
+      proxy.receiveShadow = false;
+      groupOf(p.spec.module, true).add(proxy);
+      if (!closed.parts.has(p.spec.id)) closedHidden.push(proxy);
+    }
     // only the spinner shows that it turns (its paint); drums and disks are axisymmetric
     if (p.spec.material === 'spinner') {
       const spin = new Group();
@@ -142,12 +156,31 @@ export function buildEngineScene(
     mesh.name = `row:${r.row.id}`;
     mesh.renderOrder = 1;
     mesh.castShadow = r.spool === null;
-    mesh.receiveShadow = r.spool === null;
+    // rotors receive the rotor lights' shadows (W1L-I2); they cast none (static maps)
+    mesh.receiveShadow = true;
     if (!closed.rows.has(r.row.id)) closedHidden.push(mesh);
     triangles += (r.blade.mesh.indices.length / 3) * r.row.count;
     const rowGroup = new Group();
     rowGroup.name = `rowGroup:${r.row.id}`;
     rowGroup.add(mesh);
+    if (r.material === 'fanBlade' && r.spool !== null) {
+      // the fan's time copies share the geometry, the instances and the material; the view
+      // turns each by its time offset every frame (W1L-I3)
+      mesh.userData.timeSample = 0;
+      fanTimeCopies.push(mesh);
+      for (let k = 1; k < FAN_TIME_SAMPLES; k++) {
+        const copy = new InstancedMesh(g, mesh.material, r.row.count);
+        copy.instanceMatrix = mesh.instanceMatrix;
+        copy.boundingSphere = mesh.boundingSphere;
+        copy.userData = { ...mesh.userData, timeSample: k };
+        copy.name = `${mesh.name}:t${String(k)}`;
+        copy.renderOrder = mesh.renderOrder;
+        copy.castShadow = false;
+        copy.receiveShadow = true;
+        rowGroup.add(copy);
+        fanTimeCopies.push(copy);
+      }
+    }
     groupOf(r.module, r.spool !== null).add(rowGroup);
     if (r.spool !== null) spoolGroups[r.spool].push(rowGroup);
   }
@@ -160,6 +193,7 @@ export function buildEngineScene(
     skins,
     caps,
     closedHidden,
+    fanTimeCopies,
     triangles,
     dispose: () => {
       for (const g of disposables) g.dispose();

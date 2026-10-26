@@ -7,19 +7,21 @@
 //   -> AgX tone mapping + sRGB (outputColorTransform)
 //
 // Rotational blur: a rotor seen through an open shutter is the time average of the rotor
-// image over the angle it turns, delta = omega T_open (src/geometry/motion.ts). At time t the
-// pixel's ray meets the rotor turned by omega t, i.e. the static rotor meets the ray turned
-// back by -omega t.
-// - The fan (LD-1): the turned-back ray is marched through the fan's swept volume at a few
-//   axial planes; the first point that lies at or behind the rotor surface the camera sees
-//   there is the hit, and its colour is the rotor colour there. The old single fan-face plane
-//   departed from the blades near the hub and left blade-edge "teeth" (pass-3 LD-1); the
-//   march follows the blades through their whole axial extent.
+// image over the angle it turns, delta = omega T_open (src/geometry/motion.ts).
+// - The fan (LD-1, pass-4 W1L-I3): stochastic time sampling in the rotor pass itself. The fan
+//   is drawn as N time-offset copies spread over the exposure (src/render/engineScene.ts, the
+//   offsets re-jittered every frame), and each pixel keeps the fragments of one copy only,
+//   chosen per pixel and frame (materials.ts, fanTimeMask), depth-tested within that copy.
+//   Every pixel is therefore an exact still of the fan at one instant, and TRAA's history
+//   (zero velocity: the fan is not in the main pass) averages the instants: exact in the
+//   limit, with no reprojection, so no disoccluded holes (the pass-4 march shredded the far
+//   side and left a comb at the hub). tests/browser/fanBlur.test.ts holds it to the mean of
+//   64 stills.
 // - Other rotors (cutaway rows, the spinner) use the pixel's own rotor depth: exact for
-//   surfaces of revolution, and the rows are thin.
-// The samples are jittered per pixel and frame and TRAA averages the noise out; the angle is
-// capped at one blade pitch (the image is periodic in it). This is what a film camera
-// records, not the strobed wagon wheel point sampling gives.
+//   surfaces of revolution, and the rows are thin. Their samples are jittered per pixel and
+//   frame and TRAA averages the noise out; the angle is capped at one blade pitch (the image
+//   is periodic in it).
+// This is what a film camera records, not the strobed wagon wheel point sampling gives.
 
 import {
   HalfFloatType,
@@ -31,7 +33,6 @@ import {
   type WebGPURenderer,
 } from 'three/webgpu';
 import {
-  bool,
   cos,
   float,
   Fn,
@@ -61,28 +62,14 @@ import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { traa } from 'three/addons/tsl/display/TRAANode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import type { LookUniforms } from './materials';
-
-export interface FanVolume {
-  readonly rHub: number;
-  readonly rTip: number;
-  /** Blade pitch, rad (2 pi / count). */
-  readonly pitch: number;
-  /** Axial limits of the fan rotor, m. */
-  readonly xFore: number;
-  readonly xAft: number;
-}
 
 export type PostDebug = 'rotorAlpha' | 'rotorBlur' | 'ao' | 'visible' | null;
 
 export interface PostSettings {
   /** Debug output instead of the final image (look-dev only). */
   readonly debug?: PostDebug;
-  /** Time samples per pixel for the fan march and for the other rotors. */
-  readonly fanSamples: number;
+  /** Time samples per pixel for the rotors other than the fan (own-surface blur). */
   readonly rotorSamples: number;
-  /** Axial planes the fan march tests per time sample. */
-  readonly fanPlanes: number;
   readonly aoStrength: number;
   readonly bloomStrength: number;
   /** Linear radiance above which bloom starts (above the lip's specular peak, LD-3). */
@@ -96,8 +83,11 @@ export interface LookPipeline {
   readonly bokehScale: UniformNode<'float', number>;
   /** Depth of field on (cinematic presets) or off (default: it is not drawn at all). */
   setCinematic(on: boolean): void;
-  /** Renders a frame; `traa` false skips TRAA (and depth of field): tests and debugging. */
-  render(traa?: boolean): void;
+  /**
+   * Renders a frame. Tests and debugging: `traa` false skips TRAA (and depth of field);
+   * `linear` writes half the linear radiance, with no tone map or sRGB encoding (and no DoF).
+   */
+  render(traa?: boolean, linear?: boolean): void;
   dispose(): void;
 }
 
@@ -106,8 +96,6 @@ export function createPipeline(
   main: Scene,
   rotors: Scene,
   camera: PerspectiveCamera,
-  u: LookUniforms,
-  fan: FanVolume,
   settings: PostSettings,
 ): LookPipeline {
   const pipeline = new RenderPipeline(renderer);
@@ -186,104 +174,35 @@ export function createPipeline(
       screenCoordinate.add(vec2(float(frameId.mod(64)).mul(5.588), 0)),
     );
 
-    // the fan's swept volume: J planes between xFore and xAft, in order along the ray
-    const J = settings.fanPlanes;
-    const forward = dirW.x.greaterThan(0);
-    // the planes are jittered per pixel and frame too, so their spacing never shows as steps
-    const planeJitter = interleavedGradientNoise(
-      screenCoordinate.add(vec2(37.1, float(frameId.mod(64)).mul(3.71))),
-    );
-    const span = fan.xAft - fan.xFore;
-    const planes = Array.from({ length: J }, (_, k) => {
-      const f = float(k).add(planeJitter).div(J);
-      const xa = f.mul(span).add(fan.xFore);
-      const xb = float(1).sub(f).mul(span).add(fan.xFore);
-      const xk = select(forward, xa, xb);
-      const t = xk.sub(cameraPosition.x).div(dirW.x);
-      const p = cameraPosition.add(dirW.mul(t));
-      const r = length(p.yz);
-      const zView = dirV.z.mul(t);
-      const valid = t
-        .greaterThan(0)
-        .and(r.greaterThan(fan.rHub * 0.97))
-        .and(r.lessThan(fan.rTip))
-        .and(zView.greaterThan(zScene));
-      return { p, valid };
-    });
-    let inFan: Node<'bool'> = bool(false);
-    for (const pl of planes) inFan = inFan.or(pl.valid);
-    // the spinner (or anything rotating ahead of the fan) is in front: not the fan's pixel
-    const spinnerFront = covered.and(pRotor.x.lessThan(fan.xFore));
-    const useFan = inFan.and(spinnerFront.not());
-
-    const ownFan = covered.and(rotorBlur.sample(suv).b.greaterThan(0.5));
-    const acc = vec4(rc.rgb.mul(rc.a), rc.a).toVar();
-    const fanAngle = u.lpBlur.min(fan.pitch);
-    If(useFan.and(fanAngle.greaterThan(1e-4)), () => {
-      acc.assign(vec4(0));
-      const n = settings.fanSamples;
-      Loop(n, ({ i }) => {
-        const t = float(i).add(jitter).div(n).sub(0.5).mul(fanAngle);
-        const c = cos(t);
-        const s = sin(t);
-        const hit = bool(false).toVar();
-        const col = vec4(0).toVar();
-        // a pixel on a fan blade first follows its own surface point (keeps the blade body
-        // coherent); only where that point has moved off the blades does the march look for
-        // the blade sweeping in behind it
-        // (short exposures only: over most of a pitch the own point lands on other blades at
-        // other depths and the march alone gives the smoother disc)
-        If(ownFan.and(fanAngle.lessThan(fan.pitch * 0.6)), () => {
-          const quv = toUv(rotX(pRotor, c, s));
-          const smp = rotorColor.sample(quv);
-          If(rotorBlur.sample(quv).b.greaterThan(0.5).and(smp.a.greaterThan(0.5)), () => {
-            hit.assign(true);
-            col.assign(smp);
-          });
-        });
-        for (const pl of planes) {
-          If(hit.not().and(pl.valid), () => {
-            const q = rotX(pl.p, c, s);
-            const quv = toUv(q);
-            const smp = rotorColor.sample(quv);
-            const isFan = rotorBlur.sample(quv).b.greaterThan(0.5);
-            const zr = viewZOf(rotorDepth.sample(quv).r);
-            const zq = camView.mul(vec4(q, 1)).z;
-            // only a fan blade counts (not the spinner or a booster blade seen there)
-            If(isFan.and(smp.a.greaterThan(0.5)).and(zq.lessThanEqual(zr.add(0.004))), () => {
-              hit.assign(true);
-              col.assign(smp);
-            });
-          });
-        }
-        // a miss looks through the fan: at what the pixel itself sees behind it (a booster
-        // blade, unblurred) or at the static scene
-        If(hit.not().and(covered).and(pRotor.x.greaterThan(fan.xAft)), () => {
-          col.assign(rc);
-        });
-        acc.addAssign(vec4(col.rgb.mul(col.a), col.a));
-      });
-      acc.divAssign(n);
-    });
-    // other rotors: their own surface point, turned through the spool's shutter angle
+    // the fan is already time-sampled in the rotor pass (see the header): its pixels pass
+    // through; other rotors blur along their own surface point, turned through the spool's
+    // shutter angle
     const blurMrt = rotorBlur.sample(suv);
+    const isFan = covered.and(blurMrt.b.greaterThan(0.5));
+    const acc = vec4(rc.rgb.mul(rc.a), rc.a).toVar();
     const angle = select(covered, blurMrt.r, float(0)).min(blurMrt.g).toVar();
     const visibleRotor = covered.and(zRotor.greaterThan(zScene));
-    If(useFan.not().and(visibleRotor).and(angle.greaterThan(1e-4)), () => {
+    If(isFan.not().and(visibleRotor).and(angle.greaterThan(1e-4)), () => {
       acc.assign(vec4(0));
       const n = settings.rotorSamples;
       Loop(n, ({ i }) => {
         const t = float(i).add(jitter).div(n).sub(0.5).mul(angle);
-        const smp = rotorColor.sample(toUv(rotX(pRotor, cos(t), sin(t))));
+        const quv = toUv(rotX(pRotor, cos(t), sin(t)));
+        const smp = rotorColor.sample(quv).toVar();
+        // a turned point that lands on a fan blade (a booster blade seen through the fan
+        // gaps) keeps its own colour: the fan's fragment is not this rotor's surface
+        If(rotorBlur.sample(quv).b.greaterThan(0.5), () => {
+          smp.assign(rc);
+        });
         acc.addAssign(vec4(smp.rgb.mul(smp.a), smp.a));
       });
       acc.divAssign(n);
     });
-    const rot = select(useFan.or(visibleRotor), acc, vec4(0));
+    const rot = select(visibleRotor, acc, vec4(0));
     if (settings.debug === 'visible')
       return vec4(
-        select(useFan, float(1), float(0)),
-        fanAngle.div(Math.PI),
+        select(isFan, float(1), float(0)),
+        angle.div(Math.PI),
         select(visibleRotor, float(1), float(0)),
         1,
       );
@@ -320,7 +239,19 @@ export function createPipeline(
   if (settings.debug === 'ao') pipeline.outputNode = vec4(vec3(aoTex.r), 1);
   // the chain without TRAA (built on first use): the fan-blur reference test averages
   // un-accumulated frames (tests/browser/fanBlur.test.ts)
-  let rawPipeline: RenderPipeline | null = null;
+  const debugPipelines = new Map<string, RenderPipeline>();
+  const debugPipeline = (withTraa: boolean, linear: boolean): RenderPipeline => {
+    const key = `${String(withTraa)}:${String(linear)}`;
+    let p = debugPipelines.get(key);
+    if (p === undefined) {
+      p = new RenderPipeline(renderer);
+      const c = vignette(withTraa ? traaNode : compositeTex);
+      p.outputNode = linear ? vec4(c.rgb.mul(0.5), 1) : c;
+      p.outputColorTransform = !linear;
+      debugPipelines.set(key, p);
+    }
+    return p;
+  };
   let cinematic = false;
 
   return {
@@ -331,13 +262,9 @@ export function createPipeline(
     setCinematic: (on) => {
       cinematic = on && !settings.debug;
     },
-    render: (withTraa = true) => {
-      if (!withTraa) {
-        if (rawPipeline === null) {
-          rawPipeline = new RenderPipeline(renderer);
-          rawPipeline.outputNode = vignette(compositeTex);
-        }
-        rawPipeline.render();
+    render: (withTraa = true, linear = false) => {
+      if (!withTraa || linear) {
+        debugPipeline(withTraa, linear).render();
         return;
       }
       (cinematic ? cinePipeline : pipeline).render();
@@ -345,7 +272,7 @@ export function createPipeline(
     dispose: () => {
       pipeline.dispose();
       cinePipeline.dispose();
-      rawPipeline?.dispose();
+      for (const p of debugPipelines.values()) p.dispose();
       compositeTex.dispose();
     },
   };

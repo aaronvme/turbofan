@@ -11,6 +11,10 @@
 // culling on/off comparison must show NO differing tile beyond the floor's count, and no more
 // differing pixels than twice the floor plus 0.1 % of the frame. A culled row that shows
 // makes a cluster of 24-48 differing tiles (the probe, at 09c6a11).
+//
+// The views render at shutter 0 (culling is about what geometry shows, not the blur, and the
+// stochastic fan blur would set a noisy floor), at two fan phases half a blade pitch apart,
+// so what shows through the gaps swept by the blades is checked too.
 
 import { afterAll, describe, expect, it } from 'vitest';
 import { commands } from 'vitest/browser';
@@ -62,35 +66,40 @@ describe('W1L-I1: closed-engine culling changes nothing visible', () => {
     });
     const rows: string[] = [];
     const failures: string[] = [];
-    for (const [name, pose] of Object.entries(POSES)) {
-      view.setDebugFlags({});
-      view.setPreset(pose.preset);
-      if (pose.camera && pose.target) view.setCameraPose(pose.camera, pose.target);
-      await settle(view, 40);
-      const a1 = grab(view, c);
-      // the floor pair and the on/off pair are the same number of frames apart (the jitter
-      // sequences repeat every 64 frames; a closer pair would understate the noise)
-      await settle(view, 40);
-      const a2 = grab(view, c);
-      view.setDebugFlags({ noCull: true });
-      await settle(view, 40);
-      const b = grab(view, c);
-      view.setDebugFlags({});
-      const floor = diff(a1, a2, THRESHOLD);
-      const cull = diff(a2, b, THRESHOLD);
-      rows.push(
-        `${name}: floor ${(100 * floor.changed).toFixed(3)} % px, ${floor.tilesOver25} tiles | on/off ${(100 * cull.changed).toFixed(3)} % px, ${cull.tilesOver25} tiles, worst tile ${(100 * cull.worstTile).toFixed(1)} %`,
-      );
-      if (cull.tilesOver25 > floor.tilesOver25 || cull.changed > 2 * floor.changed + 0.001) {
-        failures.push(name);
-        // the culling-off frame, dimmed, with the pixels culling changes in red
-        await commands.writeFile(
-          `test-results/culling/${name}.png`,
-          diffImage(a2, b, THRESHOLD),
-          'base64',
+    const halfPitch =
+      Math.PI / (ENGINE_DEFINITION.bladeRows.find((r) => r.id === 'fan')?.count ?? 24);
+    for (const [pname, pose] of Object.entries(POSES))
+      for (const lpPhase of [0, halfPitch]) {
+        const name = `${pname}${lpPhase > 0 ? ' (fan half a pitch on)' : ''}`;
+        view.setDebugFlags({ lpPhase });
+        view.setPreset(pose.preset);
+        view.setShutter(0);
+        if (pose.camera && pose.target) view.setCameraPose(pose.camera, pose.target);
+        await settle(view, 40);
+        const a1 = grab(view, c);
+        // the floor pair and the on/off pair are the same number of frames apart (the jitter
+        // sequences repeat every 64 frames; a closer pair would understate the noise)
+        await settle(view, 40);
+        const a2 = grab(view, c);
+        view.setDebugFlags({ noCull: true, lpPhase });
+        await settle(view, 40);
+        const b = grab(view, c);
+        view.setDebugFlags({});
+        const floor = diff(a1, a2, THRESHOLD);
+        const cull = diff(a2, b, THRESHOLD);
+        rows.push(
+          `${name}: floor ${(100 * floor.changed).toFixed(3)} % px, ${floor.tilesOver25} tiles | on/off ${(100 * cull.changed).toFixed(3)} % px, ${cull.tilesOver25} tiles, worst tile ${(100 * cull.worstTile).toFixed(1)} %`,
         );
+        if (cull.tilesOver25 > floor.tilesOver25 || cull.changed > 2 * floor.changed + 0.001) {
+          failures.push(name);
+          // the culling-off frame, dimmed, with the pixels culling changes in red
+          await commands.writeFile(
+            `test-results/culling/${pname}${lpPhase > 0 ? '-half-pitch' : ''}.png`,
+            diffImage(a2, b, THRESHOLD),
+            'base64',
+          );
+        }
       }
-    }
     console.log(`W1L-I1 culling\n${rows.join('\n')}`);
     expect(view.stats().errors).toEqual([]);
     expect(failures, rows.join('\n')).toEqual([]);
