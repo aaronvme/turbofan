@@ -90,6 +90,16 @@ describe('design point (D1-2): sized to the published SLS takeoff figures', () =
     expect(dp.fanBypassPressureRatio).toBeGreaterThan(1.45);
     expect(dp.fanBypassPressureRatio).toBeLessThan(1.75);
   });
+  it('W1C-N3: sizing throws instead of returning an engine whose thrust secant did not converge', () => {
+    for (const k of [1.6, 2]) {
+      expect(() =>
+        sizeEngine(
+          { ...CYCLE_CALIBRATION, netThrustN: k * CYCLE_CALIBRATION.netThrustN },
+          ENGINE_DEFINITION,
+        ),
+      ).toThrow(/sizing/);
+    }
+  });
   it('sizing is deterministic and pure', () => {
     const again = sizeEngine(CYCLE_CALIBRATION, ENGINE_DEFINITION);
     expect(again.design.coreNozzleAreaM2).toBe(dp.coreNozzleAreaM2);
