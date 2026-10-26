@@ -320,11 +320,82 @@ describe('outcome tracking', () => {
   });
 
   it('finalizes pending outcomes when the scenario ends', () => {
-    const r = finalizeOutcomes(takeoffAccel, initialOutcomeResults(takeoffAccel), 12);
+    // one quiet snapshot inside every window, then the run ends
+    const sampled = updateOutcomes(
+      takeoffAccel,
+      initialOutcomeResults(takeoffAccel),
+      withCycle({ netThrustN: 60_000 }),
+      5,
+    );
+    const r = finalizeOutcomes(takeoffAccel, sampled, 12);
     expect(r.map((x) => x.verdict)).toEqual(['failed', 'passed', 'failed']);
-    const early = finalizeOutcomes(takeoffAccel, initialOutcomeResults(takeoffAccel), 6);
+    const early = finalizeOutcomes(takeoffAccel, sampled, 6);
     expect(early[1]?.verdict).toBe('failed'); // "always" window not covered before the end
     expect(early[1]?.detail).toMatch(/ended at 6 s/);
+  });
+
+  describe('W0C-I2: an "always" outcome needs at least one snapshot inside its window', () => {
+    const always: Scenario = {
+      ...takeoffAccel,
+      durationS: 10,
+      timeline: [],
+      outcomes: [
+        {
+          id: 'egt',
+          description: 'EGT below the redline throughout',
+          window: { kind: 'always', fromS: 0, toS: 10 },
+          predicate: { kind: 'between', path: ['cycle', 'egtDisplayedK'], min: 0, max: 1223.15 },
+          thresholdId: 'C6',
+        },
+        {
+          id: 'short',
+          description: 'a short always window',
+          window: { kind: 'always', fromS: 2, toS: 3 },
+          predicate: { kind: 'compare', path: ['cycle', 'flags', 'surge'], op: '==', value: false },
+          thresholdId: null,
+        },
+      ],
+    };
+    const surging = (on: boolean): SimSnapshot => {
+      const s = sampleSnapshot();
+      return { ...s, cycle: { ...s.cycle, flags: { ...s.cycle.flags, surge: on } } };
+    };
+
+    it('fails every "always" outcome when no snapshot was ever published', () => {
+      // a pipeline that never publishes must not make "EGT below the redline throughout" pass
+      const r = finalizeOutcomes(always, initialOutcomeResults(always), 10);
+      expect(r.map((x) => x.verdict)).toEqual(['failed', 'failed']);
+      expect(r[0]?.detail).toMatch(/never sampled/);
+      expect(r[1]?.detail).toMatch(/never sampled/);
+    });
+
+    it('fails a window that no snapshot fell inside, even when later ones arrive', () => {
+      let r = updateOutcomes(always, initialOutcomeResults(always), surging(false), 1);
+      r = updateOutcomes(always, r, surging(false), 4); // nothing in [2, 3]
+      expect(r[1]).toMatchObject({ verdict: 'failed', decidedAtS: 4 });
+      expect(r[1]?.detail).toMatch(/never sampled in \[2, 3\] s/);
+      expect(r[0]?.verdict).toBe('pending');
+    });
+
+    it('passes once the window closes after at least one sample, and counts them', () => {
+      let r = initialOutcomeResults(always);
+      expect(r.map((x) => x.samples)).toEqual([0, 0]);
+      r = updateOutcomes(always, r, surging(false), 1);
+      r = updateOutcomes(always, r, surging(false), 2.5);
+      expect(r.map((x) => x.samples)).toEqual([2, 1]);
+      r = updateOutcomes(always, r, surging(false), 3.5);
+      expect(r[1]).toMatchObject({ verdict: 'passed', decidedAtS: 3.5, samples: 1 });
+      expect(r[1]?.detail).toMatch(/1 snapshot/);
+      const end = finalizeOutcomes(always, r, 10);
+      expect(end[0]).toMatchObject({ verdict: 'passed', samples: 3 });
+    });
+
+    it('a sample exactly on the window end counts and decides the outcome', () => {
+      const r = updateOutcomes(always, initialOutcomeResults(always), surging(false), 3);
+      expect(r[1]).toMatchObject({ verdict: 'passed', decidedAtS: 3, samples: 1 });
+      const bad = updateOutcomes(always, initialOutcomeResults(always), surging(true), 3);
+      expect(bad[1]).toMatchObject({ verdict: 'failed', decidedAtS: 3 });
+    });
   });
 
   it('is a pure reducer: inputs are not mutated', () => {
