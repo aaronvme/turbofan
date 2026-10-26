@@ -81,6 +81,9 @@ Upstream-to-downstream order along the core: 1, 2, 21, 24, 25, 3, 4, 41, 45, 49.
 | C7 | Off-design matching converges (residual < 1e-8 relative) at every point of a throttle sweep idle → takeoff | 100% of points, ≤ 25 Newton iterations each |
 | C8 | Mass and energy balance across the whole engine at every matched point | within 1e-6 relative |
 | C9 | Greitzer model, B above critical: deep-surge limit cycle appears; B below critical: rotating-stall-free recovery | qualitative, plus cycle period within 20% of the Helmholtz estimate |
+| C10 | Measured ground-run points, [WIDURI] Table 7 (OAT 25 °C, 1008 hPa, 14 ft): at the measured N1 of ground idle (20.5 / 21.0 %), MPA (65.0 %) and takeoff (97.4 %) | the model's displayed EGT within ±30 K of the measured value (idle: inside the measured 466-493 °C range widened by 30 K on each side, i.e. 436-523 °C; MPA 585 ± 30 °C; takeoff 855 ± 30 °C) and N2 within ±1.5 points of the measured value (idle 60.6 / 60.7 %, MPA 89.3 %, takeoff 99.8 %) |
+
+C10 was added by decision D3-3 (critic pass 3, question l) before any code was tuned to it; it adds a check and loosens none. The ±30 K band roughly covers engine-to-engine scatter and the measurement itself. The measured values are ENGINE_FACTS rows (idleN1Low ... staticTakeoffEgt, runUpOat, runUpPressure).
 
 ### 3.3 Flow solver validation ladder
 | ID | Case | Pass |

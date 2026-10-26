@@ -164,6 +164,20 @@ export const THRESHOLDS = {
     targetsFrom: 'PHYSICS',
     values: { maxPeriodRelativeError: pass(0.2, '1', '20%') },
   },
+  // D3-3: the measured ground-run points; the measured values themselves are ENGINE_FACTS rows
+  C10: {
+    id: 'C10',
+    section: '3.2',
+    checkText:
+      'Measured ground-run points, [WIDURI] Table 7 (OAT 25 °C, 1008 hPa, 14 ft): at the measured N1 of ground idle (20.5 / 21.0 %), MPA (65.0 %) and takeoff (97.4 %)',
+    passText:
+      "the model's displayed EGT within ±30 K of the measured value (idle: inside the measured 466-493 °C range widened by 30 K on each side, i.e. 436-523 °C; MPA 585 ± 30 °C; takeoff 855 ± 30 °C) and N2 within ±1.5 points of the measured value (idle 60.6 / 60.7 %, MPA 89.3 %, takeoff 99.8 %)",
+    targetsFrom: 'ENGINE_FACTS',
+    values: {
+      maxEgtErrorK: pass(30, 'K', '±30 K'),
+      maxN2ErrorPoints: pass(1.5, 'points', '±1.5 points'),
+    },
+  },
 
   // 3.3 Flow solver validation ladder
   L1: {
