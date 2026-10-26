@@ -31,7 +31,7 @@ import { benchFileName, parseBenchArgs, protocolLabel, type Protocol } from '../
 import { median } from '../lib/stats.ts';
 import {
   LONG_FRAME_FACTOR,
-  MAX_MEDIAN_FACTOR,
+  BELOW_RATE_MEDIAN_FACTOR,
   MAX_THROTTLED_STRETCH_MS,
   THROTTLE_FACTOR,
   combineValidity,
@@ -344,6 +344,10 @@ function onlyRun(runs: readonly RunResult[]): RunResult {
 
 const fmt = (x: number | null | undefined, digits: number) => x?.toFixed(digits) ?? '-';
 
+/** D2-13: a warning (e.g. below display rate) is printed next to the numbers, not instead. */
+const warningNote = (v: Validity) =>
+  v.warnings.length > 0 ? ` WARNING: ${v.warnings.join('; ')}` : '';
+
 function attemptLine(kind: Kind, a: Attempt): string {
   if (!a.validity.valid) return `INVALID: ${a.validity.reasons.join('; ')}`;
   const r = a.run;
@@ -517,7 +521,7 @@ async function main(): Promise<void> {
           await refocus();
           last = { rep, seq: seq++, attempt, ...(await pageRun(pageConfig)) };
           attempts.push(last);
-          process.stdout.write(`${attemptLine(kind, last)}\n`);
+          process.stdout.write(`${attemptLine(kind, last)}${warningNote(last.validity)}\n`);
           if (last.validity.valid) break;
         }
         if (last) final.get(id)?.push(last);
@@ -551,6 +555,7 @@ async function main(): Promise<void> {
         reps.map((a) => ({
           valid: a.validity.valid,
           reasons: a.validity.reasons.map((r) => `repetition ${a.rep + 1}: ${r}`),
+          warnings: a.validity.warnings.map((w) => `repetition ${a.rep + 1}: ${w}`),
         })),
       );
       return {
@@ -583,7 +588,7 @@ async function main(): Promise<void> {
       if (kind === 'throughput') {
         process.stdout.write(
           `  ${r.id}: ${fmt(a.solverMsPerIt, 3)} ms/it (p10 ${fmt(a.solverMsPerItP10, 3)}), ${a.itPerSec.toFixed(0)} it/s, ` +
-            `${a.fps.toFixed(1)} fps, frame p99 ${a.frameTimeP99.toFixed(1)} ms, ${tail}\n`,
+            `${a.fps.toFixed(1)} fps, frame p99 ${a.frameTimeP99.toFixed(1)} ms, ${tail}${warningNote(r.validity)}\n`,
         );
       } else {
         const commits = (final.get(r.id) ?? []).flatMap((x) => {
@@ -593,7 +598,7 @@ async function main(): Promise<void> {
         process.stdout.write(
           `  ${r.id}: frame p50/p95/p99 ${a.frameTimeP50.toFixed(2)}/${a.frameTimeP95.toFixed(2)}/${a.frameTimeP99.toFixed(2)} ms, ` +
             `${tail}, rAF delay p99 ${fmt(a.callbackDelayP99, 1)} ms, ` +
-            `React commit p95 ${commits.length > 0 ? median(commits).toFixed(1) : '-'} ms\n`,
+            `React commit p95 ${commits.length > 0 ? median(commits).toFixed(1) : '-'} ms${warningNote(r.validity)}\n`,
         );
       }
     }
@@ -624,7 +629,8 @@ async function main(): Promise<void> {
         longFrameFactor: LONG_FRAME_FACTOR,
         throttleFactor: THROTTLE_FACTOR,
         maxThrottledStretchMs: MAX_THROTTLED_STRETCH_MS,
-        maxMedianFactor: MAX_MEDIAN_FACTOR,
+        // D2-13: a median frame over this many intervals is a warning, not INVALID.
+        belowRateMedianFactor: BELOW_RATE_MEDIAN_FACTOR,
         rerun: 'once, after Page.bringToFront',
       },
       order: { seed, repetitions: orders, effectOnMsPerIt: effect },

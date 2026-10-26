@@ -24,11 +24,12 @@ export const THROTTLE_FACTOR = 2.5;
  */
 export const MAX_THROTTLED_STRETCH_MS = 500;
 /**
- * A run is invalid when its median delta exceeds 1.5 display intervals: most frames missed
- * vsync, as under a 30 Hz throttle (e.g. Chrome's energy saver), whose 2-interval deltas stay
- * below THROTTLE_FACTOR.
+ * A run whose median delta exceeds 1.5 display intervals gets a "below display rate" WARNING,
+ * not INVALID (D2-13): most frames missed vsync. A configuration that genuinely cannot hold the
+ * display rate is a real result, and occlusion is caught by the sustained-throttle rule. A
+ * 30 Hz throttle (e.g. Chrome's energy saver, 2-interval deltas) shows up only as this warning.
  */
-export const MAX_MEDIAN_FACTOR = 1.5;
+export const BELOW_RATE_MEDIAN_FACTOR = 1.5;
 
 /** Plausible display refresh rates; outside them the probe did not see the display's rate. */
 const MIN_HZ = 24;
@@ -88,6 +89,8 @@ export function displayIntervalMs(probeDeltas: readonly number[]): number {
 export interface Validity {
   readonly valid: boolean;
   readonly reasons: readonly string[];
+  /** Worth reading next to the numbers, but not a reason to withhold them. */
+  readonly warnings: readonly string[];
 }
 
 /** What the gate reads from a RunResult (spikes/lib/benchRun.ts). */
@@ -106,17 +109,21 @@ export function runValidity(run: RunFrames, pageHiddenMs: number): Validity {
         `for ${run.longestThrottledMs.toFixed(0)} ms in a row: window occluded or unfocused, or a stall`,
     );
   }
-  if (run.frameTime.p50 > MAX_MEDIAN_FACTOR * p) {
-    reasons.push(
-      `median frame ${run.frameTime.p50.toFixed(1)} ms over ${MAX_MEDIAN_FACTOR} display intervals ` +
-        `(${p.toFixed(1)} ms): rAF below the display rate (a throttle, or a load that cannot hold it)`,
+  const warnings: string[] = [];
+  if (run.frameTime.p50 > BELOW_RATE_MEDIAN_FACTOR * p) {
+    warnings.push(
+      `below display rate: median frame ${run.frameTime.p50.toFixed(1)} ms over ` +
+        `${BELOW_RATE_MEDIAN_FACTOR} display intervals (${p.toFixed(1)} ms): a load that cannot hold it, or a 30 Hz throttle`,
     );
   }
   if (pageHiddenMs > 0) reasons.push(`page hidden ${pageHiddenMs.toFixed(0)} ms`);
-  return { valid: reasons.length === 0, reasons };
+  return { valid: reasons.length === 0, reasons, warnings };
 }
 
 export function combineValidity(parts: readonly Validity[]): Validity {
-  const reasons = parts.flatMap((v) => v.reasons);
-  return { valid: parts.every((v) => v.valid), reasons };
+  return {
+    valid: parts.every((v) => v.valid),
+    reasons: parts.flatMap((v) => v.reasons),
+    warnings: parts.flatMap((v) => v.warnings),
+  };
 }
