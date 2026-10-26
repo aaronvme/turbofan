@@ -17,6 +17,37 @@ Regenerate with `node tools/lookdev/capture.ts` (own headed Chrome through Playw
 | `06-fan-takeoff.jpg` | `fanTakeoff`, 1/1000 s | 30 degrees per exposure: the fan reads as a disc, no blade-edge teeth at the hub |
 | `07-hot-section.jpg` | `hotSection` (cutaway close-up) | Combustor liner and dome, HPT and LPT disks and blades (10 span sections), heat tint graded along x, TRF struts, plug |
 
+## Look-dev round 2 (w1/lookdev-2, critic pass 4)
+
+All eight shots (00-07) were regenerated after the culling fix; the pass-4 shots stay in `before/` only for the pass-3 set (the pass-4 versions are in git history at 3dd23f0).
+
+- **Culling (W1L-I1):** the closed view now culls only what cannot show: the combustor, the HPT and the inner body's contents (disks, bores, shafts). Every booster, HPC and LPT row, the transition duct and the fan-frame struts are drawn: the rotors have their own pass, so the main pass's depth reaches past every rotor row, and the HPC shows through the fan and booster gaps. `tests/browser/culling.test.ts` compares culling on and off in pixels over every closed preset plus an axial intake view and a look up the core nozzle, at shutter 0 and two fan phases: no differing 16 px tile beyond the on/on noise floor. The saving is now small (1.52 of 1.66 M triangles drawn at `high`).
+- **Rotor lighting (W1L-I2):** the rotor pass's key and rim cast shadows from proxies of the static parts (layer 2, seen by the shadow cameras only), so the fan face is in the nacelle's shadow and lit only through the intake mouth and by the studio's image light.
+- **Fan blur (W1L-I3):** the march is gone. The fan is drawn as 8 time copies spread over the exposure (re-jittered every frame); each pixel keeps one copy's fragments (interleaved gradient noise plus a per-frame R2 offset), and the composite averages each pixel's 3 x 3 neighbours' instants, so one frame is a nine-sample estimate that TRAA then smooths. `tests/browser/fanBlur.test.ts` compares against the mean of 64 shutter-0 stills across the exposure, in linear light: estimator mean absolute error 0.002-0.003 (the pass-4 march: 0.07-0.12), shipped frame 0.006-0.007.
+- **Timing harness (W1L-I4):** `tools/lookdev/capture.ts` runs the D0-1 protocol (below).
+
+### The quiet official measure (D0-1, D3-7)
+
+On AC power, nothing else running, Chrome in the foreground:
+
+```
+npx vite --port 5184 --strictPort
+node tools/lookdev/capture.ts --only none --warmup-s 10 --run-s 60 --reps 3 --seed 1
+```
+
+About 11 minutes: the default, `cutaway` and `hero`, each 3 runs of 60 s with a 10 s warm-up before each run, in a seeded order rotated per repetition (D2-12). Every frame of a run is kept (p10/p50/p90 per pass); the result is the median of the runs. A run is INVALID on the occlusion signature or a hidden page (D2-11 as amended by D3-6); a slow load is a warning. Power plan, battery state, CPU load, Chrome version and the adapter are recorded at the start and the end in `docs/look-dev/timings.json`. `--diagnostics` runs the A/B set (culling, cyclorama, shadows, post, caps) instead; run it once at `--run-s 20 --reps 1`.
+
+### Indicative timings (2 s smoke runs, NOT D0-1)
+
+From a 2 x 2 s smoke run of the harness on 2026-10-26, on battery with another agent running: the default 14.5 ms GPU (opaque 4.5, **rotors 5.2**, GTAO 1.0, composite 1.9, TRAA 1.1, output 0.3), `cutaway` 13.2 ms, `hero` 18.1 ms. **The rotor pass went from about 1.2 ms to about 5 ms**: the 8 fan copies are each fully shaded before the per-pixel discard. This is the round's main cost and the first thing to reduce (see the handoff's NEXT).
+
+### Still CG-like
+
+- The nacelle is a smooth shell (no latches, hinges, reverser split, drain mast or stencils), and the engine floats with no stand or pylon (W1L-N1).
+- The cutaway's liner panels in shadow read as holes, and the hot section is near neutral grey (W1L-N2).
+- The plug is still the definition's ogive (D3-9 not done this round).
+- At 1/1000 s idle the fan shows a faint residual grain at the blade edges; the 3 x 3 average blurs the fan by one pixel.
+
 ## What changed in the look-dev round
 
 - **Studio (D3-1, LD-3):** `src/render/studio.ts`. No HDRI: an environment scene of softboxes (overhead key, two long horizontal strips, rim and kicker strips, a dim fill card, a low front strip) in a dark room, baked by `PMREMGenerator.fromScene` at 512 px per face, so reflections are smooth softbox gradients instead of the 1k HDRI's texel blocks. A visible infinity cove (floor sweeping into a wall all round, Lambert, neutral grey darkening away from the engine), a shadowed key light (2048 PCF map, re-rendered only while the engine moves), a cool rim light, and an analytic contact shadow under the nacelle (faded out in the exploded view). The Poly Haven HDRI and its notice are no longer used.
