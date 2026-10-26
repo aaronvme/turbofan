@@ -15,6 +15,7 @@ import { loopAreaCentroid } from '../../../src/geometry/revolve';
 import { isSimplePolygon } from '../../../src/geometry/airfoil';
 import { explodeOffsets, INTAKE_LEAD } from '../../../src/geometry/explode';
 import {
+  closedViewDraws,
   closedViewLimits,
   closedViewVisibility,
   hiddenWhenClosed,
@@ -141,6 +142,58 @@ describe('closed-engine culling (LD-6)', () => {
     expect(vis.rows.has('fan-frame-strut')).toBe(true);
     for (const id of ['case-transition', 'transition-inner', 'case-hpc', 'hpc-drum'])
       expect(vis.parts.has(id), id).toBe(true);
+  });
+
+  it('lookdev-3: what shows only through the intake or only up the core nozzle is drawn only from that side', () => {
+    const lim = closedViewLimits(def);
+    const rowsOf = (c: string) => def.bladeRows.filter((r) => r.component === c);
+    // the core inside its cowl ahead of the combustor is reached only through the fan, and
+    // aft of the combustor inlet only through the core nozzle
+    for (const r of [...rowsOf('booster'), ...rowsOf('hpc')]) {
+      expect(vis.frontOnly.has(r.id), r.id).toBe(true);
+      expect(vis.rearOnly.has(r.id), r.id).toBe(false);
+    }
+    for (const r of rowsOf('lpt')) {
+      expect(vis.rearOnly.has(r.id), r.id).toBe(true);
+      expect(vis.frontOnly.has(r.id), r.id).toBe(false);
+    }
+    expect(vis.rearOnly.has('trf-strut')).toBe(true);
+    for (const id of ['case-hpc', 'hpc-drum', 'case-transition'])
+      expect(vis.frontOnly.has(id), id).toBe(true);
+    for (const id of ['case-lpt', 'case-exhaust']) expect(vis.rearOnly.has(id), id).toBe(true);
+    // what the outside or both openings show is drawn from everywhere
+    for (const id of [
+      'inlet-lip',
+      'nacelle-skin',
+      'core-cowl-skin',
+      'core-lip',
+      'splitter',
+      'spinner',
+      'plug',
+      'fan-case',
+    ])
+      expect(vis.frontOnly.has(id) || vis.rearOnly.has(id), id).toBe(false);
+    for (const id of ['fan', 'fan-ogv'])
+      expect(vis.frontOnly.has(id) || vis.rearOnly.has(id), id).toBe(false);
+    // both are subsets of what the closed engine draws, and disjoint
+    for (const id of vis.frontOnly) {
+      expect(vis.parts.has(id) || vis.rows.has(id), id).toBe(true);
+      expect(vis.rearOnly.has(id), id).toBe(false);
+    }
+    for (const id of vis.rearOnly) expect(vis.parts.has(id) || vis.rows.has(id), id).toBe(true);
+    // the eye limits: in front of the core inlet (the splitter) to see the core through the
+    // fan, aft of the first LPT row to see it up the nozzle (both conservative: the intake
+    // opens at the highlight, ahead of the splitter, and the nozzle at the core lip)
+    const splitterX = Math.min(...geo.walls.coreCowl.path.map((q) => q.x));
+    expect(vis.eye.front).toBeCloseTo(splitterX, 9);
+    expect(vis.eye.rear).toBeCloseTo(lim.xRear, 9);
+    expect(closedViewDraws(vis, 'hpc-r1', -3.7)).toBe(true);
+    expect(closedViewDraws(vis, 'hpc-r1', 1.3)).toBe(false);
+    expect(closedViewDraws(vis, 'lpt-r4', 1.3)).toBe(false);
+    expect(closedViewDraws(vis, 'lpt-r4', 5.4)).toBe(true);
+    expect(closedViewDraws(vis, 'hpc-r1', 5.4)).toBe(false);
+    expect(closedViewDraws(vis, 'fan', 1.3)).toBe(true);
+    expect(closedViewDraws(vis, 'hpt-r1', -3.7)).toBe(false);
   });
 
   it('drops what the cowls and the inner body hide: the combustor, the HPT, the disks and shafts', () => {
