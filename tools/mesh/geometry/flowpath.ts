@@ -1,20 +1,37 @@
-// The mesher's geometry input: a handful of named meridional curves plus blade-row extents. W1
-// replaces the placeholder (./placeholder.ts) with an adapter from the real EngineDefinition
-// (src/contracts) that produces this same shape, so the mesher itself does not change.
+// The mesher's geometry input: a handful of named meridional curves, the blade rows with their
+// wall-to-wall edges, the solver's station planes and the combustor zone. ./definition.ts builds it
+// from the real EngineDefinition (src/contracts); the mesher itself knows nothing about engines.
 //
 // Conventions (shared with src/contracts): SI metres; x axial, x = 0 at the fan face (station 2),
-// positive downstream; r >= 0. Curves are dense polylines (spacing well below the mesh spacing).
+// positive downstream; r >= 0. Curves are polylines with linear interpolation, as in the definition.
 import { Polyline } from '../curve';
 import type { Pt } from '../types';
 
 export type Duct = 'fan' | 'bypass' | 'core';
 
-/** A blade row's axial extent at mid-span (leading and trailing edge x). */
+/** A straight line across a duct, from a point on its inner wall to a point on its outer wall. */
+export interface CutLine {
+  readonly hub: Pt;
+  readonly tip: Pt;
+}
+
+/** A blade row: its mid-span axial extent and its leading and trailing edges, wall to wall. */
 export interface BladeRow {
   readonly name: string;
   readonly duct: Duct;
+  /** Mid-span leading and trailing edge x: the axial chord the cells-per-chord rule counts. */
   readonly xLE: number;
   readonly xTE: number;
+  /** The edges, extended to the duct walls. The mesh puts a grid line on each (body-force zones). */
+  readonly le: CutLine;
+  readonly te: CutLine;
+}
+
+/** A plane where the flow solver reduces its field (a radial line across one duct). */
+export interface StationPlane {
+  readonly id: string;
+  readonly x: number;
+  readonly duct: Duct;
 }
 
 export interface FlowpathCurves {
@@ -36,6 +53,8 @@ export interface FlowpathGeometry {
   readonly fanTipDiameter: number;
   readonly curves: FlowpathCurves;
   readonly bladeRows: readonly BladeRow[];
+  /** Planes the solver reduces at; the mesh puts an exact radial grid line on each. */
+  readonly stations: readonly StationPlane[];
   /** The combustor heat-release zone (no blades; sets the core spacing there). */
   readonly combustor: { readonly xStart: number; readonly xEnd: number };
 }
@@ -160,9 +179,36 @@ export function validateFlowpath(g: FlowpathGeometry): string[] {
       (x) => nacIn.atX(x).r > hub.atX(x).r,
       'fan duct must have positive span',
     );
+    // blade edges run wall to wall in their duct; stations lie inside theirs
+    const walls: Readonly<Record<Duct, readonly [Polyline, Polyline]>> = {
+      fan: [hub, nacIn],
+      bypass: [cowl, nacIn],
+      core: [hub, outer],
+    };
+    const span: Readonly<Record<Duct, readonly [number, number]>> = {
+      fan: [0, kp.splitter.x],
+      bypass: [kp.splitter.x, kp.bypassLip.x],
+      core: [kp.splitter.x, kp.coreLip.x],
+    };
+    for (const row of g.bladeRows) {
+      const [inner, outerWall] = walls[row.duct];
+      for (const [which, e] of [
+        ['leading', row.le],
+        ['trailing', row.te],
+      ] as const) {
+        if (!(inner.distanceTo(e.hub) < 1e-9 && outerWall.distanceTo(e.tip) < 1e-9))
+          errors.push(`blade row ${row.name}: ${which} edge must run from wall to wall`);
+      }
+    }
+    for (const s of g.stations) {
+      const [a, b] = span[s.duct];
+      if (!(s.x >= a && s.x <= b)) errors.push(`station ${s.id} lies outside the ${s.duct} duct`);
+    }
   }
   for (const row of g.bladeRows) {
     if (!(row.xTE > row.xLE)) errors.push(`blade row ${row.name}: xTE must exceed xLE`);
+    if (!(row.te.hub.x > row.le.hub.x && row.te.tip.x > row.le.tip.x))
+      errors.push(`blade row ${row.name}: trailing edge must be downstream at both walls`);
   }
   return errors;
 }

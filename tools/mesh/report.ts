@@ -4,7 +4,7 @@
 import type { BlockName, EngineMesh } from './engineMesh';
 import { keyPoints } from './geometry/flowpath';
 import { meshQuality, type BlockQuality, type Where } from './metrics';
-import { nodeIndex, type Block, type Pt } from './types';
+import { nodeIndex, type Block, type MultiBlockMesh, type Pt } from './types';
 
 export interface Worst {
   readonly value: number;
@@ -33,7 +33,7 @@ export interface EngineMeshReport {
   };
   /** Cells across each block (its j direction): annulus counts for the ducts and jets. */
   readonly cellsAcross: Readonly<Record<BlockName, number>>;
-  /** Cell centres inside each blade row's axial extent, on the duct block's mid-span grid line. */
+  /** Cells in each blade row's body-force zone (between its edge grid lines), and its mid-span axial chord. */
   readonly cellsPerChord: readonly {
     readonly name: string;
     readonly duct: string;
@@ -94,21 +94,15 @@ export function engineMeshReport(mesh: EngineMesh): EngineMeshReport {
     Object.keys(mesh.index).map((name) => [name, block(name as BlockName).nj]),
   ) as Record<BlockName, number>;
 
-  const ductBlock = { fan: 'fan', bypass: 'bypass', core: 'core' } as const;
+  // the body-force zone of each row is whole cells between its edge grid lines
   const cellsPerChord = mesh.geometry.bladeRows.map((row) => {
-    const b = block(ductBlock[row.duct]);
-    const j = Math.floor(b.nj / 2);
-    let cells = 0;
-    for (let i = 0; i < b.ni; i++) {
-      const xc =
-        0.25 *
-        (nodeAt(b, i, j).x +
-          nodeAt(b, i + 1, j).x +
-          nodeAt(b, i, j + 1).x +
-          nodeAt(b, i + 1, j + 1).x);
-      if (xc >= row.xLE && xc <= row.xTE) cells++;
-    }
-    return { name: row.name, duct: row.duct, chord: row.xTE - row.xLE, cells };
+    const zone = mesh.rows.find((z) => z.id === row.name);
+    return {
+      name: row.name,
+      duct: row.duct,
+      chord: row.xTE - row.xLE,
+      cells: zone === undefined ? 0 : zone.i1 - zone.i0,
+    };
   });
 
   const aft = block('afterbody');
@@ -169,4 +163,49 @@ export function engineMeshReport(mesh: EngineMesh): EngineMeshReport {
       downstreamD: (xOut - kp.coreLip.x) / D,
     },
   };
+}
+
+/** Signal speeds at a cell centre: |u_x| + c along x and |u_r| + c along r (m/s). */
+export interface WaveSpeeds {
+  readonly ax: number;
+  readonly ar: number;
+}
+
+export interface DtLimit {
+  /** Smallest explicit 2D time step at CFL 1, s. */
+  readonly dt: number;
+  readonly block: string;
+  readonly at: Where;
+}
+
+/**
+ * The explicit time-step limit at CFL 1 for a 2D finite-volume scheme on this mesh,
+ * dt = min over cells of 1 / (a_x / L_i + a_r / L_j), with L_i and L_j the cell's lengths along
+ * its two grid directions (as metrics.ts measures them) and the signal speeds supplied per cell
+ * (decision D0-7 records this limit for physical-time mode).
+ */
+export function explicitDtLimit(
+  mesh: Pick<MultiBlockMesh, 'blocks'>,
+  speeds: (x: number, r: number, block: string) => WaveSpeeds,
+): DtLimit {
+  let best: DtLimit = { dt: Infinity, block: '', at: { i: 0, j: 0, x: 0, r: 0 } };
+  for (const b of mesh.blocks) {
+    for (let j = 0; j < b.nj; j++) {
+      for (let i = 0; i < b.ni; i++) {
+        const p00 = nodeAt(b, i, j);
+        const p10 = nodeAt(b, i + 1, j);
+        const p01 = nodeAt(b, i, j + 1);
+        const p11 = nodeAt(b, i + 1, j + 1);
+        const mid = (a: Pt, c: Pt): Pt => ({ x: 0.5 * (a.x + c.x), r: 0.5 * (a.r + c.r) });
+        const li = dist(mid(p00, p01), mid(p10, p11));
+        const lj = dist(mid(p00, p10), mid(p01, p11));
+        const x = 0.25 * (p00.x + p10.x + p01.x + p11.x);
+        const r = 0.25 * (p00.r + p10.r + p01.r + p11.r);
+        const s = speeds(x, r, b.name);
+        const dt = 1 / (s.ax / li + s.ar / lj);
+        if (dt < best.dt) best = { dt, block: b.name, at: { i, j, x, r } };
+      }
+    }
+  }
+  return best;
 }

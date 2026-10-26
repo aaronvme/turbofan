@@ -1,61 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { Polyline } from '../../../tools/mesh/curve';
 import {
   keyPoints,
   validateFlowpath,
   type FlowpathGeometry,
 } from '../../../tools/mesh/geometry/flowpath';
-import { placeholderFlowpath } from '../../../tools/mesh/geometry/placeholder';
-
-describe('placeholder flowpath', () => {
-  const g = placeholderFlowpath();
-
-  it('is a valid geometry input', () => {
-    expect(validateFlowpath(g)).toEqual([]);
-  });
-
-  it('has CFM56-7B-class proportions: 1.55 m fan, fan face at x = 0', () => {
-    expect(g.fanTipDiameter).toBeCloseTo(1.55, 6);
-    const casing = new Polyline(g.curves.nacelleInner);
-    expect(casing.atX(0).r).toBeCloseTo(0.775, 6);
-    const kp = keyPoints(g);
-    expect(kp.highlight.x).toBeLessThan(0);
-    expect(kp.spinnerNose.r).toBe(0);
-    expect(kp.plugTip.r).toBe(0);
-  });
-
-  it('has a 2-3 cm tall HPC rear annulus', () => {
-    const hub = new Polyline(g.curves.hub);
-    const outer = new Polyline(g.curves.coreOuter);
-    const hpcRows = g.bladeRows.filter((row) => row.name.startsWith('HPC'));
-    expect(hpcRows.length).toBe(19);
-    const lastRow = hpcRows[hpcRows.length - 1];
-    if (lastRow === undefined) throw new Error('no HPC rows');
-    const x = 0.5 * (lastRow.xLE + lastRow.xTE);
-    const h = outer.atX(x).r - hub.atX(x).r;
-    expect(h).toBeGreaterThanOrEqual(0.02);
-    expect(h).toBeLessThanOrEqual(0.03);
-  });
-
-  it('keeps every blade row inside its duct', () => {
-    const kp = keyPoints(g);
-    for (const row of g.bladeRows) {
-      if (row.duct === 'fan') {
-        expect(row.xLE).toBeGreaterThan(0);
-        expect(row.xTE).toBeLessThan(kp.splitter.x);
-      } else if (row.duct === 'bypass') {
-        expect(row.xLE).toBeGreaterThan(kp.splitter.x);
-        expect(row.xTE).toBeLessThan(kp.bypassLip.x);
-      } else {
-        expect(row.xLE).toBeGreaterThan(kp.splitter.x);
-        expect(row.xTE).toBeLessThan(kp.coreLip.x);
-      }
-    }
-  });
-});
+import { flowpathFromDefinition } from '../../../tools/mesh/geometry/definition';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 
 describe('validateFlowpath', () => {
-  const g = placeholderFlowpath();
+  const g = flowpathFromDefinition(ENGINE_DEFINITION);
   const withCurves = (patch: Partial<FlowpathGeometry['curves']>): FlowpathGeometry => ({
     ...g,
     curves: { ...g.curves, ...patch },
@@ -85,8 +38,13 @@ describe('validateFlowpath', () => {
     expect(validateFlowpath(withCurves({ hub: lifted }))).toContain(
       'hub must start on the axis (spinner nose)',
     );
-    const bad = { ...g, bladeRows: [{ name: 'X', duct: 'core' as const, xLE: 1, xTE: 0.9 }] };
+    const row = g.bladeRows[2];
+    if (row === undefined) throw new Error('no row');
+    const bad = { ...g, bladeRows: [{ ...row, name: 'X', xLE: 1, xTE: 0.9, te: row.le }] };
     expect(validateFlowpath(bad)).toContain('blade row X: xTE must exceed xLE');
+    expect(validateFlowpath(bad)).toContain(
+      'blade row X: trailing edge must be downstream at both walls',
+    );
     const open = g.curves.hub.map((p, k, a) => (k === a.length - 1 ? { x: p.x, r: 0.01 } : p));
     expect(validateFlowpath(withCurves({ hub: open }))).toContain(
       'hub must end on the axis (plug tip)',
@@ -129,10 +87,33 @@ describe('validateFlowpath', () => {
     const problems = validateFlowpath(withCurves({ hub: short })).join(' ');
     expect(problems).toMatch(/plug tip must be downstream of the core lip/);
     // a hub pushed through the core duct wall
-    const fat = g.curves.hub.map((p) => (p.x > 1.2 && p.x < 1.4 ? { x: p.x, r: p.r + 0.2 } : p));
+    const fat = g.curves.hub.map((p) =>
+      p.x >= 1.16 && p.x <= 1.46 ? { x: p.x, r: p.r + 0.2 } : p,
+    );
     expect(validateFlowpath(withCurves({ hub: fat }))).toContain(
       'core duct must have positive height',
     );
+  });
+
+  it('rejects blade edges off their walls and stations outside their duct', () => {
+    const row = g.bladeRows[0];
+    if (row === undefined) throw new Error('no row');
+    const off = {
+      ...row,
+      le: { hub: row.le.hub, tip: { x: row.le.tip.x, r: row.le.tip.r - 0.01 } },
+    };
+    expect(validateFlowpath({ ...g, bladeRows: [off] })).toContain(
+      `blade row ${row.name}: leading edge must run from wall to wall`,
+    );
+    const late = {
+      ...row,
+      te: { hub: { x: row.te.hub.x, r: row.te.hub.r + 0.01 }, tip: row.te.tip },
+    };
+    expect(validateFlowpath({ ...g, bladeRows: [late] })).toContain(
+      `blade row ${row.name}: trailing edge must run from wall to wall`,
+    );
+    const stray = { ...g, stations: [{ id: '13', x: 1.9, duct: 'bypass' as const }] };
+    expect(validateFlowpath(stray)).toContain('station 13 lies outside the bypass duct');
   });
 
   it('refuses key points of an empty curve', () => {

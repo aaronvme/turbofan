@@ -193,12 +193,17 @@ export function bySpacing(length: number, h: (s: number) => number, n?: number):
   return s;
 }
 
-/** Largest ratio of adjacent spacings, taken >= 1 in either direction. */
+/**
+ * Largest ratio of adjacent spacings, taken >= 1 in either direction. A zero or negative spacing
+ * (a fold) is an infinite ratio, so a check against a limit cannot pass a folded distribution.
+ */
 export function maxRatio(t: ArrayLike<number>): number {
   let worst = 1;
-  for (let k = 2; k < t.length; k++) {
-    const a = (t[k - 1] ?? 0) - (t[k - 2] ?? 0);
+  for (let k = 1; k < t.length; k++) {
     const b = (t[k] ?? 0) - (t[k - 1] ?? 0);
+    if (!(b > 0)) return Infinity;
+    if (k < 2) continue;
+    const a = (t[k - 1] ?? 0) - (t[k - 2] ?? 0);
     worst = Math.max(worst, a > b ? a / b : b / a);
   }
   return worst;

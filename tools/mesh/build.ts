@@ -2,7 +2,7 @@
 // rows, distributions by end spacing, column-wise blocks, re-spacing, and duct wall rows cut by a
 // smoothed mean-line normal. Engine-independent; tools/mesh/engineMesh.ts composes them.
 import { Polyline } from './curve';
-import { bySpacing, geometric, vinokur } from './distribution';
+import { geometric, vinokur } from './distribution';
 import { nodeIndex, type Block, type Pt } from './types';
 
 export const dist = (a: Pt, b: Pt): number => Math.hypot(a.x - b.x, a.r - b.r);
@@ -131,91 +131,381 @@ export function smoothLog(v: readonly number[], passes: number): number[] {
 }
 
 /**
- * Wall node rows of a duct between `lower` and `upper` from x0 to x1. Nodes are placed on the
- * duct's mean line by the spacing function h(x), and each node's cross-duct cut runs along the
- * mean-line normal. The normal direction is smoothed along the mean line over about one duct
- * height (the walls are C1 Hermite curves, so their curvature jumps at knots; an unsmoothed normal
- * would turn those jumps into wall-spacing jumps on the inside of bends), and it is blended to
- * radial over `blendHeights` duct heights at both ends with a C1 smoothstep, so the station planes
- * stay radial without compressing the first wall cells. This keeps the cross-duct grid lines
- * near-orthogonal through bends such as the booster-HPC gooseneck.
+ * Monotone piecewise-cubic Hermite interpolant through (xs, ys), xs strictly increasing (Fritsch &
+ * Carlson, SIAM J. Numer. Anal. 17 (1980) 238-246, with the Fritsch-Butland weighted harmonic-mean
+ * slopes). C1, reproduces linear data exactly, monotone where the data are; clamped outside.
  */
-export function ductWalls(
-  lower: Polyline,
-  upper: Polyline,
-  x0: number,
-  x1: number,
-  h: (x: number) => number,
-  ends: { lower0: Pt; upper0: Pt; lower1: Pt; upper1: Pt },
-  blendHeights = 1.5,
-): { lo: Pt[]; up: Pt[] } {
-  const M = 1500;
-  const height = (x: number): number => upper.atX(x).r - lower.atX(x).r;
-  const pts = Array.from({ length: M + 1 }, (_, m) => {
-    const x = m === M ? x1 : x0 + ((x1 - x0) * m) / M;
-    return { x, r: 0.5 * (lower.atX(x).r + upper.atX(x).r) };
-  });
-  const mean = new Polyline(pts);
-  const L = mean.length;
-  const cum = mean.cum;
-  // normal angle at each sample, from a central difference over a few samples
-  const raw = pts.map((_, m) => {
-    const a = pts[Math.max(0, m - 2)] as Pt;
-    const b = pts[Math.min(M, m + 2)] as Pt;
-    return Math.atan2(b.x - a.x, -(b.r - a.r));
-  });
-  // moving average over half a local duct height either side, three passes
-  const H = pts.map((p) => height(p.x));
-  let ang = raw;
-  for (let pass = 0; pass < 3; pass++) {
-    const prev = ang;
-    let lo = 0;
-    let hi = 0;
-    let sum = 0;
-    ang = pts.map((_, m) => {
-      const s = cum[m] ?? 0;
-      const w = 0.5 * (H[m] ?? 0);
-      while (hi <= M && (cum[hi] ?? Infinity) <= s + w) sum += prev[hi++] ?? 0;
-      while (lo < hi && (cum[lo] ?? 0) < s - w) sum -= prev[lo++] ?? 0;
-      return hi > lo ? sum / (hi - lo) : (prev[m] ?? 0);
-    });
+export function pchip(xs: readonly number[], ys: readonly number[]): (x: number) => number {
+  const n = xs.length;
+  if (n < 2 || ys.length !== n) throw new Error('pchip needs at least two knots');
+  const X = (k: number): number => xs[k] ?? NaN;
+  const Y = (k: number): number => ys[k] ?? NaN;
+  const h: number[] = [];
+  const d: number[] = [];
+  for (let k = 0; k + 1 < n; k++) {
+    const hk = X(k + 1) - X(k);
+    if (!(hk > 0)) throw new Error('pchip knots must increase');
+    h.push(hk);
+    d.push((Y(k + 1) - Y(k)) / hk);
   }
-  const Lb0 = blendHeights * height(x0);
-  const Lb1 = blendHeights * height(x1);
-  const angleAt = (s: number): number => {
-    const u = clamp((s / L) * M, 0, M);
-    const m = Math.min(M - 1, Math.floor(u));
-    // samples are near-uniform in arc length; interpolate on the sample index
-    const f = u - m;
-    const a = (ang[m] ?? 0) * (1 - f) + (ang[m + 1] ?? 0) * f;
-    const w = smoothstep(s / Lb0) * smoothstep((L - s) / Lb1);
-    return Math.PI / 2 + w * (a - Math.PI / 2);
+  const m = xs.map((_, k) => {
+    if (k === 0) return d[0] ?? 0;
+    if (k === n - 1) return d[n - 2] ?? 0;
+    const d0 = d[k - 1] ?? 0;
+    const d1 = d[k] ?? 0;
+    if (d0 * d1 <= 0) return 0;
+    const h0 = h[k - 1] ?? 0;
+    const h1 = h[k] ?? 0;
+    const w1 = 2 * h1 + h0;
+    const w2 = h1 + 2 * h0;
+    return (w1 + w2) / (w1 / d0 + w2 / d1);
+  });
+  return (x) => {
+    if (x <= X(0)) return Y(0);
+    if (x >= X(n - 1)) return Y(n - 1);
+    let lo = 0;
+    let hi = n - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (X(mid) <= x) lo = mid;
+      else hi = mid;
+    }
+    const hk = h[lo] ?? 1;
+    const t = (x - X(lo)) / hk;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    return (
+      (2 * t3 - 3 * t2 + 1) * Y(lo) +
+      (t3 - 2 * t2 + t) * hk * (m[lo] ?? 0) +
+      (-2 * t3 + 3 * t2) * Y(lo + 1) +
+      (t3 - t2) * hk * (m[lo + 1] ?? 0)
+    );
   };
-  const s = bySpacing(L, (sv) => h(mean.at(sv).x));
-  const n = s.length - 1;
-  const lo: Pt[] = [];
-  const up: Pt[] = [];
-  let lastLo = -Infinity;
-  let lastUp = -Infinity;
-  for (let k = 0; k <= n; k++) {
-    if (k === 0 || k === n) {
-      lo.push(k === 0 ? ends.lower0 : ends.lower1);
-      up.push(k === 0 ? ends.upper0 : ends.upper1);
+}
+
+/**
+ * Cell counts for consecutive segments whose target counts (the integral of ds / h over each
+ * segment) are g: as close to the targets as possible (least squares in log space) while the
+ * spacing scale g / n changes by at most `ratio` between neighbouring segments, and no segment has
+ * fewer than nMin cells. Dynamic programming over the segments; the ratio is relaxed by 5 % steps
+ * until a solution exists.
+ */
+export function segmentCounts(
+  g: readonly number[],
+  nMin: readonly number[],
+  ratio = 1.25,
+): number[] {
+  const options = g.map((gk, k) => {
+    const lo = Math.max(1, nMin[k] ?? 1, Math.floor(0.5 * gk));
+    const hi = Math.max(lo, Math.ceil(2 * gk) + 1);
+    return Array.from({ length: hi - lo + 1 }, (_, m) => lo + m);
+  });
+  const cost = (k: number, n: number): number => Math.log((g[k] ?? 1) / n) ** 2;
+  for (let limit = Math.log(ratio); ; limit += Math.log(1.05)) {
+    // best[k][m]: least cost of segments 0..k with segment k taking options[k][m]
+    const best: number[][] = [];
+    const from: number[][] = [];
+    options.forEach((opts, k) => {
+      best.push(
+        opts.map((n, m) => {
+          if (k === 0) return cost(0, n);
+          let b = Infinity;
+          let arg = -1;
+          (options[k - 1] ?? []).forEach((p, q) => {
+            const prev = best[k - 1]?.[q] ?? Infinity;
+            const jump = Math.abs(Math.log(((g[k] ?? 1) / n) * (p / (g[k - 1] ?? 1))));
+            if (jump <= limit + 1e-12 && prev < b) {
+              b = prev;
+              arg = q;
+            }
+          });
+          (from[k] ??= [])[m] = arg;
+          return b + cost(k, n);
+        }),
+      );
+    });
+    const lastBest = best[best.length - 1] ?? [];
+    let m = lastBest.indexOf(Math.min(...lastBest));
+    if (!Number.isFinite(lastBest[m] ?? Infinity)) continue;
+    const n: number[] = new Array<number>(g.length);
+    for (let k = g.length - 1; k >= 0; k--) {
+      n[k] = options[k]?.[m] ?? 1;
+      m = from[k]?.[m] ?? 0;
+    }
+    return n;
+  }
+}
+
+/**
+ * Node arc lengths along [0, L] with nodes exactly at the fixed arc lengths sFixed (increasing,
+ * from 0 to L). Between them the spacing follows h(s), adjusted so that each segment holds a whole
+ * number of cells smoothly:
+ * - each segment k becomes a zone of spacing z_k = L_k / ceil(L_k / h(mid)) (at least nMin[k]
+ *   cells), and the spacing is capped by z_k + gradation * (distance to the zone), so a short
+ *   segment (a 4.5 mm blade gap, a station plane 5 mm before a leading edge) is approached by a
+ *   graded spacing instead of a jump;
+ * - segmentCounts picks the counts, and the node index is mapped to the integral of ds / h by a
+ *   monotone cubic through the fixed nodes, so the residual per-segment scale varies smoothly.
+ * Returns the node arc lengths and the node index of each fixed arc length.
+ */
+export function fixedSpacing(
+  L: number,
+  h: (s: number) => number,
+  sFixed: readonly number[],
+  nMin: readonly number[],
+  gradation = 0.08,
+): { s: Float64Array; fixedIndex: number[] } {
+  const K = sFixed.length - 1;
+  if (K < 1 || sFixed[0] !== 0 || sFixed[K] !== L)
+    throw new Error('fixed arc lengths must span the length from 0 to L');
+  const F = (k: number): number => sFixed[k] ?? NaN;
+  for (let k = 0; k < K; k++) {
+    if (!(F(k + 1) > F(k))) throw new Error('fixed arc lengths must increase');
+  }
+  const zones = Array.from({ length: K }, (_, k) => {
+    const len = F(k + 1) - F(k);
+    // (a 0.2-cell tolerance: 15 mm at 4.98 mm is three cells, not four)
+    const n = Math.max(nMin[k] ?? 1, Math.ceil(len / h(0.5 * (F(k) + F(k + 1))) - 0.2));
+    return { a: F(k), b: F(k + 1), z: len / n };
+  });
+  const hEff = (s: number): number => {
+    let v = h(s);
+    for (const zn of zones) {
+      const dz = s < zn.a ? zn.a - s : s > zn.b ? s - zn.b : 0;
+      v = Math.min(v, zn.z + gradation * dz);
+    }
+    return v;
+  };
+  // the integral G(s) of ds / hEff on a fine grid, with the fixed arc lengths among its samples
+  const M = Math.max(8192, 64 * K);
+  const grid: number[] = [];
+  for (let m = 0; m <= M; m++) grid.push((L * m) / M);
+  for (const v of sFixed) grid.push(v);
+  grid.sort((a, b) => a - b);
+  const S: number[] = [];
+  for (const v of grid) if (S.length === 0 || v > (S[S.length - 1] ?? 0)) S.push(v);
+  const G = new Float64Array(S.length);
+  for (let m = 1; m < S.length; m++) {
+    const a = S[m - 1] ?? 0;
+    const b = S[m] ?? 0;
+    G[m] = (G[m - 1] ?? 0) + (b - a) / hEff(0.5 * (a + b));
+  }
+  const gAt = (s: number): number => G[S.indexOf(s)] ?? NaN;
+  const Gk = sFixed.map((v) => gAt(v));
+  const n0 = segmentCounts(
+    Array.from({ length: K }, (_, k) => (Gk[k + 1] ?? 0) - (Gk[k] ?? 0)),
+    nMin,
+  );
+  const fixedIndex = [0];
+  for (const n of n0) fixedIndex.push((fixedIndex[fixedIndex.length - 1] ?? 0) + n);
+  const N = fixedIndex[K] ?? 0;
+  const gamma = pchip(fixedIndex, Gk);
+  const s = new Float64Array(N + 1);
+  let m = 0;
+  let next = 0;
+  for (let i = 0; i <= N; i++) {
+    if (i === fixedIndex[next]) {
+      s[i] = F(next);
+      next++;
       continue;
     }
-    const sk = s[k] ?? 0;
-    const m = mean.at(sk);
-    const a = angleAt(sk);
-    const dir = { x: Math.cos(a), r: Math.sin(a) };
-    const sl = lower.rayHit(m, dir);
-    const su = upper.rayHit(m, dir);
-    if (sl === null || su === null || !(sl > lastLo) || !(su > lastUp)) {
-      throw new Error(`duct cut ${k} at x = ${m.x.toFixed(3)} does not cross both walls in order`);
-    }
-    lastLo = sl;
-    lastUp = su;
-    lo.push(lower.at(sl));
-    up.push(upper.at(su));
+    const gi = gamma(i);
+    while ((G[m + 1] ?? Infinity) < gi) m++;
+    const g0 = G[m] ?? 0;
+    const g1 = G[m + 1] ?? g0;
+    const a = S[m] ?? 0;
+    const b = S[m + 1] ?? a;
+    s[i] = a + (b - a) * (g1 > g0 ? (gi - g0) / (g1 - g0) : 0);
   }
-  return { lo, up };
+  return { s, fixedIndex };
+}
+
+/** A straight cut across a duct from a point on its lower wall to a point on its upper wall. */
+export interface DuctCut {
+  readonly hub: Pt;
+  readonly tip: Pt;
+}
+
+/**
+ * Node arc lengths along one wall [0, L] with nodes exactly at sFixed and exactly counts[k] cells
+ * in segment k (counts shared with the opposite wall of a duct, so they can exceed what this wall
+ * needs). The spacing function is built so that every cell ratio stays near 1 + gradation:
+ * - the spacing at each fixed node is h there, or L/n of an adjacent segment with fewer than
+ *   five cells (too few cells to grade within, so that cell size fixes the node spacing);
+ * - h is capped by the node spacings graded outwards at `gradation`, and floored near a node
+ *   whose spacing exceeds h, so neighbours step down to h rather than jump;
+ * - a segment that must hold more cells than that gives dips in its interior to a cap found by
+ *   bisection, approached from both ends at the same gradation (never by scaling the whole
+ *   segment, which would break the match with its neighbours).
+ * Also returns, per segment, the cells the wall would need at least (with the cap at infinity),
+ * so the caller can raise shared counts that this wall cannot meet.
+ */
+export function wallSpacing(
+  L: number,
+  h: (s: number) => number,
+  sFixed: readonly number[],
+  counts: readonly number[],
+  gradation = 0.08,
+): { s: Float64Array; fixedIndex: number[]; need: number[] } {
+  const K = sFixed.length - 1;
+  const F = (k: number): number => sFixed[k] ?? NaN;
+  const len = (k: number): number => F(k + 1) - F(k);
+  const n = (k: number): number => counts[k] ?? 1;
+  const rigid = (k: number): number => (k >= 0 && k < K && n(k) < 5 ? len(k) / n(k) : Infinity);
+  // a node beside a rigid segment takes that segment's cell size (the cell cannot change)
+  const sigma = sFixed.map((v, k) => {
+    const r = Math.min(rigid(k - 1), rigid(k));
+    return Number.isFinite(r) ? r : h(v);
+  });
+  // capped by the node spacings graded outwards; and near a node whose spacing exceeds h (a
+  // one-cell blade gap beside finer chord cells) floored by that spacing graded back down, so
+  // the neighbours step towards h instead of jumping to it
+  const base = (v: number): number => {
+    let out = h(v);
+    let floor = 0;
+    sigma.forEach((sg, k) => {
+      const d = gradation * Math.abs(v - F(k));
+      out = Math.min(out, sg + d);
+      floor = Math.max(floor, sg / (1 + gradation) - d);
+    });
+    return Math.max(out, Math.min(floor, out * (1 + gradation) ** 2));
+  };
+  // per segment: M sample midpoints, the base spacing there (computed once), and the cap that
+  // gives exactly n cells
+  const M = 256;
+  const caps: number[] = [];
+  const need: number[] = [];
+  const mid = (k: number, m: number): number => F(k) + ((m + 0.5) * len(k)) / M;
+  const baseAt = Array.from({ length: K }, (_, k) =>
+    Float64Array.from({ length: M }, (_, m) => base(mid(k, m))),
+  );
+  const at = (k: number, m: number, cap: number): number => {
+    const v = mid(k, m);
+    const ramp = Math.max(
+      cap,
+      (sigma[k] ?? 0) - gradation * (v - F(k)),
+      (sigma[k + 1] ?? 0) - gradation * (F(k + 1) - v),
+    );
+    return Math.min(baseAt[k]?.[m] ?? Infinity, ramp);
+  };
+  const cells = (k: number, cap: number): number => {
+    const d = len(k) / M;
+    let sum = 0;
+    for (let m = 0; m < M; m++) sum += d / at(k, m, cap);
+    return sum;
+  };
+  for (let k = 0; k < K; k++) {
+    const most = cells(k, Infinity);
+    need.push(most);
+    if (n(k) < 5 || most >= n(k)) {
+      caps.push(Infinity);
+      continue;
+    }
+    let lo = 1e-9;
+    let hi = len(k);
+    for (let it = 0; it < 60; it++) {
+      const mid = 0.5 * (lo + hi);
+      if (cells(k, mid) > n(k)) lo = mid;
+      else hi = mid;
+    }
+    caps.push(0.5 * (lo + hi));
+  }
+  // the integral of ds / spacing, then node index -> integral by a monotone cubic through the
+  // fixed nodes (the counts now match the integral to within the rigid segments' rounding)
+  const S: number[] = [];
+  for (let k = 0; k < K; k++) for (let m = 0; m < M; m++) S.push(F(k) + (len(k) * m) / M);
+  S.push(L);
+  const G = new Float64Array(S.length);
+  for (let k = 0; k < K; k++) {
+    const d = len(k) / M;
+    for (let m = 0; m < M; m++) {
+      const q = k * M + m;
+      G[q + 1] = (G[q] ?? 0) + d / at(k, m, caps[k] ?? Infinity);
+    }
+  }
+  const fixedIndex = [0];
+  for (let k = 0; k < K; k++) fixedIndex.push((fixedIndex[k] ?? 0) + n(k));
+  const Gk = sFixed.map((_, k) => G[k * M] ?? 0);
+  const N = fixedIndex[K] ?? 0;
+  const gamma = pchip(fixedIndex, Gk);
+  const s = new Float64Array(N + 1);
+  let m = 0;
+  let next = 0;
+  for (let i = 0; i <= N; i++) {
+    if (i === fixedIndex[next]) {
+      s[i] = F(next);
+      next++;
+      continue;
+    }
+    const gi = gamma(i);
+    while ((G[m + 1] ?? Infinity) < gi) m++;
+    const g0 = G[m] ?? 0;
+    const g1 = G[m + 1] ?? g0;
+    const a = S[m] ?? 0;
+    const b = S[m + 1] ?? a;
+    s[i] = a + (b - a) * (g1 > g0 ? (gi - g0) / (g1 - g0) : 0);
+  }
+  return { s, fixedIndex, need };
+}
+
+/**
+ * Wall node rows of a duct whose fixed lines (station planes, blade edges, the two ends) are cut
+ * lines from the lower to the upper wall. Each wall is distributed along its own arc length (so
+ * wall kinks cannot jump the spacing, and the fan's swept edges, 5 mm behind the fan face at the
+ * hub and 20 mm at the tip, are honoured on both walls) with the same cell count per segment:
+ * the larger of what the two walls need, raised until both can hold it smoothly (wallSpacing).
+ * The caller joins node i of one wall to node i of the other with a straight cut.
+ */
+export function wallRows(
+  lower: Polyline,
+  upper: Polyline,
+  h: (x: number) => number,
+  cuts: readonly DuctCut[],
+  minCells: (k: number) => number = () => 1,
+  gradation = 0.08,
+): { lo: Pt[]; up: Pt[]; fixed: number[] } {
+  const first = cuts[0];
+  const last = cuts[cuts.length - 1];
+  if (first === undefined || last === undefined || cuts.length < 2)
+    throw new Error('wallRows needs the two end lines');
+  const side = (wall: Polyline, pick: (c: DuctCut) => Pt) => {
+    const s0 = wall.sAtX(pick(first).x);
+    const sub = wall.sub(s0, wall.sAtX(pick(last).x));
+    const sFixed = cuts.map((c, k) =>
+      k === 0 ? 0 : k === cuts.length - 1 ? sub.length : wall.sAtX(pick(c).x) - s0,
+    );
+    for (let k = 1; k < sFixed.length; k++) {
+      if (!((sFixed[k] ?? 0) > (sFixed[k - 1] ?? 0)))
+        throw new Error(`fixed duct lines are out of order at line ${k}`);
+    }
+    return { sub, sFixed, hs: (sv: number) => h(sub.at(sv).x) };
+  };
+  const walls = [side(lower, (c) => c.hub), side(upper, (c) => c.tip)] as const;
+  const nMin = cuts.slice(1).map((_, k) => minCells(k));
+  // start from each wall's own counts, then raise until both walls can hold them
+  let counts = nMin.map((v) => v);
+  for (const w of walls) {
+    const { fixedIndex } = fixedSpacing(w.sub.length, w.hs, w.sFixed, nMin, gradation);
+    counts = counts.map((c, k) => Math.max(c, (fixedIndex[k + 1] ?? 0) - (fixedIndex[k] ?? 0)));
+  }
+  for (let it = 0; it < 20; it++) {
+    const before = counts.join();
+    for (const w of walls) {
+      const { need } = wallSpacing(w.sub.length, w.hs, w.sFixed, counts, gradation);
+      counts = counts.map((c, k) => Math.max(c, Math.ceil((need[k] ?? 0) - 0.3)));
+    }
+    if (counts.join() === before) break;
+  }
+  const place = (w: (typeof walls)[number], pick: (c: DuctCut) => Pt) => {
+    const { s, fixedIndex } = wallSpacing(w.sub.length, w.hs, w.sFixed, counts, gradation);
+    let next = 0;
+    const pts = Array.from(s, (v, i) => {
+      if (i === fixedIndex[next]) return pick(cuts[next++] as DuctCut);
+      return w.sub.at(v);
+    });
+    return { pts, fixed: fixedIndex.slice(1, -1) };
+  };
+  const a = place(walls[0], (c) => c.hub);
+  const b = place(walls[1], (c) => c.tip);
+  return { lo: a.pts, up: b.pts, fixed: a.fixed };
 }

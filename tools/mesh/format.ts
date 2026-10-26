@@ -1,4 +1,6 @@
-// Binary mesh + metrics format, version 1 (layout spec: docs/MESH.md, "Binary format").
+// Binary mesh + metrics format, version 2 (layout spec: docs/MESH.md, "Binary format").
+// Version 2 adds the STATIONS and ROWS sections (station planes and blade-row zones as grid
+// lines) and the decoder checks the file's structure before anything uploads its indices.
 //
 // Little-endian. A 64-byte header, a section table (16 bytes per section), then the sections in
 // id order, each starting on an 8-byte boundary so a loader can view them in place as typed
@@ -39,6 +41,22 @@ export interface MeshFilePatch {
   readonly label: string;
 }
 
+/** A station plane as a grid line: i-face index i of a block, across all its j. */
+export interface MeshFileStation {
+  readonly id: string;
+  readonly block: number;
+  readonly i: number;
+  readonly x: number;
+}
+
+/** A blade row's body-force zone: cells i0..i1-1 of a block, across all its j. */
+export interface MeshFileRow {
+  readonly id: string;
+  readonly block: number;
+  readonly i0: number;
+  readonly i1: number;
+}
+
 export interface MeshFile {
   readonly version: number;
   readonly precision: 'f64' | 'f32';
@@ -59,14 +77,19 @@ export interface MeshFile {
   readonly jFaceAreaR: Real;
   readonly ghostSrc: Int32Array;
   readonly ghostBc: Uint8Array;
+  readonly stations: readonly MeshFileStation[];
+  readonly rows: readonly MeshFileRow[];
 }
 
 export const MAGIC = 'TFMESH\0\0';
-export const VERSION = 1;
+export const VERSION = 2;
 const HEADER_BYTES = 64;
 const SECTION_ENTRY_BYTES = 16;
 const RECORD_BYTES = 64;
 const NAME_BYTES = 32;
+const STATION_BYTES = 32;
+const STATION_ID_BYTES = 16;
+const ROW_BYTES = 48;
 
 /** Section ids, in file order. Part of the format: never renumber. */
 export const SECTION = {
@@ -86,14 +109,25 @@ export const SECTION = {
   JFACE_AREAR: 14,
   GHOST_SRC: 15,
   GHOST_BC: 16,
+  STATIONS: 17,
+  ROWS: 18,
 } as const;
 
 /** Element type codes in the section table. */
-export const ELEMENT = { F64: 1, F32: 2, I32: 3, U8: 4, BLOCK_RECORD: 5, PATCH_RECORD: 6 } as const;
+export const ELEMENT = {
+  F64: 1,
+  F32: 2,
+  I32: 3,
+  U8: 4,
+  BLOCK_RECORD: 5,
+  PATCH_RECORD: 6,
+  STATION_RECORD: 7,
+  ROW_RECORD: 8,
+} as const;
 
 type ArrayKey = Exclude<
   keyof MeshFile,
-  'version' | 'precision' | 'ghostLayers' | 'blocks' | 'patches'
+  'version' | 'precision' | 'ghostLayers' | 'blocks' | 'patches' | 'stations' | 'rows'
 >;
 
 const ARRAY_SECTIONS: readonly {
@@ -117,8 +151,15 @@ const ARRAY_SECTIONS: readonly {
   { id: SECTION.GHOST_BC, key: 'ghostBc', kind: 'u8' },
 ];
 
-/** Assemble the file contents (metrics + 2-layer ghost map) from a mesh. */
-export function meshFileFromMesh(mesh: MultiBlockMesh, precision: 'f64' | 'f32'): MeshFile {
+/** Assemble the file contents (metrics, 2-layer ghost map, station and row maps) from a mesh. */
+export function meshFileFromMesh(
+  mesh: MultiBlockMesh,
+  precision: 'f64' | 'f32',
+  maps: { readonly stations: readonly MeshFileStation[]; readonly rows: readonly MeshFileRow[] } = {
+    stations: [],
+    rows: [],
+  },
+): MeshFile {
   const ghosts = buildGhostMap(mesh, 2);
   let nodes = 0;
   let cells = 0;
@@ -195,19 +236,21 @@ export function meshFileFromMesh(mesh: MultiBlockMesh, precision: 'f64' | 'f32')
     ...out,
     ghostSrc: ghosts.src,
     ghostBc: ghosts.bc,
+    stations: maps.stations.map((m) => ({ ...m })),
+    rows: maps.rows.map((m) => ({ ...m })),
   };
 }
 
 const align8 = (n: number): number => (n + 7) & ~7;
 
-function writeName(bytes: Uint8Array, at: number, name: string): void {
+function writeName(bytes: Uint8Array, at: number, name: string, size = NAME_BYTES): void {
   const enc = new TextEncoder().encode(name);
-  if (enc.length > NAME_BYTES) throw new Error(`name "${name}" is longer than ${NAME_BYTES} bytes`);
+  if (enc.length > size) throw new Error(`name "${name}" is longer than ${size} bytes`);
   bytes.set(enc, at);
 }
 
-function readName(bytes: Uint8Array, at: number): string {
-  const raw = bytes.subarray(at, at + NAME_BYTES);
+function readName(bytes: Uint8Array, at: number, size = NAME_BYTES): string {
+  const raw = bytes.subarray(at, at + size);
   const end = raw.indexOf(0);
   return new TextDecoder().decode(end < 0 ? raw : raw.subarray(0, end));
 }
@@ -262,6 +305,26 @@ export function encodeMeshFile(file: MeshFile): Uint8Array {
       throw new Error(`${s.key} has the wrong element type for ${file.precision}`);
     sections.push({ id: s.id, type, data: new Uint8Array(a.buffer, a.byteOffset, a.byteLength) });
   }
+  const stationBytes = new Uint8Array(file.stations.length * STATION_BYTES);
+  const sv = new DataView(stationBytes.buffer);
+  file.stations.forEach((st, k) => {
+    const o = k * STATION_BYTES;
+    writeName(stationBytes, o, st.id, STATION_ID_BYTES);
+    sv.setUint32(o + 16, st.block, true);
+    sv.setUint32(o + 20, st.i, true);
+    sv.setFloat64(o + 24, st.x, true);
+  });
+  sections.push({ id: SECTION.STATIONS, type: ELEMENT.STATION_RECORD, data: stationBytes });
+  const rowBytes = new Uint8Array(file.rows.length * ROW_BYTES);
+  const rv = new DataView(rowBytes.buffer);
+  file.rows.forEach((row, k) => {
+    const o = k * ROW_BYTES;
+    writeName(rowBytes, o, row.id);
+    rv.setUint32(o + 32, row.block, true);
+    rv.setUint32(o + 36, row.i0, true);
+    rv.setUint32(o + 40, row.i1, true);
+  });
+  sections.push({ id: SECTION.ROWS, type: ELEMENT.ROW_RECORD, data: rowBytes });
 
   let offset = HEADER_BYTES + sections.length * SECTION_ENTRY_BYTES;
   const placed = sections.map((s) => {
@@ -309,7 +372,19 @@ const ELEMENT_BYTES: Readonly<Record<number, number>> = {
   [ELEMENT.U8]: 1,
   [ELEMENT.BLOCK_RECORD]: RECORD_BYTES,
   [ELEMENT.PATCH_RECORD]: RECORD_BYTES,
+  [ELEMENT.STATION_RECORD]: STATION_BYTES,
+  [ELEMENT.ROW_RECORD]: ROW_BYTES,
 };
+
+/** The element type a section must have, given the precision flag. */
+function expectedElement(id: number, precision: 'f64' | 'f32'): number | undefined {
+  if (id === SECTION.BLOCKS) return ELEMENT.BLOCK_RECORD;
+  if (id === SECTION.PATCHES) return ELEMENT.PATCH_RECORD;
+  if (id === SECTION.STATIONS) return ELEMENT.STATION_RECORD;
+  if (id === SECTION.ROWS) return ELEMENT.ROW_RECORD;
+  const s = ARRAY_SECTIONS.find((a) => a.id === id);
+  return s === undefined ? undefined : elementOf(s.kind, precision);
+}
 
 export function decodeMeshFile(input: Uint8Array): MeshFile {
   if (input.byteLength < HEADER_BYTES) throw new Error('mesh file is shorter than its header');
@@ -354,6 +429,7 @@ export function decodeMeshFile(input: Uint8Array): MeshFile {
     [SECTION.GHOST_SRC]: nGhost,
     [SECTION.GHOST_BC]: nGhost,
   };
+  // the map sections carry their own counts (no header field): whole records
   const found = new Map<number, Uint8Array>();
   for (let k = 0; k < nSections; k++) {
     const o = HEADER_BYTES + k * SECTION_ENTRY_BYTES;
@@ -362,10 +438,18 @@ export function decodeMeshFile(input: Uint8Array): MeshFile {
     const at = u32(o + 8);
     const len = u32(o + 12);
     const size = ELEMENT_BYTES[type];
-    const count = counts[id];
-    if (size === undefined || count === undefined)
+    const expected = expectedElement(id, precision);
+    if (size === undefined || expected === undefined)
       throw new Error(`unknown section ${id} or element type ${type}`);
-    if (len !== count * size || at % 8 !== 0 || at + len > bytes.byteLength)
+    if (type !== expected)
+      throw new Error(`section ${id} has element type ${type}, expected ${expected}`);
+    const count = counts[id] ?? len / size;
+    if (
+      len !== count * size ||
+      !Number.isInteger(count) ||
+      at % 8 !== 0 ||
+      at + len > bytes.byteLength
+    )
       throw new Error(`section ${id} is malformed`);
     found.set(id, bytes.subarray(at, at + len));
   }
@@ -425,5 +509,108 @@ export function decodeMeshFile(input: Uint8Array): MeshFile {
   const arrays = Object.fromEntries(
     ARRAY_SECTIONS.map((s) => [s.key, typed(s.id, s.kind)]),
   ) as Pick<MeshFile, ArrayKey>;
-  return { version, precision, ghostLayers, blocks, patches, ...arrays };
+  const stationBytes = section(SECTION.STATIONS);
+  const sv = new DataView(stationBytes.buffer, stationBytes.byteOffset, stationBytes.byteLength);
+  const stations: MeshFileStation[] = [];
+  for (let o = 0; o < stationBytes.byteLength; o += STATION_BYTES) {
+    stations.push({
+      id: readName(stationBytes, o, STATION_ID_BYTES),
+      block: sv.getUint32(o + 16, true),
+      i: sv.getUint32(o + 20, true),
+      x: sv.getFloat64(o + 24, true),
+    });
+  }
+  const rowBytes = section(SECTION.ROWS);
+  const rv = new DataView(rowBytes.buffer, rowBytes.byteOffset, rowBytes.byteLength);
+  const rows: MeshFileRow[] = [];
+  for (let o = 0; o < rowBytes.byteLength; o += ROW_BYTES) {
+    rows.push({
+      id: readName(rowBytes, o),
+      block: rv.getUint32(o + 32, true),
+      i0: rv.getUint32(o + 36, true),
+      i1: rv.getUint32(o + 40, true),
+    });
+  }
+  const file: MeshFile = {
+    version,
+    precision,
+    ghostLayers,
+    blocks,
+    patches,
+    ...arrays,
+    stations,
+    rows,
+  };
+  const problems = meshFileProblems(file);
+  if (problems.length > 0)
+    throw new Error(`mesh file is inconsistent: ${problems.slice(0, 3).join('; ')}`);
+  return file;
+}
+
+/**
+ * Structural problems of a decoded file (empty when consistent): block offsets that do not add
+ * up, patches with unknown blocks, faces or codes or out-of-range nodes, ghost sources outside
+ * the cells, unknown BC codes, and station or row maps outside their blocks. A loader uploads
+ * these indices to the GPU, where an out-of-range index would be clamped silently.
+ */
+export function meshFileProblems(file: MeshFile): string[] {
+  const errors: string[] = [];
+  const nb = file.blocks.length;
+  let nodes = 0;
+  let cells = 0;
+  let iFaces = 0;
+  let jFaces = 0;
+  let ghosts = 0;
+  for (const b of file.blocks) {
+    const want = [nodes, cells, iFaces, jFaces, ghosts];
+    const got = [b.nodeOffset, b.cellOffset, b.iFaceOffset, b.jFaceOffset, b.ghostOffset];
+    if (want.some((v, k) => v !== got[k])) errors.push(`block ${b.name} offsets do not add up`);
+    nodes += (b.ni + 1) * (b.nj + 1);
+    cells += b.ni * b.nj;
+    iFaces += (b.ni + 1) * b.nj;
+    jFaces += b.ni * (b.nj + 1);
+    ghosts += file.ghostLayers * 2 * (b.ni + b.nj);
+  }
+  const totals = [file.nodeX.length, file.cellX.length, file.iFaceNx.length, file.jFaceNx.length];
+  if (
+    [nodes, cells, iFaces, jFaces].some((v, k) => v !== totals[k]) ||
+    ghosts !== file.ghostSrc.length
+  )
+    errors.push('block sizes do not add up to the array lengths');
+  const faceCells = (block: number, face: number): number => {
+    const b = file.blocks[block];
+    return b === undefined ? -1 : face < 2 ? b.nj : b.ni;
+  };
+  file.patches.forEach((p, k) => {
+    const ok =
+      p.block < nb &&
+      p.face <= 3 &&
+      p.bc <= 5 &&
+      p.start < p.end &&
+      p.end <= faceCells(p.block, p.face) &&
+      (p.bc === 0
+        ? p.nbrBlock >= 0 &&
+          p.nbrBlock < nb &&
+          p.nbrFace <= 3 &&
+          Math.max(p.nbrStart, p.nbrEnd) <= faceCells(p.nbrBlock, p.nbrFace)
+        : p.nbrBlock === -1);
+    if (!ok) errors.push(`patch ${k} (${p.label}) is out of range`);
+  });
+  for (let k = 0; k < file.ghostSrc.length; k++) {
+    const src = file.ghostSrc[k] ?? -1;
+    if (src < 0 || src >= cells || (file.ghostBc[k] ?? 255) > 5) {
+      errors.push(`ghost ${k} has source ${src} or code ${file.ghostBc[k] ?? -1} out of range`);
+      break;
+    }
+  }
+  for (const st of file.stations) {
+    const b = file.blocks[st.block];
+    if (b === undefined || st.i > b.ni) errors.push(`station ${st.id} lies outside its block`);
+  }
+  for (const row of file.rows) {
+    const b = file.blocks[row.block];
+    if (b === undefined || !(row.i0 < row.i1 && row.i1 <= b.ni))
+      errors.push(`row ${row.id} lies outside its block`);
+  }
+  return errors;
 }
