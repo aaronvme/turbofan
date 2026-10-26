@@ -12,6 +12,7 @@ import {
   validateSimCommand,
   validateSimCommandMessage,
   type SimClock,
+  type SnapshotParts,
 } from '../../../src/contracts/sim';
 import { SAMPLE_COMMANDS, sampleSnapshot, sampleSnapshotParts } from './fixtures/snapshotFixture';
 
@@ -106,6 +107,20 @@ describe('snapshots are immutable and versioned', () => {
     expect(first.schemaVersion).toBe(SIM_SCHEMA_VERSION);
     const second = nextSnapshot(first, sampleSnapshotParts());
     expect(second.version).toBe(2);
+  });
+
+  it('W0C-I1: stamps version and schema even when the parts carry stale ones', () => {
+    // updating one part by spreading the previous snapshot compiles (excess-property checks
+    // do not apply to spread members) and used to freeze version at its old value
+    const first = nextSnapshot(null, sampleSnapshotParts());
+    const second = nextSnapshot(first, { ...first, lastCommandSeq: 8 });
+    const third = nextSnapshot(second, { ...second, lastCommandSeq: 9 });
+    expect([first.version, second.version, third.version]).toEqual([1, 2, 3]);
+    expect(third.lastCommandSeq).toBe(9);
+    const forged = { ...sampleSnapshotParts(), schemaVersion: 0, version: 99 } as SnapshotParts;
+    const fourth = nextSnapshot(third, forged);
+    expect(fourth.version).toBe(4);
+    expect(fourth.schemaVersion).toBe(SIM_SCHEMA_VERSION);
   });
 
   it('deep-freezes the snapshot so the UI cannot mutate sim state', () => {
