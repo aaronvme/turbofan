@@ -6,16 +6,67 @@ Machine: Intel Core Ultra 7 255H, Intel Arc 140T integrated GPU (shared 16 GB, d
 
 ## Measured
 
-Every entry: the claim, the evidence (test or script, and the command that runs it), the date and the conditions. Functional facts come from tests that pass on HEAD. Timings carry the D0-1 label of the run that produced them: **all timings below are "indicative, contaminated (D0-1)"** (`--quick` protocol, other agents running), so they are not P1 or D0-2 results. The official quiet runs are in `spikes/README.md`. "C" marks a researched claim confirmed, "X" a researched claim corrected, "N" something new.
+Every entry: the claim, the evidence (test or script, and the command that runs it), the date and the conditions. Functional facts come from tests that pass on HEAD. Timings carry the D0-1 label of the run that produced them:
+- **Official (D0-1):** the orchestrator's two quiet runs of 2026-10-25, M34 (throughput) and M35 (worker). P1 (D2-5, D2-8) and D0-2 (D2-4, D2-9) rest on them. Where a quick timing and an official one disagree, the official one stands.
+- **Indicative, contaminated (D0-1):** every other timing (M29, M30, M31): `--quick` protocol (1 s runs), other agents running, power mode Best performance.
+
+How to run the spikes and the official benchmarks: `spikes/README.md`. The recorded files and their annotations: `docs/bench/README.md`. "C" marks a researched claim confirmed, "X" a researched claim corrected, "N" something new.
+
+### Official D0-1 runs (orchestrator, 2026-10-25)
+
+Common conditions (from `conditions` in both JSON files): AC power (battery status 2), plan Balanced with power mode Balanced (D0-3: a lower bound), no other agents; Intel Arc 140T, driver 32.0.101.8860; Chrome 155.0.8059.86 headed and maximized (inner 1920x945, DPR 1), drawing buffer 1920x1080; Node 24.18.0; code at 019683d. Protocol: per configuration a 10 s warm-up, then 3 runs of 60 s, median per metric, configurations in a **fixed order** (the harness before the W0G-I1/I2 fixes). A "long frame" in these files exceeds 1.5x the run's median frame time; wherever the median is 16.7 ms (every valid row) that equals 1.5 display intervals at 60 Hz. `pageHiddenMs` is 0 in every row, but it cannot see an occluded window under Playwright (M31), so validity was judged from the frame times (critic pass 2).
+
+- **M34 (N, official). Solver throughput inside the 1080p bench scene** (spike a; the M30 scene and kernel, adaptive iterations at the 7 ms budget).
+  - Run: `npm run bench:throughput`, 2026-10-25 22:18-22:47 local -> `docs/bench/throughput-2026-10-25-2218-official.json`. CPU load 17% before (WindowsTerminal 2% and dwm 1% on the GPU), 7-9% during, 8% after (GPU otherwise idle). 0 GPU errors, finite state and timestamp quantum 65536 ns in every configuration.
+  - Run order within each grid: 16x8, then 8x8, then 32x4; grids 80k, 130k, 256k.
+
+    | grid (cells) | tile | ms/it | p10 ms/it | budget it/s | achieved it/s | fps | frame p99 (ms) | long frames/run |
+    |---|---|---|---|---|---|---|---|---|
+    | 400x200 (80k) | 16x8 | **INVALID** (D2-8) | - | - | - | - | - | - |
+    | 400x200 (80k) | 8x8 | 0.945 | 0.852 | 444 | 427 | 60.0 | 16.8 | 0 |
+    | 400x200 (80k) | 32x4 | 1.015 | 0.909 | 414 | 384 | 60.0 | 16.8 | 0 |
+    | 512x256 (131k) | 16x8 | 1.277 | 1.088 | 329 | **299** | 60.0 | 16.8 | 0 |
+    | 512x256 (131k) | 8x8 | 1.403 | 1.285 | 299 | **265** | 60.0 | 16.8 | 0 |
+    | 512x256 (131k) | 32x4 | 1.498 | 1.350 | 280 | **251** | 60.0 | 16.8 | 0 |
+    | 724x362 (262k) | 16x8 | 2.863 | 2.785 | 147 | 121 | 60.0 | 16.8 | 0 |
+    | 724x362 (262k) | 8x8 | 2.904 | 2.720 | 145 | 122 | 60.0 | 16.8 | 0 |
+    | 724x362 (262k) | 32x4 | 2.968 | 2.753 | 141 | 122 | 60.0 | 16.8 | 0 |
+
+  - **The 80k-16x8 row is invalid** (D2-8); the JSON is kept as recorded. About 52 s into the configuration (42 s into run 0) Chrome's rAF dropped to ~1 Hz and stayed there: run 0 has 2561 frames, 23 of them ~1017 ms; runs 1 and 2 have 59 and 60 frames, every delta ~1016 ms. The file's median therefore reads 4.8 it/s, frame p50 1016 ms and 0 long frames (the run-median rule cannot see a run that is entirely slow), and 1.33 ms/it, which is the GPU at one frame per second, not the kernel's cost. The window lost focus or was covered (M31); the next configuration, after `bringToFront()`, ran at 60 fps. Not a number to quote.
+  - Render GPU (three's passes) 3.6-3.8 ms in every row; the resample pass 0.066 / 0.131 / 0.262 ms at 80k / 130k / 256k.
+  - Readings:
+    - **P1 PASS (D2-5, D2-8):** every valid 130k row holds 60 fps at >= 250 it/s, against the kill line of 150, on Balanced.
+    - **16x8 is the default tile, not a measured best.** The per-grid ranking follows run order at all three sizes (130k 1.277 / 1.403 / 1.498 ms/it, 256k 2.863 / 2.904 / 2.968), and later runs of one configuration are slower (130k-8x8 achieved 281.7, 265.2, 264.7 it/s). The fixed order confounds the tile comparison (W0G-I2); the harness now rotates it.
+    - 256k reaches ~121 it/s, below its budget rate (141-147): the scheduler stays under 7 ms.
+    - The official 130k ms/it (1.28-1.50) is higher than the quick runs' 0.88-1.01 (M30), which ran on power mode Best performance, ran the configuration first or alone, and lasted 1 s.
+- **M35 (N, official). Main thread vs worker under a synthetic React load** (spike d; the M29 setup: 130k cells, 16x8, a fixed 3 it/frame, the React 19 **development** build re-rendering 240 gauges, sparklines and a table on the main thread).
+  - Run: `npm run bench:worker`, 2026-10-25 22:47-23:06 local -> `docs/bench/worker-2026-10-25-2247-official.json`. CPU load 5% before, 9-16% during, 7% after; no other process on the GPU before or after. Its `gitDirty: true` comes only from the untracked throughput JSON of the run before (W0G-N2, fixed in the harness).
+
+    | configuration | frame p50 / p95 / p99 (ms) | fps | long frames per run (runs) | rAF delay p95 / p99 (ms) | React commit p50 / p95 (ms) | solver GPU per frame p50 (ms) |
+    |---|---|---|---|---|---|---|
+    | main-idle | 16.7 / 16.8 / 16.8 | 60.0 | 0 | 0.8 / 1.2 | - | 4.5 |
+    | worker-idle | 16.7 / 16.8 / 16.9 | 60.0 | 0 (0, 0, 1) | 0.4 / 0.5 | - | 4.3 |
+    | main-react15 | 16.7 / 16.8 / 16.8 | 60.0 | 0 | 5.2 / 10.0 | 5.1 / 12.7 | 4.1 |
+    | worker-react15 | 16.7 / 16.8 / 16.9 | 60.0 | 0 | 0.2 / 0.3 | 5.9 / 12.6 | 4.1 |
+    | main-react60 | 16.7 / 33.2 / 33.5 | 56.6 | 177 (138, 177, 187) | 15.8 / 20.7 | 4.4 / 11.6 | 6.4 |
+    | worker-react60 | 16.7 / 16.8 / 33.3 | 58.9 | 60 (60, 67, 51) | 5.7 / 12.7 | 4.3 / 11.5 | 5.8 |
+
+  - "rAF delay" is how late the rendering thread's rAF callback started after its frame time. No main-thread long task (> 50 ms) in any configuration. COOP/COEP: `crossOriginIsolated` true on both threads, SharedArrayBuffer shared, WebGPU in the worker (as M13).
+  - Readings, with the D2-9 caveats:
+    - **At the realistic 15 Hz load neither mode drops a frame.** The worker's gain is the rAF start delay (p99 10.0 ms on the main thread vs 0.3 ms in the worker), which matters once the app's per-frame main-thread work grows.
+    - **The worker is not immune at 60 Hz:** it drops about 60 frames per 60 s run (main thread 177). M29's quick-run "the worker holds 60 fps" is wrong.
+    - The solver ran a fixed 3 it/frame: 4.1-4.5 ms of GPU per frame, 5.8-6.4 ms under the 60 Hz load (which also slows the solver per iteration: ~2.3 vs 1.4-1.6 ms/it), below the 7 ms budget.
+    - React was the development build; production commits are faster.
+    - D2-4 adopts the worker as a headroom decision on this evidence.
 
 ### Dawn in Node (spike e)
 
 - **M1 (N). Dawn sees the Arc 140T through D3D12.** Hardware adapter (not the fallback), vendor `intel`, architecture `xe-lpg`, description "D3D12 driver version 32.0.101.8860". It offers `timestamp-query`, `shader-f16`, `subgroups` and `float32-filterable`, with `maxComputeWorkgroupStorageSize` 32768 and `maxStorageBuffersPerShaderStage` 16. Evidence: `spikes/dawn/adapter-info.ts` (`npm run gpu:info`) -> `docs/bench/dawn-adapter-2026-10-24.json`; `tests/gpu/dawn-smoke.test.ts` "gets a hardware adapter" (`npm run test:gpu`). 2026-10-24.
 - **M2 (C). The `webgpu@0.6.2` package and its usage.** It ships `dist/win32-x64/dawn.node` with `dxcompiler.dll` and `d3dcompiler_47.dll`. `import { create, globals } from 'webgpu'`, `Object.assign(globalThis, globals)` (the WebGPU enums are not globals in Node otherwise), `create([])`. Evidence: `tests/gpu/helpers/dawn.ts`, used by every `npm run test:gpu` file (15/15 on 2026-10-24).
 - **M3 (X). A live device does NOT keep the Node process alive.** The process exits as soon as nothing else is scheduled, even with the device and the GPU object still referenced. Evidence: `node spikes/dawn/exit-probe.ts` prints "process exited 1 ms after the last await, device never destroyed". 2026-10-24.
-- **M4 (N). dawn.node segfaults if the GPU object from `create()` is garbage-collected while one of its devices lives.** Seen as a native crash while the Dawn tests were being written (2026-10-24); there is no standalone repro script. `SimDevice` keeps the GPU object referenced for the device's lifetime, pinned by `tests/unit/gpu/device.test.ts` "keeps a reference to the GPU object" (`npm test`).
+- **M4 (N, observed, no repro). dawn.node segfaults if the GPU object from `create()` is garbage-collected while one of its devices lives.** Seen as a native crash while the Dawn tests were being written (2026-10-24); there is no standalone repro script, and the test pins the mitigation, not the crash. `SimDevice` keeps the GPU object referenced for the device's lifetime, pinned by `tests/unit/gpu/device.test.ts` "keeps a reference to the GPU object" (`npm test`).
 - **M5 (N). Dawn quantizes timestamps to 2^16 ns (65.536 us) by default.** Every value is a multiple of 65536. The toggle `disable-dawn-features=timestamp_quantization` gives full resolution. Evidence: `tests/gpu/dawn-smoke.test.ts` "rounds every timestamp down to a multiple of 2^16 ns" and "times dispatches with unquantized timestamp queries when the quantization toggle is off" (`npm run test:gpu`).
-- **M6 (N). The first timestamp written on a fresh D3D12 device can be ~200 s stale.** Seen on Dawn while writing `tests/gpu/timestamp-ring.test.ts` (2026-10-24). No pass can outlast the 2 s Windows TDR limit, so `pairDurationMs` rejects pairs longer than 2 s (`MAX_PASS_MS`), pinned by `tests/unit/gpu/timestamps.test.ts` "is NaN for a pair longer than the Windows TDR limit" (`npm test`).
+- **M6 (N, observed, no repro). The first timestamp written on a fresh D3D12 device can be ~200 s stale.** Seen on Dawn while writing `tests/gpu/timestamp-ring.test.ts` (2026-10-24); no repro script, and the test pins the mitigation, not the stale value. No pass can outlast the 2 s Windows TDR limit, so `pairDurationMs` rejects pairs longer than 2 s (`MAX_PASS_MS`), pinned by `tests/unit/gpu/timestamps.test.ts` "is NaN for a pair longer than the Windows TDR limit" (`npm test`).
 - **M7 (N). Validation errors reach a listener and are never swallowed.** Evidence: `tests/gpu/dawn-smoke.test.ts` "delivers a validation error to our sink" (`npm run test:gpu`).
 - **M8 (N). f32 -> `rgba16float` storage-texture stores truncate toward zero.** 101.99999758 is stored as 101.9375 (one f16 step low), not 102, so values read back carry up to one f16 step of error, not half a step. Evidence: `tests/gpu/resample.test.ts` (`npm run test:gpu`), Dawn D3D12 in Node, 2026-10-24. Chrome uses the same Dawn D3D12 backend, but its stores were not measured separately.
 
@@ -70,7 +121,7 @@ Evidence for M27-M29: the worker probe (`spikes/worker/workerProbe.ts`, run insi
   - `renderer.setSize(w, h)` with the default `updateStyle = true` throws "TypeError: Cannot set properties of undefined (setting 'width')": an OffscreenCanvas has no `style`. Call `setSize(w, h, false)` and size the canvas element with CSS on the main thread.
   - `self.devicePixelRatio` is undefined. The main thread must send the DPR and resizes (from a ResizeObserver) as messages.
   - `new OrbitControls(camera, offscreenCanvas)` throws "Cannot read properties of undefined (reading 'removeEventListener')": it needs `ownerDocument`, `getRootNode()` and `style` on its element. Either forward pointer, wheel and key events from the main thread to a proxy element in the worker, or run the controls on the main thread and post the camera pose.
-- **M29 (N). Main thread vs worker frame times under a synthetic React load.**
+- **M29 (N, quick; superseded by M35). Main thread vs worker frame times under a synthetic React load.**
   - Setup: same scene, 130k-cell solver at a fixed 3 it/frame, 1920x1080 drawing buffer. The React 19 development build (Vite dev server) re-renders 240 gauges with SVG sparklines and a 24x10 table on the main thread, at 15 Hz or 60 Hz. The worker draws through `self.requestAnimationFrame`.
   - A "long frame" exceeds 1.5x the run's median frame time, i.e. at least one missed vsync. Every value is the median over 3 runs of 1 s. Conditions: AC power, plan Balanced, power mode Best performance, CPU load 38% before and 15-58% during the runs (other agents), no other process on the GPU, page visible throughout.
 
@@ -86,13 +137,13 @@ Evidence for M27-M29: the worker probe (`spikes/worker/workerProbe.ts`, run insi
   - Readings:
     - The worker path costs nothing when idle.
     - At 15 Hz neither mode drops frames. React 19's concurrent renderer yields every ~5 ms, so a long render rarely blocks a frame.
-    - At 60 Hz the main-thread renderer misses about 14 of 60 vsyncs per second, while the worker holds 60 fps.
+    - At 60 Hz the main-thread renderer missed about 14 of 60 vsyncs per second and the worker none, in these 1 s runs. **Corrected by the official 60 s runs (M35): the worker does drop frames at 60 Hz, about 60 per minute (main thread 177).**
     - An earlier run, with a game also on the GPU (`docs/bench/worker-2026-10-24-2125-quick.json`), shows the same pattern: main-react60 2 long frames per run (11 in run 1), worker-react60 0.
-  - Caveats: these are development-build React commit times (production is faster); 1 s runs; contaminated (D0-1).
+  - Caveats: these are development-build React commit times (production is faster); 1 s runs; contaminated (D0-1). Use M35.
 
 ### Spike (a): solver throughput inside the 1080p scene
 
-- **M30 (N). Per-iteration GPU cost of the representative fused kernel inside the bench scene** (3 stage dispatches per iteration, 12 blocks).
+- **M30 (N, quick; the official numbers are M34). Per-iteration GPU cost of the representative fused kernel inside the bench scene** (3 stage dispatches per iteration, 12 blocks).
   - Scene: 571k triangles (403k instanced PBR metal, nacelle, 65k particle sprites), RoomEnvironment PMREM, AgX, bloom, 1920x1080.
   - Method: the IterationScheduler sizes iterations per frame to the plan's 7 ms solver budget.
   - Conditions: AC power, plan Balanced, power mode Best performance, CPU load 46% before and 46-66% during (other agents), no other process on the GPU (`gpuBusyBefore` only WindowsTerminal at 1.2%), page visible. Evidence: `docs/bench/throughput-2026-10-24-2140-quick.json` (`npm run bench:throughput -- --quick`, 73 s for all 9), 2026-10-24.
@@ -112,15 +163,17 @@ Evidence for M27-M29: the worker probe (`spikes/worker/workerProbe.ts`, run insi
 
   - Readings:
     - The tile ranking does NOT hold up. A second sweep at low CPU load (`throughput-2026-10-24-2153-quick.json`) ranked the tiles differently. Run alone, each as the first configuration (`--only`, files 2154-2156), the 130k tiles all came in at 0.88-0.97 ms/it (16x8 0.898 and 0.877, 32x4 0.973, 8x8 0.923). So the gaps within a sweep come from run order or GPU clock/power drift (not measured), not from the tile shape.
-    - 130k cells reach ~400 it/s inside the budget, against P1's kill line of 150.
+    - 130k cells reached ~400 it/s inside the budget in this quick run (the official run: 251-299, M34), against P1's kill line of 150.
     - The previous builder's run (`docs/bench/throughput-2026-10-24-quick.json`, 0795d0a, CPU 17-24%, power plan and mode not recorded) measured 0.82 ms/it and 480 it/s for 130k-16x8.
     - The resample pass costs at most 0.33 ms, the particle compute one quantum (0.066 ms).
     - Render GPU time (three's `trackTimestamp`) varies 2.6-5.3 ms for the same scene and runs higher next to the slower tiles. This is unexplained; treat it as unreliable until the quiet run.
-  - P1 needs the official quiet run (D0-1) before it counts.
+  - P1 is decided on the official run (M34, D2-5): 251-299 it/s at 130k on Balanced, lower than these quick numbers.
 - **M31 (N). Another process on the shared GPU wrecks the timings, and an occluded Chrome stops drawing.**
   - With a game using 63% of the 3D engine before the run (`conditions.gpuBusyBefore` in `docs/bench/throughput-2026-10-24-2133-quick.json`), ms/it rose 1.2-2.5x over the clean run.
   - In 130k-16x8, the page got one frame per second for two of the three runs (6 it/s achieved), consistent with Chrome throttling rAF while another window covered it.
-  - The harness now records `gpuBusyBefore`/`gpuBusyAfter` (other processes' 3D/compute engine use) and `pageHiddenMs` per configuration, and prints `PAGE HIDDEN ... INVALID (D0-1)` when the page was hidden during a run. 2026-10-24.
+  - The harness records `gpuBusyBefore`/`gpuBusyAfter` (other processes' 3D/compute engine use).
+  - **Corrected (critic pass 2, W0G-I1): `pageHiddenMs` does not detect this.** Playwright launches Chrome with `--disable-backgrounding-occluded-windows` and `--disable-renderer-backgrounding` (both in `conditions.chromeFlags` since the fix; seen on chrome://version 2026-10-26), so an occluded or unfocused window stays `visibilityState === 'visible'` while its rAF drops to ~1 Hz. `pageHiddenMs` was 0 in every run, including the official 80k-16x8 row that ran at 1 Hz (M34).
+  - The mitigation now (`spikes/lib/validity.ts`, `tests/unit/spikes/validity.test.ts`): the harness measures the display interval with an idle rAF probe before the sweep and refuses to start if the probe is throttled; brings Chrome to the front (CDP `Page.bringToFront`) before every run; counts long frames against the display interval; marks a run INVALID when frames over 2.5 display intervals last more than 500 ms in a row, its median frame exceeds 1.5 intervals, or the page was hidden; reruns it once; and reports a configuration with a run still invalid as INVALID, without an aggregate. The gate is unit-tested on synthetic 1 Hz and 80k-16x8-shaped runs and keeps the official main-react60 shape valid. It has not yet met a real occlusion in a live run.
 - **M32 (N). How the spike kernel differs from the final W2 kernel** (it is a cost model, not validated physics):
   - Missing: body forces (blade rows), the combustor heat source, point-implicit sources, eddy viscosity, a residual reduction, and SSP-RK3 physical-time mode.
   - Thermo uses placeholder NASA-7-shaped coefficients.
@@ -157,4 +210,5 @@ Still unverified (new):
 - Input latency of camera controls proxied from the main thread into a worker.
 - `rgba16float` store rounding in Chrome (M8 was measured in Dawn/Node only).
 - GPU clock and thermal state during runs (not readable from the harness).
-- Any official D0-1 timing: everything above is `--quick` and contaminated.
+- The tile ranking: the official run's fixed order confounds it (M34). The next official run uses the rotated order (W0G-I2) and reports the order effect.
+- Timings on the Best performance plan (D0-3): both official runs used Balanced.
