@@ -51,7 +51,7 @@ D = 1.5494 m, the fan diameter: the fan rotor's tip radius in the definition, ×
 - **The problem:** the definition's nozzle lips have blunt bases (the core cowl is 15 mm thick at its trailing edge, the nacelle 18 mm). The 12-block topology needs a knife edge at each lip.
 - **What the adapter does:** it closes each base onto the duct-side line with a C1 smoothstep ramp over `KNIFE_EDGE_LENGTH_FACTOR` = 10 base thicknesses (150 mm at the core lip, 180 mm at the fan lip).
 - **Stated tolerance:** the closure moves only the external line (coreCowl, nacelleOuter), only over the last 10 base thicknesses, and only inwards. It moves it by at most the base thickness (15.0 / 18.0 mm), and the line keeps falling to the lip.
-- **What stays exact:** the duct-side lines coreOuter and nacelleInner are bitwise the definition's. So the nozzle exit areas A8 = 0.1852 m² and A18 = 0.9161 m² that the cycle is sized on (D1-2, D2-2) are unchanged.
+- **What stays exact:** the duct-side lines coreOuter and nacelleInner are bitwise the definition's. So the nozzle exit areas A8 = 0.1851 m² and A18 = 0.9162 m² that the cycle is sized on (D1-2, D2-2; 0.1852 / 0.9161 before w1/cycle-calib's N2 thermo data) are unchanged.
 - **Rendering:** the definition keeps its true thickness, and the 3D geometry renders that.
 - **Tests:** `tests/unit/mesh/definitionGeometry.test.ts` checks all of the above.
 

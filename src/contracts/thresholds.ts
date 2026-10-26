@@ -63,7 +63,8 @@ export const THRESHOLDS = {
   T3: {
     id: 'T3',
     section: '3.1',
-    checkText: 'cp of stoichiometric Jet-A products at 1000, 1500, 2000 K vs a NASA CEA reference',
+    checkText:
+      'cp of stoichiometric Jet-A products at 1000, 1500, 2000 K vs JANAF species tables mixed at the frozen stoichiometric Jet-A product composition (the method CEA uses for a frozen mixture)',
     passText: 'within 0.5%',
     targetsFrom: 'PHYSICS',
     values: {
@@ -163,6 +164,35 @@ export const THRESHOLDS = {
     passText: 'qualitative, plus cycle period within 20% of the Helmholtz estimate',
     targetsFrom: 'PHYSICS',
     values: { maxPeriodRelativeError: pass(0.2, '1', '20%') },
+  },
+  // D3-3: the measured ground-run points; the measured values themselves are ENGINE_FACTS rows
+  C10: {
+    id: 'C10',
+    section: '3.2',
+    checkText:
+      'Measured ground-run points, [WIDURI] Table 7 (OAT 25 °C, 1008 hPa, 14 ft): at the measured N1 of ground idle (20.5 / 21.0 %), MPA (65.0 %) and takeoff (97.4 %)',
+    passText:
+      "the model's displayed EGT within ±30 K of the measured value (idle: inside the measured 466-493 °C range widened by 30 K on each side, i.e. 436-523 °C; MPA 585 ± 30 °C; takeoff 855 ± 30 °C) and N2 within ±1.5 points of the measured value (idle 60.6 / 60.7 %, MPA 89.3 %, takeoff 99.8 %)",
+    targetsFrom: 'ENGINE_FACTS',
+    values: {
+      maxEgtErrorK: pass(30, 'K', '±30 K'),
+      maxN2ErrorPoints: pass(1.5, 'points', '±1.5 points'),
+    },
+  },
+  // D3-11: the EEDB LTO fuel flows; the databank values themselves are ENGINE_FACTS rows
+  C11: {
+    id: 'C11',
+    section: '3.2',
+    checkText: 'Fuel flow at the EEDB LTO settings 7 / 30 / 85% rated thrust (ISA SLS)',
+    passText: 'within ±5% of the databank',
+    targetsFrom: 'ENGINE_FACTS',
+    values: {
+      maxRelativeError: pass(0.05, '1', '±5%'),
+      // % of the rated thrust (eedbRatedThrust)
+      idleThrustPercent: check(7, '%', '7 /'),
+      approachThrustPercent: check(30, '%', '30 /'),
+      climbOutThrustPercent: check(85, '%', '/ 85'),
+    },
   },
 
   // 3.3 Flow solver validation ladder

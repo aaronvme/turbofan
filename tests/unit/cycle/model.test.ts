@@ -115,7 +115,9 @@ describe('transient model: shaft dynamics and FADEC', { timeout: TIMEOUT_MS }, (
     const m = createCycleModel();
     m.reset('groundIdle', ISA_SLS);
     expect(m.source).toBe('model');
-    const settle = run(m, 30, 0.05, () => inputs({ throttleLever: lever0 }));
+    // the ~1 s spool time constant plus the slower LP thermal settling of the part-power loads:
+    // 40 s gets N1 inside the 0.05-point stability criterion below
+    const settle = run(m, 40, 0.05, () => inputs({ throttleLever: lever0 }));
     const start = m.state();
     // stabilised: N1 moved less than 0.05 points over the last second
     expect(Math.abs(start.n1Percent - (settle[settle.length - 21]?.n1Percent ?? 0))).toBeLessThan(

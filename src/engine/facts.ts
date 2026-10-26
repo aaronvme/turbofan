@@ -42,11 +42,19 @@ export const ENGINE_FACTS = {
   fuelFlowClimbOut: f(1.031, 'kg/s', 'official'),
   fuelFlowApproach: f(0.343, 'kg/s', 'official'),
   fuelFlowIdle: f(0.11, 'kg/s', 'official'),
+  eiCoTakeoff: f(0.00031, 'kg/kg', 'official'),
+  eiCoClimbOut: f(0.00017, 'kg/kg', 'official'),
+  eiCoApproach: f(0.00282, 'kg/kg', 'official'),
+  eiCoIdle: f(0.02939, 'kg/kg', 'official'),
+  eiHcTakeoff: f(0.00003, 'kg/kg', 'official'),
+  eiHcClimbOut: f(0.00002, 'kg/kg', 'official'),
+  eiHcApproach: f(0.00005, 'kg/kg', 'official'),
+  eiHcIdle: f(0.00154, 'kg/kg', 'official'),
   tsfcTakeoff: f(1.0648e-5, 'kg/(N s)', 'estimate'),
   tsfcTakeoffAvWeek: f(1.0934e-5, 'kg/(N s)', 'published'),
   // the w1/cycle design-point sizing (D1-2, D2-2)
-  coreNozzleArea: f(0.1852, 'm²', 'estimate'),
-  bypassNozzleArea: f(0.9161, 'm²', 'estimate'),
+  coreNozzleArea: f(0.1851, 'm²', 'estimate'),
+  bypassNozzleArea: f(0.9162, 'm²', 'estimate'),
   accelStartMaxThrustFraction: f(0.15, '', 'official'),
   fanDiameter: f(1.5494, 'm', 'official'),
   fanBladeCount: f(24, '', 'published'),
@@ -134,6 +142,10 @@ export const ENGINE_FACTS = {
   vsvOpenAboveN2c: f(95, '%', 'unknown'),
   vbvMaxFraction: f(0.25, '', 'unknown'),
   tbvMaxFraction: f(0.05, '', 'unknown'),
+  vbvOpenBelowN2c: f(70, '%', 'unknown'),
+  vbvClosedAboveN2c: f(85, '%', 'unknown'),
+  groundRunCustomerBleed: f(0, '', 'unknown'),
+  groundRunAccessoryLoad: f(40000, 'W', 'unknown'),
 } as const satisfies Readonly<Record<string, EngineFact>>;
 
 export type EngineFactId = keyof typeof ENGINE_FACTS;

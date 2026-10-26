@@ -8,7 +8,7 @@
 //
 // Interpolation is a tensor product of 1-D cubic Hermite splines with three-point slopes (exact
 // for quadratics, C1 everywhere), extrapolated linearly with the end slope. C1 tables keep the
-// Newton matching (src/cycle/match.ts) from chattering across grid lines.
+// Newton matching (src/cycle/engine.ts) from chattering across grid lines.
 //
 // Below the lowest speed line (starting, windmilling) compressors follow the similarity laws used
 // for sub-idle map extension (Gaudet & Gauthier, "A Simple Sub-idle Component Map Extrapolation

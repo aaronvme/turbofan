@@ -14,7 +14,11 @@ import {
 import type { EngineDefinition } from '../../../src/contracts/engine';
 import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 import { factValue } from '../../../src/engine/facts';
-import { createCycleModel } from '../../../src/cycle/model';
+import {
+  N1_LIMIT_MARGIN_PERCENT,
+  N2_LIMIT_MARGIN_PERCENT,
+  createCycleModel,
+} from '../../../src/cycle/model';
 
 /** Simulation tests take 1-10 s each; Stryker's instrumented runs are several times slower. */
 const TIMEOUT_MS = 600_000;
@@ -39,7 +43,6 @@ const last = (s: readonly CycleState[]): CycleState => {
 };
 
 /** The FADEC's own margin under each overspeed redline (model.ts: limit - 1 %). */
-const OVERSPEED_MARGIN_PERCENT = 1;
 
 describe('CycleModel.step input checks', () => {
   it('rejects invalid inputs and time steps without advancing the state', () => {
@@ -67,7 +70,10 @@ describe('FADEC limiters and schedules', { timeout: TIMEOUT_MS }, () => {
     expect(s.fadec.n1TargetPercent).toBeGreaterThan(isa.fadec.n1TargetPercent);
     expect(s.fadec.limiter).toBe('n1Max');
     expect(s.n1Rpm).toBeLessThanOrEqual(factValue('n1MaxRpm'));
-    expect(s.n1Percent).toBeCloseTo((100 * factValue('n1MaxRpm')) / refs.n1Rpm - 1, 1);
+    expect(s.n1Percent).toBeCloseTo(
+      (100 * factValue('n1MaxRpm')) / refs.n1Rpm - N1_LIMIT_MARGIN_PERCENT,
+      1,
+    );
     // past the flat rating corner the engine can no longer make rated thrust
     expect(s.netThrustN).toBeLessThan(factValue('takeoffThrust'));
     expect(s.netThrustN).toBeGreaterThan(0.9 * factValue('takeoffThrust'));
@@ -95,7 +101,7 @@ describe('FADEC limiters and schedules', { timeout: TIMEOUT_MS }, () => {
     );
     const end = last(s);
     expect(end.fadec.limiter).toBe('n2Max');
-    expect(end.n2Percent).toBeCloseTo(99 - OVERSPEED_MARGIN_PERCENT, 1);
+    expect(end.n2Percent).toBeCloseTo(99 - N2_LIMIT_MARGIN_PERCENT, 1);
     for (const x of s) expect(x.n2Rpm).toBeLessThanOrEqual(n2Max);
   });
 
@@ -267,4 +273,59 @@ describe('surge episode', { timeout: TIMEOUT_MS }, () => {
     expect(last(after).flags.surge).toBe(false);
     expect(last(after).hpc.surgeMarginFraction).toBeGreaterThan(0);
   });
+  it('an injected surge on a stopped or sub-idle engine is ignored (no pressurised HPC to surge)', () => {
+    const m = createCycleModel();
+    m.reset('shutdown', ISA_SLS);
+    m.injectFault('surge');
+    const s = m.step(0.05, inputs({ fuelLever: 'cutoff' }));
+    expect(s.flags.surge).toBe(false);
+    expect(validateCycleState(s, refs)).toEqual([]);
+  });
 });
+
+describe(
+  'W1C-N5: steady vs transitory EGT limits, the N1 limiter at the corner',
+  { timeout: TIMEOUT_MS },
+  () => {
+    const redline = factValue('egtTakeoffLimit');
+    const transient = factValue('egtTransientLimit');
+    const allowance = factValue('egtTransientDuration');
+
+    it('a 45 C day at full lever: the 960 C band for at most 20 s, then a steady EGT under the 950 C redline', () => {
+      const hot = { ...ISA_SLS, temperatureK: 273.15 + 45 };
+      const m = createCycleModel();
+      m.reset('groundIdle', hot);
+      const states = run(m, 40, 0.05, () => inputs({ throttleLever: 1, ambient: hot }));
+      let above = 0;
+      let longest = 0;
+      for (const s of states) {
+        expect(s.egtDisplayedK).toBeLessThan(transient);
+        above = s.egtDisplayedK > redline ? above + 0.05 : 0;
+        longest = Math.max(longest, above);
+        expect(s.flags.egtExceedance).toBe(false);
+      }
+      expect(longest).toBeLessThanOrEqual(allowance + 0.05);
+      for (const s of states.slice(-100)) expect(s.egtDisplayedK).toBeLessThan(redline);
+    });
+
+    it('egtExceedance stays clear through the allowed transitory peak of a ground-idle slam', () => {
+      const m = createCycleModel();
+      m.reset('groundIdle', ISA_SLS);
+      const states = run(m, 10, 0.02, () => inputs({ throttleLever: 1 }));
+      expect(Math.max(...states.map((s) => s.egtDisplayedK))).toBeGreaterThan(redline);
+      for (const s of states) expect(s.flags.egtExceedance).toBe(false);
+    });
+
+    it('the 30 C flat-rating corner makes rated takeoff thrust in the transient model too', () => {
+      const corner = { ...ISA_SLS, temperatureK: factValue('flatRatingTemperature') };
+      const m = createCycleModel();
+      m.reset('groundIdle', corner);
+      const states = run(m, 25, 0.05, () => inputs({ throttleLever: 1, ambient: corner }));
+      const end = last(states);
+      // the corner's rated N1 sits on the N1 limiter's target, so either loop may hold it
+      expect(['n1Target', 'n1Max']).toContain(end.fadec.limiter);
+      expect(end.netThrustN / factValue('takeoffThrust')).toBeGreaterThan(0.998);
+      for (const s of states) expect(s.n1Rpm).toBeLessThanOrEqual(factValue('n1MaxRpm'));
+    });
+  },
+);

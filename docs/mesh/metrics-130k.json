@@ -172,7 +172,7 @@
         },
         "wallOrthoMaxDeg": 26.9852,
         "interfaceOrthoMaxDeg": 18.7534,
-        "interfaceKinkMaxDeg": 31.3686,
+        "interfaceKinkMaxDeg": 31.3689,
         "aspectMin": 1.00068,
         "aspectMax": 6.42641,
         "aspectMaxAt": {
@@ -190,14 +190,14 @@
         "nj": 32,
         "cells": 3680,
         "minJacobian": 0.0000256907,
-        "maxJacobian": 0.000136224,
+        "maxJacobian": 0.000136223,
         "minScaledJacobian": 0.865104,
         "maxStretch": 1.11013,
         "maxStretchAt": {
           "i": 6,
           "j": 19,
           "x": 0.299741,
-          "r": 0.628732
+          "r": 0.628733
         },
         "maxSkewDeg": 30.1054,
         "maxSkewAt": {
@@ -207,17 +207,17 @@
           "r": 0.45259
         },
         "wallOrthoMaxDeg": 29.9661,
-        "interfaceOrthoMaxDeg": 28.6201,
-        "interfaceKinkMaxDeg": 31.3686,
-        "aspectMin": 1.00003,
-        "aspectMax": 2.63182,
+        "interfaceOrthoMaxDeg": 28.6202,
+        "interfaceKinkMaxDeg": 31.3689,
+        "aspectMin": 1.00005,
+        "aspectMax": 2.63181,
         "aspectMaxAt": {
           "i": 0,
           "j": 21,
           "x": 0.262478,
           "r": 0.646952
         },
-        "minEdge": 0.00502494,
+        "minEdge": 0.00502495,
         "maxEdge": 0.0133032
       },
       {
@@ -226,7 +226,7 @@
         "nj": 16,
         "cells": 8544,
         "minJacobian": 0.00000260989,
-        "maxJacobian": 0.000108529,
+        "maxJacobian": 0.000108592,
         "minScaledJacobian": 0.724318,
         "maxStretch": 1.12775,
         "maxStretchAt": {
@@ -243,28 +243,28 @@
           "r": 0.287063
         },
         "wallOrthoMaxDeg": 43.5018,
-        "interfaceOrthoMaxDeg": 11.138,
-        "interfaceKinkMaxDeg": 4.81702,
-        "aspectMin": 1.00001,
-        "aspectMax": 3.51663,
+        "interfaceOrthoMaxDeg": 11.1371,
+        "interfaceKinkMaxDeg": 4.84574,
+        "aspectMin": 1.00002,
+        "aspectMax": 3.51849,
         "aspectMaxAt": {
           "i": 531,
           "j": 0,
           "x": 2.72804,
-          "r": 0.309293
+          "r": 0.309339
         },
         "minEdge": 0.00102235,
-        "maxEdge": 0.0114256
+        "maxEdge": 0.0114321
       },
       {
         "name": "afterbody",
         "ni": 127,
         "nj": 32,
         "cells": 4064,
-        "minJacobian": 0.0000414707,
+        "minJacobian": 0.0000414858,
         "maxJacobian": 0.0000993132,
         "minScaledJacobian": 0.921024,
-        "maxStretch": 1.07628,
+        "maxStretch": 1.07629,
         "maxStretchAt": {
           "i": 58,
           "j": 30,
@@ -276,20 +276,20 @@
           "i": 117,
           "j": 0,
           "x": 2.67192,
-          "r": 0.423676
+          "r": 0.423677
         },
         "wallOrthoMaxDeg": 22.9237,
-        "interfaceOrthoMaxDeg": 16.0422,
+        "interfaceOrthoMaxDeg": 16.0423,
         "interfaceKinkMaxDeg": 29.0641,
-        "aspectMin": 1.00003,
-        "aspectMax": 2.19355,
+        "aspectMin": 1.00004,
+        "aspectMax": 2.19361,
         "aspectMaxAt": {
           "i": 59,
           "j": 13,
           "x": 2.10631,
-          "r": 0.597201
+          "r": 0.597205
         },
-        "minEdge": 0.00492349,
+        "minEdge": 0.00492336,
         "maxEdge": 0.0110817
       },
       {
@@ -297,9 +297,9 @@
         "ni": 68,
         "nj": 16,
         "cells": 1088,
-        "minJacobian": 0.0000234122,
-        "maxJacobian": 0.000319329,
-        "minScaledJacobian": 0.635633,
+        "minJacobian": 0.0000233969,
+        "maxJacobian": 0.000319334,
+        "minScaledJacobian": 0.635636,
         "maxStretch": 1.1384,
         "maxStretchAt": {
           "i": 67,
@@ -307,25 +307,25 @@
           "x": 3.39442,
           "r": 0.335847
         },
-        "maxSkewDeg": 50.5331,
+        "maxSkewDeg": 50.5328,
         "maxSkewAt": {
           "i": 57,
           "j": 0,
           "x": 3.30701,
-          "r": 0.10318
+          "r": 0.103181
         },
-        "wallOrthoMaxDeg": 50.1987,
+        "wallOrthoMaxDeg": 50.1984,
         "interfaceOrthoMaxDeg": 42.5053,
         "interfaceKinkMaxDeg": 42.5041,
-        "aspectMin": 1.00003,
-        "aspectMax": 3.36953,
+        "aspectMin": 1.00002,
+        "aspectMax": 3.37161,
         "aspectMaxAt": {
           "i": 0,
           "j": 0,
           "x": 2.75442,
-          "r": 0.305588
+          "r": 0.305639
         },
-        "minEdge": 0.0026499,
+        "minEdge": 0.00264827,
         "maxEdge": 0.0347342
       },
       {
@@ -388,7 +388,7 @@
         },
         "wallOrthoMaxDeg": 0,
         "interfaceOrthoMaxDeg": 13.8263,
-        "interfaceKinkMaxDeg": 10.7825,
+        "interfaceKinkMaxDeg": 10.7788,
         "aspectMin": 1,
         "aspectMax": 4.64805,
         "aspectMaxAt": {
@@ -513,7 +513,7 @@
         }
       },
       "wallOrthoMaxDeg": {
-        "value": 50.1987,
+        "value": 50.1984,
         "block": "plug"
       },
       "interfaceOrthoMaxDeg": {

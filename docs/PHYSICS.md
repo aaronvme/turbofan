@@ -8,7 +8,8 @@ The thresholds in this file were set by the orchestrator on 2026-10-24, before a
 |---|---|---|
 | N1, N2, EGT, fuel flow, thrust, TSFC, station Pt/Tt/W | **Simulated** | 0-D transient cycle model (`src/cycle`) |
 | Start sequence, accel/decel, limiters | **Simulated** | FADEC-like controller + shaft dynamics |
-| Surge cycles (100-300 ms) | **Simulated** | Greitzer lumped compression-system model |
+| Part-power performance: C10 MPA N2/EGT and idle position 2 N2, C11 at 30 and 7 % thrust | **Simulated, known gap** (KNOWN FAIL markers) | With every D3-11/D3-14 mechanism at its plausible bound, the bounded fit meets C10 and C11 except approach fuel flow (-6.4 %, against ±5 %). It breaks the transient model, so it is rejected, and the reference keeps the gap: MPA 536 vs 585 C and N2 2.6 points low; EEDB fuel -12 % at 30 %, -10 % at 7 %. Likely cause: the generic, scaled pyCycle maps are too efficient at part power. The two datasets also differ: [EEDB] 8CM066 is a newly manufactured engine on a test bed, while the [WIDURI] ground run is an on-wing engine of unknown, likely deteriorated condition, which runs hotter at a given N1 (ENGINE_FACTS "Part-power calibration") |
+| Surge cycles (period from the derived Helmholtz frequency) | **Simulated** | Greitzer lumped compression-system model on the engine's own HPC system (D3-4, `src/cycle/surgeSystem.ts`): B from the HPC duct, the combustor plenum and the rotor tip speed at the current N2, the post-surge characteristic a cubic extension of the scaled HPC map. At SLS takeoff B = 0.19 and the Helmholtz period is 6.2 ms; a surge is a deep surge (reverse flow) with a period of about 15 ms |
 | Meridional p, T, rho, velocity incl. swirl; choking; jet plume | **Simulated** | 2D axisymmetric + swirl solver (`src/flow`), body-force blade rows, combustor heat source |
 | First 10-30 ms of a surge bang / light-off pressure wave | **Simulated** (slow motion) | solver physical-time mode |
 | Particles, cut-plane fields, schlieren, heat haze | **Derived** from the simulated field | resampled solver textures |
@@ -19,7 +20,7 @@ The thresholds in this file were set by the orchestrator on 2026-10-24, before a
 
 ## 2. Equations (summary; builders expand each section with the exact form they implement)
 
-- **Gas:** thermally perfect, cp(T, FAR) from NASA 7-coefficient polynomials for air and stoichiometric Jet-A products, frozen composition. One TypeScript module (`src/thermo`) is used by the cycle model and code-generated into WGSL constants.
+- **Gas:** thermally perfect, cp(T, FAR) from NASA 7-coefficient polynomials for air and stoichiometric Jet-A products, frozen composition. One TypeScript module (`src/thermo`) is used by the cycle model and code-generated into WGSL constants. Frozen means complete combustion and no dissociation. Cantera 3.2.0 (`tools/thermo/cantera_crosscheck.py`, NASA TM-4513 species data, D3-5) puts the error of that at 0.23 % in cp at the cycle's hottest gas (combustor exit at SLS takeoff, 1641 K, 2.8 MPa, FAR 0.0245); it grows to 19 % for stoichiometric products at 2000 K and 1 atm, a state the engine never reaches. The same script reproduces the model's frozen cp within 0.05 % (air 200-1500 K, products 1000-2000 K) and its product composition within 1e-6.
 - **Cycle:** component maps (pyCycle-derived, scaled), Newton–Raphson matching of mass-flow and work residuals; transients integrate `J dω/dt = τ_turbine − τ_compressor` per shaft.
 - **Flow:** per-radian, r-weighted finite volume for the axisymmetric Euler equations with swirl. Conserved state (ρ′, ρu_x, ρu_r, ρ r u_θ, η) plus ρZ (fuel-air ratio), with ρ′ = ρ − ρ∞ and η = ρ(h₀ − h₀∞) − p′ (gauge variables). SLAU2 fluxes, MUSCL (van Albada), point-implicit sources, 3-stage RK with local time stepping (steady) or SSP-RK3 (physical time). Hall–Thollet body force with blockage for compressor rows, follow-camber relaxation for turbine rows, heat release `η_b W_f LHV` in the combustor. v1 turbulence: Euler in the engine, Prandtl free-shear eddy viscosity `ν_t = 0.028 ΔU r½` in the plume.
 
@@ -66,7 +67,7 @@ Upstream-to-downstream order along the core: 1, 2, 21, 24, 25, 3, 4, 41, 45, 49.
 |---|---|---|
 | T1 | cp of air at 300, 500, 1000, 1500 K vs NASA/JANAF tables | within 0.5% |
 | T2 | γ of air at the same temperatures | within 0.5% |
-| T3 | cp of stoichiometric Jet-A products at 1000, 1500, 2000 K vs a NASA CEA reference | within 0.5% |
+| T3 | cp of stoichiometric Jet-A products at 1000, 1500, 2000 K vs JANAF species tables mixed at the frozen stoichiometric Jet-A product composition (the method CEA uses for a frozen mixture) | within 0.5% |
 | T4 | h(T) integrates cp(T): h(T2) − h(T1) vs numeric integral | within 1e-6 relative |
 
 ### 3.2 Cycle (targets come from `docs/ENGINE_FACTS.md`, each with its source)
@@ -81,6 +82,12 @@ Upstream-to-downstream order along the core: 1, 2, 21, 24, 25, 3, 4, 41, 45, 49.
 | C7 | Off-design matching converges (residual < 1e-8 relative) at every point of a throttle sweep idle → takeoff | 100% of points, ≤ 25 Newton iterations each |
 | C8 | Mass and energy balance across the whole engine at every matched point | within 1e-6 relative |
 | C9 | Greitzer model, B above critical: deep-surge limit cycle appears; B below critical: rotating-stall-free recovery | qualitative, plus cycle period within 20% of the Helmholtz estimate |
+| C10 | Measured ground-run points, [WIDURI] Table 7 (OAT 25 °C, 1008 hPa, 14 ft): at the measured N1 of ground idle (20.5 / 21.0 %), MPA (65.0 %) and takeoff (97.4 %) | the model's displayed EGT within ±30 K of the measured value (idle: inside the measured 466-493 °C range widened by 30 K on each side, i.e. 436-523 °C; MPA 585 ± 30 °C; takeoff 855 ± 30 °C) and N2 within ±1.5 points of the measured value (idle 60.6 / 60.7 %, MPA 89.3 %, takeoff 99.8 %) |
+| C11 | Fuel flow at the EEDB LTO settings 7 / 30 / 85% rated thrust (ISA SLS) | within ±5% of the databank |
+
+C10 was added by decision D3-3 (critic pass 3, question l) before any code was tuned to it; it adds a check and loosens none. The ±30 K band roughly covers engine-to-engine scatter and the measurement itself. The measured values are ENGINE_FACTS rows (idleN1Low ... staticTakeoffEgt, runUpOat, runUpPressure).
+
+C11 was added by decision D3-11 before any part-power calibration was tuned to it; it adds a check and loosens none. The three settings are the ICAO LTO thrust settings of the engine's databank row ([EEDB] 8CM066, test bed, ISA SLS, no bleed or power extraction): the model runs at 0.07, 0.30 and 0.85 x eedbRatedThrust and its fuel flow is compared with fuelFlowIdle, fuelFlowApproach and fuelFlowClimbOut (ENGINE_FACTS rows). The 100 % setting is the sizing point (C3) and is not repeated here. D3-11 also says how C10 and C11 may be met: only through bounded, physically real part-power mechanisms (the VBV schedule, the HPC VSV schedule, the part-speed efficiency trends of the fan, booster and LPT maps), fitted to both datasets at once.
 
 ### 3.3 Flow solver validation ladder
 | ID | Case | Pass |

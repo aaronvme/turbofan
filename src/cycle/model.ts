@@ -15,9 +15,13 @@
 //   loop (max of N1 target and the N2 idle floor, then min of the N1, N2 and EGT limiters), with
 //   rate feedback for damping, clamped between decel and accel schedules built from the steady
 //   working line (RU_ss times ACCEL/DECEL factors).
-// - Surge: an HPC operating point beyond the surge line, or an injected fault, starts a Greitzer
-//   episode (greitzer.ts, B above critical) that modulates the HPC exit; the FADEC cuts fuel to
-//   recover.
+// - Surge (D3-4): an HPC operating point beyond the surge line, or an injected fault, starts a
+//   Greitzer episode on the engine's own compression system (surgeSystem.ts: B from the HPC duct,
+//   the combustor plenum and the rotor tip speed at the current N2; the cubic from the scaled HPC
+//   map's current speed line). The throttle line runs through the matched HPC operating point, so
+//   once the FADEC's fuel cut moves that point back inside the surge line the equilibrium is
+//   stable again, the oscillation decays and the episode ends. The period is whatever the derived
+//   Helmholtz frequency and B give.
 
 import { ISA_SLS, type AmbientConditions } from '../contracts/ambient';
 import {
@@ -44,24 +48,35 @@ import { enthalpy, gamma, gasConstant, temperatureFromEnthalpy } from '../thermo
 import { at } from './at';
 import { hermite1 } from './componentMaps';
 import {
-  REFERENCE_ENGINE,
+  referenceEngine,
   egtShunt,
   groundIdle,
   solveGasPath,
   solveSteady,
   surgeMargins,
+  vbvScheduleFraction,
+  vsvOffsetRad,
   type EnginePoint,
   type OperatingConditions,
   type SizedEngine,
   type SteadySolution,
 } from './engine';
 import {
+  criticalB,
   equilibrium,
   greitzerStep,
-  helmholtzFrequency,
   type GreitzerParams,
   type GreitzerState,
 } from './greitzer';
+import {
+  compressionSystem,
+  ductVariables,
+  engineGreitzerParams,
+  greitzerB,
+  hpcCubic,
+  systemHelmholtzFrequency,
+  type CompressionSystem,
+} from './surgeSystem';
 
 /**
  * Spool polar moments of inertia (estimates; no public figure), kg m^2. LP: 24 fan blades of
@@ -78,8 +93,11 @@ const SUBIDLE_N2_PERCENT = 57;
 /** FADEC gains: integrator rate per unit fractional error (1/s), rate-feedback time (s). */
 const K_LOOP = 2;
 const TD = 0.7;
-/** Rate feedback of the overspeed limiters, s (short, so they act only near the limit). */
-const TD_LIMIT = 0.3;
+/**
+ * Rate feedback of the overspeed limiters, s (short, so they act only near the limit). 0.5 (0.3
+ * before W1C-N5) holds a slam overshoot to about 0.1 point, which the 0.5-point N1 margin needs.
+ */
+const TD_LIMIT = 0.5;
 /**
  * Rate feedback of the EGT limiter, s: the lead that stops the fuel ramp before the 960 C
  * transient limit instead of after it (the EGT rises at several hundred K/s in a slam accel).
@@ -96,10 +114,25 @@ const TF_EGT = TD_EGT / 3;
  * steady point chatter between the EGT and N1 loops.
  */
 const EGT_ERROR_SCALE_K = 150;
-/** Accel/decel schedules as multiples of the steady Wf/P3 at the same corrected N2. */
-const ACCEL_FACTOR = 2.2;
+/**
+ * Accel/decel schedules as multiples of the steady Wf/P3 at the same corrected N2. 1.8 (2.2
+ * before W1C-I1) keeps a ground-idle slam out of surge (min HPC margin 0.034) now that the idle
+ * working line carries the part-power losses: the HP mechanical loss, the clearance penalty and
+ * the VBV dump raise the low-speed HPC operating line, so the steady Wf/P3 sits closer to surge.
+ */
+const ACCEL_FACTOR = 1.8;
 /** The accel schedule opens up by this much more between 68 and 80 % corrected N2. */
 const ACCEL_FACTOR_HIGH = 0.3;
+/**
+ * Overspeed limiter targets sit this many points under the TCDS N1 / N2 limits. N1: 0.5: the
+ * 30 C flat-rating corner (rated thrust at 103.5 % N1) is at the limiter target, so the transient
+ * model makes rated thrust there (W1C-N5); a corner slam overshoots the target by 0.1 point with
+ * TD_LIMIT 0.5 (0.5 with 0.3, which took N1 to 104.02 %).
+ */
+export const N1_LIMIT_MARGIN_PERCENT = 0.5;
+export const N2_LIMIT_MARGIN_PERCENT = 1;
+/** The EGT limiter aims this far under the active displayed-EGT limit, K. */
+const EGT_LIMIT_MARGIN_K = 5;
 /** Limiter loops run at this multiple of K_LOOP, so they bite hard near their limits only. */
 const K_LIMIT_FACTOR = 4;
 const DECEL_FACTOR = 0.6;
@@ -115,16 +148,29 @@ const HUNG_RATE = 0.05;
 const HUNG_TIME_S = 10;
 /** No light-off: fuel on for this long beyond the light-off delay without lighting. */
 const NO_LIGHT_WINDOW_S = 10;
-/** Greitzer surge episode: B above critical (C9), length, and the fuel cut at onset. */
-const SURGE_PARAMS: GreitzerParams = { psi0: 0.3, h: 0.18, w: 0.25, gammaT: 0.5, b: 1 };
-const SURGE_EPISODE_S = 0.3;
+/** The FADEC's fuel cut at surge onset (stall recovery), fraction of the Wf/P3 demand. */
 const SURGE_FUEL_CUT = 0.25;
 /**
- * HPC compression system for the Helmholtz frequency: HPC inlet annulus pi (0.316^2 - 0.222^2)
- * from the reference flowpath, duct length = the HPC length 0.6 m, plenum = combustor and NGV
- * volume about 0.1 m^3 (estimate).
+ * An injected surge fault holds the throttle this far inside the surge line (equilibrium at
+ * (1 - x) of the peak flow) for SURGE_FAULT_S, as a transient blockage or ingestion would.
  */
-const HPC_DUCT = { areaM2: 0.1589, lengthM: 0.6, plenumM3: 0.1 } as const;
+const SURGE_FAULT_INSIDE = 0.1;
+const SURGE_FAULT_S = 0.1;
+/** The episode ends once Phi and Psi are within this fraction of a stable equilibrium. */
+const SURGE_RECOVERED = 0.02;
+/** Longest episode before the model ends it regardless (a FADEC would shut down), s. */
+const SURGE_MAX_S = 5;
+/** Greitzer integration step in xi = omega_H t (C9 resolves the limit cycle at 0.01-0.02). */
+const SURGE_DXI = 0.02;
+
+interface SurgeEpisode {
+  readonly g: GreitzerState;
+  readonly params: GreitzerParams;
+  readonly omegaH: number;
+  readonly elapsedS: number;
+  /** An injected fault holds the throttle inside the surge line until this time, s. */
+  readonly forcedUntilS: number;
+}
 
 export interface CycleModelOptions {
   readonly engine?: SizedEngine;
@@ -189,7 +235,7 @@ function leverToN1(lever: number, idleN1: number, takeoffN1: number): number {
 export function leverForNetThrust(
   thrustN: number,
   ambient: AmbientConditions = ISA_SLS,
-  engine: SizedEngine = REFERENCE_ENGINE,
+  engine: SizedEngine = referenceEngine(),
 ): number {
   const { c, idle, n1TakeoffPercent } = leverEnds(engine, ambient);
   const s = solveSteady(engine, c, { kind: 'netThrust', value: thrustN }, idle.unknowns);
@@ -251,6 +297,12 @@ class TurbofanCycleModel implements CycleModel {
   private fuelOnTime: number | null = null;
   private hungTimer = 0;
   private egtPrev: number | null = null;
+  /**
+   * Time the displayed EGT has spent above the takeoff redline, s. TCDS E.004 VI note 4 allows
+   * the 960 C transitory limit for 20 s; after that the limiter aims under the redline. The
+   * allowance renews once EGT is back under the maximum-continuous limit.
+   */
+  private egtAboveRedlineS = 0;
   private dEgt = 0;
   private flags: CycleFlags = {
     surge: false,
@@ -263,14 +315,16 @@ class TurbofanCycleModel implements CycleModel {
     egtExceedance: false,
   };
   private pending: CycleFault | null = null;
-  private surge: { remaining: number; g: GreitzerState } | null = null;
+  private surge: SurgeEpisode | null = null;
+  private readonly surgeSystem: CompressionSystem;
   private last!: CycleState;
   private inputs: CycleInputs = DEFAULT_CYCLE_INPUTS;
 
   constructor(definition: EngineDefinition, opts: CycleModelOptions) {
     this.definition = definition;
-    this.e = opts.engine ?? REFERENCE_ENGINE;
+    this.e = opts.engine ?? referenceEngine();
     this.startFuelScale = opts.startFuelScale ?? 1;
+    this.surgeSystem = compressionSystem(definition);
   }
 
   reset(initial: CycleInitialCondition, ambient: AmbientConditions = ISA_SLS): CycleState {
@@ -286,6 +340,7 @@ class TurbofanCycleModel implements CycleModel {
     this.fuelOnTime = null;
     this.hungTimer = 0;
     this.egtPrev = null;
+    this.egtAboveRedlineS = 0;
     this.dEgt = 0;
     this.flags = {
       ...this.flags,
@@ -344,6 +399,14 @@ class TurbofanCycleModel implements CycleModel {
 
   // -------------------------------------------------------------------------------------
 
+  /** The displayed-EGT limit in force: transitory while the 20 s allowance lasts, else the redline. */
+  private egtLimitK(): number {
+    const lim = this.definition.limits;
+    return this.egtAboveRedlineS < lim.egtTransientDurationS
+      ? lim.egtTransientK
+      : Math.min(lim.egtTransientK, lim.egtTakeoffRedlineK);
+  }
+
   private pct1(): number {
     return (100 * this.n1) / this.e.calibration.n1ReferenceRpm;
   }
@@ -359,8 +422,9 @@ class TurbofanCycleModel implements CycleModel {
       this.lit = false;
       this.flags = { ...this.flags, flameout: true };
       this.fuelOnTime = this.t;
-    } else if (this.pending === 'surge') {
-      this.startSurge();
+    } else if (this.pending === 'surge' && this.pct2() >= SUBIDLE_N2_PERCENT) {
+      // below the sub-idle speed the HPC is not pressurised: nothing to surge, the fault is dropped
+      this.startSurge(prev, true);
     }
     this.pending = null;
     const n2p = this.pct2();
@@ -369,6 +433,8 @@ class TurbofanCycleModel implements CycleModel {
     const dEgtRaw = this.egtPrev === null ? 0 : (egt - this.egtPrev) / dt;
     this.dEgt += ((dEgtRaw - this.dEgt) * dt) / TF_EGT;
     this.egtPrev = egt;
+    if (egt > lim.egtTakeoffRedlineK) this.egtAboveRedlineS += dt;
+    else if (egt <= lim.egtMaxContinuousK) this.egtAboveRedlineS = 0;
     const p3 = prev.stations['3'].ptPa;
 
     // starter and start sequence
@@ -452,14 +518,29 @@ class TurbofanCycleModel implements CycleModel {
       const caps: [FadecLimiter, number][] = [
         [
           'n1Max',
-          loop((100 * lim.n1MaxRpm) / cal.n1ReferenceRpm - 1, this.pct1(), this.dn1, 100, TD_LIMIT),
+          loop(
+            (100 * lim.n1MaxRpm) / cal.n1ReferenceRpm - N1_LIMIT_MARGIN_PERCENT,
+            this.pct1(),
+            this.dn1,
+            100,
+            TD_LIMIT,
+          ),
         ],
         [
           'n2Max',
-          loop((100 * lim.n2MaxRpm) / cal.n2ReferenceRpm - 1, n2p, this.dn2, 100, TD_LIMIT),
+          loop(
+            (100 * lim.n2MaxRpm) / cal.n2ReferenceRpm - N2_LIMIT_MARGIN_PERCENT,
+            n2p,
+            this.dn2,
+            100,
+            TD_LIMIT,
+          ),
         ],
-        // TCDS E.004 VI note 4: 960 C transitory at takeoff for up to 20 s
-        ['egtMax', loop(lim.egtTransientK - 5, egt, this.dEgt, EGT_ERROR_SCALE_K, TD_EGT)],
+        // TCDS E.004 VI note 4: 960 C transitory at takeoff for up to 20 s, then the redline
+        [
+          'egtMax',
+          loop(this.egtLimitK() - EGT_LIMIT_MARGIN_K, egt, this.dEgt, EGT_ERROR_SCALE_K, TD_EGT),
+        ],
       ];
       for (const [name, rLimit] of caps) {
         const r = K_LIMIT_FACTOR * rLimit;
@@ -514,27 +595,75 @@ class TurbofanCycleModel implements CycleModel {
     if (this.mode === 'shutdown' && this.n2 < 1) this.mode = 'off';
 
     // surge: beyond the surge line in the matched regime
-    if (this.surge === null && snap.hpc.surgeMarginFraction < 0) this.startSurge();
+    if (
+      this.surge === null &&
+      snap.hpc.surgeMarginFraction < 0 &&
+      this.pct2() >= SUBIDLE_N2_PERCENT
+    ) {
+      this.startSurge(snap, false);
+    }
     if (this.surge !== null) {
-      const omegaH = helmholtzFrequency(
-        Math.sqrt(gamma(snap.stations['3'].ttK, 0) * gasConstant(0) * snap.stations['3'].ttK),
-        HPC_DUCT.areaM2,
-        HPC_DUCT.plenumM3,
-        HPC_DUCT.lengthM,
-      );
-      const steps = Math.ceil((omegaH * dt) / 0.02);
-      let g = this.surge.g;
-      for (let k = 0; k < steps; k++) g = greitzerStep(SURGE_PARAMS, g, (omegaH * dt) / steps);
-      const remaining = this.surge.remaining - dt;
-      this.surge = remaining > 0 ? { remaining, g } : null;
+      const ep = this.surge;
+      const sys = this.surgeAt(snap, this.t < ep.forcedUntilS);
+      const steps = Math.ceil((sys.omegaH * dt) / SURGE_DXI);
+      let g = ep.g;
+      for (let k = 0; k < steps; k++) g = greitzerStep(sys.params, g, (sys.omegaH * dt) / steps);
+      const elapsedS = ep.elapsedS + dt;
+      const eq = equilibrium(sys.params);
+      const settled =
+        Math.abs(g.phi - eq.phi) <= SURGE_RECOVERED * Math.abs(eq.phi) &&
+        Math.abs(g.psi - eq.psi) <= SURGE_RECOVERED * Math.abs(eq.psi);
+      const stable = sys.params.b < criticalB(sys.params);
+      const done =
+        elapsedS >= SURGE_MAX_S ||
+        (this.t >= ep.forcedUntilS && elapsedS >= (2 * Math.PI) / sys.omegaH && stable && settled);
+      this.surge = done ? null : { ...ep, g, params: sys.params, omegaH: sys.omegaH, elapsedS };
     }
     this.flags = { ...this.flags, surge: this.surge !== null };
     return snap;
   }
 
-  private startSurge(): void {
-    const eq = equilibrium(SURGE_PARAMS);
-    this.surge = { remaining: SURGE_EPISODE_S, g: { phi: eq.phi * 0.95, psi: eq.psi } };
+  /**
+   * The engine's Greitzer system at a state: B and omega_H at the current N2 and T3, the cubic
+   * of the HPC speed line at the current corrected speed, the throttle through the matched HPC
+   * point (held inside the surge line while an injected fault lasts).
+   */
+  private surgeAt(snap: Snapshot, forced: boolean): { params: GreitzerParams; omegaH: number } {
+    const st = snap.stations;
+    const r = gasConstant(0);
+    const t3 = st['3'].ttK;
+    const a3 = Math.sqrt(gamma(t3, 0) * r * t3);
+    const inlet = { pt25Pa: st['25'].ptPa, tt25K: st['25'].ttK, n2Rpm: this.n2, rJPerKgK: r };
+    const speed = this.n2 / Math.sqrt(inlet.tt25K / 288.15) / this.e.design.corrSpeed.hpc;
+    const fit = hpcCubic(this.e.maps.hpc, speed, this.surgeSystem, inlet);
+    const op = ductVariables(
+      this.surgeSystem,
+      inlet,
+      snap.hpc.correctedFlowKgPerS,
+      snap.hpc.pressureRatio,
+    );
+    const peak = 2 * fit.w;
+    // the cubic is positive up to Phi = 3W (x = 2), so the throttle line is defined there
+    const phiOp = Math.min(op.phi, 1.5 * peak);
+    const phiEq = forced ? Math.min(phiOp, (1 - SURGE_FAULT_INSIDE) * peak) : phiOp;
+    const b = greitzerB(this.surgeSystem, this.n2, a3);
+    return {
+      params: engineGreitzerParams(fit, b, phiEq),
+      omegaH: systemHelmholtzFrequency(this.surgeSystem, a3),
+    };
+  }
+
+  private startSurge(snap: Snapshot, injected: boolean): void {
+    const forcedUntilS = injected ? this.t + SURGE_FAULT_S : this.t;
+    const sys = this.surgeAt(snap, injected);
+    const eq = equilibrium(sys.params);
+    this.surge = {
+      g: { phi: eq.phi * 0.95, psi: eq.psi },
+      params: sys.params,
+      omegaH: sys.omegaH,
+      elapsedS: 0,
+      forcedUntilS,
+    };
     this.ru *= 1 - SURGE_FUEL_CUT;
   }
 
@@ -626,9 +755,11 @@ class TurbofanCycleModel implements CycleModel {
       expansion(r, a.lpt.pressureRatio);
     const t5 = temperatureFromEnthalpy(h45 - pLpt / w41, far41);
     const t495 = temperatureFromEnthalpy(h45 - (cal.egtProbeLptWorkFraction * pLpt) / w41, far41);
-    const etaM = cal.mechanicalEfficiency;
-    const netHp = etaM * pHpt - a.power.hpc * r * r * r - c.powerExtractionW;
-    const netLp = etaM * pLpt - (a.power.fan + a.power.lpc) * q * q * q;
+    // mechanical losses follow the spool speed as in the gas path (engine.ts), so the two agree
+    const mech = cal.mechanicalLossSpeedExponent;
+    const netHp =
+      pHpt - a.mechanicalLossW.hp * r ** mech - a.power.hpc * r * r * r - c.powerExtractionW;
+    const netLp = pLpt - a.mechanicalLossW.lp * q ** mech - (a.power.fan + a.power.lpc) * q * q * q;
     const pt4 = p3 * (1 - cal.combustorPressureLossFraction);
     // pressures below the anchor's expansion are not resolved; never below ambient
     const pt45 = Math.max(p0, pt4 / pr(r, a.hpt.pressureRatio));
@@ -695,7 +826,7 @@ class TurbofanCycleModel implements CycleModel {
     let thrustScale = 1;
     if (this.surge !== null) {
       // the HPC exit follows the Greitzer state; reverse flow shows as zero (StationState.w >= 0)
-      const eq = equilibrium(SURGE_PARAMS);
+      const eq = equilibrium(this.surge.params);
       const fr = this.surge.g.phi / eq.phi;
       const pr = Math.max(0.2, this.surge.g.psi / eq.psi);
       const s3 = stations['3'];
@@ -716,10 +847,12 @@ class TurbofanCycleModel implements CycleModel {
     const t2 = stations['2'].ttK;
     const n2c = this.pct2() / Math.sqrt(t2 / 288.15);
     const vsv = this.definition.vsvSchedules[0];
+    // the displayed schedule stands for the HPC map's own; D3-11 adds the fitted offset
     const vsvClosure =
       vsv === undefined
         ? 0
-        : hermite1(
+        : vsvOffsetRad(cal, n2c) +
+          hermite1(
             vsv.points.map((p) => p.n2CorrectedPercent),
             vsv.points.map((p) => p.closure),
             clamp(
@@ -732,8 +865,14 @@ class TurbofanCycleModel implements CycleModel {
       ...this.flags,
       n1Overspeed: this.n1 > lim.n1MaxRpm,
       n2Overspeed: this.n2 > lim.n2MaxRpm,
+      // W1C-N5: above the transitory limit at any time, or above the redline for longer than the
+      // 20 s the TCDS allows
       egtExceedance:
-        egtDisplayed > (this.mode === 'start' ? lim.egtStartLimitK : lim.egtTakeoffRedlineK),
+        this.mode === 'start'
+          ? egtDisplayed > lim.egtStartLimitK
+          : egtDisplayed > lim.egtTransientK ||
+            (egtDisplayed > lim.egtTakeoffRedlineK &&
+              this.egtAboveRedlineS > lim.egtTransientDurationS),
     };
     return {
       timeS: this.t,
@@ -751,7 +890,8 @@ class TurbofanCycleModel implements CycleModel {
       fan: snap.fan,
       hpc,
       vsvClosureRad: Math.max(0, vsvClosure),
-      vbvOpenFraction: clamp((85 - n2c) / 15, 0, 1),
+      vbvOpenFraction:
+        cal.vbv.maxFraction > 0 ? vbvScheduleFraction(cal, n2c) / cal.vbv.maxFraction : 0,
       starterEngaged: this.starterOn,
       ignitersOn: this.igniters,
       combustorLit: this.lit,
