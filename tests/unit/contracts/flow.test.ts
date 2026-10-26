@@ -1,7 +1,12 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { toHalfBits } from '../../../src/contracts/half';
 import {
   FIELD_EXTENTS,
+  SOLVER_DOMAIN_MIN_D,
+  fieldExtentDomainProblems,
+  minimumSolverDomain,
+  type SolverDomain,
   FIELD_TEXTURE_FORMAT,
   STATE_CHANNELS,
   VELOCITY_CHANNELS,
@@ -20,6 +25,7 @@ import {
 import { ISA_SLS } from '../../../src/contracts/ambient';
 import { SOLVER_REDUCTION_STATIONS } from '../../../src/contracts/stations';
 import { sampleCycleState } from './fixtures/cycleFixture';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 
 const REF: FieldReference = fieldReferenceFromAmbient(ISA_SLS);
 
@@ -87,6 +93,54 @@ describe('render texture layout', () => {
     expect(texelIndexAt(e, e.xMin - 1e-6, 0.1)).toBeNull();
     expect(texelIndexAt(e, 0, e.rMax + 1e-6)).toBeNull();
     expect(texelIndexAt(e, 0, -0.1)).toBeNull();
+  });
+});
+
+describe('W0M-I5: the render extents lie inside the solver domain (docs/MESH.md)', () => {
+  it('states the MESH.md domain requirement in fan diameters', () => {
+    expect(SOLVER_DOMAIN_MIN_D).toEqual({ upstream: 5, radial: 5, downstream: 20 });
+  });
+
+  it('derives the minimum domain from the definition: highlight, core lip, nacelle, fan tip', () => {
+    const d = minimumSolverDomain(ENGINE_DEFINITION);
+    const c = ENGINE_DEFINITION.flowpath.curves;
+    const fan = ENGINE_DEFINITION.bladeRows.find(
+      (r) => r.component === 'fan' && r.kind === 'rotor',
+    );
+    const D = 2 * (fan?.leadingEdge.tip.r ?? Number.NaN);
+    expect(D).toBeCloseTo(1.5494, 4); // 61 in fan ([FICHE] in ENGINE_FACTS.md)
+    expect(d.xIn).toBeCloseTo((c.nacelleInner.points[0]?.x ?? 0) - 5 * D, 12);
+    expect(d.xOut).toBeCloseTo((c.coreOuter.points.at(-1)?.x ?? 0) + 20 * D, 12);
+    expect(d.rOut).toBeCloseTo(Math.max(...c.nacelleOuter.points.map((p) => p.r)) + 5 * D, 12);
+  });
+
+  it('every texel of both extents is inside the minimum domain of the reference engine', () => {
+    const domain = minimumSolverDomain(ENGINE_DEFINITION);
+    expect(fieldExtentDomainProblems(FIELD_EXTENTS.near, domain)).toEqual([]);
+    // the far texture used to reach r = 10 m, past r_out (8.75 m placeholder, 8.81 m minimum)
+    expect(fieldExtentDomainProblems(FIELD_EXTENTS.far, domain)).toEqual([]);
+  });
+
+  it('every texel is inside the domain of the generated meshes (docs/mesh/metrics-*.json)', () => {
+    for (const name of ['130k', '80k']) {
+      const metrics = JSON.parse(
+        readFileSync(new URL(`../../../docs/mesh/metrics-${name}.json`, import.meta.url), 'utf8'),
+      ) as { report: { domain: SolverDomain } };
+      for (const e of [FIELD_EXTENTS.near, FIELD_EXTENTS.far])
+        expect(fieldExtentDomainProblems(e, metrics.report.domain)).toEqual([]);
+    }
+  });
+
+  it('reports each side of an extent that leaves the domain', () => {
+    const domain: SolverDomain = { xIn: -8, xOut: 32, rOut: 8 };
+    const e: FieldExtent = { id: 'far', width: 4, height: 4, xMin: -8, xMax: 32, rMin: 0, rMax: 8 };
+    expect(fieldExtentDomainProblems(e, domain)).toEqual([]);
+    const text = (patch: Partial<FieldExtent>) =>
+      fieldExtentDomainProblems({ ...e, ...patch }, domain).join('|');
+    expect(text({ xMin: -8.1 })).toMatch(/far: xMin -8\.1 is upstream of the inflow xIn -8/);
+    expect(text({ xMax: 32.1 })).toMatch(/far: xMax 32\.1 is downstream of the outflow xOut 32/);
+    expect(text({ rMax: 8.1 })).toMatch(/far: rMax 8\.1 is beyond the far-field boundary rOut 8/);
+    expect(text({ rMin: -0.1 })).toMatch(/far: rMin -0\.1 is below the axis/);
   });
 });
 
