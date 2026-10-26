@@ -8,7 +8,6 @@ export default defineConfig({
   plugins: [react()],
   test: {
     include: ['tests/browser/**/*.test.{ts,tsx}'],
-    passWithNoTests: true,
     testTimeout: 120_000,
     browser: {
       enabled: true,

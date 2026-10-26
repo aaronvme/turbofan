@@ -10,6 +10,5 @@ export default defineConfig({
     environment: 'node',
     pool: 'forks',
     testTimeout: 120_000,
-    passWithNoTests: true,
   },
 });
