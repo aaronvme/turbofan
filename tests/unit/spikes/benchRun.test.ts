@@ -56,9 +56,9 @@ describe('RunRecorder (D0-1 phases)', () => {
     expect(r3?.gpuSamples).toBe(0);
   });
 
-  it('counts long frames: deltas over 1.5 x the run median, i.e. at least one missed vsync', () => {
-    const rec = new RunRecorder(P, 0);
-    drive(rec, 0, 10, 1, 990);
+  it('counts long frames against the display interval: deltas over 1.5 intervals', () => {
+    const rec = new RunRecorder(P, 0, 20);
+    drive(rec, 0, 20, 1, 990);
     // Run 1 (1000..3000): 20 ms frames, one 29 ms frame (below 30: not long), two 40 ms gaps.
     const times = [1000];
     for (const dt of [20, 20, 29, 20, 40, 20, 40, 20]) times.push((times.at(-1) ?? 0) + dt);
@@ -67,6 +67,38 @@ describe('RunRecorder (D0-1 phases)', () => {
     const [r1, r2] = rec.results();
     expect(r1?.longFrames).toBe(2);
     expect(r2?.longFrames).toBe(0);
+    expect(r1?.displayIntervalMs).toBe(20);
+  });
+
+  it('W0G-I1: a run entirely at 1 Hz has every frame long (the run-median rule saw none)', () => {
+    const p = { warmupMs: 1000, runMs: 10_000, runs: 3 };
+    const rec = new RunRecorder(p, 0, 1000 / 60);
+    drive(rec, 0, 1000 / 60, 1, 990); // last warm-up frame at 59/60 s
+    drive(rec, (59 * 1000) / 60 + 1000, 1000, 1, 40_000); // occluded: rAF at 1 Hz
+    for (const r of rec.results()) {
+      expect(r.longFrames).toBe(r.frameTime.n);
+      expect(r.longestThrottledMs).toBeCloseTo(10_000, 6);
+      expect(r.throttledMs).toBeCloseTo(10_000, 6);
+    }
+  });
+
+  it("without a given display interval, takes the warm-up's median frame time", () => {
+    const rec = new RunRecorder(P, 0);
+    drive(rec, 0, 20, 1, 990); // warm-up at 50 Hz
+    const times = [1000];
+    for (const dt of [20, 40, 20, 20]) times.push((times.at(-1) ?? 0) + dt);
+    for (const t of times) rec.frame(t, 1);
+    drive(rec, 1120, 20, 1, 8000);
+    const [r1] = rec.results();
+    expect(r1?.displayIntervalMs).toBe(20);
+    expect(r1?.longFrames).toBe(1);
+  });
+
+  it('refuses to guess a display interval with neither a given one nor warm-up frames', () => {
+    const rec = new RunRecorder(P, 1000);
+    drive(rec, 1000, 1000, 1, 2000); // one warm-up frame, so no warm-up frame time
+    drive(rec, 3000, 20, 1, 9000);
+    expect(() => rec.results()).toThrow(/display interval/);
   });
 
   it('summarises how late each rAF callback started after its frame time (main-thread contention)', () => {

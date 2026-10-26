@@ -19,21 +19,34 @@ describe('D0-1 protocol', () => {
 
   it('labels quick results as indicative and contaminated', () => {
     expect(protocolLabel(QUICK)).toBe('indicative, contaminated (D0-1): --quick run');
-    expect(protocolLabel(OFFICIAL)).toBe('official (D0-1): 10 s warm-up, median of 3 x 60 s');
+    expect(protocolLabel(OFFICIAL)).toBe(
+      'official (D0-1): 3 repetitions in rotated order, each a 10 s warm-up then 60 s; median per configuration',
+    );
   });
 });
 
 describe('parseBenchArgs', () => {
   it('defaults to the official protocol', () => {
-    expect(parseBenchArgs([])).toEqual({ protocol: OFFICIAL, only: null, port: 5181 });
+    expect(parseBenchArgs([])).toEqual({ protocol: OFFICIAL, only: null, port: 5181, seed: null });
   });
 
-  it('takes --quick, --only=a,b and --port=N', () => {
-    expect(parseBenchArgs(['--quick', '--only=130k-16x8,80k-8x8', '--port=5199'])).toEqual({
+  it('takes --quick, --only=a,b, --port=N and --seed=N', () => {
+    expect(
+      parseBenchArgs(['--quick', '--only=130k-16x8,80k-8x8', '--port=5199', '--seed=4242']),
+    ).toEqual({
       protocol: QUICK,
       only: ['130k-16x8', '80k-8x8'],
       port: 5199,
+      seed: 4242,
     });
+  });
+
+  it('takes a seed in the 32-bit unsigned range only (W0G-I2: the order generator seed)', () => {
+    expect(parseBenchArgs(['--seed=0']).seed).toBe(0);
+    expect(parseBenchArgs(['--seed=4294967295']).seed).toBe(4294967295);
+    expect(() => parseBenchArgs(['--seed=4294967296'])).toThrow(/seed/);
+    expect(() => parseBenchArgs(['--seed=-1'])).toThrow(/seed/);
+    expect(() => parseBenchArgs(['--seed=1.5'])).toThrow(/seed/);
   });
 
   it('rejects unknown flags rather than silently running the official protocol', () => {
