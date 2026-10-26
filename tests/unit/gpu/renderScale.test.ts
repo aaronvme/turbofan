@@ -9,14 +9,20 @@ import {
   initialRenderScale,
   nextRenderScale,
   RENDER_PROFILES,
+  type RenderProfile,
   type RenderScaleState,
 } from '../../../src/gpu/renderScale';
 
 const perf = RENDER_PROFILES.performance;
 
-const run = (s: RenderScaleState, gpuMs: number, frames: number): RenderScaleState => {
+const run = (
+  s: RenderScaleState,
+  gpuMs: number,
+  frames: number,
+  profile: RenderProfile = perf,
+): RenderScaleState => {
   let t = s;
-  for (let i = 0; i < frames; i++) t = nextRenderScale(t, gpuMs, perf);
+  for (let i = 0; i < frames; i++) t = nextRenderScale(t, gpuMs, profile);
   return t;
 };
 
@@ -70,7 +76,7 @@ describe('nextRenderScale', () => {
     expect(run(s, Number.NaN, 5 * perf.holdFrames).scale).toBe(0.85);
     expect(run(s, 0, 5 * perf.holdFrames).scale).toBe(0.85);
     const q = initialRenderScale(RENDER_PROFILES.quality);
-    expect(run(q, 30, 5 * perf.holdFrames).scale).toBe(1);
+    expect(run(q, 30, 5 * perf.holdFrames, RENDER_PROFILES.quality).scale).toBe(1);
   });
 
   it('counts frames since the last change', () => {

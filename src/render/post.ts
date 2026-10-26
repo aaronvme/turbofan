@@ -28,7 +28,10 @@
 import {
   HalfFloatType,
   RenderPipeline,
+  Vector2,
   Vector4,
+  type RenderTarget,
+  type Texture,
   type Node,
   type PerspectiveCamera,
   type Scene,
@@ -90,11 +93,23 @@ export interface LookPipeline {
   /** Depth of field on (cinematic presets) or off (default: it is not drawn at all). */
   setCinematic(on: boolean): void;
   /**
+   * The resolution of the 3D passes, the composite and TRAA relative to the drawing buffer
+   * (D3-7, the performance profile); the output pass upsamples TRAA's result.
+   */
+  setRenderScale(scale: number): void;
+  /**
    * Renders a frame. Tests and debugging: `traa` false skips TRAA (and depth of field);
    * `linear` writes half the linear radiance, with no tone map or sRGB encoding (and no DoF).
    */
   render(traa?: boolean, linear?: boolean): void;
   dispose(): void;
+}
+
+/** The TRAANode internals the render-scale fix touches (three r186, not in @types/three). */
+interface TraaInternals {
+  updateBefore(frame: { renderer: WebGPURenderer }): void;
+  readonly _historyRenderTarget: RenderTarget & { depthTexture: Texture };
+  readonly _previousDepthNode: { value: Texture };
 }
 
 export function createPipeline(
@@ -264,6 +279,27 @@ export function createPipeline(
   compositeTex.name = 'Composite';
 
   const traaNode = traa(compositeTex, sceneDepth, sceneVelocity, camera);
+  // three r186's TRAANode copies the scene depth into its history (its disocclusion test) only
+  // when the history matches the drawing buffer. Below render scale 1 (the performance
+  // profile, D3-7) it never would, so every pixel read as disoccluded and TRAA stopped
+  // accumulating: the copy is made here instead whenever three skipped it.
+  const traaState = traaNode as unknown as TraaInternals;
+  const traaUpdate = traaState.updateBefore.bind(traaNode);
+  const drawing = new Vector2();
+  traaState.updateBefore = (frame) => {
+    traaUpdate(frame);
+    const h = traaState._historyRenderTarget;
+    const d = sceneDepth.value as Texture;
+    frame.renderer.getDrawingBufferSize(drawing);
+    if (
+      (h.width !== drawing.x || h.height !== drawing.y) &&
+      scenePass.renderTarget.width === h.width &&
+      scenePass.renderTarget.height === h.height
+    ) {
+      frame.renderer.copyTextureToTexture(d, h.depthTexture);
+      traaState._previousDepthNode.value = h.depthTexture;
+    }
+  };
   const focusDistance = uniform(4);
   const focalLength = uniform(2.5);
   const bokehScale = uniform(1.2);
@@ -305,6 +341,7 @@ export function createPipeline(
     return p;
   };
   let cinematic = false;
+  let renderScale = 1;
 
   return {
     pipeline,
@@ -314,6 +351,22 @@ export function createPipeline(
     bokehScale,
     setCinematic: (on) => {
       cinematic = on && !settings.debug;
+    },
+    setRenderScale: (scale) => {
+      if (scale === renderScale) return;
+      renderScale = scale;
+      scenePass.setResolutionScale(scale);
+      rotorPass.setResolutionScale(scale);
+      compositeTex.setResolutionScale(scale);
+      // TRAA reads its beauty's size before the composite's own resize in the same frame,
+      // and three then copied the resized scene depth into the old-size history (a WebGPU
+      // copy error): resize the composite target now
+      renderer.getDrawingBufferSize(drawing);
+      compositeTex.renderTarget?.setSize(
+        Math.floor(drawing.x * scale),
+        Math.floor(drawing.y * scale),
+      );
+      aoPass.resolutionScale = 0.5 * scale;
     },
     render: (withTraa = true, linear = false) => {
       if (!withTraa || linear) {

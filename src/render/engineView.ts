@@ -29,6 +29,12 @@ import { screenRectOfBox, type Box3Like } from '../geometry/screenRect';
 import { closedViewVisibility } from '../geometry/visibility';
 import { requestSimDevice, type GpuErrorReport, type SimDevice } from '../gpu/device';
 import type { FrameSample, PassMedians } from '../gpu/passTimings';
+import {
+  initialRenderScale,
+  nextRenderScale,
+  RENDER_PROFILES,
+  type RenderProfileId,
+} from '../gpu/renderScale';
 import { createMockCycle, mockSteadyState, MOCK_LABEL } from '../mocks/mockCycle';
 import { buildEngineScene, type EngineScene } from './engineScene';
 import { createLookUniforms, createMaterials, type LookUniforms } from './materials';
@@ -50,6 +56,8 @@ export interface EngineViewOptions {
   readonly debug?: PostDebug;
   /** Per-pass GPU timestamps (default on when the adapter has timestamp-query). */
   readonly timing?: boolean;
+  /** `quality` (full resolution, the default) or `performance` (dynamic resolution, D3-7). */
+  readonly profile?: RenderProfileId;
 }
 
 export interface EngineViewStats {
@@ -64,6 +72,9 @@ export interface EngineViewStats {
   /** Rolling medians of GPU ms per pass and CPU ms per frame (W1G-I2). */
   readonly timings: PassMedians;
   readonly timestamps: boolean;
+  readonly profile: RenderProfileId;
+  /** The 3D passes' resolution relative to the canvas (1 in `quality`). */
+  readonly renderScale: number;
 }
 
 export interface EngineView {
@@ -78,6 +89,8 @@ export interface EngineView {
   setThrottle(lever: number, settle?: boolean): void;
   setShutter(angleDeg: number): void;
   setCinematic(on: boolean): void;
+  /** The render profile (D3-7): `performance` follows the GPU time with the render scale. */
+  setProfile(id: RenderProfileId): void;
   setCameraPose(position: readonly number[], target: readonly number[]): void;
   /** Look-dev A/B switches (e.g. caps or culling off) for timing comparisons. */
   setDebugFlags(flags: DebugFlags): void;
@@ -186,11 +199,8 @@ async function assemble(
   const def = o.definition;
   const geo = buildEngineGeometry(def, GEOMETRY_QUALITY[o.quality ?? 'high']);
   const uniforms = createLookUniforms();
-  const scene: EngineScene = buildEngineScene(
-    geo,
-    createMaterials(uniforms),
-    closedViewVisibility(def, geo),
-  );
+  const closedSet = closedViewVisibility(def, geo);
+  const scene: EngineScene = buildEngineScene(geo, createMaterials(uniforms), closedSet);
   const studio: Studio = await createStudio(renderer);
   for (const s of [scene.main, scene.rotors]) {
     s.environment = studio.environment;
@@ -229,6 +239,9 @@ async function assemble(
   let lastExplode = -1;
   let flags: DebugFlags = {};
   let fanFrame = 0;
+  let profile: RenderProfileId = o.profile ?? 'quality';
+  let scaleState = initialRenderScale(RENDER_PROFILES[profile]);
+  post.setRenderScale(scaleState.scale);
   const target = new Vector3(0.5, 0, 0);
 
   const inputs = (): CycleInputs => ({
@@ -288,6 +301,11 @@ async function assemble(
     },
     setCinematic(on) {
       post.setCinematic(on);
+    },
+    setProfile(id) {
+      profile = id;
+      scaleState = initialRenderScale(RENDER_PROFILES[id]);
+      post.setRenderScale(scaleState.scale);
     },
     setCameraPose(position, t) {
       camera.position.set(position[0] ?? 0, position[1] ?? 0, position[2] ?? 0);
@@ -365,6 +383,10 @@ async function assemble(
       // closed engine (LD-6): draw only what the cowls can show
       const closed = cut === 0 && explode === 0 && flags.noCull !== true;
       for (const obj of scene.closedHidden) obj.visible = !closed;
+      // and what shows only through one opening, only for an eye on that side
+      const eyeX = camera.position.x;
+      for (const obj of scene.frontOnly) obj.visible = !closed || eyeX < closedSet.eye.front;
+      for (const obj of scene.rearOnly) obj.visible = !closed || eyeX > closedSet.eye.rear;
       const skinsVisible = explode < 0.02;
       for (const s of scene.skins) if (!s.name.startsWith('cap:')) s.visible = skinsVisible;
       if (!skinsVisible)
@@ -385,6 +407,10 @@ async function assemble(
       );
       post.fanRect.value.set(rect.min[0], rect.min[1], rect.max[0], rect.max[1]);
 
+      // dynamic resolution (D3-7): the median GPU time of the timer's rolling window, at the
+      // current scale (the controller holds for a full window after every change)
+      scaleState = nextRenderScale(scaleState, timer.medians().gpuTotal, RENDER_PROFILES[profile]);
+      post.setRenderScale(scaleState.scale);
       post.focusDistance.value = camera.position.distanceTo(target);
       if (flags.noPost === true) renderer.render(scene.main, camera);
       else post.render(flags.noTraa !== true, flags.linear === true);
@@ -402,6 +428,8 @@ async function assemble(
         cycleLabel: MOCK_LABEL,
         timings: timer.medians(),
         timestamps: timer.enabled,
+        profile,
+        renderScale: scaleState.scale,
       };
     },
     beginTimingRun() {

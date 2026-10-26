@@ -1,11 +1,12 @@
 // Main-thread look-dev entry (D2-4 allows it for look-dev; the same EngineView runs in the
-// worker, src/render/worker.ts). Query: ?preset=<id>&clean=1&shutter=<deg>&quality=test.
-// Keys: 1-8 presets, c cutaway, e exploded, r realistic, t/g throttle up/down, p the GPU
-// pass overlay. window.lookdev drives it from Playwright (tools/lookdev/capture.ts).
+// worker, src/render/worker.ts). Query: ?preset=<id>&clean=1&shutter=<deg>&quality=test
+// &profile=performance. Keys: 1-8 presets, c cutaway, e exploded, r realistic, t/g throttle
+// up/down, p the GPU pass overlay, q the render profile (quality / performance, D3-7). window.lookdev drives it from Playwright (tools/lookdev/capture.ts).
 
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { ENGINE_DEFINITION } from '../engine/definition';
 import { PASS_GROUPS, type FrameSample, type PassMedians } from '../gpu/passTimings';
+import type { RenderProfileId } from '../gpu/renderScale';
 import { createEngineView, type DebugFlags, type EngineView } from '../render/engineView';
 import type { PostDebug } from '../render/post';
 import { LOOK_PRESET_IDS, LOOK_PRESETS, type LookMode, type LookPresetId } from '../render/presets';
@@ -23,6 +24,7 @@ interface LookdevApi {
   setThrottle(lever: number, settle?: boolean): void;
   setShutter(deg: number): void;
   setDebugFlags(flags: DebugFlags): void;
+  setProfile(id: RenderProfileId): void;
   /** Renders n frames at a fixed 1/60 s step, one per animation frame, then waits for the GPU. */
   renderFrames(n: number): Promise<void>;
   /** Renders n frames and returns the per-pass GPU and CPU medians over them. */
@@ -89,6 +91,7 @@ async function main(): Promise<void> {
     height: innerHeight,
     dpr: devicePixelRatio,
     quality: params.get('quality') === 'test' ? 'test' : 'high',
+    profile: params.get('profile') === 'performance' ? 'performance' : 'quality',
     debug: (params.get('debug') as PostDebug) ?? null,
   });
   const controls = new OrbitControls(view.camera, canvas);
@@ -124,7 +127,7 @@ async function main(): Promise<void> {
       acc += dt;
       if (acc > 0.5) {
         const s = view.stats();
-        hud.textContent = `${s.cycleLabel} cycle · N1 ${s.n1Rpm.toFixed(0)} rpm · N2 ${s.n2Rpm.toFixed(0)} rpm · blur ${s.lpBlurDeg.toFixed(1)}° · ${(s.drawnTriangles / 1e6).toFixed(2)} of ${(s.triangles / 1e6).toFixed(2)} M tris · GPU errors ${s.errors.length}`;
+        hud.textContent = `${s.cycleLabel} cycle · N1 ${s.n1Rpm.toFixed(0)} rpm · N2 ${s.n2Rpm.toFixed(0)} rpm · blur ${s.lpBlurDeg.toFixed(1)}° · ${(s.drawnTriangles / 1e6).toFixed(2)} of ${(s.triangles / 1e6).toFixed(2)} M tris · ${s.profile} ${s.renderScale.toFixed(2)}× · GPU errors ${s.errors.length}`;
         passes.innerHTML = renderPasses(s.timings, s.timestamps);
         acc = 0;
       }
@@ -143,6 +146,8 @@ async function main(): Promise<void> {
     if (e.key === 't') view.setThrottle((lever = Math.min(1, lever + 0.25)));
     if (e.key === 'g') view.setThrottle((lever = Math.max(0, lever - 0.25)));
     if (e.key === 'p') document.body.classList.toggle('nopasses');
+    if (e.key === 'q')
+      view.setProfile(view.stats().profile === 'quality' ? 'performance' : 'quality');
   });
 
   window.lookdev = {
@@ -159,6 +164,9 @@ async function main(): Promise<void> {
     },
     setDebugFlags: (f) => {
       view.setDebugFlags(f);
+    },
+    setProfile: (id) => {
+      view.setProfile(id);
     },
     async renderFrames(n) {
       paused = true;

@@ -109,9 +109,14 @@ describe('runOrder: seeded and rotated per repetition (D2-12)', () => {
     for (const id of ids) expect(new Set(o.map((rep) => rep.indexOf(id))).size).toBe(3);
   });
 
-  it('the official set is small: the default, the cutaway and the hero', () => {
-    expect(OFFICIAL_CONFIGS.map((c) => c.preset).sort()).toEqual(
-      ['cutaway', 'hero', 'threeQuarterFront'].sort(),
+  it('the official set is small: the default, the cutaway, the hero, and the default in the performance profile (D3-7)', () => {
+    expect(OFFICIAL_CONFIGS.map((c) => `${c.preset}:${c.profile ?? 'quality'}`).sort()).toEqual(
+      [
+        'cutaway:quality',
+        'hero:quality',
+        'threeQuarterFront:quality',
+        'threeQuarterFront:performance',
+      ].sort(),
     );
   });
 });

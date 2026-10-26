@@ -49,6 +49,9 @@ export interface EngineScene {
   readonly fanTimeCopies: readonly FanTimeCopy[];
   /** Objects the closed engine never shows (src/geometry/visibility.ts): culled in realistic mode. */
   readonly closedHidden: readonly Object3D[];
+  /** Drawn by the closed engine only for an eye ahead of / aft of ClosedViewSet.eye. */
+  readonly frontOnly: readonly Object3D[];
+  readonly rearOnly: readonly Object3D[];
   readonly triangles: number;
   dispose(): void;
 }
@@ -99,6 +102,12 @@ export function buildEngineScene(
   const skins: Object3D[] = [];
   const caps: [Mesh, Mesh][] = [];
   const closedHidden: Object3D[] = [];
+  const frontOnly: Object3D[] = [];
+  const rearOnly: Object3D[] = [];
+  const sided = (id: string, obj: Object3D) => {
+    if (closed.frontOnly.has(id)) frontOnly.push(obj);
+    if (closed.rearOnly.has(id)) rearOnly.push(obj);
+  };
   const fanTimeCopies: FanTimeCopy[] = [];
   const disposables: BufferGeometry[] = [];
   let triangles = 0;
@@ -118,6 +127,7 @@ export function buildEngineScene(
     // fill-bound, not triangle-bound)
     mesh.renderOrder = p.spec.skin ? 0 : 1;
     if (!closed.parts.has(p.spec.id)) closedHidden.push(mesh);
+    sided(p.spec.id, mesh);
     // the part as a shadow proxy for the rotor pass's lights (W1L-I2, src/render/studio.ts)
     if (p.spec.material !== 'spinner') {
       const proxy = new Mesh(g, materials.part(p.spec.material));
@@ -173,6 +183,7 @@ export function buildEngineScene(
     // rotors receive the rotor lights' shadows (W1L-I2); they cast none (static maps)
     mesh.receiveShadow = true;
     if (!closed.rows.has(r.row.id)) closedHidden.push(mesh);
+    sided(r.row.id, mesh);
     triangles += (r.blade.mesh.indices.length / 3) * r.row.count;
     const rowGroup = new Group();
     rowGroup.name = `rowGroup:${r.row.id}`;
@@ -215,6 +226,8 @@ export function buildEngineScene(
     skins,
     caps,
     closedHidden,
+    frontOnly,
+    rearOnly,
     fanTimeCopies,
     triangles,
     dispose: () => {

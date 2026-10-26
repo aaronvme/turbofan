@@ -19,6 +19,8 @@ export interface TimingConfig {
   readonly group: string;
   readonly preset: string;
   readonly flags: Readonly<Record<string, boolean | number | string>>;
+  /** The render profile (D3-7); `quality` when absent. */
+  readonly profile?: 'quality' | 'performance';
 }
 
 /** The official set (D3-7): the default, the cutaway and the hero. About 11 min at D0-1. */
@@ -26,6 +28,14 @@ export const OFFICIAL_CONFIGS: readonly TimingConfig[] = [
   { id: 'default (threeQuarterFront)', group: 'official', preset: 'threeQuarterFront', flags: {} },
   { id: 'cutaway', group: 'official', preset: 'cutaway', flags: {} },
   { id: 'hero (cinematic, DoF on)', group: 'official', preset: 'hero', flags: {} },
+  // D3-7: the battery default if the default is over 8 ms on AC
+  {
+    id: 'default, performance profile',
+    group: 'official',
+    preset: 'threeQuarterFront',
+    flags: {},
+    profile: 'performance',
+  },
 ];
 
 /** The A/B diagnostics (`--diagnostics`): run once at 20 s each to rank them. */

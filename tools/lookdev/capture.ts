@@ -75,6 +75,7 @@ interface LookdevPage {
     ready: boolean;
     setPreset(id: string): void;
     setDebugFlags(f: Readonly<Record<string, boolean | number | string>>): void;
+    setProfile(id: string): void;
     renderFrames(n: number): Promise<void>;
     timeFrames(n: number): Promise<Medians>;
     renderFor(ms: number): Promise<void>;
@@ -85,7 +86,12 @@ interface LookdevPage {
       events: string[];
     }>;
     conditions(): Promise<Record<string, unknown>>;
-    stats(): { errors: unknown[]; drawnTriangles: number; triangles: number };
+    stats(): {
+      errors: unknown[];
+      drawnTriangles: number;
+      triangles: number;
+      renderScale: number;
+    };
   };
 }
 
@@ -175,18 +181,21 @@ async function main(): Promise<void> {
           const c = configs.find((k) => k.id === id);
           if (c === undefined) throw new Error(`no config ${id}`);
           const run = await page.evaluate(
-            async ([preset, flags, warmMs, runMs]) => {
+            async ([preset, flags, profile, warmMs, runMs]) => {
               const l = (window as LookdevPage).lookdev;
               if (l === undefined) throw new Error('no lookdev');
               l.setDebugFlags(flags);
+              l.setProfile(profile);
               l.setPreset(preset);
               await l.renderFor(warmMs);
               const r = await l.timeRun(runMs);
               const errors = l.stats().errors.length;
+              const scale = l.stats().renderScale;
               l.setDebugFlags({});
-              return { ...r, errors };
+              l.setProfile('quality');
+              return { ...r, errors, scale };
             },
-            [c.preset, c.flags, t.warmupS * 1000, t.runS * 1000] as const,
+            [c.preset, c.flags, c.profile ?? 'quality', t.warmupS * 1000, t.runS * 1000] as const,
           );
           const summary = summarizeRun(run.frames);
           const validity = runValidityOf(run.rafDeltas, displayMs, run.hiddenMs);
@@ -195,7 +204,7 @@ async function main(): Promise<void> {
           e.validity.push(validity);
           perConfig.set(id, e);
           log(
-            `rep ${rep + 1} ${id}: GPU p50 ${summary.gpuTotal.p50.toFixed(2)} ms (p10 ${summary.gpuTotal.p10.toFixed(2)}, p90 ${summary.gpuTotal.p90.toFixed(2)}), ${summary.frames} frames, ${validity.valid ? 'valid' : validity.reasons.join('; ')}${validity.warnings.length > 0 ? ` [${validity.warnings.join('; ')}]` : ''}${run.events.length > 0 ? ` events: ${run.events.join(', ')}` : ''}, errors ${run.errors}`,
+            `rep ${rep + 1} ${id}: GPU p50 ${summary.gpuTotal.p50.toFixed(2)} ms (p10 ${summary.gpuTotal.p10.toFixed(2)}, p90 ${summary.gpuTotal.p90.toFixed(2)}), ${summary.frames} frames, ${validity.valid ? 'valid' : validity.reasons.join('; ')}${validity.warnings.length > 0 ? ` [${validity.warnings.join('; ')}]` : ''}${run.events.length > 0 ? ` events: ${run.events.join(', ')}` : ''}, render scale ${run.scale}, errors ${run.errors}`,
           );
         }
       }

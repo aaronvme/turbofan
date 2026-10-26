@@ -170,6 +170,52 @@ describe('engine view, main thread', () => {
   });
 });
 
+describe('engine view, performance profile (D3-7)', () => {
+  let view: EngineView | null = null;
+  afterAll(async () => {
+    if (view !== null) await view.dispose();
+  });
+
+  it('renders every preset and mode at the reduced render scale with zero GPU errors, and switches profiles', async () => {
+    const c = canvas();
+    view = await createEngineView({
+      gpu: navigator.gpu,
+      canvas: c,
+      definition: ENGINE_DEFINITION,
+      width: W,
+      height: H,
+      dpr: 1,
+      quality: 'test',
+      profile: 'performance',
+    });
+    const v = view;
+    expect(v.stats().profile).toBe('performance');
+    for (const preset of LOOK_PRESET_IDS) {
+      v.setPreset(preset);
+      await settle(v, 6);
+      expectPicture(`performance ${preset}`, grab(v, c));
+      const s = v.stats().renderScale;
+      expect(s, `${preset} render scale`).toBeGreaterThanOrEqual(0.75);
+      expect(s, `${preset} render scale`).toBeLessThanOrEqual(0.85);
+    }
+    // the modes in transition, and the profile switched both ways mid-run (the passes and
+    // TRAA's history resize: three r186 copied a resized depth into an old-size history)
+    v.setPreset('threeQuarterFront');
+    v.setMode('cutaway');
+    await settle(v, 10);
+    v.setProfile('quality');
+    await settle(v, 4);
+    expect(v.stats().renderScale).toBe(1);
+    v.setMode('exploded');
+    v.setProfile('performance');
+    await settle(v, 10);
+    v.setPreset('exploded');
+    await settle(v, 6);
+    expectPicture('performance exploded, after the switches', grab(v, c));
+    expect(v.stats().errors).toEqual([]);
+  });
+});
+
 describe('engine view, dedicated worker on an OffscreenCanvas', () => {
   it('renders the same scene module with zero GPU errors and reports its pass timings', async () => {
     const worker = new Worker(new URL('../../src/render/worker.ts', import.meta.url), {
