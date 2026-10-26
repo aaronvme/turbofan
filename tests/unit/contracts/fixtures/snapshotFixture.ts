@@ -26,7 +26,7 @@ export function sampleSnapshotParts(): SnapshotParts {
       state: 'running',
       elapsedS: 3.25,
       nextStepIndex: 2,
-      outcomes: [{ id: 'reach-95', verdict: 'pending', decidedAtS: null, detail: '' }],
+      outcomes: [{ id: 'reach-95', verdict: 'pending', decidedAtS: null, detail: '', samples: 0 }],
     },
     view: renderStateOf(DEFAULT_UI_STATE),
   };

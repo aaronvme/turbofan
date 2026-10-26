@@ -77,6 +77,11 @@ export interface OutcomeResult {
   readonly verdict: OutcomeVerdict;
   readonly decidedAtS: number | null;
   readonly detail: string;
+  /**
+   * Snapshots evaluated inside the window so far. An "always" outcome passes only if this is
+   * at least 1: a pipeline that never publishes must not pass "held throughout" (W0C-I2).
+   */
+  readonly samples: number;
 }
 
 export type ScenarioRunState = 'idle' | 'running' | 'passed' | 'failed' | 'aborted';
@@ -147,44 +152,72 @@ export function evaluatePredicate(predicate: Predicate, snapshot: unknown): bool
 }
 
 export function initialOutcomeResults(scenario: Scenario): OutcomeResult[] {
-  return scenario.outcomes.map((o) => ({
-    id: o.id,
-    verdict: 'pending',
-    decidedAtS: null,
-    detail: '',
-  }));
+  return scenario.outcomes.map((o) => pendingResult(o.id));
 }
+
+function pendingResult(id: string): OutcomeResult {
+  return { id, verdict: 'pending', decidedAtS: null, detail: '', samples: 0 };
+}
+
+const snapshotCount = (n: number): string => `${n} snapshot${n === 1 ? '' : 's'}`;
 
 function decide(
   outcome: ExpectedOutcome,
+  prev: OutcomeResult,
   snapshot: unknown,
   elapsedS: number,
-): OutcomeResult | null {
+): OutcomeResult {
   const w = outcome.window;
   const holds = () => evaluatePredicate(outcome.predicate, snapshot);
+  const [from, to] =
+    w.kind === 'eventually'
+      ? [w.fromS, w.byS]
+      : w.kind === 'always'
+        ? [w.fromS, w.toS]
+        : [w.atS, Infinity];
+  const inWindow = elapsedS >= from && elapsedS <= to;
+  const samples = prev.samples + (inWindow ? 1 : 0);
+  const pending: OutcomeResult = { ...prev, samples };
   const result = (verdict: OutcomeVerdict, detail: string): OutcomeResult => ({
     id: outcome.id,
     verdict,
     decidedAtS: elapsedS,
     detail,
+    samples,
   });
   switch (w.kind) {
     case 'eventually':
-      if (elapsedS >= w.fromS && elapsedS <= w.byS && holds())
-        return result('passed', `held at ${elapsedS} s`);
-      if (elapsedS > w.byS) return result('failed', `did not hold by ${w.byS} s`);
-      return null;
+      if (inWindow && holds()) return result('passed', `held at ${elapsedS} s`);
+      if (elapsedS > w.byS) {
+        return result(
+          'failed',
+          samples === 0
+            ? `never sampled in [${w.fromS}, ${w.byS}] s`
+            : `did not hold by ${w.byS} s (${snapshotCount(samples)})`,
+        );
+      }
+      return pending;
     case 'always':
-      if (elapsedS >= w.fromS && elapsedS <= w.toS && !holds())
-        return result('failed', `violated at ${elapsedS} s`);
-      if (elapsedS >= w.toS) return result('passed', `held from ${w.fromS} s to ${w.toS} s`);
-      return null;
+      if (inWindow && !holds()) return result('failed', `violated at ${elapsedS} s`);
+      if (elapsedS >= w.toS) return closeAlways(w, result, samples);
+      return pending;
     case 'at':
-      if (elapsedS < w.atS) return null;
+      if (!inWindow) return pending;
       return holds()
         ? result('passed', `held at ${elapsedS} s`)
         : result('failed', `did not hold at ${elapsedS} s`);
   }
+}
+
+/** An "always" window has closed: it passes only if a snapshot was evaluated inside it. */
+function closeAlways(
+  w: { readonly fromS: number; readonly toS: number },
+  result: (verdict: OutcomeVerdict, detail: string) => OutcomeResult,
+  samples: number,
+): OutcomeResult {
+  return samples > 0
+    ? result('passed', `held from ${w.fromS} s to ${w.toS} s (${snapshotCount(samples)})`)
+    : result('failed', `never sampled in [${w.fromS}, ${w.toS}] s`);
 }
 
 /** Pure reducer: decides pending outcomes against one more snapshot taken elapsedS into the run. */
@@ -195,36 +228,33 @@ export function updateOutcomes(
   elapsedS: number,
 ): OutcomeResult[] {
   return scenario.outcomes.map((outcome, i) => {
-    const prev = results[i] ?? { id: outcome.id, verdict: 'pending', decidedAtS: null, detail: '' };
+    const prev = results[i] ?? pendingResult(outcome.id);
     if (prev.verdict !== 'pending') return prev;
-    return decide(outcome, snapshot, elapsedS) ?? prev;
+    return decide(outcome, prev, snapshot, elapsedS);
   });
 }
 
-/** Closes the run at endS: outcomes still pending pass only if they were "always" and covered. */
+/**
+ * Closes the run at endS: a pending "always" outcome whose window ended by endS passes if it
+ * was sampled at least once; every other pending outcome fails.
+ */
 export function finalizeOutcomes(
   scenario: Scenario,
   results: readonly OutcomeResult[],
   endS: number,
 ): OutcomeResult[] {
   return scenario.outcomes.map((outcome, i) => {
-    const prev = results[i] ?? { id: outcome.id, verdict: 'pending', decidedAtS: null, detail: '' };
+    const prev = results[i] ?? pendingResult(outcome.id);
     if (prev.verdict !== 'pending') return prev;
-    const w = outcome.window;
-    if (w.kind === 'always' && endS >= w.toS) {
-      return {
-        id: outcome.id,
-        verdict: 'passed',
-        decidedAtS: endS,
-        detail: `held from ${w.fromS} s to ${w.toS} s`,
-      };
-    }
-    return {
-      id: outcome.id,
-      verdict: 'failed',
+    const result = (verdict: OutcomeVerdict, detail: string): OutcomeResult => ({
+      ...prev,
+      verdict,
       decidedAtS: endS,
-      detail: `scenario ended at ${endS} s before the outcome was decided`,
-    };
+      detail,
+    });
+    const w = outcome.window;
+    if (w.kind === 'always' && endS >= w.toS) return closeAlways(w, result, prev.samples);
+    return result('failed', `scenario ended at ${endS} s before the outcome was decided`);
   });
 }
 
