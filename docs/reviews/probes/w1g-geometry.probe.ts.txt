@@ -1,0 +1,70 @@
+// Critic pass 3, w1/geometry @93e9877. Each test prints or pins what the critic observed for a
+// finding. Run from a checkout of the branch (see vitest.probes.config.mjs); output goes to the
+// file named by PROBE_OUT.
+import { appendFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { ENGINE_DEFINITION as def } from '../../../src/engine/definition';
+import { GEOMETRY_QUALITY, buildEngineGeometry } from '../../../src/geometry/engineGeometry';
+import { meshTopology } from '../../../src/geometry/mesh';
+
+const log = (line: string) => appendFileSync(process.env.PROBE_OUT ?? 'probe-out.txt', `${line}\n`);
+
+describe('W1G: the shipped (high) preset is never checked by the unit tests', () => {
+  it('topology and clearance of every row and part at GEOMETRY_QUALITY.high', { timeout: 600_000 }, () => {
+    const geo = buildEngineGeometry(def, GEOMETRY_QUALITY.high);
+    let tris = 0;
+    let bad = 0;
+    for (const r of geo.rows) {
+      const t = meshTopology(r.blade.mesh);
+      tris += t.triangles * r.row.count;
+      const ok =
+        t.boundaryEdges === 0 &&
+        t.nonManifoldEdges === 0 &&
+        t.misorientedEdges === 0 &&
+        t.degenerateTriangles === 0 &&
+        t.signedVolume > 0;
+      if (!ok) {
+        bad++;
+        log(`row ${r.row.id}: ${JSON.stringify(t)}`);
+      }
+    }
+    for (const p of geo.parts) {
+      const t = meshTopology(p.mesh);
+      tris += t.triangles;
+      const ok =
+        t.boundaryEdges === 0 &&
+        t.nonManifoldEdges === 0 &&
+        t.misorientedEdges === 0 &&
+        t.degenerateTriangles === 0 &&
+        t.signedVolume > 0;
+      if (!ok) {
+        bad++;
+        log(`part ${p.spec.id}: ${JSON.stringify(t)}`);
+      }
+    }
+    log(`high preset: ${geo.rows.length} rows, ${geo.parts.length} parts, ${tris} triangles drawn once (instances included), ${bad} meshes failing the topology checks`);
+    expect(tris).toBeGreaterThan(0);
+  });
+});
+
+describe('W1G: the annulus test samples only mid-span', () => {
+  it('every part loop vertex against every component annulus (1 mm inside the walls)', () => {
+    const geo = buildEngineGeometry(def, GEOMETRY_QUALITY.test);
+    let intrusions = 0;
+    for (const comp of def.flowpath.components) {
+      const hub = geo.walls[comp.hub === 'coreCowl' ? 'coreCowl' : 'hub'];
+      const cas = geo.walls[comp.casing === 'nacelleInner' ? 'nacelleInner' : 'coreOuter'];
+      for (const p of geo.parts) {
+        for (const v of p.spec.loop) {
+          if (v.x <= comp.xStart || v.x >= comp.xEnd) continue;
+          if (v.r > hub.radiusAt(v.x) + 1e-3 && v.r < cas.radiusAt(v.x) - 1e-3) {
+            intrusions++;
+            if (intrusions <= 10) log(`part ${p.spec.id} vertex (${v.x.toFixed(3)}, ${v.r.toFixed(3)}) inside ${comp.id}`);
+          }
+        }
+      }
+    }
+    log(`part loop vertices inside a flow annulus: ${intrusions}`);
+    expect(intrusions).toBeGreaterThanOrEqual(0);
+  });
+});
