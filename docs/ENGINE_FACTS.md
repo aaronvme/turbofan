@@ -205,7 +205,7 @@ T49.5 (after LPT stage 1, equal stage work) comes out at 1174 K = 901 °C, i.e. 
 
 ## Model vs published (updated every wave)
 
-Model: the W1 cycle model (`src/cycle`, w1/cycle), ISA SLS static unless stated. Tests: tests/unit/cycle/engine.test.ts and model.test.ts.
+Model: the W1 cycle model (`src/cycle`, w1/cycle), ISA SLS static unless stated. Tests: tests/unit/cycle/engine.test.ts, model.test.ts and modelPaths.test.ts.
 
 | Figure | Published | Model | Delta | Threshold (PHYSICS.md) |
 |---|---|---|---|---|
@@ -217,8 +217,8 @@ Model: the W1 cycle model (`src/cycle`, w1/cycle), ISA SLS static unless stated.
 | Ground idle N1 | 20-22 % (idleN1Min, idleN1Max) | 20.5 % | inside | C4: inside the range |
 | Ground idle N2 | 60-62 % (idleN2Min, idleN2Max) | 61.0 % (FADEC floor) | inside | C4: inside the range |
 | Ground idle EGT | below 773.15 K (idleEgtMax) | 592 K (319 C displayed) | inside; 150 K below the measured 466-493 C | C4: inside the range |
-| 15 % to 95 % rated takeoff thrust, lever to maximum in 1 s (33.73(b), D2-1) | 5.0 s | 2.60 s; peak displayed EGT 950.6 C (limit 960 C), min HPC surge margin 0.11, no surge | 2.40 s margin | C5: ≤ 5.0 s |
-| Ground idle (1.0 % thrust) to 95 % rated takeoff thrust | none (harsher than 33.73(b)) | 5.30 s | information only | none |
+| 15 % to 95 % rated takeoff thrust, lever to maximum in 1 s (33.73(b), D2-1) | 5.0 s | 2.60 s; peak displayed EGT 946.5 C (limit 960 C), min HPC surge margin 0.106, no surge | 2.40 s margin | C5: ≤ 5.0 s |
+| Ground idle (1.0 % thrust) to rated takeoff, lever to maximum in 1 s (33.73(a)) | no overtemperature (displayed EGT below 960 C, egtTransientLimit) or surge | peak 958.3 C, min HPC surge margin 0.025, no surge; 95 % thrust at 5.22 s (no time limit applies) | 1.7 K under | 33.73(a) check in model.test.ts (not a PHYSICS.md threshold) |
 | Takeoff EGT (displayed), 30 C corner (D1-1) | below 1223.15 K (egtTakeoffLimit) | 1195.7 K (922.5 C) | 27.5 K margin | C6: below the redline |
 | Static takeoff run, OAT 25 C, N1 97.4 % | 855 C EGT, N2 99.8 % (staticTakeoffEgt, staticTakeoffN2) | 853.1 C, N2 99.9 % | -1.9 K, +0.1 pt | calibration target (W0C-I6) |
 
