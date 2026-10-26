@@ -52,6 +52,7 @@ import { HPC_MAP } from './maps/hpc';
 import { HPT_MAP } from './maps/hpt';
 import { LPC_MAP } from './maps/lpc';
 import { LPT_MAP } from './maps/lpt';
+import { at } from './at';
 import { newton } from './newton';
 
 const T_STD = 288.15;
@@ -785,18 +786,18 @@ export function solveSteady(
   guess: readonly number[] = e.design.unknowns,
 ): SteadySolution {
   const cal = e.calibration;
-  const at = (x: readonly number[]): EnginePoint =>
+  const pointAt = (x: readonly number[]): EnginePoint =>
     evaluateGasPath(
       e,
       c,
-      (x[6] ?? 1) * cal.n1Rpm,
-      (x[7] ?? 1) * cal.n2Rpm,
-      (x[8] ?? 1) * cal.fuelFlowKgPerS,
+      at(x, 6) * cal.n1Rpm,
+      at(x, 7) * cal.n2Rpm,
+      at(x, 8) * cal.fuelFlowKgPerS,
       x,
     );
   const r = newton(
     (x) => {
-      const p = at(x);
+      const p = pointAt(x);
       return [
         ...p.residuals,
         p.netPowerHpW / e.design.scale.powerHp,
@@ -808,7 +809,7 @@ export function solveSteady(
     { tolerance: MATCH_TOLERANCE, maxIterations: MAX_NEWTON_ITERATIONS, maxStep: MAX_STEP },
   );
   return {
-    point: at(r.x),
+    point: pointAt(r.x),
     unknowns: r.x,
     iterations: r.iterations,
     converged: r.converged,

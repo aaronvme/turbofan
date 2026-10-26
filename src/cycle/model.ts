@@ -41,6 +41,7 @@ import { ENGINE_DEFINITION } from '../engine/definition';
 import { factValue } from '../engine/facts';
 import { rpmToRadPerS } from '../engine/units';
 import { enthalpy, gamma, gasConstant, temperatureFromEnthalpy } from '../thermo/gas';
+import { at } from './at';
 import { hermite1 } from './componentMaps';
 import {
   REFERENCE_ENGINE,
@@ -82,8 +83,13 @@ const TD_LIMIT = 0.3;
 /**
  * Rate feedback of the EGT limiter, s: the lead that stops the fuel ramp before the 960 C
  * transient limit instead of after it (the EGT rises at several hundred K/s in a slam accel).
+ * EGT follows the fuel flow almost algebraically, so the raw derivative would feed the loop's own
+ * output back and chatter; it is filtered first-order with TF_EGT = TD_EGT / 3, the usual
+ * derivative filter (K. J. Astrom and T. Hagglund, PID Controllers, 2nd ed., ISA 1995, 3.3:
+ * TD / N with N = 2-20).
  */
 const TD_EGT = 0.3;
+const TF_EGT = TD_EGT / 3;
 /** Accel/decel schedules as multiples of the steady Wf/P3 at the same corrected N2. */
 const ACCEL_FACTOR = 2.2;
 /** The accel schedule opens up by this much more between 68 and 80 % corrected N2. */
@@ -354,7 +360,8 @@ class TurbofanCycleModel implements CycleModel {
     const n2p = this.pct2();
     const idleN2 = cal.groundIdleN2Percent;
     const egt = prev.stations['49.5'].ttK + egtShunt(this.definition, this.n2);
-    this.dEgt = this.egtPrev === null ? 0 : (egt - this.egtPrev) / dt;
+    const dEgtRaw = this.egtPrev === null ? 0 : (egt - this.egtPrev) / dt;
+    this.dEgt += ((dEgtRaw - this.dEgt) * dt) / TF_EGT;
     this.egtPrev = egt;
     const p3 = prev.stations['3'].ptPa;
 
@@ -409,7 +416,7 @@ class TurbofanCycleModel implements CycleModel {
     const ruSs = hermite1(
       this.sched.ruN2c,
       this.sched.ruSteady,
-      clamp(n2c, this.sched.ruN2c[0] ?? 0, Infinity),
+      Math.max(n2c, at(this.sched.ruN2c, 0)),
     );
     const accel = ACCEL_FACTOR + ACCEL_FACTOR_HIGH * clamp((n2c - 68) / 12, 0, 1);
     const ruAcc = (accel * ruSs) / this.sched.ruDesign;
@@ -530,7 +537,7 @@ class TurbofanCycleModel implements CycleModel {
     if (this.lit && this.pct2() >= SUBIDLE_N2_PERCENT && this.wf > 0) {
       const s = solveGasPath(this.e, c, this.n1, this.n2, this.wf, this.x);
       // a converged but non-physical root (BPR near zero) falls back to the similarity model
-      if (s.maxResidual < 1e-6 && (s.x[1] ?? 0) > 1) {
+      if (s.maxResidual < 1e-6 && at(s.x, 1) > 1) {
         this.x = [...s.x];
         return this.fromPoint(s.point);
       }
@@ -711,8 +718,8 @@ class TurbofanCycleModel implements CycleModel {
             vsv.points.map((p) => p.closure),
             clamp(
               n2c,
-              vsv.points[0]?.n2CorrectedPercent ?? 0,
-              vsv.points[vsv.points.length - 1]?.n2CorrectedPercent ?? 100,
+              at(vsv.points, 0).n2CorrectedPercent,
+              at(vsv.points, vsv.points.length - 1).n2CorrectedPercent,
             ),
           );
     const flags: CycleFlags = {

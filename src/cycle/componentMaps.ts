@@ -18,6 +18,7 @@
 // range the efficiency falls as x (2 - x), x = N / N_min, the parabolic dependence of turbine
 // efficiency on blade-speed ratio, reaching zero at standstill.
 
+import { at } from './at';
 import type { CompressorMapData, TurbineMapData } from './maps/types';
 
 type Table = readonly (readonly number[])[];
@@ -27,7 +28,7 @@ function lowerIndex(xs: readonly number[], x: number): number {
   let hi = xs.length - 1;
   while (hi - lo > 1) {
     const mid = (lo + hi) >> 1;
-    if ((xs[mid] ?? 0) <= x) lo = mid;
+    if (at(xs, mid) <= x) lo = mid;
     else hi = mid;
   }
   return lo;
@@ -35,8 +36,8 @@ function lowerIndex(xs: readonly number[], x: number): number {
 
 function nodeSlope(xs: readonly number[], vs: readonly number[], i: number): number {
   const n = xs.length;
-  const x = (k: number): number => xs[k] ?? 0;
-  const v = (k: number): number => vs[k] ?? 0;
+  const x = (k: number): number => at(xs, k);
+  const v = (k: number): number => at(vs, k);
   if (i === 0) return (v(1) - v(0)) / (x(1) - x(0));
   if (i === n - 1) return (v(n - 1) - v(n - 2)) / (x(n - 1) - x(n - 2));
   const hl = x(i) - x(i - 1);
@@ -49,20 +50,20 @@ function nodeSlope(xs: readonly number[], vs: readonly number[], i: number): num
 /** 1-D cubic Hermite with three-point slopes; linear beyond the ends. */
 export function hermite1(xs: readonly number[], vs: readonly number[], x: number): number {
   const n = xs.length;
-  const first = xs[0] ?? 0;
-  const last = xs[n - 1] ?? 0;
-  if (x <= first) return (vs[0] ?? 0) + nodeSlope(xs, vs, 0) * (x - first);
-  if (x >= last) return (vs[n - 1] ?? 0) + nodeSlope(xs, vs, n - 1) * (x - last);
+  const first = at(xs, 0);
+  const last = at(xs, n - 1);
+  if (x <= first) return at(vs, 0) + nodeSlope(xs, vs, 0) * (x - first);
+  if (x >= last) return at(vs, n - 1) + nodeSlope(xs, vs, n - 1) * (x - last);
   const i = lowerIndex(xs, x);
-  const x0 = xs[i] ?? 0;
-  const h = (xs[i + 1] ?? 0) - x0;
+  const x0 = at(xs, i);
+  const h = at(xs, i + 1) - x0;
   const t = (x - x0) / h;
   const t2 = t * t;
   const t3 = t2 * t;
   return (
-    (2 * t3 - 3 * t2 + 1) * (vs[i] ?? 0) +
+    (2 * t3 - 3 * t2 + 1) * at(vs, i) +
     (t3 - 2 * t2 + t) * h * nodeSlope(xs, vs, i) +
-    (-2 * t3 + 3 * t2) * (vs[i + 1] ?? 0) +
+    (-2 * t3 + 3 * t2) * at(vs, i + 1) +
     (t3 - t2) * h * nodeSlope(xs, vs, i + 1)
   );
 }
@@ -76,14 +77,16 @@ export function hermite2(
   y: number,
 ): number {
   // rows i-1 .. i+2 are all the x-interval [i, i+1] needs (its two node slopes)
-  const i = lowerIndex(xs, Math.min(Math.max(x, xs[0] ?? 0), xs[xs.length - 1] ?? 0));
+  const xFirst = at(xs, 0);
+  const xLast = at(xs, xs.length - 1);
+  const i = lowerIndex(xs, Math.min(Math.max(x, xFirst), xLast));
   const from = Math.max(0, i - 1);
   const to = Math.min(xs.length - 1, i + 2);
   const sub = xs.slice(from, to + 1);
-  const col = sub.map((_, k) => hermite1(ys, table[from + k] ?? [], y));
-  if (x > (xs[0] ?? 0) && x < (xs[xs.length - 1] ?? 0)) return hermite1(sub, col, x);
+  const col = sub.map((_, k) => hermite1(ys, at(table, from + k), y));
+  if (x > xFirst && x < xLast) return hermite1(sub, col, x);
   // beyond the ends: extrapolate with the end slope of the full spline (same as hermite1)
-  const full = xs.map((_, k) => hermite1(ys, table[k] ?? [], y));
+  const full = xs.map((_, k) => hermite1(ys, at(table, k), y));
   return hermite1(xs, full, x);
 }
 
@@ -146,7 +149,7 @@ export function compressorPoint(
 ): CompressorPoint {
   const m = s.map;
   const nc = Math.max(0, speedFraction) * m.design.nc;
-  const nMin = m.nc[0] ?? 0;
+  const nMin = at(m.nc, 0);
   const raw = rawCompressor(m, Math.max(nc, nMin), rline);
   let { wc, pr } = raw;
   const { eff } = raw;
@@ -220,8 +223,8 @@ export function turbinePoint(
 ): TurbinePoint {
   const m = s.map;
   const npMap = Math.max(0, speedFraction) * m.design.np;
-  const npMin = m.np[0] ?? 0;
-  const prMinMap = m.pr[0] ?? 0;
+  const npMin = at(m.np, 0);
+  const prMinMap = at(m.pr, 0);
   const prMap = 1 + (pressureRatio - 1) / s.prScale;
   const npc = Math.max(npMap, npMin);
   const prc = Math.max(prMap, prMinMap);

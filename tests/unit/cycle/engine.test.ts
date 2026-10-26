@@ -8,6 +8,7 @@ import {
   REFERENCE_ENGINE,
   balances,
   displayedEgt,
+  evaluateGasPath,
   groundIdle,
   sizeEngine,
   solveSteady,
@@ -86,6 +87,16 @@ describe('off-design matching', () => {
     expect(rel(s.point.netThrustN, dp.point.netThrustN)).toBeLessThan(1e-6);
     expect(rel(s.point.n1Rpm, dp.point.n1Rpm)).toBeLessThan(1e-6);
     expect(rel(s.point.n2Rpm, dp.point.n2Rpm)).toBeLessThan(1e-6);
+  });
+
+  it('an unlit combustor releases no heat: the fuel only dilutes, so T4 falls below T3', () => {
+    const p = dp.point;
+    const args = [engine, sls, p.n1Rpm, p.n2Rpm, p.fuelFlowKgPerS, dp.unknowns] as const;
+    const lit = evaluateGasPath(...args);
+    const unlit = evaluateGasPath(...args, false);
+    expect(lit.stations['4'].ttK).toBeGreaterThan(lit.stations['3'].ttK + 500);
+    expect(unlit.stations['4'].ttK).toBeLessThan(unlit.stations['3'].ttK);
+    expect(unlit.stations['4'].ttK).toBeGreaterThan(unlit.stations['3'].ttK - 30);
   });
 
   // idle first (setup), then the counted sweep idle -> takeoff

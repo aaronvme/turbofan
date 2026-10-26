@@ -21,34 +21,40 @@ export interface NewtonResult {
   readonly converged: boolean;
 }
 
+import { at } from './at';
+
 const maxAbs = (v: readonly number[]): number => v.reduce((m, a) => Math.max(m, Math.abs(a)), 0);
 const norm2 = (v: readonly number[]): number => Math.sqrt(v.reduce((s, a) => s + a * a, 0));
 
 /** Solves A x = b by Gaussian elimination with partial pivoting; throws if A is singular. */
 export function solveLinear(a: readonly (readonly number[])[], b: readonly number[]): number[] {
   const n = b.length;
-  const m = a.map((row, i) => [...row, b[i] ?? 0]);
+  if (a.length !== n || a.some((row) => row.length !== n)) {
+    throw new Error(`solveLinear: A must be ${n} x ${n}`);
+  }
+  const m = a.map((row, i) => [...row, at(b, i)]);
   for (let c = 0; c < n; c++) {
     let p = c;
     for (let r = c + 1; r < n; r++) {
-      if (Math.abs(m[r]?.[c] ?? 0) > Math.abs(m[p]?.[c] ?? 0)) p = r;
+      if (Math.abs(at(at(m, r), c)) > Math.abs(at(at(m, p), c))) p = r;
     }
-    const pivotRow = m[p] ?? [];
-    const pivot = pivotRow[c] ?? 0;
+    const pivotRow = at(m, p);
+    const pivot = at(pivotRow, c);
     if (!(Math.abs(pivot) > 1e-300)) throw new Error('singular Jacobian');
-    [m[c], m[p]] = [pivotRow, m[c] ?? []];
+    m[p] = at(m, c);
+    m[c] = pivotRow;
     for (let r = c + 1; r < n; r++) {
-      const row = m[r] ?? [];
-      const k = (row[c] ?? 0) / pivot;
-      for (let j = c; j <= n; j++) row[j] = (row[j] ?? 0) - k * (pivotRow[j] ?? 0);
+      const row = at(m, r);
+      const k = at(row, c) / pivot;
+      for (let j = c; j <= n; j++) row[j] = at(row, j) - k * at(pivotRow, j);
     }
   }
   const x = new Array<number>(n).fill(0);
   for (let r = n - 1; r >= 0; r--) {
-    const row = m[r] ?? [];
-    let s = row[n] ?? 0;
-    for (let j = r + 1; j < n; j++) s -= (row[j] ?? 0) * (x[j] ?? 0);
-    x[r] = s / (row[r] ?? 1);
+    const row = at(m, r);
+    let s = at(row, n);
+    for (let j = r + 1; j < n; j++) s -= at(row, j) * at(x, j);
+    x[r] = s / at(row, r);
   }
   return x;
 }
@@ -75,11 +81,12 @@ export function newton(
     iterations++;
     const jac: number[][] = r.map(() => []);
     for (let j = 0; j < x.length; j++) {
-      const dxj = h * Math.max(1, Math.abs(x[j] ?? 0));
+      const xj = at(x, j);
+      const dxj = h * Math.max(1, Math.abs(xj));
       const xp = [...x];
-      xp[j] = (xp[j] ?? 0) + dxj;
+      xp[j] = xj + dxj;
       const rp = f(xp);
-      rp.forEach((v, i) => ((jac[i] ?? [])[j] = (v - (r[i] ?? 0)) / dxj));
+      rp.forEach((v, i) => (at(jac, i)[j] = (v - at(r, i)) / dxj));
     }
     let dx: number[];
     try {
@@ -92,13 +99,13 @@ export function newton(
     }
     let lambda = 1;
     dx.forEach((d, j) => {
-      const cap = opts.maxStep[j] ?? Infinity;
+      const cap = at(opts.maxStep, j);
       if (Math.abs(d) * lambda > cap) lambda = cap / Math.abs(d);
     });
     const base = norm2(r);
     let accepted: { x: number[]; r: number[] } | null = null;
     for (let k = 0; k < 10; k++) {
-      const xn = x.map((v, j) => v + lambda * (dx[j] ?? 0));
+      const xn = x.map((v, j) => v + lambda * at(dx, j));
       const rn = safe(f, xn);
       if (rn !== null && (norm2(rn) < base || k === 9)) {
         accepted = { x: xn, r: rn };
