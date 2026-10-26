@@ -1,0 +1,160 @@
+// Critic pass 2, w1/mesh @959bce1: station planes and blade edges on grid lines, the knife-edge
+// closure against the definition, the station and row maps, and decoder fuzzing.
+// Run from a checkout of the branch (see vitest.probes.config.mjs).
+import { describe, expect, it } from 'vitest';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
+import { SOLVER_REDUCTION_STATIONS } from '../../../src/contracts/stations';
+import { MESH_130K, MESH_80K, buildEngineMesh, meshFileMaps } from '../../../tools/mesh/engineMesh';
+import { decodeMeshFile, encodeMeshFile, meshFileFromMesh, SECTION } from '../../../tools/mesh/format';
+import { flowpathFromDefinition, KNIFE_EDGE_LENGTH_FACTOR } from '../../../tools/mesh/geometry/definition';
+import { Polyline } from '../../../tools/mesh/curve';
+import { nodeIndex, type Pt } from '../../../tools/mesh/types';
+
+const geometry = flowpathFromDefinition(ENGINE_DEFINITION);
+const def = ENGINE_DEFINITION.flowpath.curves;
+const pts = (c: { points: readonly { x: number; r: number }[] }): Pt[] => c.points.map((p) => ({ x: p.x, r: p.r }));
+
+describe.each([MESH_130K, MESH_80K])('$name grid lines', (spec) => {
+  const mesh = buildEngineMesh(geometry, spec);
+  const walls = {
+    fan: [geometry.curves.hub, geometry.curves.nacelleInner],
+    bypass: [geometry.curves.coreCowl, geometry.curves.nacelleInner],
+    core: [geometry.curves.hub, geometry.curves.coreOuter],
+  } as const;
+
+  it('every reduction station is a bitwise-radial grid line, wall to wall, at the definition x', () => {
+    const ids = mesh.stations.map((s) => s.id);
+    for (const id of [...SOLVER_REDUCTION_STATIONS, '49.5']) expect(ids).toContain(id);
+    for (const st of mesh.stations) {
+      const defSt = ENGINE_DEFINITION.stations.find((s) => s.id === st.id);
+      expect(st.x).toBe(defSt?.x);
+      const b = mesh.blocks[mesh.index[st.block]]!;
+      for (let j = 0; j <= b.nj; j++) expect(b.x[nodeIndex(b, st.i, j)]).toBe(st.x);
+      const [inner, outer] = walls[st.block].map((c) => new Polyline(c));
+      expect(Math.abs(b.r[nodeIndex(b, st.i, 0)]! - inner!.atX(st.x).r)).toBeLessThan(1e-12);
+      expect(Math.abs(b.r[nodeIndex(b, st.i, b.nj)]! - outer!.atX(st.x).r)).toBeLessThan(1e-12);
+    }
+  });
+
+  it('every blade LE/TE is a grid line on the cut line, rows ordered and disjoint per duct', () => {
+    expect(mesh.rows.map((r) => r.id).sort()).toEqual(ENGINE_DEFINITION.bladeRows.map((r) => r.id).sort());
+    let worst = 0;
+    for (const z of mesh.rows) {
+      const row = geometry.bladeRows.find((r) => r.name === z.id)!;
+      expect(z.block).toBe(row.duct);
+      const b = mesh.blocks[mesh.index[z.block]]!;
+      for (const [i, cut] of [[z.i0, row.le], [z.i1, row.te]] as const) {
+        const dx = cut.tip.x - cut.hub.x;
+        const dr = cut.tip.r - cut.hub.r;
+        const len = Math.hypot(dx, dr);
+        for (let j = 0; j <= b.nj; j++) {
+          const k = nodeIndex(b, i, j);
+          const d = Math.abs((b.x[k]! - cut.hub.x) * dr - (b.r[k]! - cut.hub.r) * dx) / len;
+          worst = Math.max(worst, d);
+        }
+        expect(Math.hypot(b.x[nodeIndex(b, i, 0)]! - cut.hub.x, b.r[nodeIndex(b, i, 0)]! - cut.hub.r)).toBeLessThan(1e-12);
+        expect(Math.hypot(b.x[nodeIndex(b, i, b.nj)]! - cut.tip.x, b.r[nodeIndex(b, i, b.nj)]! - cut.tip.r)).toBeLessThan(1e-12);
+      }
+    }
+    expect(worst).toBeLessThan(1e-12);
+    for (const duct of ['fan', 'bypass', 'core'] as const) {
+      const zs = mesh.rows.filter((z) => z.block === duct).sort((a, b) => a.i0 - b.i0);
+      for (let k = 1; k < zs.length; k++) expect(zs[k]!.i0).toBeGreaterThanOrEqual(zs[k - 1]!.i1);
+    }
+  });
+
+  it('the wall nodes of the bypass block move from the true core cowl only in the ramp, inwards, by <= base', () => {
+    const b = mesh.blocks[mesh.index.bypass]!;
+    const truth = new Polyline(pts(def.coreCowl));
+    const te = def.coreCowl.points.at(-1)!;
+    const base = te.r - def.coreOuter.points.at(-1)!.r;
+    const x0 = te.x - KNIFE_EDGE_LENGTH_FACTOR * base;
+    let maxIn = 0;
+    let maxOut = 0;
+    let upstream = 0;
+    for (let i = 0; i <= b.ni; i++) {
+      const k = nodeIndex(b, i, 0);
+      const x = b.x[k]!;
+      const d = truth.atX(x).r - b.r[k]!;
+      if (x <= x0) upstream = Math.max(upstream, Math.abs(d));
+      else {
+        maxIn = Math.max(maxIn, d);
+        maxOut = Math.max(maxOut, -d);
+      }
+    }
+    expect(upstream).toBeLessThan(1e-12);
+    expect(maxOut).toBeLessThan(1e-12);
+    expect(maxIn).toBeLessThanOrEqual(base + 1e-12);
+    // eslint-disable-next-line no-console
+    console.log(spec.name, 'core cowl base', base, 'ramp', x0, '..', te.x, 'max inward', maxIn);
+  });
+});
+
+describe('decoder fuzzing (80k f32)', () => {
+  const mesh = buildEngineMesh(geometry, MESH_80K);
+  const good = encodeMeshFile(meshFileFromMesh(mesh, 'f32', meshFileMaps(mesh)));
+  const view = (b: Uint8Array) => new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const sectionAt = (b: Uint8Array, id: number): { at: number; len: number; type: number; entry: number } => {
+    const v = view(b);
+    const n = v.getUint32(48, true);
+    for (let k = 0; k < n; k++) {
+      const o = 64 + 16 * k;
+      if (v.getUint32(o, true) === id)
+        return { entry: o, type: v.getUint32(o + 4, true), at: v.getUint32(o + 8, true), len: v.getUint32(o + 12, true) };
+    }
+    throw new Error(`no section ${id}`);
+  };
+  const corrupt = (f: (b: Uint8Array, v: DataView) => void): Uint8Array => {
+    const b = good.slice();
+    f(b, view(b));
+    return b;
+  };
+  it('decodes the good file', () => {
+    expect(decodeMeshFile(good).blocks.length).toBe(12);
+  });
+  it.each([
+    ['ghost source = cell count', (b: Uint8Array, v: DataView) => {
+      const s = sectionAt(b, SECTION.GHOST_SRC);
+      v.setInt32(s.at + 4 * 100, mesh.totalCells, true);
+    }],
+    ['ghost BC code 9', (b: Uint8Array) => {
+      const s = sectionAt(b, SECTION.GHOST_BC);
+      b[s.at + 7] = 9;
+    }],
+    ['station i beyond its block', (b: Uint8Array, v: DataView) => {
+      const s = sectionAt(b, SECTION.STATIONS);
+      v.setUint32(s.at + 20, 100000, true);
+    }],
+    ['row i1 beyond its block', (b: Uint8Array, v: DataView) => {
+      const s = sectionAt(b, SECTION.ROWS);
+      v.setUint32(s.at + 40, 100000, true);
+    }],
+    ['precision flag flipped to f64', (_b: Uint8Array, v: DataView) => {
+      v.setUint32(12, v.getUint32(12, true) & ~1, true);
+    }],
+    ['block cell offset off by one', (b: Uint8Array, v: DataView) => {
+      const s = sectionAt(b, SECTION.BLOCKS);
+      const o = s.at + 64 * 3 + 32 + 4 * 3;
+      v.setUint32(o, v.getUint32(o, true) + 1, true);
+    }],
+  ])('rejects %s', (_name, f) => {
+    expect(() => decodeMeshFile(corrupt(f))).toThrow();
+  });
+  it('accepts NaN cell volumes (no numeric validation; the manifest hash is the integrity check)', () => {
+    const b = corrupt((bb, v) => {
+      const s = sectionAt(bb, SECTION.CELL_VOLR);
+      v.setFloat32(s.at + 4 * 10, Number.NaN, true);
+    });
+    expect(() => decodeMeshFile(b)).not.toThrow();
+  });
+  it('rejects a table whose STATIONS entry was overwritten by a second ROWS entry (missing section)', () => {
+    const s = sectionAt(good, SECTION.ROWS);
+    const t = sectionAt(good, SECTION.STATIONS);
+    const b = corrupt((_bb, v) => {
+      // point the STATIONS entry at the ROWS id: ROWS appears twice, STATIONS is then missing
+      v.setUint32(t.entry, SECTION.ROWS, true);
+      v.setUint32(t.entry + 4, s.type, true);
+    });
+    expect(() => decodeMeshFile(b)).toThrow();
+  });
+});

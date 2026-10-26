@@ -1,0 +1,20 @@
+// Critic pass 2, w1/mesh @959bce1: STATIONS/ROWS in the generated binaries (run after npm run mesh).
+import { it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
+import { MESH_130K, MESH_80K, buildEngineMesh } from '../../../tools/mesh/engineMesh';
+import { decodeMeshFile } from '../../../tools/mesh/format';
+import { flowpathFromDefinition } from '../../../tools/mesh/geometry/definition';
+const g = flowpathFromDefinition(ENGINE_DEFINITION);
+it.each([MESH_130K, MESH_80K])('the station and row maps in public/mesh/mesh-$name.bin match the mesh', (spec) => {
+  const mesh = buildEngineMesh(g, spec);
+  const file = decodeMeshFile(new Uint8Array(readFileSync(`public/mesh/mesh-${spec.name}.bin`)));
+  expect(file.precision).toBe('f32');
+  expect(file.stations).toEqual(mesh.stations.map((s) => ({ id: s.id, block: mesh.index[s.block], i: s.i, x: s.x })));
+  expect(file.rows).toEqual(mesh.rows.map((r) => ({ id: r.id, block: mesh.index[r.block], i0: r.i0, i1: r.i1 })));
+  // station x survives exactly (f64 record) and equals the f64 node x on that line
+  for (const s of file.stations) {
+    const b = file.blocks[s.block]!;
+    for (let j = 0; j <= b.nj; j++) expect(file.nodeX[b.nodeOffset + j * (b.ni + 1) + s.i]).toBe(s.x);
+  }
+});
