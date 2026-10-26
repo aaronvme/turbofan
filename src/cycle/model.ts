@@ -79,6 +79,11 @@ const K_LOOP = 2;
 const TD = 0.7;
 /** Rate feedback of the overspeed limiters, s (short, so they act only near the limit). */
 const TD_LIMIT = 0.3;
+/**
+ * Rate feedback of the EGT limiter, s: the lead that stops the fuel ramp before the 960 C
+ * transient limit instead of after it (the EGT rises at several hundred K/s in a slam accel).
+ */
+const TD_EGT = 0.3;
 /** Accel/decel schedules as multiples of the steady Wf/P3 at the same corrected N2. */
 const ACCEL_FACTOR = 2.2;
 /** The accel schedule opens up by this much more between 68 and 80 % corrected N2. */
@@ -233,6 +238,8 @@ class TurbofanCycleModel implements CycleModel {
   private igniters = false;
   private fuelOnTime: number | null = null;
   private hungTimer = 0;
+  private egtPrev: number | null = null;
+  private dEgt = 0;
   private flags: CycleFlags = {
     surge: false,
     flameout: false,
@@ -266,6 +273,8 @@ class TurbofanCycleModel implements CycleModel {
     this.starterCutOut = false;
     this.fuelOnTime = null;
     this.hungTimer = 0;
+    this.egtPrev = null;
+    this.dEgt = 0;
     this.flags = {
       ...this.flags,
       ...Object.fromEntries(Object.keys(this.flags).map((k) => [k, false])),
@@ -345,6 +354,8 @@ class TurbofanCycleModel implements CycleModel {
     const n2p = this.pct2();
     const idleN2 = cal.groundIdleN2Percent;
     const egt = prev.stations['49.5'].ttK + egtShunt(this.definition, this.n2);
+    this.dEgt = this.egtPrev === null ? 0 : (egt - this.egtPrev) / dt;
+    this.egtPrev = egt;
     const p3 = prev.stations['3'].ptPa;
 
     // starter and start sequence
@@ -435,7 +446,7 @@ class TurbofanCycleModel implements CycleModel {
           loop((100 * lim.n2MaxRpm) / cal.n2ReferenceRpm - 1, n2p, this.dn2, 100, TD_LIMIT),
         ],
         // TCDS E.004 VI note 4: 960 C transitory at takeoff for up to 20 s
-        ['egtMax', loop(lim.egtTransientK - 5, egt, 0, 300)],
+        ['egtMax', loop(lim.egtTransientK - 5, egt, this.dEgt, 300, TD_EGT)],
       ];
       for (const [name, rLimit] of caps) {
         const r = K_LIMIT_FACTOR * rLimit;
