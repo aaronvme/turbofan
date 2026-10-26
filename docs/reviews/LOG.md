@@ -1194,3 +1194,23 @@ None.
 **Orchestrator decisions needed (pass 4):**
 - (p) **W1L-N3:** keep the definition's plug and centre-body ogive, or check it against a public CFM56-7B dimension (a definition change: mesh regenerated, `test:mesh` rerun).
 - (q) **D3-2 timing:** show Aaron the W1 shots now, or after `w1/lookdev-2`'s first task (W1L-I1).
+
+## Critic pass 5: w1/cycle-calib + w1/cycle-calib-2 @8a962c4
+
+Reviewed 2026-10-26 by the pass-5 critic: the stack tip `w1/cycle-calib-2` @8a962c4 (which contains `w1/cycle-calib` @1e5e5b7) against main 8f066af as one unit. The stack branches from ca0f264, so the review diff is `ca0f264...8a962c4` (43 files; the two-dot diff against main also shows main's look-dev merge as reverted, which the merge does not do). Judged under the new orchestrator decision **D3-15** (accept the residual part-power gap for W1: the C10/C11 KNOWN-FAIL markers stay visible, the gap is in the PHYSICS.md fidelity ledger with its likely cause, part-power map fidelity goes to the backlog). Checklists applied: typescript-reviewer, silent-failure-hunter, pr-test-analyzer. Stryker not run (D3-13).
+
+New probe: `docs/reviews/probes/w1k-calib.probe.ts.txt` (the reference at every C10/C11/C4 point, the VBV schedules, and the 33.73(a) slam on the reference and on the rejected fit).
+
+**Gates at the stack tip** (rerun in the builder worktree; tracked files unchanged afterwards):
+- `npm test`: 1538 passed, **5 expected fail** (1543 tests, 67 files), exit 0, 50 s.
+  - The 5 are `it.fails`: C10 MPA N2, C10 MPA EGT, C10 idle position 2 N2 (`tests/unit/cycle/c10.test.ts:86-91`), C11 approach and idle (`tests/unit/cycle/c11.test.ts:78`). Each flips red if it starts passing. Each check has a plain `it` convergence test beside it, so an `it.fails` cannot pass on a solver exception or a missing point. The labels' stated reasons are stale (W1K-I1).
+- `npm run lint`: clean (ESLint, Prettier). `npm run typecheck`: clean.
+- `npm run coverage`: lines 98.55 %, statements 97.62 %, branches 87.43 %, functions 98.46 %; every threshold passes. Per file: `engine.ts` lines 100 % / branches 91.2 %, `partPower.ts` 100 / 92.9, `model.ts` 100 / 98.4, `surgeSystem.ts` 98.3 / 75.0, `boundedLeastSquares.ts` 95.7 / **69.9**; `src/thermo` lines 100 %.
+- `npm run test:mesh`: 29 passed.
+
+**Pre-registration (D3-3, D3-11, D3-5).**
+- C10: 6009cdd (10:29) is the stack's first commit and touches only PHYSICS.md 3.2, `thresholds.ts` and `thresholds.test.ts`. The first `src/cycle` change is b918b75, after it.
+- C11: 5f035f3 (17:01) is `w1/cycle-calib-2`'s first commit, with the same three files. The mechanisms arrive later (0b69ed6 TDD, dd13fcd).
+- The wording is D3-3's and D3-11's, word for word (C10: idle 436-523 C, MPA 585 ± 30 C, takeoff 855 ± 30 C, N2 ± 1.5 points at 60.6 / 60.7 / 89.3 / 99.8 %; C11: 7 / 30 / 85 % rated thrust, ISA SLS, ± 5 %). `thresholds.test.ts` pins 30 K, 1.5 points, 0.05, 7 / 30 / 85 and the count 4 + 11 + 13 + 3.
+- T3 is reworded per D3-5 at 041cf2d, with PHYSICS.md and `thresholds.ts` changed together. The tolerance stays 0.5 %.
+- Across the stack the `thresholds.ts` diff only adds lines. Nothing was loosened. The surge ledger row's "100-300 ms" became "period from the derived Helmholtz frequency" (D3-4).
