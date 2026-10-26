@@ -18,6 +18,9 @@ describe('passGroupOf (three render-context names -> render passes, W1G-I2)', ()
     ['TRAA', 'traa'],
     ['DoF [ CoC ]', 'dof'],
     ['DoF [ Blur64 Near ]', 'dof'],
+    // the depth of field's circle-of-confusion blur and its input copy
+    ['Gaussian Blur [ Horizontal Pass ]', 'dof'],
+    ['Gaussian Blur [ Vertical Pass ]', 'dof'],
     ['Bloom [ High Pass ]', 'bloom'],
     ['Bloom [ Blur Vertical - 3 ]', 'bloom'],
     ['Bloom [ Composite ]', 'bloom'],
