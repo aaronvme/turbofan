@@ -1,0 +1,107 @@
+// Critic pass 1, w0/contracts @e51aff1. Each test pins a finding's current behaviour.
+import { describe, expect, it } from 'vitest';
+import { ISA_SLS } from '../../../src/contracts/ambient';
+import { findNonPlainData, nextSnapshot, type SimSnapshot } from '../../../src/contracts/sim';
+import {
+  finalizeOutcomes,
+  initialOutcomeResults,
+  updateOutcomes,
+  type Scenario,
+} from '../../../src/contracts/scenario';
+import { rasterizeField, FIELD_EXTENTS, fieldReferenceFromAmbient } from '../../../src/contracts/flow';
+import { validateEngineDefinition } from '../../../src/contracts/engine';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
+import { createMockCycle, mockSteadyState } from '../../../src/mocks/mockCycle';
+import { sampleSnapshotParts } from '../../../tests/unit/contracts/fixtures/snapshotFixture';
+
+describe('W0C: nextSnapshot version', () => {
+  it('a parts object that carries version (spread from the previous snapshot) freezes the counter', () => {
+    const first = nextSnapshot(null, sampleSnapshotParts());
+    // compiles: excess-property checks do not apply to spread members
+    const second = nextSnapshot(first, { ...first, lastCommandSeq: 8 });
+    const third = nextSnapshot(second, { ...second, lastCommandSeq: 9 });
+    expect(first.version).toBe(1);
+    expect(second.version).toBe(1); // should be 2
+    expect(third.version).toBe(1); // should be 3
+  });
+});
+
+const always: Scenario = {
+  id: 'p',
+  title: 'p',
+  description: '',
+  initial: 'groundIdle',
+  ambient: ISA_SLS,
+  durationS: 10,
+  timeline: [],
+  outcomes: [
+    {
+      id: 'egt',
+      description: 'EGT below the redline throughout',
+      window: { kind: 'always', fromS: 0, toS: 10 },
+      predicate: { kind: 'between', path: ['cycle', 'egtDisplayedK'], min: 0, max: 1223.15 },
+      thresholdId: 'C6',
+    },
+    {
+      id: 'short',
+      description: 'a short always window',
+      window: { kind: 'always', fromS: 2, toS: 3 },
+      predicate: { kind: 'compare', path: ['cycle', 'flags', 'surge'], op: '==', value: false },
+      thresholdId: null,
+    },
+  ],
+};
+
+describe('W0C: vacuous "always" outcomes', () => {
+  it('passes every "always" outcome when no snapshot was ever evaluated', () => {
+    const res = finalizeOutcomes(always, initialOutcomeResults(always), 10);
+    expect(res.map((r) => r.verdict)).toEqual(['passed', 'passed']);
+  });
+  it('passes an "always" window that no snapshot fell inside', () => {
+    const snap = { cycle: { egtDisplayedK: 2000, flags: { surge: true } } };
+    // snapshots at 1 s and 4 s only: the [2, 3] window was never sampled, yet it passes,
+    // even though the 4 s snapshot (surging) is evaluated only for the window end test
+    let res = updateOutcomes(always, initialOutcomeResults(always), { cycle: { egtDisplayedK: 900, flags: { surge: false } } }, 1);
+    res = updateOutcomes(always, res, { cycle: { egtDisplayedK: 900, flags: { surge: true } } }, 4);
+    expect(res[1]?.verdict).toBe('passed');
+    void snap;
+  });
+});
+
+describe('W0C: D0-2 boundary', () => {
+  it('nextSnapshot rejects NaN in the cycle state (throws, not silent)', () => {
+    const parts = sampleSnapshotParts();
+    const bad = { ...parts, cycle: { ...parts.cycle, n1Rpm: Number.NaN } };
+    expect(() => nextSnapshot(null, bad)).toThrow(/non-finite/);
+  });
+  it('the mock states and the definition are plain data', () => {
+    expect(findNonPlainData(mockSteadyState(ENGINE_DEFINITION, 1))).toBeNull();
+    expect(findNonPlainData(ENGINE_DEFINITION)).toBeNull();
+    const m = createMockCycle(ENGINE_DEFINITION);
+    expect(findNonPlainData(m.reset('groundIdle'))).toBeNull();
+  });
+  it('a snapshot carries no provenance: a MOCK cycle state is indistinguishable from a model one', () => {
+    const s: SimSnapshot = nextSnapshot(null, { ...sampleSnapshotParts(), cycle: mockSteadyState(ENGINE_DEFINITION, 0.5) });
+    expect(JSON.stringify(s)).not.toMatch(/MOCK/);
+  });
+});
+
+describe('W0C: f16 overflow', () => {
+  it('rasterizeField writes +Inf bits for a finite value above the f16 range without complaint', () => {
+    const tiny = { ...FIELD_EXTENTS.far, width: 1, height: 1 };
+    const ref = fieldReferenceFromAmbient(ISA_SLS);
+    const tex = rasterizeField(tiny, ref, () => ({
+      pPa: ref.pInfPa, rhoKgPerM3: ref.rhoInfKgPerM3, tK: 288, fuelAirRatio: 0,
+      uxMPerS: 1e6, urMPerS: 0, uthetaMPerS: 0, fluidFraction: 1,
+    }));
+    expect(tex.velocity[0]).toBe(0x7c00);
+  });
+});
+
+describe('W0C: validator gaps', () => {
+  it('accepts a VSV schedule whose closure is negative (opening past design) and a 1-row HPC', () => {
+    const def = structuredClone(ENGINE_DEFINITION);
+    (def.vsvSchedules[0]!.points[0] as { closure: number }).closure = -2;
+    expect(validateEngineDefinition(def)).toEqual([]);
+  });
+});

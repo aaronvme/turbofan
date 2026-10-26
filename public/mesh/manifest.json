@@ -1,0 +1,20 @@
+{
+  "format": "turbofan-mesh",
+  "version": 2,
+  "specs": {
+    "130k": {
+      "file": "mesh-130k.bin",
+      "bytes": 7555408,
+      "cells": 130034,
+      "blocks": 12,
+      "sha256": "bd8e40b0195e628504dc3df3239da9daff93d6003e7e070b1b056aa8afa6875c"
+    },
+    "80k": {
+      "file": "mesh-80k.bin",
+      "bytes": 4690752,
+      "cells": 80588,
+      "blocks": 12,
+      "sha256": "03afce8040a5a19b40d2d1e12a1467c431cbd6787d4763c0149d0436638d1445"
+    }
+  }
+}

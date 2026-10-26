@@ -8,7 +8,9 @@
     "node": ">=24"
   },
   "scripts": {
+    "predev": "npm run mesh:assets",
     "dev": "vite",
+    "prebuild": "npm run mesh:assets",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
@@ -16,6 +18,7 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:mesh": "vitest run -c vitest.mesh.config.ts",
     "coverage": "vitest run --coverage",
     "test:gpu": "vitest run -c vitest.gpu.config.ts",
     "test:browser": "vitest run -c vitest.browser.config.ts",
@@ -24,7 +27,9 @@
     "gpu:info": "node spikes/dawn/adapter-info.ts",
     "e2e": "playwright test",
     "mutate": "stryker run",
-    "gates": "npm run typecheck && npm run lint && npm run coverage"
+    "mesh": "node --import ./tools/mesh/ts-resolve.mjs tools/mesh/scripts/generate.ts",
+    "mesh:assets": "node --import ./tools/mesh/ts-resolve.mjs tools/mesh/scripts/generate.ts --assets",
+    "gates": "npm run typecheck && npm run lint && npm run coverage && npm run test:mesh"
   },
   "dependencies": {
     "react": "19.3.1",

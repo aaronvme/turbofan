@@ -17,7 +17,9 @@ export default defineConfig({
     environment: 'node',
     coverage: {
       provider: 'v8',
-      include: ['src/**/*.ts', 'spikes/lib/**/*.ts'],
+      // tools/mesh is the offline mesher: pure TypeScript, unit-tested like src; its command-line
+      // scripts only wire files to the tested modules
+      include: ['src/**/*.ts', 'tools/mesh/**/*.ts', 'spikes/lib/**/*.ts'],
       exclude: [
         'src/**/*.test.ts',
         'src/**/*.d.ts',
@@ -25,6 +27,7 @@ export default defineConfig({
         'src/ui/**',
         'src/app/**',
         'src/audio/worklet/**',
+        'tools/mesh/scripts/**',
       ],
       reporter: ['text-summary', 'html', 'json-summary'],
       thresholds: {
@@ -37,6 +40,7 @@ export default defineConfig({
         'src/flow/reference/**': CORE,
         'src/flow/coupling/**': CORE,
         'src/geometry/**': CORE,
+        'tools/mesh/**': { lines: 90 },
       },
     },
   },

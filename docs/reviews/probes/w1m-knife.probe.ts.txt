@@ -1,0 +1,38 @@
+// Critic pass 2, w1/mesh @959bce1: knife-edge displacement of every mesh node on the closed lips.
+import { it, expect } from 'vitest';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
+import { MESH_130K, MESH_80K, buildEngineMesh } from '../../../tools/mesh/engineMesh';
+import { flowpathFromDefinition, KNIFE_EDGE_LENGTH_FACTOR } from '../../../tools/mesh/geometry/definition';
+import { Polyline } from '../../../tools/mesh/curve';
+const g = flowpathFromDefinition(ENGINE_DEFINITION);
+const c = ENGINE_DEFINITION.flowpath.curves;
+const P = (cv: { points: readonly { x: number; r: number }[] }) => cv.points.map((p) => ({ x: p.x, r: p.r }));
+it.each([MESH_130K, MESH_80K])('knife-edge displacement of every mesh node on the closed lips ($name)', (spec) => {
+  const mesh = buildEngineMesh(g, spec);
+  for (const [name, truthC, innerC, knife] of [
+    ['coreCowl', c.coreCowl, c.coreOuter, g.curves.coreCowl],
+    ['nacelleOuter', c.nacelleOuter, c.nacelleInner, g.curves.nacelleOuter],
+  ] as const) {
+    const truth = new Polyline(P(truthC));
+    const kn = new Polyline(knife);
+    const te = truthC.points.at(-1)!;
+    const base = te.r - innerC.points.at(-1)!.r;
+    const x0 = te.x - KNIFE_EDGE_LENGTH_FACTOR * base;
+    let n = 0, maxIn = 0, maxOut = 0, minThick = Infinity;
+    const inner = new Polyline(P(innerC));
+    for (const b of mesh.blocks) for (let k = 0; k < b.x.length; k++) {
+      const x = b.x[k]!, r = b.r[k]!;
+      if (!(x > x0 && x <= te.x)) continue;
+      if (kn.distanceTo({ x, r }) > 1e-10) continue;
+      n++;
+      const d = truth.atX(x).r - r;
+      maxIn = Math.max(maxIn, d); maxOut = Math.max(maxOut, -d);
+      if (x < te.x) minThick = Math.min(minThick, r - inner.atX(x).r);
+    }
+    console.log(spec.name, name, { base, x0, nodes: n, maxIn, maxOut, minThick });
+    expect(n).toBeGreaterThan(5);
+    expect(maxOut).toBeLessThan(1e-12);
+    expect(maxIn).toBeLessThanOrEqual(base + 1e-12);
+    expect(minThick).toBeGreaterThan(0);
+  }
+});

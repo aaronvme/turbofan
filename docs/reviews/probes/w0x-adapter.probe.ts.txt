@@ -1,0 +1,80 @@
+// Critic pass 1, trial merge of w0/contracts @e51aff1 + w0/mesh-spike @a72c771: is the
+// placeholder flowpath cleanly swappable for the real EngineDefinition? A minimal adapter maps
+// ENGINE_DEFINITION onto the mesher's FlowpathGeometry and feeds it to validateFlowpath and
+// buildEngineMesh. Run from a tree that has both branches merged.
+import { describe, expect, it } from 'vitest';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
+import { factValue } from '../../../src/engine/facts';
+import { FIELD_EXTENTS } from '../../../src/contracts/flow';
+import { MESH_130K, MESH_80K, buildEngineMesh } from '../../../tools/mesh/engineMesh';
+import { validateFlowpath, type BladeRow, type Duct, type FlowpathGeometry } from '../../../tools/mesh/geometry/flowpath';
+import { placeholderFlowpath } from '../../../tools/mesh/geometry/placeholder';
+import { meshQuality } from '../../../tools/mesh/metrics';
+import type { Pt } from '../../../tools/mesh/types';
+
+const def = ENGINE_DEFINITION;
+const pts = (id: keyof typeof def.flowpath.curves): Pt[] =>
+  def.flowpath.curves[id].points.map((p) => ({ x: p.x, r: p.r }));
+
+function adapter(pinchTrailingEdges: boolean): FlowpathGeometry {
+  const hub = [...pts('spinner'), ...pts('coreInner').slice(1), ...pts('plug').slice(1)];
+  const coreOuter = pts('coreOuter');
+  const coreCowl = pts('coreCowl');
+  const nacelleInner = pts('nacelleInner');
+  const nacelleOuter = pts('nacelleOuter');
+  if (pinchTrailingEdges) {
+    // close the blunt trailing edges onto the inner lines (changes the geometry)
+    coreCowl[coreCowl.length - 1] = coreOuter[coreOuter.length - 1] as Pt;
+    nacelleOuter[nacelleOuter.length - 1] = nacelleInner[nacelleInner.length - 1] as Pt;
+  }
+  const duct = (c: string): Duct => (c === 'fan' ? 'fan' : c === 'bypassDuct' ? 'bypass' : 'core');
+  const bladeRows: BladeRow[] = def.bladeRows.map((r) => ({
+    name: r.id,
+    duct: duct(r.component),
+    xLE: 0.5 * (r.leadingEdge.hub.x + r.leadingEdge.tip.x),
+    xTE: 0.5 * (r.trailingEdge.hub.x + r.trailingEdge.tip.x),
+  }));
+  const comb = def.flowpath.components.find((c) => c.id === 'combustor');
+  if (comb === undefined) throw new Error('no combustor');
+  return {
+    name: 'ENGINE_DEFINITION adapter (critic probe)',
+    fanTipDiameter: factValue('fanDiameter'),
+    curves: { hub, coreOuter, coreCowl, nacelleInner, nacelleOuter },
+    bladeRows,
+    combustor: { xStart: comb.xStart, xEnd: comb.xEnd },
+  };
+}
+
+describe('W0X: EngineDefinition -> mesher', () => {
+  it('the definition as it stands is rejected by validateFlowpath (blunt trailing edges)', () => {
+    const problems = validateFlowpath(adapter(false));
+    console.log(problems.join('\n'));
+    expect(problems).toContain('coreCowl must end at the core lip (coreOuter end)');
+    expect(problems).toContain('nacelleOuter must end at the bypass lip');
+  });
+
+  for (const spec of [MESH_130K, MESH_80K]) {
+    it(`with pinched trailing edges, ${spec.name}: build and quality`, () => {
+      const g = adapter(true);
+      expect(validateFlowpath(g)).toEqual([]);
+      let msg = 'built';
+      try {
+        const mesh = buildEngineMesh(g, spec);
+        const q = meshQuality(mesh);
+        const worst = q.reduce((a, b) => (b.maxStretch > a.maxStretch ? b : a));
+        const minJ = Math.min(...q.map((b) => b.minJacobian));
+        const skew = q.reduce((a, b) => (b.maxSkewDeg > a.maxSkewDeg ? b : a));
+        msg = `${spec.name}: ${mesh.totalCells} cells; max stretch ${worst.maxStretch.toFixed(3)} in ${worst.name} at (${worst.maxStretchAt.x.toFixed(2)}, ${worst.maxStretchAt.r.toFixed(2)}); min J ${minJ.toExponential(2)}; max skew ${skew.maxSkewDeg.toFixed(1)} in ${skew.name}; domain x ${mesh.domain.xIn}..${mesh.domain.xOut}, r_out ${mesh.domain.rOut}`;
+      } catch (e) {
+        msg = `${spec.name}: buildEngineMesh threw: ${(e as Error).message.slice(0, 300)}`;
+      }
+      console.log(msg);
+    }, 120_000);
+  }
+
+  it('the far render extent reaches beyond the mesh domain radially', () => {
+    const mesh = buildEngineMesh(placeholderFlowpath(), MESH_130K);
+    console.log(`mesh x ${mesh.domain.xIn}..${mesh.domain.xOut} r_out ${mesh.domain.rOut}; far extent x ${FIELD_EXTENTS.far.xMin}..${FIELD_EXTENTS.far.xMax} r ${FIELD_EXTENTS.far.rMax}`);
+    expect(FIELD_EXTENTS.far.rMax).toBeGreaterThan(mesh.domain.rOut);
+  });
+});

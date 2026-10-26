@@ -23,6 +23,42 @@ The thresholds in this file were set by the orchestrator on 2026-10-24, before a
 - **Cycle:** component maps (pyCycle-derived, scaled), Newton–Raphson matching of mass-flow and work residuals; transients integrate `J dω/dt = τ_turbine − τ_compressor` per shaft.
 - **Flow:** per-radian, r-weighted finite volume for the axisymmetric Euler equations with swirl. Conserved state (ρ′, ρu_x, ρu_r, ρ r u_θ, η) plus ρZ (fuel-air ratio), with ρ′ = ρ − ρ∞ and η = ρ(h₀ − h₀∞) − p′ (gauge variables). SLAU2 fluxes, MUSCL (van Albada), point-implicit sources, 3-stage RK with local time stepping (steady) or SSP-RK3 (physical time). Hall–Thollet body force with blockage for compressor rows, follow-camber relaxation for turbine rows, heat release `η_b W_f LHV` in the combustor. v1 turbulence: Euler in the engine, Prandtl free-shear eddy viscosity `ν_t = 0.028 ΔU r½` in the plume.
 
+### 2.1 Coordinates and conventions (W0 contracts; `src/contracts/engine.ts`, `src/contracts/stations.ts`)
+
+- **Frame:** meridional (x, r, θ), SI units. x is axial, **x = 0 at the station 2 plane (fan face)**, positive downstream; r ≥ 0 from the engine axis; θ right-handed about +x. Every module (definition, mesh, solver, geometry, cycle stations) uses this frame.
+- **Rotation:** `rotation[spool]` is the sign of the shaft angular velocity about +x (+1 = counter-clockwise seen from behind, looking upstream along −x). The CFM56-7B "rotates clockwise (aft looking forward)" (NTSB AAR-19/03 §1.3.1), so both spools are **−1** (co-rotating). Absolute swirl from the fan and compressors is therefore in −θ.
+- **Angles:** blade and flow angles are geometric, measured from the meridional (+x) direction, positive toward +θ, and do not depend on the rotation sign: a rotor turning in −θ simply has the mirror image of the angles of one turning in +θ. Compressor rotor angles are positive (relative flow toward +θ), turbine rotor inlet angles negative.
+- **Curves:** flowpath walls are (x, r) polylines with strictly increasing x and linear interpolation; a hub curve that starts on the axis (the spinner) counts as the axis upstream of its nose.
+- **Render textures (decision D0-4):** the state texture stores the gauge ratios (p − p∞)/p∞ and (ρ − ρ∞)/ρ∞, then T (K) and FAR; the velocity texture stores u_x, u_r, u_θ (m/s) and the fluid fraction. An ambient texel encodes as exact zeros. f16 keeps 11 bits of the perturbation itself, where p/p∞ would quantise at about 1e-3 (about 100 Pa).
+- **EGT:** the cockpit EGT is the measured T49.5 plus the FADEC display shunt (+30 K, ramped over 8300–8500 rpm N2 for "TI" engines; EASA TCDS E.004 IV.1.1). The TCDS limits are displayed values.
+
+### 2.2 Stations (SAE ARP755, superseded by AS755)
+
+| Station | Plane | x in the reference engine (m) |
+|---|---|---|
+| 0 | free stream (not a plane) | — |
+| 1 | inlet highlight | −0.775 |
+| 2 | fan face (defines x = 0) | 0 |
+| 13 | bypass stream behind the fan OGVs | 0.600 |
+| 18 / 19 | bypass nozzle throat / exit (convergent: same plane) | 1.550 |
+| 21 | core stream behind the fan root, booster inlet | 0.265 |
+| 24 | booster exit | 0.640 |
+| 25 | HPC inlet (after the transition duct; P25 = P24 by the OPR convention) | 0.860 |
+| 3 | HPC exit (OPR = P3/P2) | 1.460 |
+| 4 | combustor exit / HPT NGV inlet (T4) | 1.740 |
+| 41 | HPT rotor inlet, cooling air mixed in | 1.793 |
+| 45 | LPT inlet | 1.970 |
+| 49.5 | LPT stage 2 nozzle: the EGT probe plane (TCDS E.004 IV.1.1) | 2.065 |
+| 5 | LPT exit | 2.370 |
+| 8 / 9 | core nozzle throat / exit (convergent: same plane) | 2.750 |
+
+Upstream-to-downstream order along the core: 1, 2, 21, 24, 25, 3, 4, 41, 45, 49.5, 5, 8, 9; along the bypass: 1, 2, 13, 18, 19. The solver reduces its field to the cycle at stations 2, 13, 18, 25, 3, 4, 45, 5, 8. The x values come from `src/engine/definition.ts` (flowpath proportions justified in ENGINE_FACTS.md).
+
+### 2.3 Synthesized blade rows and design-point estimate (W0)
+
+- **Design-point estimate** (`src/engine/designPoint.ts`): constant-cp, calorically perfect sections (cold γ = 1.4; hot cp = 1150 J/(kg K)), isentropic compressor and turbine efficiencies, fuel energy `η_b W_f LHV` into the combustor air, shaft balances with a 0.99 mechanical efficiency, convergent nozzles. It sizes A8 and A18 and gives the blade mean line its totals. It is not the cycle model.
+- **Blade synthesis** (`src/engine/bladeDesign.ts`): free vortex (r c_θ and c_x uniform across the span at each edge), equal stage work with a chosen mean-line reaction, c_x from continuity on the subsonic branch, zero incidence, Carter's rule δ = m θ / σⁿ with m = 0.23 (2a/c)² + ξ°/500 (a/c = 0.5), n = 1/2 for decelerating and 1 for accelerating rows; no deviation in turbine rows (follow-camber); stagger = mean of the metal angles; chord = meridional length / cos(stagger); counts from a target mid-span solidity except the 24 published fan blades. The Euler work Ω Δ(r c_θ) on the mean line equals each component's design work exactly.
+
 ## 3. Pre-registered thresholds
 
 ### 3.1 Thermo

@@ -1,0 +1,1098 @@
+{
+  "spec": {
+    "name": "80k",
+    "targetCells": 80000,
+    "nCore": 16,
+    "nBypass": 32,
+    "nLip": 16,
+    "nFar": 36,
+    "cellsPerChord": 6,
+    "lipRadialSpacing": 0.009,
+    "lipAxialSpacing": 0.01,
+    "fanFaceSpacing": 0.009,
+    "splitterSpacing": 0.005,
+    "fanSpacingMax": 0.009,
+    "coreSpacingMax": 0.01,
+    "bypassSpacingMax": 0.015,
+    "combustorSpacing": 0.008,
+    "highlightSpacing": 0.0035,
+    "lipWallNormalSpacing": 0.003,
+    "lipThickness": 0.12,
+    "lipOuterSpacingMax": 0.02,
+    "bypassLipGrowth": 1.08,
+    "lipNormalSmoothing": 0.5,
+    "gradation": 0.08,
+    "plumeGrowth": 0.008,
+    "plumeSpacingMax": 0.05,
+    "nearPlumeD": 7,
+    "farGrowth": 0.1,
+    "shearExponent": 2,
+    "outflowRadialSpacing": 0.045,
+    "upstreamD": 5,
+    "radialD": 5,
+    "downstreamD": 20,
+    "upstreamSmoothing": 100,
+    "sweeps": 0
+  },
+  "report": {
+    "spec": "80k",
+    "targetCells": 80000,
+    "totalCells": 80588,
+    "deviation": 0.00735,
+    "blocks": [
+      {
+        "name": "upstream",
+        "ni": 42,
+        "nj": 96,
+        "cells": 4032,
+        "minJacobian": 0.000123259,
+        "maxJacobian": 0.553124,
+        "minScaledJacobian": 0.682137,
+        "maxStretch": 1.13541,
+        "maxStretchAt": {
+          "i": 30,
+          "j": 60,
+          "x": -1.11098,
+          "r": 1.01656
+        },
+        "maxSkewDeg": 46.9892,
+        "maxSkewAt": {
+          "i": 41,
+          "j": 59,
+          "x": -0.817627,
+          "r": 0.995195
+        },
+        "wallOrthoMaxDeg": 0,
+        "interfaceOrthoMaxDeg": 46.9414,
+        "interfaceKinkMaxDeg": 45.6903,
+        "aspectMin": 1.00015,
+        "aspectMax": 83.6359,
+        "aspectMaxAt": {
+          "i": 0,
+          "j": 41,
+          "x": -8.18946,
+          "r": 0.816338
+        },
+        "minEdge": 0.00838029,
+        "maxEdge": 0.880253
+      },
+      {
+        "name": "inlet",
+        "ni": 87,
+        "nj": 32,
+        "cells": 2784,
+        "minJacobian": 0.0000184536,
+        "maxJacobian": 0.000505863,
+        "minScaledJacobian": 0.903025,
+        "maxStretch": 1.09285,
+        "maxStretchAt": {
+          "i": 83,
+          "j": 31,
+          "x": -0.0198052,
+          "r": 0.588586
+        },
+        "maxSkewDeg": 25.4414,
+        "maxSkewAt": {
+          "i": 86,
+          "j": 0,
+          "x": -0.000838854,
+          "r": 0.234331
+        },
+        "wallOrthoMaxDeg": 25.1991,
+        "interfaceOrthoMaxDeg": 24.068,
+        "interfaceKinkMaxDeg": 45.6903,
+        "aspectMin": 1.0003,
+        "aspectMax": 6.22089,
+        "aspectMaxAt": {
+          "i": 86,
+          "j": 0,
+          "x": -0.000838854,
+          "r": 0.234331
+        },
+        "minEdge": 0.00179093,
+        "maxEdge": 0.030073
+      },
+      {
+        "name": "lip",
+        "ni": 250,
+        "nj": 16,
+        "cells": 4000,
+        "minJacobian": 0.0000102929,
+        "maxJacobian": 0.000665827,
+        "minScaledJacobian": 0.921806,
+        "maxStretch": 1.11236,
+        "maxStretchAt": {
+          "i": 96,
+          "j": 14,
+          "x": -0.871554,
+          "r": 0.783649
+        },
+        "maxSkewDeg": 22.8085,
+        "maxSkewAt": {
+          "i": 84,
+          "j": 0,
+          "x": -0.742878,
+          "r": 0.749916
+        },
+        "wallOrthoMaxDeg": 20.8618,
+        "interfaceOrthoMaxDeg": 8.54724,
+        "interfaceKinkMaxDeg": 51.9918,
+        "aspectMin": 1.00001,
+        "aspectMax": 4.17529,
+        "aspectMaxAt": {
+          "i": 145,
+          "j": 0,
+          "x": -0.354627,
+          "r": 1.03878
+        },
+        "minEdge": 0.003,
+        "maxEdge": 0.0285495
+      },
+      {
+        "name": "fan",
+        "ni": 47,
+        "nj": 48,
+        "cells": 2256,
+        "minJacobian": 0.0000184551,
+        "maxJacobian": 0.000107457,
+        "minScaledJacobian": 0.890038,
+        "maxStretch": 1.10308,
+        "maxStretchAt": {
+          "i": 2,
+          "j": 47,
+          "x": 0.0166931,
+          "r": 0.770981
+        },
+        "maxSkewDeg": 27.122,
+        "maxSkewAt": {
+          "i": 18,
+          "j": 0,
+          "x": 0.0555487,
+          "r": 0.254796
+        },
+        "wallOrthoMaxDeg": 26.9852,
+        "interfaceOrthoMaxDeg": 18.7534,
+        "interfaceKinkMaxDeg": 31.3416,
+        "aspectMin": 1.00068,
+        "aspectMax": 6.42641,
+        "aspectMaxAt": {
+          "i": 0,
+          "j": 0,
+          "x": 0.000839493,
+          "r": 0.23499
+        },
+        "minEdge": 0.00172943,
+        "maxEdge": 0.0133032
+      },
+      {
+        "name": "bypass",
+        "ni": 96,
+        "nj": 32,
+        "cells": 3072,
+        "minJacobian": 0.0000256877,
+        "maxJacobian": 0.000168293,
+        "minScaledJacobian": 0.865446,
+        "maxStretch": 1.0858,
+        "maxStretchAt": {
+          "i": 16,
+          "j": 16,
+          "x": 0.398966,
+          "r": 0.602091
+        },
+        "maxSkewDeg": 30.0663,
+        "maxSkewAt": {
+          "i": 6,
+          "j": 0,
+          "x": 0.296188,
+          "r": 0.452587
+        },
+        "wallOrthoMaxDeg": 29.9467,
+        "interfaceOrthoMaxDeg": 28.6169,
+        "interfaceKinkMaxDeg": 31.3416,
+        "aspectMin": 1.0004,
+        "aspectMax": 2.92993,
+        "aspectMaxAt": {
+          "i": 90,
+          "j": 0,
+          "x": 1.48133,
+          "r": 0.530674
+        },
+        "minEdge": 0.00497958,
+        "maxEdge": 0.0148425
+      },
+      {
+        "name": "core",
+        "ni": 447,
+        "nj": 16,
+        "cells": 7152,
+        "minJacobian": 0.00000276891,
+        "maxJacobian": 0.000113043,
+        "minScaledJacobian": 0.732084,
+        "maxStretch": 1.14571,
+        "maxStretchAt": {
+          "i": 446,
+          "j": 0,
+          "x": 2.74506,
+          "r": 0.310831
+        },
+        "maxSkewDeg": 42.9387,
+        "maxSkewAt": {
+          "i": 83,
+          "j": 0,
+          "x": 0.7639,
+          "r": 0.289227
+        },
+        "wallOrthoMaxDeg": 42.7793,
+        "interfaceOrthoMaxDeg": 11.0722,
+        "interfaceKinkMaxDeg": 6.92543,
+        "aspectMin": 1.00004,
+        "aspectMax": 4.16188,
+        "aspectMaxAt": {
+          "i": 329,
+          "j": 0,
+          "x": 1.89446,
+          "r": 0.303506
+        },
+        "minEdge": 0.00102233,
+        "maxEdge": 0.0119257
+      },
+      {
+        "name": "afterbody",
+        "ni": 98,
+        "nj": 32,
+        "cells": 3136,
+        "minJacobian": 0.0000500009,
+        "maxJacobian": 0.000132876,
+        "minScaledJacobian": 0.921023,
+        "maxStretch": 1.07503,
+        "maxStretchAt": {
+          "i": 45,
+          "j": 30,
+          "x": 2.09893,
+          "r": 0.697749
+        },
+        "maxSkewDeg": 22.924,
+        "maxSkewAt": {
+          "i": 90,
+          "j": 0,
+          "x": 2.67269,
+          "r": 0.423349
+        },
+        "wallOrthoMaxDeg": 22.924,
+        "interfaceOrthoMaxDeg": 16.2269,
+        "interfaceKinkMaxDeg": 29.0637,
+        "aspectMin": 1.00063,
+        "aspectMax": 2.92429,
+        "aspectMaxAt": {
+          "i": 46,
+          "j": 13,
+          "x": 2.11338,
+          "r": 0.596364
+        },
+        "minEdge": 0.00493586,
+        "maxEdge": 0.0148262
+      },
+      {
+        "name": "plug",
+        "ni": 52,
+        "nj": 16,
+        "cells": 832,
+        "minJacobian": 0.0000280087,
+        "maxJacobian": 0.000432817,
+        "minScaledJacobian": 0.63778,
+        "maxStretch": 1.14571,
+        "maxStretchAt": {
+          "i": 0,
+          "j": 0,
+          "x": 2.75554,
+          "r": 0.30902
+        },
+        "maxSkewDeg": 50.3735,
+        "maxSkewAt": {
+          "i": 44,
+          "j": 0,
+          "x": 3.31017,
+          "r": 0.100252
+        },
+        "wallOrthoMaxDeg": 49.9327,
+        "interfaceOrthoMaxDeg": 42.5153,
+        "interfaceKinkMaxDeg": 42.5141,
+        "aspectMin": 1.00026,
+        "aspectMax": 4.41915,
+        "aspectMaxAt": {
+          "i": 0,
+          "j": 0,
+          "x": 2.75554,
+          "r": 0.30902
+        },
+        "minEdge": 0.00253006,
+        "maxEdge": 0.0347342
+      },
+      {
+        "name": "plume-core",
+        "ni": 390,
+        "nj": 16,
+        "cells": 6240,
+        "minJacobian": 0.000137667,
+        "maxJacobian": 0.0116211,
+        "minScaledJacobian": 0.999868,
+        "maxStretch": 1.14015,
+        "maxStretchAt": {
+          "i": 0,
+          "j": 14,
+          "x": 3.40763,
+          "r": 0.335844
+        },
+        "maxSkewDeg": 0.931225,
+        "maxSkewAt": {
+          "i": 342,
+          "j": 15,
+          "x": 23.5502,
+          "r": 0.555305
+        },
+        "wallOrthoMaxDeg": 0,
+        "interfaceOrthoMaxDeg": 0.931225,
+        "interfaceKinkMaxDeg": 42.5141,
+        "aspectMin": 1.00016,
+        "aspectMax": 7.47138,
+        "aspectMaxAt": {
+          "i": 298,
+          "j": 15,
+          "x": 17.0046,
+          "r": 0.45706
+        },
+        "minEdge": 0.00901583,
+        "maxEdge": 0.257127
+      },
+      {
+        "name": "plume-bypass",
+        "ni": 442,
+        "nj": 32,
+        "cells": 14144,
+        "minJacobian": 0.0000909521,
+        "maxJacobian": 0.0115698,
+        "minScaledJacobian": 0.971251,
+        "maxStretch": 1.10531,
+        "maxStretchAt": {
+          "i": 318,
+          "j": 31,
+          "x": 13.6428,
+          "r": 0.995723
+        },
+        "maxSkewDeg": 13.772,
+        "maxSkewAt": {
+          "i": 0,
+          "j": 0,
+          "x": 2.75505,
+          "r": 0.393262
+        },
+        "wallOrthoMaxDeg": 0,
+        "interfaceOrthoMaxDeg": 13.772,
+        "interfaceKinkMaxDeg": 10.4995,
+        "aspectMin": 1.00003,
+        "aspectMax": 7.4715,
+        "aspectMaxAt": {
+          "i": 350,
+          "j": 0,
+          "x": 17.0046,
+          "r": 0.473672
+        },
+        "minEdge": 0.009,
+        "maxEdge": 0.257394
+      },
+      {
+        "name": "plume-outer",
+        "ni": 540,
+        "nj": 16,
+        "cells": 8640,
+        "minJacobian": 0.0000855074,
+        "maxJacobian": 0.0115698,
+        "minScaledJacobian": 0.91142,
+        "maxStretch": 1.10532,
+        "maxStretchAt": {
+          "i": 416,
+          "j": 15,
+          "x": 13.6428,
+          "r": 1.31926
+        },
+        "maxSkewDeg": 24.2976,
+        "maxSkewAt": {
+          "i": 34,
+          "j": 15,
+          "x": 2.06056,
+          "r": 0.947869
+        },
+        "wallOrthoMaxDeg": 0,
+        "interfaceOrthoMaxDeg": 24.208,
+        "interfaceKinkMaxDeg": 52.0191,
+        "aspectMin": 1.0001,
+        "aspectMax": 7.19366,
+        "aspectMaxAt": {
+          "i": 453,
+          "j": 0,
+          "x": 17.6377,
+          "r": 1.22529
+        },
+        "minEdge": 0.009,
+        "maxEdge": 0.257738
+      },
+      {
+        "name": "farfield",
+        "ni": 675,
+        "nj": 36,
+        "cells": 24300,
+        "minJacobian": 0.00020121,
+        "maxJacobian": 0.105813,
+        "minScaledJacobian": 0.570903,
+        "maxStretch": 1.12351,
+        "maxStretchAt": {
+          "i": 0,
+          "j": 20,
+          "x": -1.13034,
+          "r": 2.14868
+        },
+        "maxSkewDeg": 55.1868,
+        "maxSkewAt": {
+          "i": 127,
+          "j": 0,
+          "x": 1.58047,
+          "r": 1.06499
+        },
+        "wallOrthoMaxDeg": 0,
+        "interfaceOrthoMaxDeg": 55.1385,
+        "interfaceKinkMaxDeg": 52.0191,
+        "aspectMin": 1.00011,
+        "aspectMax": 79.7114,
+        "aspectMaxAt": {
+          "i": 232,
+          "j": 35,
+          "x": 2.32818,
+          "r": 8.45452
+        },
+        "minEdge": 0.00905364,
+        "maxEdge": 0.880253
+      }
+    ],
+    "worst": {
+      "minJacobian": {
+        "value": 0.00000276891,
+        "block": "core"
+      },
+      "minScaledJacobian": {
+        "value": 0.570903,
+        "block": "farfield"
+      },
+      "maxStretch": {
+        "value": 1.14571,
+        "block": "core",
+        "at": {
+          "i": 446,
+          "j": 0,
+          "x": 2.74506,
+          "r": 0.310831
+        }
+      },
+      "maxSkewDeg": {
+        "value": 55.1868,
+        "block": "farfield",
+        "at": {
+          "i": 127,
+          "j": 0,
+          "x": 1.58047,
+          "r": 1.06499
+        }
+      },
+      "maxAspect": {
+        "value": 83.6359,
+        "block": "upstream",
+        "at": {
+          "i": 0,
+          "j": 41,
+          "x": -8.18946,
+          "r": 0.816338
+        }
+      },
+      "wallOrthoMaxDeg": {
+        "value": 49.9327,
+        "block": "plug"
+      },
+      "interfaceOrthoMaxDeg": {
+        "value": 55.1385,
+        "block": "farfield"
+      },
+      "interfaceKinkMaxDeg": {
+        "value": 52.0191,
+        "block": "plume-outer"
+      },
+      "minEdge": {
+        "value": 0.00102233,
+        "block": "core"
+      }
+    },
+    "cellsAcross": {
+      "upstream": 96,
+      "inlet": 32,
+      "lip": 16,
+      "fan": 48,
+      "bypass": 32,
+      "core": 16,
+      "afterbody": 32,
+      "plug": 16,
+      "plume-core": 16,
+      "plume-bypass": 32,
+      "plume-outer": 16,
+      "farfield": 36
+    },
+    "cellsPerChord": [
+      {
+        "name": "fan",
+        "duct": "fan",
+        "chord": 0.1375,
+        "cells": 29
+      },
+      {
+        "name": "fan-ogv",
+        "duct": "bypass",
+        "chord": 0.1,
+        "cells": 7
+      },
+      {
+        "name": "booster-igv",
+        "duct": "core",
+        "chord": 0.035,
+        "cells": 7
+      },
+      {
+        "name": "booster-r1",
+        "duct": "core",
+        "chord": 0.045,
+        "cells": 8
+      },
+      {
+        "name": "booster-s1",
+        "duct": "core",
+        "chord": 0.04,
+        "cells": 7
+      },
+      {
+        "name": "booster-r2",
+        "duct": "core",
+        "chord": 0.043,
+        "cells": 8
+      },
+      {
+        "name": "booster-s2",
+        "duct": "core",
+        "chord": 0.038,
+        "cells": 7
+      },
+      {
+        "name": "booster-r3",
+        "duct": "core",
+        "chord": 0.041,
+        "cells": 7
+      },
+      {
+        "name": "booster-s3",
+        "duct": "core",
+        "chord": 0.036,
+        "cells": 6
+      },
+      {
+        "name": "hpc-igv",
+        "duct": "core",
+        "chord": 0.03,
+        "cells": 6
+      },
+      {
+        "name": "hpc-r1",
+        "duct": "core",
+        "chord": 0.04,
+        "cells": 8
+      },
+      {
+        "name": "hpc-s1",
+        "duct": "core",
+        "chord": 0.032,
+        "cells": 7
+      },
+      {
+        "name": "hpc-r2",
+        "duct": "core",
+        "chord": 0.036,
+        "cells": 7
+      },
+      {
+        "name": "hpc-s2",
+        "duct": "core",
+        "chord": 0.029,
+        "cells": 6
+      },
+      {
+        "name": "hpc-r3",
+        "duct": "core",
+        "chord": 0.033,
+        "cells": 7
+      },
+      {
+        "name": "hpc-s3",
+        "duct": "core",
+        "chord": 0.027,
+        "cells": 6
+      },
+      {
+        "name": "hpc-r4",
+        "duct": "core",
+        "chord": 0.03,
+        "cells": 6
+      },
+      {
+        "name": "hpc-s4",
+        "duct": "core",
+        "chord": 0.025,
+        "cells": 6
+      },
+      {
+        "name": "hpc-r5",
+        "duct": "core",
+        "chord": 0.027,
+        "cells": 6
+      },
+      {
+        "name": "hpc-s5",
+        "duct": "core",
+        "chord": 0.023,
+        "cells": 6
+      },
+      {
+        "name": "hpc-r6",
+        "duct": "core",
+        "chord": 0.025,
+        "cells": 8
+      },
+      {
+        "name": "hpc-s6",
+        "duct": "core",
+        "chord": 0.021,
+        "cells": 8
+      },
+      {
+        "name": "hpc-r7",
+        "duct": "core",
+        "chord": 0.023,
+        "cells": 9
+      },
+      {
+        "name": "hpc-s7",
+        "duct": "core",
+        "chord": 0.02,
+        "cells": 8
+      },
+      {
+        "name": "hpc-r8",
+        "duct": "core",
+        "chord": 0.021,
+        "cells": 8
+      },
+      {
+        "name": "hpc-s8",
+        "duct": "core",
+        "chord": 0.019,
+        "cells": 7
+      },
+      {
+        "name": "hpc-r9",
+        "duct": "core",
+        "chord": 0.02,
+        "cells": 8
+      },
+      {
+        "name": "hpc-s9",
+        "duct": "core",
+        "chord": 0.019,
+        "cells": 7
+      },
+      {
+        "name": "hpt-n1",
+        "duct": "core",
+        "chord": 0.04,
+        "cells": 7
+      },
+      {
+        "name": "hpt-r1",
+        "duct": "core",
+        "chord": 0.035,
+        "cells": 6
+      },
+      {
+        "name": "lpt-n1",
+        "duct": "core",
+        "chord": 0.034,
+        "cells": 6
+      },
+      {
+        "name": "lpt-r1",
+        "duct": "core",
+        "chord": 0.032,
+        "cells": 6
+      },
+      {
+        "name": "lpt-n2",
+        "duct": "core",
+        "chord": 0.036,
+        "cells": 6
+      },
+      {
+        "name": "lpt-r2",
+        "duct": "core",
+        "chord": 0.034,
+        "cells": 6
+      },
+      {
+        "name": "lpt-n3",
+        "duct": "core",
+        "chord": 0.038,
+        "cells": 6
+      },
+      {
+        "name": "lpt-r3",
+        "duct": "core",
+        "chord": 0.036,
+        "cells": 6
+      },
+      {
+        "name": "lpt-n4",
+        "duct": "core",
+        "chord": 0.04,
+        "cells": 6
+      },
+      {
+        "name": "lpt-r4",
+        "duct": "core",
+        "chord": 0.038,
+        "cells": 6
+      }
+    ],
+    "lipSpacing": {
+      "bypassInside": 0.009,
+      "bypassOutside": 0.009,
+      "coreInside": 0.009,
+      "coreOutside": 0.009
+    },
+    "domain": {
+      "xIn": -8.54,
+      "xOut": 33.75,
+      "rOut": 8.82,
+      "D": 1.5494,
+      "upstreamD": 5.01162,
+      "radialD": 5.69253,
+      "downstreamD": 20.0077
+    }
+  },
+  "stations": [
+    {
+      "id": "2",
+      "x": 0,
+      "block": "fan",
+      "i": 0
+    },
+    {
+      "id": "13",
+      "x": 0.6,
+      "block": "bypass",
+      "i": 31
+    },
+    {
+      "id": "18",
+      "x": 1.55,
+      "block": "bypass",
+      "i": 96
+    },
+    {
+      "id": "25",
+      "x": 0.86,
+      "block": "core",
+      "i": 98
+    },
+    {
+      "id": "3",
+      "x": 1.46,
+      "block": "core",
+      "i": 262
+    },
+    {
+      "id": "4",
+      "x": 1.74,
+      "block": "core",
+      "i": 305
+    },
+    {
+      "id": "45",
+      "x": 1.97,
+      "block": "core",
+      "i": 340
+    },
+    {
+      "id": "49.5",
+      "x": 2.065,
+      "block": "core",
+      "i": 357
+    },
+    {
+      "id": "5",
+      "x": 2.37,
+      "block": "core",
+      "i": 407
+    },
+    {
+      "id": "8",
+      "x": 2.75,
+      "block": "core",
+      "i": 447
+    }
+  ],
+  "rows": [
+    {
+      "id": "fan",
+      "block": "fan",
+      "i0": 3,
+      "i1": 32
+    },
+    {
+      "id": "fan-ogv",
+      "block": "bypass",
+      "i0": 18,
+      "i1": 25
+    },
+    {
+      "id": "booster-igv",
+      "block": "core",
+      "i0": 3,
+      "i1": 10
+    },
+    {
+      "id": "booster-r1",
+      "block": "core",
+      "i0": 12,
+      "i1": 20
+    },
+    {
+      "id": "booster-s1",
+      "block": "core",
+      "i0": 22,
+      "i1": 29
+    },
+    {
+      "id": "booster-r2",
+      "block": "core",
+      "i0": 31,
+      "i1": 39
+    },
+    {
+      "id": "booster-s2",
+      "block": "core",
+      "i0": 41,
+      "i1": 48
+    },
+    {
+      "id": "booster-r3",
+      "block": "core",
+      "i0": 50,
+      "i1": 57
+    },
+    {
+      "id": "booster-s3",
+      "block": "core",
+      "i0": 59,
+      "i1": 65
+    },
+    {
+      "id": "hpc-igv",
+      "block": "core",
+      "i0": 99,
+      "i1": 105
+    },
+    {
+      "id": "hpc-r1",
+      "block": "core",
+      "i0": 106,
+      "i1": 114
+    },
+    {
+      "id": "hpc-s1",
+      "block": "core",
+      "i0": 115,
+      "i1": 122
+    },
+    {
+      "id": "hpc-r2",
+      "block": "core",
+      "i0": 123,
+      "i1": 130
+    },
+    {
+      "id": "hpc-s2",
+      "block": "core",
+      "i0": 131,
+      "i1": 137
+    },
+    {
+      "id": "hpc-r3",
+      "block": "core",
+      "i0": 138,
+      "i1": 145
+    },
+    {
+      "id": "hpc-s3",
+      "block": "core",
+      "i0": 146,
+      "i1": 152
+    },
+    {
+      "id": "hpc-r4",
+      "block": "core",
+      "i0": 153,
+      "i1": 159
+    },
+    {
+      "id": "hpc-s4",
+      "block": "core",
+      "i0": 160,
+      "i1": 166
+    },
+    {
+      "id": "hpc-r5",
+      "block": "core",
+      "i0": 167,
+      "i1": 173
+    },
+    {
+      "id": "hpc-s5",
+      "block": "core",
+      "i0": 174,
+      "i1": 180
+    },
+    {
+      "id": "hpc-r6",
+      "block": "core",
+      "i0": 181,
+      "i1": 189
+    },
+    {
+      "id": "hpc-s6",
+      "block": "core",
+      "i0": 191,
+      "i1": 199
+    },
+    {
+      "id": "hpc-r7",
+      "block": "core",
+      "i0": 201,
+      "i1": 210
+    },
+    {
+      "id": "hpc-s7",
+      "block": "core",
+      "i0": 212,
+      "i1": 220
+    },
+    {
+      "id": "hpc-r8",
+      "block": "core",
+      "i0": 222,
+      "i1": 230
+    },
+    {
+      "id": "hpc-s8",
+      "block": "core",
+      "i0": 232,
+      "i1": 239
+    },
+    {
+      "id": "hpc-r9",
+      "block": "core",
+      "i0": 241,
+      "i1": 249
+    },
+    {
+      "id": "hpc-s9",
+      "block": "core",
+      "i0": 251,
+      "i1": 258
+    },
+    {
+      "id": "hpt-n1",
+      "block": "core",
+      "i0": 306,
+      "i1": 313
+    },
+    {
+      "id": "hpt-r1",
+      "block": "core",
+      "i0": 316,
+      "i1": 322
+    },
+    {
+      "id": "lpt-n1",
+      "block": "core",
+      "i0": 341,
+      "i1": 347
+    },
+    {
+      "id": "lpt-r1",
+      "block": "core",
+      "i0": 349,
+      "i1": 355
+    },
+    {
+      "id": "lpt-n2",
+      "block": "core",
+      "i0": 357,
+      "i1": 363
+    },
+    {
+      "id": "lpt-r2",
+      "block": "core",
+      "i0": 365,
+      "i1": 371
+    },
+    {
+      "id": "lpt-n3",
+      "block": "core",
+      "i0": 373,
+      "i1": 379
+    },
+    {
+      "id": "lpt-r3",
+      "block": "core",
+      "i0": 381,
+      "i1": 387
+    },
+    {
+      "id": "lpt-n4",
+      "block": "core",
+      "i0": 389,
+      "i1": 395
+    },
+    {
+      "id": "lpt-r4",
+      "block": "core",
+      "i0": 397,
+      "i1": 403
+    }
+  ],
+  "explicitDt": {
+    "dt": 0.00000129617,
+    "block": "core",
+    "at": {
+      "i": 250,
+      "j": 0,
+      "x": 1.42587,
+      "r": 0.260571
+    }
+  },
+  "binaryBytes": {
+    "f64": 7956920,
+    "f32": 4690752
+  }
+}
