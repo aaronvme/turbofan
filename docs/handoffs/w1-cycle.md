@@ -1,58 +1,100 @@
-w1/cycle: STOP-CLEAN at the self-brake, mostly done. Thermo, maps, design point, off-design and the Greitzer model are green. The transient CycleModel works end to end (C9 and start flags green), but C5 fails at 5.16 s against 5.0 s, and src/cycle branch coverage is 80.2 % against the 85 % config gate. (from w1/contracts-fix @3969af7; HEAD = the commit that adds this file)
+w1/cycle: DONE except mutation testing, which is only partly run (see MUTATION). Every threshold (T1-T4, C1-C9) is green. C5 now starts at 15 % of rated takeoff thrust per D2-1 and takes 2.60 s. src/cycle branch coverage is about 99 %. (from w1/contracts-fix @3969af7; previous pass @b4acf7f; HEAD = the commit that adds this file)
 
-DONE (TDD: each "(TDD)" commit came first and failed)
-- c3a2b58 / 75b1b4e+ src/thermo. species.ts holds the NASA 7-coefficient polynomials for N2, O2, Ar, CO2 and H2O (GRI-Mech 3.0 thermo30.dat, Burcat's data). gas.ts gives cp, h (sensible, relative to 298.15 K), the entropy function, gamma, R, the frozen mixture by FAR (air plus stoichiometric C12H23 products), T(h) and T(s,p) by Newton (stops at 1e-9 K), and isentropicTemperature. h and the entropy function are integrated analytically from cp, with continuity at 1000 K. GAS_TABLES exports two gases x two ranges (5 cp coefficients plus hConst and sConst) for the W2 WGSL generator. Test: tests/unit/thermo/gas.test.ts (33 tests).
-- 063cd92 / 4db5442 maps. Fan, LPC, HPC, HPT and LPT were ported from pyCycle commit ee7e161 (Apache-2.0). They were fetched with curl rather than WebFetch, so the bytes are exact (WebFetch summarises). A script parsed them with ast and never executed them. Each file has a header, and NOTICE is at the repo root. componentMaps.ts provides a C1 tensor-product Hermite lookup and pure pyCycle-style scaling (s_Wc, s_PR on PR-1, s_eff pinned at the map's design Nc/R-line). It also has the surge margin at equal corrected flow, sub-map similarity extension (Gaudet & Gauthier GT2007-27193) and Stodola below the turbine PR range. Test: maps.test.ts.
-- cf4e4d2 / 2358d59 engine.ts. Sizing per D1-2: the fan bypass PR (1.537) is solved so that thrust is 121430 N at the EEDB 1.293 kg/s. The outputs are A8 = 0.1852 m² (+4.2 % vs the 0.1778 placeholder) and A18 = 0.9161 m² (+1.0 %). The gas path has 6 unknowns: fan R, BPR, LPC R, HPC R, HPT PR and LPT PR. solveSteady adds N1, N2 and Wf, with a fuel, N1, N2 or thrust spec. groundIdle() reaches idle by continuation. balances() is the C8 check. Test: engine.test.ts.
-- bda44d4 / (WIP commit) greitzer.ts (C9) and model.ts (CycleModel, `createCycleModel()`).
-  - J dw/dt with inertias LP 60 and HP 10 kg m², derived in the header.
-  - FADEC: a single Wf/P3 integrator with a lowest-wins selector (N1 target, idle floor N2 61 %, N1/N2/EGT limiters with EGT at the 960 C transient limit), between accel and decel schedules (2.2-2.5x and 0.6x the steady Wf/P3).
-  - Below 57 % N2, or unlit: a similarity sub-idle model anchored at ground idle (Agrawal & Yunis 81-GT-202).
-  - Start: starter torque, fuel at the 20 % FADEC minimum (the test moves the lever at 25 %), light-off 3 s after fuel, cut-out at 56 %, idle in 38.5 s, EGT peak about 370 C. Flags for hung, hot and no-light-off starts.
-  - Surge: the HPC beyond its surge line, or injectFault, runs a Greitzer episode (0.3 s, 25 % fuel cut).
-  - Test: model.test.ts.
-- ENGINE_FACTS.md: the "Model vs published" table is filled, and a new "Cycle model calibration (W1)" section records the calibration.
+DONE, earlier passes (each "(TDD)" commit came first and failed)
+- src/thermo: thermally perfect air and frozen Jet-A products from NASA 7-coefficient polynomials (GRI-Mech 3.0, Burcat). Provides cp, h, the entropy function, gamma, R, the T(h) and T(s,p) Newton inverses, and GAS_TABLES for the W2 WGSL generator. Test: tests/unit/thermo/gas.test.ts.
+- src/cycle/maps + componentMaps.ts:
+  - pyCycle ee7e161 maps (Apache-2.0, NOTICE), with a C1 Hermite lookup and pyCycle-style scaling.
+  - The surge margin is taken at equal corrected flow.
+  - Below the map: similarity laws (Gaudet & Gauthier GT2007-27193) and Stodola.
+  - Test: maps.test.ts.
+- engine.ts:
+  - Design-point sizing (D1-2): the fan bypass PR of 1.537 closes thrust at the EEDB fuel flow. Sizing outputs A8 0.1852 and A18 0.9161 m².
+  - Gas path: 6 unknowns, Newton with an FD Jacobian. solveSteady takes a fuel, N1, N2 or thrust spec.
+  - groundIdle() runs a continuation down to idle; balances() is the C8 check.
+  - Test: engine.test.ts.
+- greitzer.ts (C9) and model.ts (createCycleModel):
+  - Shafts: J dw/dt with LP 60 and HP 10 kg m² (estimates, derived in the header).
+  - FADEC: one Wf/P3 integrator with a lowest-wins selector (N1 target, the 61 % N2 idle floor, N1/N2/EGT limiters) between the accel and decel schedules.
+  - Sub-idle: a similarity model (Agrawal & Yunis 81-GT-202).
+  - Start: a sequence with hung, hot and no-light-off flags.
+  - Surge: a Greitzer episode.
 
-THRESHOLDS
-- T1 cp air 300/500/1000/1500 K vs NIST-JANAF (fetched): pass, < 0.5 %. T2 gamma: pass. T3 products at 1000/1500/2000 K vs a frozen JANAF mixture formed the CEA way: pass. T4 h vs a Gauss-Legendre integral of cp: pass, < 1e-6 (including across 1000 K). The exact error values were not printed (budget). T3's reference is JANAF species data mixed as CEA does, not a CEA run.
-- C1, C2 (BPR, OPR, W) and C3 are 0.0 % at the design point: the sizing closure is exact, and off-design reproduces it to 1e-6.
-- C4 at ISA ground idle: N1 20.5 %, N2 61.0 %, EGT 319 C displayed. All pass. Idle thrust is 1.0 % of takeoff (at most 15 % is allowed).
-- C5: FAIL, 5.16 s from ground idle to 95 % thrust, with the lever moved 0 to 1 in 1 s, no surge, and minimum HPC surge margin 0.03. Fuel is limited early by the accel schedule against the HPC surge margin at 61-75 % N2. 2.6x gave surge.
-- C6 (D1-1, 30 C, rated thrust): 922.5 C displayed, 27.5 K under the 950 C redline. Pass. N1 is 103.4 %, under 104 %.
-- C7: idle plus 16 sweep points all converge, max 6 iterations, residual < 1e-10. Pass.
-- C8: mass and energy imbalance at most about 1e-10. Pass.
-- C9: B 1.0 > B_crit 0.661 gives deep surge (min Phi -0.039) with a period 1.174 x the Helmholtz period (+17.4 %, limit 20 %). B 0.5 recovers. Pass.
+DONE this pass
+- 6b84dc0 (TDD) / f842817 / 012cc38 / 0ef1a6f: C5 per D2-1.
+  - The test now starts from a stabilised 14.9 % of rated takeoff thrust. 33.73(b) starts the 5 s clock at not more than 15 % when there is no flight-idle stop. The 0.1-point margin under the ceiling means a settling residual can never put the start above 15 %.
+  - The test checks that N1 moved less than 0.05 points over the last second before the lever moves. The lever then reaches maximum in 1 s (33.73(a)).
+  - `leverForNetThrust()` in model.ts gives the lever for a steady thrust. It is the inverse of the FADEC's lever-to-N1 schedule, which is now the single function `leverToN1`.
+  - RED: the time passed straight away, but displayed EGT went past the 960 C transitory limit. That is the "without overtemperature" part of 33.73(a), which the old test never reached because it failed on time first.
+  - Fix, all in the FADEC; no threshold, inertia or bleed was touched. The EGT limiter gets rate feedback (TD 0.3 s, the same as the overspeed limiters). That derivative is filtered first-order with TF = TD/3 (Astrom & Hagglund, PID Controllers, 3.3). Without the filter, an EGT-limited steady point chattered 12 K under its target, because EGT follows Wf almost algebraically.
+  - The EGT error scale goes from 300 to 150 K, because 2212e7f (TDD) adds a 33.73(a) check: a slam from ground idle with no surge and EGT under 960 C. It failed at 960.05 C and now passes at 958.3 C. 100 K would make the steady point chatter.
+  - Tests: model.test.ts (C5, 33.73(a), leverForNetThrust); modelPaths.test.ts covers the EGT limiter settling on its target.
+- 012cc38 / 2645274: branch coverage of src/cycle went from 80.2 % to about 99 %, without coverage-only tests.
+  - New src/cycle/at.ts (checked indexing) replaces the silent `?? 0` / `?? []` fallbacks in componentMaps, newton, engine (solveSteady) and model. An indexing bug now throws instead of feeding a plausible 0 into a Newton solve. solveLinear also checks that A is square.
+  - New tests in tests/unit/cycle/modelPaths.test.ts:
+    - step() rejects bad inputs and time steps without advancing.
+    - A 40 C day rebuilds the schedules, and the N1 limiter caps N1 at 103 %, with thrust under rated.
+    - The N2 limiter works against a lowered redline, and so does the EGT limiter.
+    - A slam decel rides the decel schedule without a flameout, then the idle floor takes over.
+    - On a slam accel the selected loop goes accel schedule, then n1Target.
+    - A definition without VSVs reports zero closure.
+    - After a flameout, auto ignition relights at the 3 s light-off delay and recovers to idle. With the igniters off, the engine stays out and runs down.
+    - Fuel cutoff gives shutdown and a monotonic run-down; the starter during the run-down re-enters a start.
+    - Start aborts: releasing the starter while cranking, and fuel cutoff after light-off (a dry crank while the starter is held).
+    - A surge cuts fuel at onset, shows a negative HPC margin, and ends after the episode.
+  - New tests in tests/unit/cycle/numerics.test.ts: at, solveLinear (pivoting, singular, shape), and Newton's exits on a singular Jacobian, a non-finite line search (thrown or NaN), the maxStep cap and contract, and a flat spot.
+  - engine.test.ts: an unlit combustor makes T4 fall below T3.
+- 0d93ac3 (TDD) / 0d43dbb: greitzer equilibrium() only bracketed [0, 2W]. With a wide-open throttle it returned the characteristic's peak, which is not an equilibrium. It now doubles the bracket until it crosses the throttle line. criticalB is Infinity on the falling branch, as its doc already said. The surge parameters in use are unchanged.
+- 0ef1a6f / 3670124, docs/ENGINE_FACTS.md:
+  - C5 per D2-1, in the "Flight-idle N1" note and the 33.73 note.
+  - D2-2: A8 0.1852 m² and A18 0.9161 m² are `estimate`, with their derivation. They replace the definition's placeholders only after w1/mesh merges; definition.ts is not touched.
+  - D2-3: the EGT probe share of 0.35 is a calibrated `estimate`. Station 49.5 sits after LPT stage 1 of 4, and stage 1 does more than an equal share because the last stage is lightly loaded for low exit swirl. The rising mean radius pulls the other way and no split is published, which is recorded too.
+  - The model-vs-published table is updated, including a 33.73(a) ground-idle slam row.
+- ec51f27: the simulation tests' describe timeouts are 600 s; a 120 s one failed under Stryker.
+- D2-10: `source: 'model'` was already set (model.ts), and model.test.ts asserts it.
 
-CALIBRATION (W0C-I6)
-- Thermally perfect gas alone takes the ISA EGT from 931 C to about 893 C.
-- Energy balance pins T45 to the fuel flow and T25, so the remaining 36 K at the 25 C run was closed with two unpublished parameters:
-  - ISA takeoff N1 = 101 %. With it, N2 at the run is 99.9 % against 99.8 % measured; with 100 % it is 100.3 %.
-  - EGT probe at 0.35 of the LPT work. Equal stage work would give 0.25; the extra stands in for the probe's low reading.
-- Result: 853.1 C against the measured 855 C. Everything else is unchanged.
+THRESHOLDS (measured on this HEAD)
+- T1 cp air: max 0.162 % at 1000 K (300 / 500 / 1500 K: 0.131 / 0.141 / 0.065 %). Limit 0.5 %: pass.
+- T2 gamma: max 0.054 %: pass.
+- T3 products: max 0.211 % at 2000 K (1000 / 1500 K: 0.144 / 0.001 %): pass. The reference is JANAF species mixed the CEA way, not a CEA run.
+- T4: max 2.0e-15. Limit 1e-6: pass.
+- C1 thrust 4.6e-10, C2 BPR / OPR / airflow 0, C3 TSFC 1.0e-5 relative. Limit 3 %: pass (the sizing closure is exact).
+- C4 ISA ground idle: N1 20.54 %, N2 61.00 %, EGT 319.1 C displayed, thrust 1.0 % of takeoff: pass.
+- C5: 2.60 s from 14.9 % to 95 %. Peak displayed EGT 946.5 C, min HPC surge margin 0.106, no surge. Limit 5.0 s: pass.
+  - For information, from ground idle (33.73(a), no time limit): 95 % at 5.22 s, peak 958.3 C, min margin 0.025.
+- C6 at the 30 C corner: 922.5 C displayed, N1 103.44 %. Limit 950 C: pass.
+- C7: 16-point sweep, max 7 iterations, max residual 7.2e-12: pass.
+- C8: max imbalance 3.4e-11: pass.
+- C9: B 1.0 > B_crit 0.661 gives deep surge (min Phi -0.039) with a period +17.4 % of the Helmholtz period (limit 20 %). B 0.5 recovers (amplitude 5e-14): pass.
 
-NEXT (orchestrator decisions first)
-1. DECIDE C5. Options:
-   - accept a TBV model (HPC 9th-stage bleed to the LPT during accels; the CFM56-7 has one) to buy HPC margin;
-   - revisit the HP/LP inertia estimates (both unpublished);
-   - accept that a ground-idle start point is harsher than 33.73(b)'s flight-idle point.
-   The threshold was not touched.
-2. DECIDE A8/A18. The sized values differ from the definition's flowpath (`PLUG_R_AT_CORE_LIP` and `COWL_R_AT_FAN_NOZZLE` still give 0.1778 and 0.9067). The cycle uses its own sized areas. Updating the definition and the facts rows (bypassNozzleArea, coreNozzleArea) moves geometry under w1/mesh and w1/geometry and breaks designPoint.test.ts expectations.
-3. DECIDE whether the probe-fraction calibration (0.35) is acceptable or wants a radiation-error term instead.
-4. Branch coverage of src/cycle: add tests for the model's abort, shutdown, flameout/relight, ambient change and invalid-input paths.
-5. Run `npm run mutate` on src/thermo and src/cycle. Not run (budget).
-6. Not done: a thermocouple lag on EGT (validateCycleState pins egtMeasured = T49.5); VBV and TBV fed to the gas path (VBV is reported only); a combustion-efficiency drop at idle; customer bleed taken from HPC exit rather than stage 5/9.
+MUTATION
+- (in progress at the time of writing; the final section replaces this line)
+
+NEXT
+1. Mutation testing at a usable cost (see GOTCHAS), then kill the remaining meaningful survivors.
+2. After w1/mesh merges (D2-2): put A8 0.1852 / A18 0.9161 into definition.ts (PLUG_R_AT_CORE_LIP, COWL_R_AT_FAN_NOZZLE) and the bypassNozzleArea fact row, then update designPoint.test.ts expectations.
+3. FADEC tuning found while writing the limiter tests (none is a threshold):
+   - A slam decel from takeoff undershoots the idle floor to N2 58.5 % (below the 60 % idle minimum) for about 3 s before settling. The idle-floor loop runs at K_LOOP; a 4x gain only brings the undershoot to 60.0 %.
+   - On a slam to an N2 redline set 1 % under the takeoff N2, the N2 limiter overshoots the redline by up to 0.85 % (0.2 % with TD_LIMIT 0.5). A 10 s lever advance stays under it. The reference redline is 5 % above takeoff N2, so it is not reached in practice.
+   - The Wf/P3 integrator winds up to the accel schedule while the engine is unlit in run mode (a flameout with the igniters off), so a relight would start rich.
+   - egtExceedance compares against the 950 C redline. The ground-idle slam peaks at 958.3 C for about 1 s, which TCDS VI note 4 allows (960 C for 20 s), but the flag fires.
+4. Still open from the earlier pass:
+   - a thermocouple lag on EGT (the contract pins egtMeasured = T49.5);
+   - VBV and TBV fed to the gas path;
+   - a combustion-efficiency drop at idle;
+   - customer bleed from stage 5/9;
+   - shutdown -> 'off' (N2 < 1 rpm is never reached: the viscous friction time constant is about 570 s and there is no Coulomb bearing term).
 
 GOTCHAS
-- The model's n1Percent is relative to the definition's 100 % speed (5175 rpm). The design point is 5227 rpm (101 %), held in CycleCalibration n1Rpm vs n1ReferenceRpm.
-- Idle EGT is about 150 K below the measured ground run (466-493 C): the model has no customer bleed, accessory load or VBV flow at idle.
-- StationState cannot express reverse flow. During a Greitzer episode, station 3 W shows 0 when Phi < 0. This is a contract question for later.
-- Similarity sub-idle pressures are floored at ambient (documented in the code).
-- The model's simulation tests take about 40 s under coverage. The describe blocks have a 120 s timeout.
-- Each CycleModel reset or ambient change runs about 25 steady solves (about 0.1-0.3 s).
-- No new dependencies. No dev server, Chrome or GPU device was started. Scratch scripts are outside the repo.
+- Stryker on this code is slow:
+  - REFERENCE_ENGINE is sized at import, so every mutant in thermo, engine or componentMaps code reached by the sizing is "static" (72 % of the thermo+numerics set) and runs the whole suite.
+  - The instrumented dry run of the unit suite takes about 19 min, so the default 5-minute dryRunTimeoutMinutes fails. Pass `--dryRunTimeoutMinutes 90`.
+  - Use `--incremental` (reports/stryker-incremental.json) so a re-run re-tests only what changed.
+- The model's n1Percent is relative to the definition's 100 % speed (5175 rpm). The design point is 101 % (5227 rpm).
+- Idle EGT is about 150 K under the measured ground run: the model has no customer bleed, accessory load or VBV flow at idle.
+- StationState cannot express reverse flow, so station 3 W shows 0 during a Greitzer episode while Phi < 0. This is a contract question.
+- Each CycleModel reset or ambient change runs about 25 steady solves (0.1-0.3 s); leverForNetThrust runs about 10.
+- The cycle tests take about 45 s plain. The whole suite takes about 150 s under coverage.
+- No new dependencies. No dev server, Chrome or GPU device was started. Scratch scripts live outside the repo.
 
-GATES @ the WIP commit (this commit adds docs only)
-- npm test: 1007 passed / 1 failed (C5) / 0 skipped (34 files)
-- npm run lint: clean. npm run typecheck: clean.
-- coverage: lines 99.3 %, statements 98.2 %, branches 87.9 %, functions 99.9 %; src/thermo 100 % lines, src/cycle 98.6 % lines. src/cycle branches 80.2 % < 85 %, so the gate FAILS.
-- mutate: not run.
+GATES
+- (filled in at the end of the pass)
