@@ -826,3 +826,125 @@ None.
 - No threshold was loosened. C5 follows D2-1. The thermo data, the pyCycle numbers and the scaling match their sources. The Newton and C8 machinery is robust, and nothing is swallowed.
 - I explicitly allow I1-I4 after the merge, assigned to the planned **cycle fix round** together with D2-15 and the full mutation score: I3 first, then I4, then I1 (needs decision (l)); I2 needs decision (m).
 - The nits go to the same round.
+
+## Critic pass 3: w1/geometry @93e9877
+
+Reviewed 2026-10-26 by the pass-3 critic:
+- the branch diff from ac22ee3: `src/geometry/**`, `src/render/**`, `src/lookdev/main.ts`, `lookdev.html`, the D2-2 changes (`src/engine/facts.ts`, `definition.test.ts`, `designPoint.test.ts`, ENGINE_FACTS, PHYSICS 2.3, MESH.md, the manifest), the tests, LOOKDEV.md and NOTICE.md;
+- the seven screenshots in `docs/look-dev/`, against LD-1..LD-6 and D3-1.
+
+Checklists applied: typescript-reviewer, silent-failure-hunter, pr-test-analyzer, security-review (the look-dev page reads a fixed HDRI URL and a few query parameters, all mapped onto fixed enums; no eval, storage or network beyond same-origin fetch; nothing found), and the three/WebGPU pitfalls in GPU_FACTS M11-M28.
+
+New probe: `docs/reviews/probes/w1g-geometry.probe.ts.txt`. It runs the topology checks on the shipped `high` preset, and checks every part-loop vertex against every flow annulus.
+
+**Gates at HEAD** (rerun in the builder worktree; tracked files unchanged):
+- `npm test`: 1169 passed (39 files), exit 0.
+- `npm run lint`: clean. `npm run typecheck`: clean.
+- `npm run coverage`: lines 98.13 %, statements 97.06 %, branches 87.64 %, functions 97.9 %. `src/geometry`: lines 99.62 %, branches 91.62 %, functions 100 %. `src/lookdev/main.ts` sits in the unit coverage at 0 % (W1G-N5).
+- `npm run test:mesh`: 29 passed.
+- `npm run test:browser`: 2 passed (main thread, every preset; worker on an OffscreenCanvas).
+
+**D2-2 (A8/A18), checked:**
+- The facts carry 0.1852 / 0.9161 m² (`estimate`, [D2-2]). The w1/cycle sizing gives 0.185182 / 0.916069 m², so the four-digit rounding is 1e-4 / 3e-5 relative.
+- The plug radius at the lip (0.3052 m) and the core-cowl radius at the fan nozzle (0.5305 m) follow from the definition formulas.
+- `definition.test` pins both exit annulus areas to 1e-6 and a monotonic area fall over the last 0.2 m, so the exits are the throats.
+- **The `designPoint.test` rewrite is sound.** The constant-cp estimate is now pinned to its own derivation table (0.1778 / 0.9067, ENGINE_FACTS "Design-point estimate") and tied to the sized areas within 5 % / 2 %, instead of claiming that it produces the facts. It is not a threshold (PHYSICS has none for the estimate).
+- MESH.md and the metrics JSON are updated. The manifest hashes moved (130k 33c76df6, 80k 6f316568), `test:mesh` passes, and `npm run mesh` reproduces them in the trial merge (below).
+- The tie between the cycle's sizing and these facts has no test (cross-branch, W1C-I3).
+
+**Code, checked and sound:**
+- **Geometry.** `src/geometry` is pure, deterministic and typed-array based (worker-transferable).
+- **Topology tests.** `meshTopology` welds exact duplicates and then counts boundary, non-manifold and misoriented edges, degenerate triangles and the divergence-theorem volume. That is the right set of checks.
+- **Blade tests.** Per row: watertight, outward, the clearance kept at every vertex, the hub ring on the hub wall, the tip ring exactly one tip clearance inside the casing, the LE on the definition line, normals agreeing with the faces, unit tangents.
+- **Worker-safety (D2-4).** No DOM in `src/render` (the only `HTMLCanvasElement` is a type). `setSize(w, h, false)`. The HDRI comes through HDRLoader (fetch). The worker entry renders the same EngineView, and its browser test passes.
+- **Device errors.** `gpuDevice.ts` listens with `addEventListener('uncapturederror')`, which three's `onuncapturederror` assignment cannot clobber (M16), and reports every loss except our own destroy (M17). Nothing is swallowed. W1G-N3 lists the leaks on failed init and dispose.
+- The rotor pass uses `setClearColor(0, 0)`. Blades upload no tangents (three's Instance.js does not rotate them, recorded in the handoff). The scene-camera uniforms go into the post quad. These are the pitfalls the builder hit, and they are handled.
+
+**Frame-time claim (20-23 ms vs ~8 ms):**
+- The claim is credible as "far over budget", but it is not a GPU cost.
+- `lookdev.timeFrames` (`src/lookdev/main.ts:120-128`) awaits `queue.onSubmittedWorkDone()` after every frame. So it measures the serialized CPU + GPU + submission round trip, with no pipelining, on the main thread, while a Stryker run had 8 workers on the CPU. It cannot tell CPU-bound from GPU-bound.
+- What the chain draws:
+  - two MRT scene passes into three `rgba16float` targets at 1080p;
+  - 1,461,160 triangles (probe; the handoff's 1.46 M is right), most of them hidden in realistic mode (2,272 of the 2,296 blades and the internals sit behind the cowls);
+  - GTAO at half resolution, a full-resolution 24-tap rotor composite, TRAA, depth of field and bloom.
+- On the Arc 140T that is plausibly 10+ ms of GPU by itself, so the ~8 ms target needs the LD-6 measures: cull the hidden rows and internals outside cutaway, DOF only in cinematic mode, fewer blur taps.
+- The P2 budget is 16.7 ms minus the solver's ≤ 7 ms. W1G-I2 says how to measure it.
+
+**Visual review** (`docs/look-dev/01..07`, 1920x1080). I confirm LD-1..LD-6 and add the causes and fixes below. The studio look of D3-1 is not started yet, so everything below is for the look-dev round:
+- **LD-1 (fan), confirmed and refined.**
+  - 05/06: the outer span blurs into a disc, but the inner ~40 % shows dark knife-edged gaps and blade-edge "teeth" radiating from the spinner. That is the single fan-face blur plane departing from the blades near the hub (the handoff's diagnosis).
+  - 01: the default realistic preset uses a 180° shutter at idle: 54° per exposure, 3.6 blade pitches. The idle fan becomes an unreadable smear. Use a short shutter (1/500-1/1000 s) in the realistic presets, and keep 180° for a "film" mode.
+  - 03 (cutaway): the fan reads as a translucent sheet, for the same reason. Cutaway and exploded need a near-zero shutter.
+  - 04 (exploded): the fan blades are hidden inside the opaque fan case. `fan-case`, the spinner and the fan row are all module `fan` (rank 0, `parts.ts:252`, `explode.ts:9`), so the most recognisable part never shows. Give the fan case its own forward offset (with the intake), or move the fan rotor out of its case.
+- **LD-2 (nacelle and lip), confirmed, with the cause of the blocky reflections.**
+  - The inlet lip is metalness 1 at roughness 0.14 (`materials.ts:167`). The nacelle paint has clearcoat 1 at clearcoatRoughness 0.05 (`:138-141`).
+  - Both mirror the **1k** HDRI (1024x512). Its texels show as stair-step "bricks" along the lip and the nacelle: 02 on the left lip, 05/06 on the right half of the lip and cowl.
+  - Fix: satin paint (base roughness about 0.45, clearcoat ≤ 0.5 at about 0.3 roughness, a faint orange peel), and a lip at roughness ≥ 0.25 with circumferential anisotropy. Use a 2k/4k environment, or the D3-1 studio rig, for anything glossier.
+- **LD-3 / D3-1 (environment), confirmed.**
+  - The "studio sweep" is a near-black sphere: colours 0.05 → 0.004 (`engineView.ts:107-116`).
+  - There is one unshadowed directional key (`:117-121`), no fill, no rim, no floor.
+  - Bloom (threshold 0.9) haloes the lip in 01 (left) and 03 (top-left, bottom-left).
+  - Fix: a cyclorama floor and sweep at about 0.2 albedo; a soft-shadowed key plus fill and rim (area lights or a studio HDRI); a contact shadow or AO under the nacelle; a bloom threshold above the lip's specular peak.
+- **LD-4 (cutaway and proportions), confirmed.**
+  - 03: the section caps are not distinguishable at the wide view. The fine hatch aliases away, and the cap colour is the metal's. Use a flat, distinct cap colour with an anti-aliased (fwidth) hatch.
+  - 03/07: the combustor reads as a wavy double tube. It needs an annular liner, a dome and fuel-nozzle stems.
+  - 02/03/07: the plug is a polished-copper ogive "bullet". A straight cone with a small tip radius, in dull grey superalloy, would read right; its size matches the definition (r 0.305 m at the lip, 0.65 m aft of it).
+  - Frames and struts are still missing (the handoff's list).
+- **LD-5 (materials), confirmed.**
+  - Nearly every part is metalness 1 (`materials.ts:167-259`).
+  - The heat-tint ramp reads as varnished wood grain on the combustor, turbine cases and plug (04, 07).
+  - Fix: cases painted or cast (metalness ≤ 0.3, roughness 0.55-0.7); hot section dull superalloy (roughness about 0.5); the tint lower in chroma and graded along x from the hot zones.
+- **New visual items:**
+  - **V1 (07): stair-step blade silhouettes in close-ups.** The `high` preset lofts core blades with only 6 sections x 15 points (`engineGeometry.ts:33`). Use about 12 sections for HPT/LPT, or a distance LOD.
+  - **V2 (03, 07): every compressor and turbine blade carries one bright specular streak.** They read as lit tubes. Raise the roughness or vary it per blade, so the key-light highlight breaks up.
+  - **V3 (03, 05): the acoustic-liner perforation moirés** on the inlet barrel and the fan case. Fade it with fwidth, or make it a mip-mapped normal map.
+  - **V4 (01, 05): the spinner reads as a chrome cone.** The CFM56-7 spinner is dark with a white spiral (handoff item 3). Use a matte dark base (roughness about 0.5) so the stripe reads.
+  - **V5 (04): the exploded preset clips the exhaust** at the right edge of the frame.
+
+### Blocking
+None.
+
+### Important
+- **W1G-I1 OPEN: the shipped `high` preset is never checked, and its fan case is not manifold.**
+  - Where:
+    - every geometry test uses `GEOMETRY_QUALITY.test` or a coarser loft (`blade.test.ts:15`, `engineGeometry.test.ts:9`);
+    - `engineView.ts:95` and the worker build `high` (21x41 fan sections, 6x15 core, 192 segments, 10 wall samples).
+  - Failure, from the probe on `buildEngineGeometry(def, GEOMETRY_QUALITY.high)`: part `fan-case` has 384 non-manifold edges and 768 degenerate triangles (192 segments x 2 and x 4). Every other row and part is clean.
+  - Likely cause: `xsBetween` (`parts.ts:79-85`) collects x samples in a `Set` of doubles. A wall sample within float32 resolution of a uniform x then becomes a coincident vertex after the `Float32Array`, so there are zero-length loop segments.
+  - So a bug that appears only at the production resolution (seams, slivers, shading cracks, cutaway caps over a non-manifold loop) passes the suite. The whole `high` build plus topology takes about 1 s (the probe ran in 1.26 s), so there is no cost reason to skip it.
+  - Fix:
+    - merge x samples closer than about 1e-6 m in `xsBetween` and `dedupe`;
+    - run the topology test for every row and part, and the annulus test, at `high` too.
+  - Allowed after merge: the look-dev round, first task.
+- **W1G-I2 OPEN: the render-time number cannot steer the performance work.** See the frame-time paragraph above.
+  - Fix, in the look-dev round before any optimisation:
+    - per-pass GPU timestamps (the device already requests `timestamp-query`; use three's `trackTimestamp` or, after the merge, gpu-spikes' `TimestampRing`);
+    - CPU time per frame reported separately;
+    - measured in the worker (D2-4) at the D0-1 protocol, in the orchestrator's quiet window.
+  - Report GPU ms per pass against the ≤ 8 ms render budget, then cull, LOD and gate DOF (LD-6).
+  - Allowed after merge.
+
+### Nits
+- **W1G-N1 OPEN: the annulus test samples only mid-span.**
+  - Where: `engineGeometry.test.ts:88-111` tests one point per x at mid-span, 9 x per component.
+  - Failure: a disk rim, a drum or a case wall that pokes into the annulus anywhere else passes. The probe finds 0 intrusions over every part-loop vertex today, so this is a gap, not a bug.
+  - Fix: test every part-loop vertex against every component annulus (the probe's loop), at both presets.
+- **W1G-N2 OPEN: the browser test cannot see a blank or broken frame.**
+  - Where: `tests/browser/engineView.test.ts` asserts zero GPU errors and a triangle count only, at `quality: 'test'`, with the worker on one preset.
+  - Failure: a broken rotor composite, a NaN uniform or a camera inside a part all pass.
+  - Fix: read the canvas back per preset and assert coverage and mean-luminance bands, with one preset at `high`.
+- **W1G-N3 OPEN: cleanup and error paths in the render module.**
+  - Device leaks:
+    - `createEngineView` leaks the device if `renderer.init()`, the HDRI fetch or `buildEngineGeometry` throws after `createEngineDevice` (`engineView.ts:80-99`).
+    - `dispose()` drops a rejection: `void Promise.resolve(renderer.dispose()).then(...)` leaves the device alive with an unhandled rejection.
+  - Worker:
+    - a message that arrives before `init` resolves throws "init first";
+    - a device loss reaches the main thread only inside a later `rendered` reply (`worker.ts:65-83`).
+  - Fix: destroy on any init failure; queue messages until ready; post a `gpu-error` message from `onError` (part of the gpuDevice.ts → `src/gpu/device.ts` swap).
+- **W1G-N4 OPEN (cross-branch): two notice files and no licence text.** After the merge, `NOTICE` (w1/cycle, the pyCycle maps) and `NOTICE.md` (this branch, the CC0 HDRI) sit side by side. Merge them into one `NOTICE`. Apache-2.0 §4(a) also asks that recipients get a copy of the licence, so add `LICENSES/Apache-2.0.txt` before anything is published.
+- **W1G-N5 OPEN: `src/lookdev/main.ts` counts as 0 % in the unit coverage.** It is a page entry like `src/render`. Exclude it in `vitest.config.ts`, or move its logic into a pure module.
+
+**Verdict w1/geometry @93e9877: MERGE, with the look-dev fix round already planned.**
+- The code is sound: pure, deterministic geometry with real topology checks, worker-safe rendering, and errors routed rather than swallowed.
+- The visual quality is below the bar, and the look-dev round takes it with D3-1's studio look: LD-1..LD-6, refined above, plus V1-V5.
+- I1 and I2 are allowed after the merge, as the round's first tasks. The nits go to the same round.
