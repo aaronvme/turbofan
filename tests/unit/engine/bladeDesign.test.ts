@@ -253,6 +253,29 @@ describe('designRow', () => {
     expect(designRow(EDGES, aero, { count: 24 }, { maxCountPasses: 0 }).count).toBe(24);
   });
 
+  it('W0C-N4: a count that flips between two neighbours settles on the one nearer the target solidity', () => {
+    // At a rounding boundary, count c gives a stagger whose chord asks for c + 1 and back
+    // (three rows of the reference engine do this). Sweep the target solidity finely and
+    // check every result: either the count is what its own chord asks for, or it is the
+    // member of the flip-flop whose mid solidity is closer to the target.
+    const aero = stator(45 * DEG, 0);
+    let flipFlops = 0;
+    for (let k = 0; k <= 600; k++) {
+      const target = 1 + k * 0.001;
+      const row = designRow(EDGES, aero, { targetSolidity: target });
+      const asked = Math.round((2 * Math.PI * R_MID * target) / row.chord.mid);
+      if (asked === row.count) continue;
+      flipFlops++;
+      const other = designRow(EDGES, aero, { count: asked });
+      expect(Math.abs(row.solidity.mid - target)).toBeLessThanOrEqual(
+        Math.abs(other.solidity.mid - target),
+      );
+      // the other neighbour flips back: this really is a two-count cycle
+      expect(Math.round((2 * Math.PI * R_MID * target) / other.chord.mid)).toBe(row.count);
+    }
+    expect(flipFlops).toBeGreaterThan(0);
+  });
+
   it('W0C-I4: a row that does not turn needs no deviation, even at a tiny solidity', () => {
     // Carter's k exceeds 1 at sigma ~ 0.04, but there is no turning to deviate from
     const row = designRow(EDGES, stator(30 * DEG, 30 * DEG), { count: 1 });
