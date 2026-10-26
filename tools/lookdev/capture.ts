@@ -74,7 +74,7 @@ interface LookdevPage {
   lookdev?: {
     ready: boolean;
     setPreset(id: string): void;
-    setDebugFlags(f: Readonly<Record<string, boolean>>): void;
+    setDebugFlags(f: Readonly<Record<string, boolean | number | string>>): void;
     renderFrames(n: number): Promise<void>;
     timeFrames(n: number): Promise<Medians>;
     renderFor(ms: number): Promise<void>;

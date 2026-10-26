@@ -18,7 +18,7 @@ export interface TimingConfig {
   readonly id: string;
   readonly group: string;
   readonly preset: string;
-  readonly flags: Readonly<Record<string, boolean>>;
+  readonly flags: Readonly<Record<string, boolean | number | string>>;
 }
 
 /** The official set (D3-7): the default, the cutaway and the hero. About 11 min at D0-1. */
@@ -54,6 +54,14 @@ export const DIAGNOSTIC_CONFIGS: readonly TimingConfig[] = [
     group: 'default',
     preset: 'threeQuarterFront',
     flags: { noPost: true },
+  },
+  // the rotor pass's cost: the rest of the pass, and per fan time copy
+  { id: 'default, no fan', group: 'default', preset: 'threeQuarterFront', flags: { noFan: true } },
+  {
+    id: 'default, 4 fan copies',
+    group: 'default',
+    preset: 'threeQuarterFront',
+    flags: { fanCopies: 4 },
   },
   { id: 'fanTakeoff', group: 'fan', preset: 'fanTakeoff', flags: {} },
   { id: 'cutaway, caps off', group: 'cutaway', preset: 'cutaway', flags: { noCaps: true } },

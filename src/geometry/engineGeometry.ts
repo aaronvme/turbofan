@@ -34,7 +34,10 @@ export const GEOMETRY_QUALITY = {
   high: {
     wallSamples: 10,
     segments: 192,
-    fanBlade: { sections: 25, pointsPerSide: 45 },
+    // 13 x 23 (the chord points are cosine-spaced, so the edges stay fine): at 25 x 45 the
+    // default view's fan triangles were a few pixels each, and the rotor pass paid for the
+    // quad overshading (lookdev-3: rotors 3.2 -> 1.8 ms, no visible change at fanIdle)
+    fanBlade: { sections: 13, pointsPerSide: 23 },
     coreBlade: { sections: 6, pointsPerSide: 15 },
     turbineBlade: { sections: 10, pointsPerSide: 15 },
   },

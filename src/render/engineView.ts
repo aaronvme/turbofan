@@ -101,6 +101,10 @@ export interface DebugFlags {
   readonly linear?: boolean;
   /** Extra LP spool angle, rad (the fan-blur reference renders stills across the exposure). */
   readonly lpPhase?: number;
+  /** Fewer fan time copies than FAN_TIME_SAMPLES (the rotor pass's cost per copy). */
+  readonly fanCopies?: number;
+  /** No fan at all (what the rest of the rotor pass costs). */
+  readonly noFan?: boolean;
 }
 
 const FPS = 60;
@@ -294,11 +298,17 @@ async function assemble(
       fanFrame = (fanFrame + 1) % 1_000_000;
       const j = (fanFrame * 0.5698402909980532) % 1;
       uniforms.fanSeed.value = (fanFrame * 0.7548776662466927) % 1;
-      const nCopies = scene.fanTimeCopies.length;
+      const nCopies = Math.max(
+        1,
+        Math.min(scene.fanTimeCopies.length, flags.fanCopies ?? scene.fanTimeCopies.length),
+      );
       uniforms.fanCopies.value = fanLive ? nCopies : 1;
-      scene.fanTimeCopies.forEach((m, k) => {
-        m.visible = fanLive || k === 0;
-        m.rotation.x = fanLive ? ((k + j) / nCopies - 0.5) * fanSpan : 0;
+      scene.fanTimeCopies.forEach((c, k) => {
+        c.depth.visible = c.shaded.visible =
+          flags.noFan !== true && (fanLive ? k < nCopies : k === 0);
+        c.depth.rotation.x = c.shaded.rotation.x = fanLive
+          ? ((k + j) / nCopies - 0.5) * fanSpan
+          : 0;
       });
 
       const step = dtS / TRANSITION_S;

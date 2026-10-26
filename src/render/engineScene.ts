@@ -17,6 +17,7 @@ import {
   Matrix4,
   Mesh,
   Scene,
+  type Material,
   type Object3D,
 } from 'three/webgpu';
 import { COMPONENT_IDS, type ComponentId } from '../contracts/engine';
@@ -41,13 +42,26 @@ export interface EngineScene {
   readonly skins: readonly Object3D[];
   /** Cap meshes: [start face, end face] per part. */
   readonly caps: readonly (readonly [Mesh, Mesh])[];
-  /** The fan's time copies (stochastic blur, src/render/post.ts); index = userData.timeSample. */
-  readonly fanTimeCopies: readonly InstancedMesh[];
+  /**
+   * The fan's time copies (stochastic blur, src/render/post.ts), index = userData.timeSample:
+   * the depth pre-pass draw and the shaded draw of each (they turn together).
+   */
+  readonly fanTimeCopies: readonly FanTimeCopy[];
   /** Objects the closed engine never shows (src/geometry/visibility.ts): culled in realistic mode. */
   readonly closedHidden: readonly Object3D[];
   readonly triangles: number;
   dispose(): void;
 }
+
+export interface FanTimeCopy {
+  readonly depth: InstancedMesh;
+  readonly shaded: InstancedMesh;
+}
+
+// the rotor pass draws every fan copy's depth first, the other rotors next (renderOrder 1),
+// then the shaded fan copies, which pass only where their depth is the one stored
+const FAN_DEPTH_ORDER = 0;
+const FAN_SHADED_ORDER = 2;
 
 function toGeometry(m: MeshData, withTangents = false): BufferGeometry {
   const g = new BufferGeometry();
@@ -85,7 +99,7 @@ export function buildEngineScene(
   const skins: Object3D[] = [];
   const caps: [Mesh, Mesh][] = [];
   const closedHidden: Object3D[] = [];
-  const fanTimeCopies: InstancedMesh[] = [];
+  const fanTimeCopies: FanTimeCopy[] = [];
   const disposables: BufferGeometry[] = [];
   let triangles = 0;
 
@@ -165,20 +179,28 @@ export function buildEngineScene(
     rowGroup.add(mesh);
     if (r.material === 'fanBlade' && r.spool !== null) {
       // the fan's time copies share the geometry, the instances and the material; the view
-      // turns each by its time offset every frame (W1L-I3)
+      // turns each by its time offset every frame (W1L-I3). Each copy is drawn twice: depth
+      // only with the per-pixel pick first, then shaded where its depth is the stored one
+      // (src/render/materials.ts, fanDepthMaterial), so a pixel is shaded once, not per copy
       mesh.userData.timeSample = 0;
-      fanTimeCopies.push(mesh);
-      for (let k = 1; k < FAN_TIME_SAMPLES; k++) {
-        const copy = new InstancedMesh(g, mesh.material, r.row.count);
+      mesh.renderOrder = FAN_SHADED_ORDER;
+      const copyOf = (k: number, material: Material, order: number, tag: string) => {
+        const copy = new InstancedMesh(g, material, r.row.count);
         copy.instanceMatrix = mesh.instanceMatrix;
         copy.boundingSphere = mesh.boundingSphere;
         copy.userData = { ...mesh.userData, timeSample: k };
-        copy.name = `${mesh.name}:t${String(k)}`;
-        copy.renderOrder = mesh.renderOrder;
+        copy.name = `${mesh.name}:${tag}${String(k)}`;
+        copy.renderOrder = order;
         copy.castShadow = false;
         copy.receiveShadow = true;
         rowGroup.add(copy);
-        fanTimeCopies.push(copy);
+        return copy;
+      };
+      for (let k = 0; k < FAN_TIME_SAMPLES; k++) {
+        const depth = copyOf(k, materials.fanDepth(), FAN_DEPTH_ORDER, 'z');
+        depth.receiveShadow = false;
+        const shaded = k === 0 ? mesh : copyOf(k, mesh.material, FAN_SHADED_ORDER, 't');
+        fanTimeCopies.push({ depth, shaded });
       }
     }
     groupOf(r.module, r.spool !== null).add(rowGroup);

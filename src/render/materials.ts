@@ -19,7 +19,9 @@
 
 import {
   Color,
+  EqualDepth,
   InstancedMesh,
+  MeshBasicNodeMaterial,
   MeshPhysicalNodeMaterial,
   MeshStandardNodeMaterial,
   type Node,
@@ -422,6 +424,12 @@ function bladeHide(
  * history) plus a per-frame offset, so every pixel cycles through all copies over the frames
  * (a static pattern left each pixel on one copy: vertical streaks). Within that copy the depth
  * test is the ordinary one.
+ *
+ * The test runs in the fan's depth pre-pass only (fanDepthMaterial). A discard does not save
+ * the shading on Dawn (WGSL demotes the invocation to a helper, and the shader runs to its
+ * end), so the shaded copies had each cost a full fan (pass 4: rotors 1.2 -> 5.7 ms at the
+ * default view). The shaded copies now pass only where their depth equals the pre-pass's:
+ * one shaded fragment per pixel, the picked copy's front one (lookdev-3).
  */
 function fanTimeMask(u: LookUniforms): Node<'bool'> {
   const sample = uniform(0).onObjectUpdate(({ object }) =>
@@ -500,9 +508,35 @@ function rowSurface(kind: RowMaterial, u: LookUniforms): MeshPhysicalNodeMateria
   }
 }
 
+/**
+ * The fan's depth pre-pass: depth only, the per-pixel copy pick (fanTimeMask) and the same
+ * vertex position as the shaded fan (bladeHide over the same object uniforms), so a shaded
+ * copy's fragment has bit-identical depth where it was picked (EqualDepth, rowSurface).
+ */
+function fanDepthMaterial(u: LookUniforms, positionOf: () => Node<'vec3'>): NodeMaterial {
+  const m = new MeshBasicNodeMaterial();
+  m.colorWrite = false;
+  m.positionNode = positionOf();
+  m.maskNode = fanTimeMask(u);
+  return m;
+}
+
+/** The row's spool angle plus the mesh's own turn, and its blade's angular extent. */
+function bladeHideOf(u: LookUniforms): Node<'vec3'> {
+  // the row group's spool angle plus the mesh's own turn (a fan time copy's offset)
+  const rowAngle = uniform(0).onObjectUpdate(
+    ({ object }) => (object?.parent?.rotation.x ?? 0) + (object?.rotation.x ?? 0),
+  );
+  const tMin = uniform(0).onObjectUpdate(({ object }) => Number(object?.userData.thetaMin ?? 0));
+  const tMax = uniform(0).onObjectUpdate(({ object }) => Number(object?.userData.thetaMax ?? 0));
+  return bladeHide(u, rowAngle, tMin, tMax);
+}
+
 export interface MaterialSet {
   part(kind: PartMaterial): NodeMaterial;
   cap(kind: PartMaterial): NodeMaterial;
+  /** The fan's depth pre-pass (one material for every time copy). */
+  fanDepth(): NodeMaterial;
   /**
    * A blade-row material. Per-row values (the row's rotation and angular extent) are object
    * uniforms read from the mesh's userData, so one material serves every row of its kind.
@@ -524,20 +558,11 @@ export function createMaterials(u: LookUniforms): MaterialSet {
   return {
     part: (kind) => get(`part:${kind}`, () => partMaterial(kind, u)),
     cap: (kind) => get(`cap:${kind}`, () => capMaterial(kind)),
+    fanDepth: () => get('fanDepth', () => fanDepthMaterial(u, () => bladeHideOf(u))),
     row: (kind, spool) =>
       get(`row:${kind}:${String(spool)}`, () => {
         const m = rowSurface(kind, u);
-        // the row group's spool angle plus the mesh's own turn (a fan time copy's offset)
-        const rowAngle = uniform(0).onObjectUpdate(
-          ({ object }) => (object?.parent?.rotation.x ?? 0) + (object?.rotation.x ?? 0),
-        );
-        const tMin = uniform(0).onObjectUpdate(({ object }) =>
-          Number(object?.userData.thetaMin ?? 0),
-        );
-        const tMax = uniform(0).onObjectUpdate(({ object }) =>
-          Number(object?.userData.thetaMax ?? 0),
-        );
-        m.positionNode = bladeHide(u, rowAngle, tMin, tMax);
+        m.positionNode = bladeHideOf(u);
         // inside the nacelle (fan) or the core (every other row): see CAVITY
         m.aoNode = float(kind === 'fanBlade' ? 0.62 : 0.5);
         if (spool !== null) {
@@ -551,7 +576,13 @@ export function createMaterials(u: LookUniforms): MaterialSet {
           m.mrtNode = mrt({
             blur: vec4(spool === 'lp' ? u.lpBlur : u.hpBlur, pitch, fanFlag, 1),
           });
-          if (kind === 'fanBlade') m.maskNode = fanTimeMask(u);
+          if (kind === 'fanBlade') {
+            // the pick was made in the depth pre-pass: only the picked copy's front fragment
+            // has the stored depth, and with no discard here the depth test runs early, so
+            // nothing else is shaded
+            m.depthFunc = EqualDepth;
+            m.depthWrite = false;
+          }
         }
         return m;
       }),
