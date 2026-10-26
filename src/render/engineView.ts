@@ -9,6 +9,7 @@
 
 import {
   AgXToneMapping,
+  Matrix4,
   PCFShadowMap,
   PerspectiveCamera,
   Vector3,
@@ -16,10 +17,15 @@ import {
 } from 'three/webgpu';
 import { DEFAULT_CYCLE_INPUTS, type CycleInputs } from '../contracts/cycle';
 import type { EngineDefinition } from '../contracts/engine';
-import { buildEngineGeometry, GEOMETRY_QUALITY } from '../geometry/engineGeometry';
+import {
+  buildEngineGeometry,
+  GEOMETRY_QUALITY,
+  type EngineGeometry,
+} from '../geometry/engineGeometry';
 import { cutawayWedge } from '../geometry/cutaway';
 import { easeInOut, explodeOffsets } from '../geometry/explode';
 import { advanceAngle, shutterBlurAngle } from '../geometry/motion';
+import { screenRectOfBox, type Box3Like } from '../geometry/screenRect';
 import { closedViewVisibility } from '../geometry/visibility';
 import { requestSimDevice, type GpuErrorReport, type SimDevice } from '../gpu/device';
 import type { FrameSample, PassMedians } from '../gpu/passTimings';
@@ -112,6 +118,23 @@ const CUT_WIDTH = (100 * Math.PI) / 180;
 const EXPLODE_GAP = 0.22;
 const TRANSITION_S = 1.4;
 
+/** The fan blades' axis-aligned box over every angle (a cylinder about x), m. */
+function fanBoxOf(geo: EngineGeometry): Box3Like {
+  const fan = geo.rows.find((r) => r.material === 'fanBlade');
+  if (fan === undefined) throw new Error('engineView: no fan geometry');
+  const p = fan.blade.mesh.positions;
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  let r = 0;
+  for (let i = 0; i < p.length; i += 3) {
+    const x = p[i] ?? 0;
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+    r = Math.max(r, Math.hypot(p[i + 1] ?? 0, p[i + 2] ?? 0));
+  }
+  return { min: [x0, -r, -r], max: [x1, r, r] };
+}
+
 export async function createEngineView(o: EngineViewOptions): Promise<EngineView> {
   const errors: GpuErrorReport[] = [];
   const sink = (r: GpuErrorReport) => {
@@ -180,6 +203,9 @@ async function assemble(
   const fanRow = def.bladeRows.find((r) => r.id === 'fan');
   if (fanRow === undefined) throw new Error('engineView: no fan row');
   const fanPitch = (2 * Math.PI) / fanRow.count;
+  const fanBox = fanBoxOf(geo);
+  const viewProj = new Matrix4();
+  let heightPx = o.height * o.dpr;
   const post: LookPipeline = createPipeline(renderer, scene.main, scene.rotors, camera, {
     rotorSamples: 8,
     aoStrength: 0.9,
@@ -228,6 +254,7 @@ async function assemble(
     device,
     uniforms,
     setSize(width, height, dpr) {
+      heightPx = height * dpr;
       renderer.setPixelRatio(dpr);
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
@@ -343,6 +370,20 @@ async function assemble(
       if (!skinsVisible)
         for (const s of scene.skins) if (s.name.startsWith('cap:')) s.visible = false;
       studio.contact.value = 1 - easeInOut(explode);
+      // the composite's fan region: the fan's box where the exploded view has moved it, 3 px
+      // of margin for the 3 x 3 neighbourhood and TRAA's jitter
+      camera.updateMatrixWorld();
+      viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      const fdx = offsets.fan;
+      const rect = screenRectOfBox(
+        viewProj.elements,
+        {
+          min: [fanBox.min[0] + fdx, fanBox.min[1], fanBox.min[2]],
+          max: [fanBox.max[0] + fdx, fanBox.max[1], fanBox.max[2]],
+        },
+        3 / Math.max(1, heightPx),
+      );
+      post.fanRect.value.set(rect.min[0], rect.min[1], rect.max[0], rect.max[1]);
 
       post.focusDistance.value = camera.position.distanceTo(target);
       if (flags.noPost === true) renderer.render(scene.main, camera);

@@ -28,6 +28,7 @@
 import {
   HalfFloatType,
   RenderPipeline,
+  Vector4,
   type Node,
   type PerspectiveCamera,
   type Scene,
@@ -84,6 +85,8 @@ export interface LookPipeline {
   readonly focusDistance: UniformNode<'float', number>;
   readonly focalLength: UniformNode<'float', number>;
   readonly bokehScale: UniformNode<'float', number>;
+  /** The fan's screen rectangle in uv (u0, v0, u1, v1): the composite's fan region. */
+  readonly fanRect: UniformNode<'vec4', Vector4>;
   /** Depth of field on (cinematic presets) or off (default: it is not drawn at all). */
   setCinematic(on: boolean): void;
   /**
@@ -126,6 +129,8 @@ export function createPipeline(
   const rotorBlur = rotorPass.getTextureNode('blur');
 
   const aoStrength = uniform(settings.aoStrength);
+  // the fan's screen rectangle (u0, v0, u1, v1); the whole screen until the view sets it
+  const fanRect = uniform(new Vector4(0, 0, 1, 1));
 
   // the post quad renders with its own camera, so the scene camera comes in as uniforms
   // (by reference: TRAA's per-frame jitter of the projection is included)
@@ -218,34 +223,42 @@ export function createPipeline(
     // front of what this pixel shows behind the fan, else this pixel's own view past the fan.
     // A pixel whose front surface is ahead of every neighbouring fan fragment (the spinner,
     // the lip) keeps its own colour. One pixel of spatial blur on the fan, none on the rest.
-    const zBehind = select(covered.and(isFan.not()).and(visibleRotor), zRotor, zScene);
-    const centreFan = isFan.and(visibleRotor);
-    const sum = vec3(0).toVar();
-    const weight = float(0).toVar();
-    const fanHits = float(0).toVar();
-    for (let dy = -1; dy <= 1; dy++)
-      for (let dx = -1; dx <= 1; dx++) {
-        const nuv = suv.add(vec2(dx, dy).div(screenSize));
-        const nc = rotorColor.sample(nuv);
-        const nFan = rotorBlur.sample(nuv).b.greaterThan(0.5).and(nc.a.greaterThan(0.5));
-        const nz = viewZOf(rotorDepth.sample(nuv).r);
-        const valid = nFan.and(nz.greaterThan(zBehind));
-        // the view past the fan: this pixel's own composite where it sees no fan; on a fan
-        // pixel, the neighbour's own (a booster blade or the spinner there, else the scene)
-        const nsd = sceneDepth.sample(nuv).r;
-        const nzs = select(nsd.lessThan(1), viewZOf(nsd), float(-1e9));
-        const nRotor = nc.a.greaterThan(0.001).and(nFan.not()).and(nz.greaterThan(nzs));
-        const nPast = select(nRotor, nc.rgb, sceneColor.sample(nuv).rgb.mul(occl));
-        // on a fan pixel, a neighbour whose front surface is ahead of this fan fragment (the
-        // spinner's or the lip's edge) is left out, so occluding edges stay sharp
-        const nFront = select(nRotor, nz, nzs);
-        const occludes = centreFan.and(valid.not()).and(nFront.greaterThan(zRotor.add(0.002)));
-        const w = select(occludes, float(0), float(1));
-        sum.addAssign(select(valid, nc.rgb, select(centreFan, nPast, own)).mul(w));
-        weight.addAssign(w);
-        fanHits.addAssign(select(valid, float(1), float(0)));
-      }
-    return vec4(select(fanHits.greaterThan(0), sum.div(weight.max(1)), own), 1);
+    // Only inside the fan's screen rectangle (the view sets it each frame from the fan's box,
+    // src/geometry/screenRect.ts): elsewhere no pixel or neighbour holds a fan fragment, and
+    // the 45 texture reads per pixel were most of the composite's cost.
+    const result = own.toVar();
+    const inFan = suv.greaterThanEqual(fanRect.xy).all().and(suv.lessThanEqual(fanRect.zw).all());
+    If(inFan, () => {
+      const zBehind = select(covered.and(isFan.not()).and(visibleRotor), zRotor, zScene);
+      const centreFan = isFan.and(visibleRotor);
+      const sum = vec3(0).toVar();
+      const weight = float(0).toVar();
+      const fanHits = float(0).toVar();
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const nuv = suv.add(vec2(dx, dy).div(screenSize));
+          const nc = rotorColor.sample(nuv);
+          const nFan = rotorBlur.sample(nuv).b.greaterThan(0.5).and(nc.a.greaterThan(0.5));
+          const nz = viewZOf(rotorDepth.sample(nuv).r);
+          const valid = nFan.and(nz.greaterThan(zBehind));
+          // the view past the fan: this pixel's own composite where it sees no fan; on a fan
+          // pixel, the neighbour's own (a booster blade or the spinner there, else the scene)
+          const nsd = sceneDepth.sample(nuv).r;
+          const nzs = select(nsd.lessThan(1), viewZOf(nsd), float(-1e9));
+          const nRotor = nc.a.greaterThan(0.001).and(nFan.not()).and(nz.greaterThan(nzs));
+          const nPast = select(nRotor, nc.rgb, sceneColor.sample(nuv).rgb.mul(occl));
+          // on a fan pixel, a neighbour whose front surface is ahead of this fan fragment (the
+          // spinner's or the lip's edge) is left out, so occluding edges stay sharp
+          const nFront = select(nRotor, nz, nzs);
+          const occludes = centreFan.and(valid.not()).and(nFront.greaterThan(zRotor.add(0.002)));
+          const w = select(occludes, float(0), float(1));
+          sum.addAssign(select(valid, nc.rgb, select(centreFan, nPast, own)).mul(w));
+          weight.addAssign(w);
+          fanHits.addAssign(select(valid, float(1), float(0)));
+        }
+      result.assign(select(fanHits.greaterThan(0), sum.div(weight.max(1)), own));
+    });
+    return vec4(result, 1);
   })();
   const compositeTex = rtt(composite, null, null, { type: HalfFloatType });
   compositeTex.name = 'Composite';
@@ -295,6 +308,7 @@ export function createPipeline(
 
   return {
     pipeline,
+    fanRect,
     focusDistance,
     focalLength,
     bokehScale,
