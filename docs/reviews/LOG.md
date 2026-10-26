@@ -1279,3 +1279,68 @@ New probe: `docs/reviews/probes/w1k-calib.probe.ts.txt` (the reference at every 
 - the dataset difference (NME test bed vs an on-wing, likely deteriorated engine).
 
 The ENGINE_FACTS "What binds" and "Likely cause" sections agree with it.
+
+**Probe `w1k-calib` at the reference** (the values the `it.fails` markers see):
+- **The five markers miss:** C11 approach -12.3 % and idle -9.7 %; C10 MPA N2 86.71 vs 89.3 % and EGT 536.4 vs 585 C; idle position 2 N2 62.23 vs 60.7 %.
+- **Every other point passes:** C11 climb-out -2.5 %; takeoff N2 99.88 % / 856.0 C; idle position 1; idle position 2 EGT 461.3 C; C4 at N1 20.09 % / 414.4 C; the booster R-line peaks at 2.62.
+- These match the handoff table.
+
+### Blocking
+None.
+
+### Important
+- **W1K-I1 OPEN: the text around the rejected fit and the KNOWN FAIL markers gives stale or wrong reasons.** Under D3-15 these markers are the visible record of the gap, so their reasons have to be right.
+  - Where:
+    - `src/cycle/partPower.ts:10` says the fit file is one "which CYCLE_CALIBRATION reads". That is false. Only `PART_POWER_FIT_CALIBRATION` reads it, and the reference is not the fit.
+    - `src/cycle/engine.ts:237-241` is D3-11-round text. It says the fit "meets C10 but not C11 and costs the 33.73(a) slam its HPC surge margin: adopting it is an orchestrator decision". After D3-14 the fit meets everything except C11 approach, and the adoption rule has already rejected it.
+    - `engine.ts:250-254` says the probe share is "re-derived to the measured 855 C (W0C-I6)". It is now fitted in [0.25, 0.45]. The list also leaves out the HPC Reynolds lapse and the HPT clearance.
+    - `tests/unit/cycle/c11.test.ts:73-82` gives the reason as "D3-11 bounds bind". For idle that is untrue: the bounded fit meets it (-4.3 %), and the reference misses it because that fit was rejected.
+    - `tests/unit/cycle/c10.test.ts:86-98` says the checks "cannot [be met] with physically justified parameters (W1C-I1 limit, orchestrator decision)". The D3-14 fit meets all three C10 markers inside the bounds.
+    - `docs/ENGINE_FACTS.md:160` says "the D3-11 fit ... puts it at 0.276". The committed fit is 0.284.
+  - Failure: the next calibration round, or a reader of the test output, takes the wrong cause. They may think idle fuel flow is out of reach inside the bounds, or that `partPowerFit.ts` drives the reference. Either way they look in the wrong place for the backlog item D3-15 creates.
+  - Fix (text only):
+    - relabel both marker sets "KNOWN FAIL (D3-15: accepted part-power gap, PHYSICS.md ledger)";
+    - make the doc comments say what is true: in the reference the mechanisms are off; the bounded fit meets C10 and C11 idle/climb-out but misses approach; the fit is rejected for the transients;
+    - fix the three code comments and the facts row.
+  - Allowed after merge (the first cycle round, or a small fix commit before it).
+- **W1K-I2 OPEN: the adoption-rule rejection is real, but its recorded reason is incomplete and nothing in the repo reproduces it.**
+  - Where: ENGINE_FACTS "What binds" (last bullet), the handoff, and the PHYSICS.md ledger ("breaks the transient model"). The evidence was a scratch copy outside the repo.
+  - Probe `w1k-calib`, the 33.73(a) ground-idle slam (lever to maximum in 1 s, 10 s, dt 0.02):
+    - **reference:** 121.3 kN at 10 s, 95 % at 5.82 s, peak EGT 958.3 C, min HPC margin 0.034, no surge;
+    - **committed fit:** min HPC margin **-0.010** with the **surge flag raised**, then a hang at N1 34.7 % / N2 75.3 %, **10.7 kN at 10 s** (the handoff's number), peak EGT 860.4 C.
+  - So the rejection stands, and on stronger grounds than recorded. The committed fit itself surges in the slam. ENGINE_FACTS gives the surge margin only for "an earlier fit" and lists the 10.7 kN as a failure to reach thrust.
+  - Also, the slam's surge on the fit ends in a hung engine, not a recovery. Nobody has looked at that post-surge path, because the reference never surges in the slam. W3's surge scenarios will meet it.
+  - Fix:
+    - correct the recorded reason (the committed fit surges in the 33.73(a) slam, min margin -1.0 %, and hangs at 10.7 kN);
+    - add one pinned test that runs the slam on `PART_POWER_FIT_CALIBRATION` and expects the surge. It marks the rejection the way `partPower.test.ts:251-259` marks the C11 miss, so a future refit is checked against the adoption rule in the repo, not on a scratch copy;
+    - put the post-surge hang in the D3-15 backlog item.
+  - Allowed after merge.
+
+### Nits
+- **W1K-N1: the solver calls a stall "converged".** `boundedLeastSquares.ts:194-198` sets `converged = true` when no damped step lowers the cost after 20 tries. That also happens when every trial returns `null`, i.e. the solves fail all around the point, so a failing neighbourhood reads as an optimum. `partPowerFit.ts:4` prints "converged: true" without the criterion. Fix: return the stop reason (gradient, cost tolerance, no descent, Jacobian failed) and print it in the generated header.
+- **W1K-N2: the VBV / VSV schedules use N2 corrected to T2** (`engine.ts:392`; called with `s2.tt`). The [QAR] CFM schedule cited for them is on N2K25. At ground idle the two frames differ by about 4 %. The knots are `unknown` / `estimate`, so this is a labelling issue. Fix: state "corrected to T2" in the facts rows and the bounds' reasons, or schedule on T25.
+- **W1K-N3: combustion efficiency is keyed on corrected fuel flow** (`engine.ts:689`). At a given corrected point P3 scales with delta2, so at altitude flight idle the real efficiency falls further than the sea-level EEDB table gives (combustor loading). Fix: a ledger note, or a loading-parameter key in the backlog item.
+- **W1K-N4: the duct cold loss is capped at 0.5 silently** (`engine.ts:701`). That is fine as a Newton guard, but a converged point on the cap would be unphysical and unflagged. Fix: assert in the C7/C8 sweeps that no converged point is on the cap, or expose it on the EnginePoint.
+- **W1K-N5: if a later round adopts a fit, the HPC Reynolds exponent needs a compressor source.** The turbine bound reused now is honestly marked `estimate`. This is a backlog note, not a defect.
+
+### Trial merge (w1/cycle-calib-2 @8a962c4 into the critic branch at main 8f066af)
+- **Merge:** `git merge --no-ff --no-commit w1/cycle-calib-2` is clean. 43 files, no conflicts with main's look-dev merge.
+- **`npm run mesh`:** no working-tree change, so the stack's regenerated mesh, manifest and metrics (after the D2-2 redo) are exactly what main's generator produces.
+- **Gates on the combined tree:**
+  - `npm test`: 1577 passed, 5 expected fail (69 files).
+  - `npm run lint` and `npm run typecheck`: clean.
+  - `npm run coverage`: lines 99.5 %, statements 98.56 %, branches 87.91 %, functions 99.58 %; every threshold passes.
+  - `npm run test:mesh`: 29 passed. `npm run build`: ok.
+  - The probe `w1k-calib`: 3 passed.
+- **Restore:** `git merge --abort` (after an index stat refresh: the build's `mesh:assets` had touched `manifest.json` without changing it). Then `dist/`, `coverage/`, the generated `public/mesh/*.bin` and the probe copy were removed. The critic branch is back at its own commits on 8f066af. The builder worktree is clean at 8a962c4.
+
+**Verdict w1/cycle-calib + w1/cycle-calib-2 @8a962c4: MERGE.**
+- C10 and C11 were pre-registered before any tuning, word for word as D3-3 and D3-11. T3 follows D3-5 with its tolerance unchanged, and nothing was loosened.
+- Every mechanism is sourced and bounded, and none acts at the design point. The fit is deterministic, and the adoption rule was applied: the reference is not the fit. The probe confirms the rejection, which is in fact stronger than recorded.
+- W1C-I2, I3, I4 and N1-N5 are closed. The gap W1C-I1 leaves is honestly in the fidelity ledger, as D3-15 asks.
+- The gates are green on the tip and on the merged tree.
+- W1K-I1 (the marker labels and comments state stale reasons) and W1K-I2 (record the slam surge as the reason, and pin it in a test) are allowed after merge. They go to the first cycle round with the nits, the D3-15 backlog item and the D3-13 mutation runs.
+
+**Orchestrator decisions needed (pass 5):**
+- (r) **D3-15 on main:** record D3-15 in the LOG with this merge, so that the relabelled markers (W1K-I1) can cite it.
+- (s) **The post-surge hang (W1K-I2):** the fit's slam surges, then hangs at 10.7 kN instead of recovering. Either add it to the part-power backlog item, or schedule a check of the surge-recovery path (FADEC fuel cut and re-acceleration) before W3's surge scenarios.
