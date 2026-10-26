@@ -92,6 +92,17 @@ describe('axialVelocity (continuity on the subsonic branch)', () => {
     });
     expect(r.cxMPerS).toBe(0);
     expect(r.mach).toBe(0);
+    expect(r.choked).toBe(false);
+  });
+
+  it('W0C-I4: rejects a swirl whose kinetic energy reaches the total enthalpy', () => {
+    // cp = 0.5 makes c_theta^2 / (2 cp) = c_theta^2 exactly, so the static enthalpy hits 0
+    const gas = { cpJPerKgK: 0.5, gamma: 1.4 };
+    const at = (cTheta: number) => () =>
+      axialVelocity({ wKgPerS: 1, ttK: 100, ptPa: pt, areaM2: 1, cThetaMPerS: cTheta, gas });
+    expect(at(10)).toThrow(/axialVelocity: the swirl exceeds the total enthalpy/);
+    expect(at(11)).toThrow(/the swirl exceeds the total enthalpy/);
+    expect(at(9.9)).not.toThrow();
   });
 });
 
@@ -214,6 +225,24 @@ describe('designRow', () => {
       /beyond 90 deg/,
     );
     // turning so large that Carter's rule has no solution at a tiny solidity
-    expect(() => designRow(EDGES, stator(80 * DEG, -60 * DEG), { count: 1 })).toThrow();
+    expect(() => designRow(EDGES, stator(80 * DEG, -60 * DEG), { count: 1 })).toThrow(
+      /designRow: Carter's rule has no solution at sigma/,
+    );
+    // W0C-I4: the exit axial velocity is checked as well as the inlet's
+    expect(() =>
+      designRow(
+        EDGES,
+        { ...stator(0, 0), exit: { rcTheta: 0, cxMPerS: 0 } },
+        { targetSolidity: 1 },
+      ),
+    ).toThrow(/axial velocity must be > 0 at both edges/);
+  });
+
+  it('W0C-I4: a row that does not turn needs no deviation, even at a tiny solidity', () => {
+    // Carter's k exceeds 1 at sigma ~ 0.04, but there is no turning to deviate from
+    const row = designRow(EDGES, stator(30 * DEG, 30 * DEG), { count: 1 });
+    expect(row.deviation).toEqual({ hub: 0, mid: 0, tip: 0 });
+    // equal speeds in and out: a decelerating row in Carter's sense (n = 1/2), not accelerating
+    expect(row.accelerating).toBe(false);
   });
 });
