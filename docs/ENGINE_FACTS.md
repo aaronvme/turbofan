@@ -46,8 +46,8 @@ Reference variant: **CFM56-7B27/3** (Tech Insertion, "TI"), the 27,300 lbf ratin
 | fuelFlowIdle | Fuel flow at the LTO idle setting (7 %) | 0.110 kg/s | 0.11 kg/s | [EEDB] 8CM066 | official |
 | tsfcTakeoff | TSFC, SLS takeoff: the C3 target | 0.376 (lb/h)/lbf | 1.0648e-5 kg/(N s) | derived: fuelFlowTakeoff / takeoffThrust = 1.293 / 121430 = 1.0648e-5 kg/(N s) = 0.3759 (lb/h)/lbf, per [D0-5] | estimate |
 | tsfcTakeoffAvWeek | TSFC at max power (2.7 % above tsfcTakeoff; not the model target) | 0.386 (lb/h)/lbf | 1.0934e-5 kg/(N s) | [AW08] | published |
-| coreNozzleArea | Core nozzle throat area A8 = A9 (convergent, choked at SLS takeoff) | sized | 0.1852 m² | derived: the w1/cycle design-point sizing per [D2-2], A8 = W5 / (choked mass flux at P8, T5), thermally perfect gas, ISA SLS takeoff at fuelFlowTakeoff and takeoffThrust; the constant-cp estimate below gives 0.1778 m² (-4.0 %) | estimate |
-| bypassNozzleArea | Bypass nozzle exit area A18 = A19 (convergent, unchoked at SLS) | sized | 0.9161 m² | derived: the w1/cycle design-point sizing per [D2-2], A18 = W13 / (mass flux at P18, T13, p0), unchoked at SLS takeoff; the constant-cp estimate below gives 0.9067 m² (-1.0 %) | estimate |
+| coreNozzleArea | Core nozzle throat area A8 = A9 (convergent, choked at SLS takeoff) | sized | 0.1851 m² | derived: the w1/cycle design-point sizing per [D2-2] (0.1852 until the NASA TM-4513 N2 data of w1/cycle-calib moved it by -0.08 %), A8 = W5 / (choked mass flux at P8, T5), thermally perfect gas, ISA SLS takeoff at fuelFlowTakeoff and takeoffThrust; the constant-cp estimate below gives 0.1778 m² (-4.0 %) | estimate |
+| bypassNozzleArea | Bypass nozzle exit area A18 = A19 (convergent, unchoked at SLS) | sized | 0.9162 m² | derived: the w1/cycle design-point sizing per [D2-2] (0.9161 before the TM-4513 N2 data, +0.01 %), A18 = W13 / (mass flux at P18, T13, p0), unchoked at SLS takeoff; the constant-cp estimate below gives 0.9067 m² (-1.0 %) | estimate |
 | accelStartMaxThrustFraction | 33.73(b) start point when there is no flight-idle stop: at most this fraction of rated takeoff thrust | 15 % | 0.15 | [CFR] 33.73(b) | official |
 | fanDiameter | Fan diameter (blade tip) | 61 in | 1.5494 m | [FICHE] | official |
 | fanBladeCount | Fan blades (wide chord, Ti-6-4) | 24 | 24 | [NTSB] 1.3.1 | published |
@@ -182,7 +182,7 @@ PHYSICS.md C5 (≤ 5.0 s to 95 % takeoff thrust) is 33.73(b), timed from the sta
 | T45 / T49.5 / T5 | 1243 / 1174 / 965 K |
 | HP / LP shaft work | 26.3 / 19.0 MW |
 | P5 / p0 (core nozzle pressure ratio) | 2.64, choked |
-| A8 / A18 | 0.1778 / 0.9067 m² (this constant-cp estimate; the definition carries the w1/cycle sizing 0.1852 / 0.9161 m², [D2-2]) |
+| A8 / A18 | 0.1778 / 0.9067 m² (this constant-cp estimate; the definition carries the w1/cycle sizing 0.1851 / 0.9162 m², [D2-2]) |
 | Net thrust | 123.9 kN, +2.0 % of takeoffThrust |
 | TSFC | 1.043e-5 kg/(N s), -2.0 % from tsfcTakeoff |
 
@@ -197,7 +197,7 @@ T49.5 (after LPT stage 1, equal stage work) comes out at 1174 K = 901 °C, i.e. 
 | Intake | -0.775 to 0 | highlight 0.800, throat 0.735, fan casing 0.7767 | throat Mach about 0.65 at takeoff; highlight area 1.07 x the fan tip area |
 | Spinner | -0.42 to 0 | 0 to 0.229 | conical nose; hub/tip 0.296 at the fan face, fan-face Mach about 0.6 |
 | Fan | 0 to 0.26 | hub rises 0.229 to 0.316 | the hub climbs to the booster radius, as in CFM56-class fans |
-| Bypass duct | 0.26 to 1.55 | core cowl 0.430 to 0.535, nacelle 0.777 to 0.757 | Mach about 0.5 behind the OGVs, accelerating to the nozzle; A18 = 0.9161 m² (core cowl r = 0.5305 at the fan nozzle exit) |
+| Bypass duct | 0.26 to 1.55 | core cowl 0.430 to 0.535, nacelle 0.777 to 0.757 | Mach about 0.5 behind the OGVs, accelerating to the nozzle; A18 = 0.9162 m² (core cowl r = 0.5305 at the fan nozzle exit) |
 | Booster | 0.26 to 0.64 | 0.316 to 0.345 / 0.430 to 0.410 | entry Mach about 0.5; 7 rows (IGV + 3 stages) |
 | Transition duct | 0.64 to 0.86 | gooseneck down to 0.222 / 0.316 | brings the core flow down to the HPC radius |
 | HPC | 0.86 to 1.46 | 0.222 to 0.262 / 0.316 to 0.281 | entry Mach about 0.45, exit about 0.3 (19 mm blades at the exit); 19 rows |
@@ -205,7 +205,7 @@ T49.5 (after LPT stage 1, equal stage work) comes out at 1174 K = 901 °C, i.e. 
 | HPT | 1.74 to 1.88 | 0.298 / 0.342 to 0.348 | NGV + rotor |
 | Inter-turbine duct | 1.88 to 1.97 | rises to 0.330 / 0.388 | the LPT sits at a larger radius than the HPT |
 | LPT | 1.97 to 2.37 | 0.330 to 0.335 / 0.388 to 0.452 | 8 rows; exit Mach about 0.4 |
-| Exhaust and plug | 2.37 to 3.40 | plug 0.335 to 0 / casing 0.452 to 0.390 | core nozzle lip at x = 2.75, A8 = 0.1852 m² (plug r = 0.3052 at the lip) |
+| Exhaust and plug | 2.37 to 3.40 | plug 0.335 to 0 / casing 0.452 to 0.390 | core nozzle lip at x = 2.75, A8 = 0.1851 m² (plug r = 0.3053 at the lip) |
 | Nacelle | -0.775 to 1.55 | outer radius up to 1.06 | nacelleMaxDiameter |
 
 ## Model vs published (updated every wave)
@@ -229,19 +229,19 @@ Model: the W1 cycle model (`src/cycle`, w1/cycle), ISA SLS static unless stated.
 
 ## Cycle model calibration (W1)
 
-The W1 model is thermally perfect (src/thermo) and map-based (pyCycle maps, NOTICE). It takes every W0 assumption above unchanged (pressure ratios, efficiencies, losses, cooling, LHV) except the two rows below. Its own sized outputs replace the W0 estimate's derived values for the cycle; the definition's flowpath still uses the W0 placeholders (see the w1-cycle handoff).
+The W1 model is thermally perfect (src/thermo) and map-based (pyCycle maps, NOTICE). It takes every W0 assumption above unchanged (pressure ratios, efficiencies, losses, cooling, LHV) except the two rows below. Its own sized outputs replace the W0 estimate's derived values for the cycle; since D2-2 the definition's flowpath carries the sized nozzle areas too (coreNozzleArea, bypassNozzleArea).
 
 Sized at ISA SLS takeoff (D1-2): the fan bypass pressure ratio is solved so that net thrust equals takeoffThrust at fuelFlowTakeoff, so C1 and C3 close exactly and BPR, OPR and airflow are inputs.
 
 | Quantity | W0 estimate | W1 cycle | How |
 |---|---|---|---|
 | Fan bypass pressure ratio | 1.55 (assumed) | 1.537 | sizing output: thrust closure at the EEDB fuel flow |
-| Core nozzle area A8 | 0.1778 m² | 0.1852 m² (+4.2 %), `estimate` | sizing output: A8 = W5 / (choked flux at P8, T5), thermally perfect, at ISA SLS takeoff with fuelFlowTakeoff |
-| Bypass nozzle area A18 | 0.9067 m² | 0.9161 m² (+1.0 %), `estimate` | sizing output: A18 = W13 / (flux at P18, T13, p0), unchoked at SLS |
+| Core nozzle area A8 | 0.1778 m² | 0.1851 m² (+4.1 %), `estimate` | sizing output: A8 = W5 / (choked flux at P8, T5), thermally perfect, at ISA SLS takeoff with fuelFlowTakeoff |
+| Bypass nozzle area A18 | 0.9067 m² | 0.9162 m² (+1.0 %), `estimate` | sizing output: A18 = W13 / (flux at P18, T13, p0), unchoked at SLS |
 | T3 / T4 / T41 / T45 | 836 / 1746 / 1627 / 1243 K | 810.6 / 1641 / 1551 / 1200.6 K | thermally perfect cp(T, FAR) instead of cold 1004.7 and hot 1150 J/(kg K) |
 | T49.5 at ISA takeoff, displayed EGT | 1174 K, 931 C | 1112 K, 866.5 C | thermally perfect gas plus the two calibrations below |
 
-Decision D2-2: the sized A8 and A18 replace the definition's placeholders (bypassNozzleArea above, the core nozzle lip in definition.ts) only after w1/mesh merges, because the flowpath, the mesh and the 3D geometry all derive from definition.ts. Until then the cycle uses its own sized areas and the definition keeps 0.1778 / 0.9067 m².
+Decision D2-2: the sized A8 and A18 replace the definition's placeholders (coreNozzleArea and bypassNozzleArea above set the plug radius at the core nozzle lip and the core cowl radius at the fan nozzle in definition.ts), so the cycle, the flowpath, the mesh and the 3D geometry share one pair of areas. tests/unit/cycle/engine.test.ts (W1C-I3) fails if the sizing moves more than the facts' four-digit rounding (5e-4 relative) from them, or if the definition's station 8 and 18 annuli differ from the facts; the fix is to redo D2-2 (the facts, then `npm run mesh`).
 
 Calibrated parameters (W0C-I6), each a model assumption with no public value, both `estimate` (calibrated):
 

@@ -3,6 +3,7 @@ import { THRESHOLDS } from '../../../src/contracts/thresholds';
 import { ISA_SLS } from '../../../src/contracts/ambient';
 import { factValue } from '../../../src/engine/facts';
 import { ENGINE_DEFINITION } from '../../../src/engine/definition';
+import { casingRadiusAt, hubRadiusAt } from '../../../src/contracts/engine';
 import {
   CYCLE_CALIBRATION,
   REFERENCE_ENGINE,
@@ -61,12 +62,29 @@ describe('design point (D1-2): sized to the published SLS takeoff figures', () =
       THRESHOLDS.C3.values.maxRelativeError.value,
     );
   });
-  it('nozzle areas are outputs: core choked, bypass not, near the W0 placeholders', () => {
+  it('nozzle areas are outputs: core choked at SLS takeoff, bypass not', () => {
     expect(dp.coreNozzleAreaM2).toBeGreaterThan(0);
-    expect(rel(dp.coreNozzleAreaM2, factValue('coreNozzleArea'))).toBeLessThan(0.15);
-    expect(rel(dp.bypassNozzleAreaM2, factValue('bypassNozzleArea'))).toBeLessThan(0.15);
     expect(dp.point.coreNozzleChoked).toBe(true);
     expect(dp.point.bypassNozzleChoked).toBe(false);
+  });
+  it('W1C-I3 / D2-2: the sized A8 and A18 are the definition nozzle areas (one source of truth)', () => {
+    // the facts carry the sizing to four digits (half a unit in the last digit: 5e-4 relative at
+    // most); the definition's flowpath is built from the facts
+    const redo =
+      'the sizing moved: redo D2-2 (coreNozzleArea / bypassNozzleArea facts, then npm run mesh)';
+    expect(rel(dp.coreNozzleAreaM2, factValue('coreNozzleArea')), redo).toBeLessThan(5e-4);
+    expect(rel(dp.bypassNozzleAreaM2, factValue('bypassNozzleArea')), redo).toBeLessThan(5e-4);
+    const fp = ENGINE_DEFINITION.flowpath;
+    const annulus = (component: string, station: string) => {
+      const x = ENGINE_DEFINITION.stations.find((s) => s.id === station)?.x ?? NaN;
+      const c = fp.components.find((k) => k.id === component);
+      if (c === undefined) throw new Error(`no ${component}`);
+      const rc = casingRadiusAt(fp, c, x) ?? NaN;
+      const rh = hubRadiusAt(fp, c, x) ?? NaN;
+      return Math.PI * (rc * rc - rh * rh);
+    };
+    expect(rel(annulus('exhaust', '8'), factValue('coreNozzleArea'))).toBeLessThan(1e-9);
+    expect(rel(annulus('bypassDuct', '18'), factValue('bypassNozzleArea'))).toBeLessThan(1e-9);
   });
   it('the fan bypass pressure ratio that closes the thrust is physically plausible', () => {
     expect(dp.fanBypassPressureRatio).toBeGreaterThan(1.45);

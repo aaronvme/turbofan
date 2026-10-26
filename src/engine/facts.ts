@@ -45,8 +45,8 @@ export const ENGINE_FACTS = {
   tsfcTakeoff: f(1.0648e-5, 'kg/(N s)', 'estimate'),
   tsfcTakeoffAvWeek: f(1.0934e-5, 'kg/(N s)', 'published'),
   // the w1/cycle design-point sizing (D1-2, D2-2)
-  coreNozzleArea: f(0.1852, 'm²', 'estimate'),
-  bypassNozzleArea: f(0.9161, 'm²', 'estimate'),
+  coreNozzleArea: f(0.1851, 'm²', 'estimate'),
+  bypassNozzleArea: f(0.9162, 'm²', 'estimate'),
   accelStartMaxThrustFraction: f(0.15, '', 'official'),
   fanDiameter: f(1.5494, 'm', 'official'),
   fanBladeCount: f(24, '', 'published'),
