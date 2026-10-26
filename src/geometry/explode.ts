@@ -18,6 +18,12 @@ export function easeInOut(t: number): number {
   return u * u * (3 - 2 * u);
 }
 
+/**
+ * Extra forward slide of the intake module, m. The fan case belongs to it (parts.ts), so it
+ * clears the fan blades instead of hiding them; 0.75 m takes it past the spinner nose too.
+ */
+export const INTAKE_LEAD = 0.75;
+
 /** Axial offset per module, m, at explode amount t in [0, 1] (eased) and `gap` per rank. */
 export function explodeOffsets(
   def: EngineDefinition,
@@ -27,5 +33,6 @@ export function explodeOffsets(
   const e = easeInOut(t);
   const out = {} as Record<ComponentId, number>;
   for (const id of COMPONENT_IDS) out[id] = e === 0 ? 0 : e * gap * moduleRank(def, id);
+  if (e !== 0) out.inlet -= e * INTAKE_LEAD;
   return out;
 }

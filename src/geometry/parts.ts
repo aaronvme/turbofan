@@ -34,6 +34,7 @@ export const PART_MATERIALS = [
   'disk',
   'innerCase',
   'shaft',
+  'combustorLiner',
 ] as const;
 export type PartMaterial = (typeof PART_MATERIALS)[number];
 
@@ -46,6 +47,11 @@ export interface PartSpec {
   readonly spool: Spool | null;
   /** Skins hidden in the exploded view (cowls come off before an engine is split). */
   readonly skin: boolean;
+  /**
+   * Visual only and inside a flow annulus (the combustor liner): the flow solver sees the
+   * definition's annulus, not this part, so the annulus checks skip it.
+   */
+  readonly decorative?: boolean;
   readonly loop: readonly P2[];
 }
 
@@ -75,13 +81,30 @@ const SHAFTS = {
   hp: { rIn: 0.075, rOut: 0.09, x0: 0.88, x1: 1.84, boreR: 0.1 },
 } as const;
 
+/**
+ * Samples closer than this are one sample, m. The meshes are float32: two doubles that differ
+ * by less than its resolution (~3e-8 m at x ~ 0.3 m) become one vertex, i.e. a zero-length
+ * loop segment, degenerate triangles and non-manifold edges after revolving (W1G-I1: the
+ * fan case at the high preset had 384 such edges).
+ */
+export const X_MERGE = 1e-6;
+
 /** x of the wall samples strictly inside (x0, x1), plus both ends and a 50 mm minimum grid. */
-function xsBetween(x0: number, x1: number, walls: readonly EngineWall[]): number[] {
-  const xs = new Set<number>([x0, x1]);
-  for (const w of walls) for (const p of w.samples) if (p.x > x0 && p.x < x1) xs.add(p.x);
+export function xsBetween(x0: number, x1: number, walls: readonly EngineWall[]): number[] {
+  const xs: number[] = [x0, x1];
+  for (const w of walls) for (const p of w.samples) if (p.x > x0 && p.x < x1) xs.push(p.x);
   const n = Math.ceil((x1 - x0) / 0.05);
-  for (let k = 1; k < n; k++) xs.add(x0 + ((x1 - x0) * k) / n);
-  return [...xs].sort((a, b) => a - b);
+  for (let k = 1; k < n; k++) xs.push(x0 + ((x1 - x0) * k) / n);
+  xs.sort((a, b) => a - b);
+  // keep both ends exactly; drop interior samples within X_MERGE of a kept one or of x1
+  const out: number[] = [];
+  for (const x of xs) {
+    const last = out[out.length - 1];
+    if (last !== undefined && x - last < X_MERGE) continue;
+    if (x !== x1 && x1 - x < X_MERGE) continue;
+    out.push(x);
+  }
+  return out;
 }
 
 /** The loop between lower(x) and upper(x) over the x samples: lower forward, upper back. */
@@ -103,24 +126,88 @@ function bandLoop(
   return dedupe(loop);
 }
 
-/** Drops consecutive repeats and a closing repeat; zero-thickness ends collapse to a point. */
-function dedupe(loop: readonly P2[]): P2[] {
+const near = (a: P2, b: P2) => Math.abs(a.x - b.x) < X_MERGE && Math.abs(a.r - b.r) < X_MERGE;
+
+/**
+ * Drops consecutive (near-)repeats and a closing repeat; zero-thickness ends collapse to a
+ * point. "Near" is X_MERGE in both coordinates, for the float32 reason above.
+ */
+export function dedupe(loop: readonly P2[]): P2[] {
   const out: P2[] = [];
   for (const p of loop) {
     const q = out[out.length - 1];
-    if (q === undefined || q.x !== p.x || q.r !== p.r) out.push(p);
+    if (q === undefined || !near(q, p)) out.push(p);
   }
   const first = out[0];
   const last = out[out.length - 1];
-  if (
-    out.length > 1 &&
-    first !== undefined &&
-    last !== undefined &&
-    first.x === last.x &&
-    first.r === last.r
-  )
-    out.pop();
+  if (out.length > 1 && first !== undefined && last !== undefined && near(first, last)) out.pop();
   return out;
+}
+
+/**
+ * The combustor liner (visual only): an annular chamber with a rounded dome, an outer and an
+ * inner liner wall running aft to the HPT nozzle platforms, as one thin closed shell. The mid
+ * surface is a C open aft; the loop is that curve offset by +-t/2. Proportions are a
+ * plausible single annular combustor, not engine data.
+ */
+export function linerLoop(
+  hub: EngineWall,
+  casing: EngineWall,
+  x0: number,
+  x1: number,
+  t = 0.0025,
+): P2[] {
+  const L = x1 - x0;
+  const xd = x0 + 0.22 * L; // dome apex station
+  const xa = x1 - 0.004; // aft end, just ahead of the NGV
+  const gapO = (x: number) => casing.radiusAt(x) - 0.008;
+  const gapI = (x: number) => hub.radiusAt(x) + 0.007;
+  // dome: its height is the annulus at the dome less the clearances, centred in it
+  const xdc = xd + 0.03 * L;
+  const rTop = gapO(xdc) - 0.004;
+  const rBot = gapI(xdc) + 0.004;
+  const rc = (rTop + rBot) / 2;
+  const b = (rTop - rBot) / 2;
+  const a = Math.min(0.022, 0.12 * L);
+  const mid: P2[] = [];
+  // outer liner, aft to fore: it follows the casing with a clearance
+  const nWall = 10;
+  for (let k = 0; k <= nWall; k++) {
+    const x = xa + ((xdc - xa) * k) / nWall;
+    const f = (x - xdc) / (xa - xdc);
+    mid.push({ x, r: rTop + (gapO(x) - rTop) * Math.min(1, f * 1.6) });
+  }
+  // the dome: a half ellipse bulging forward, from the top round to the bottom
+  const nDome = 14;
+  for (let k = 1; k < nDome; k++) {
+    const th = Math.PI / 2 + (Math.PI * k) / nDome;
+    mid.push({ x: xdc + a * Math.cos(th), r: rc + b * Math.sin(th) });
+  }
+  // inner liner, fore to aft
+  for (let k = 0; k <= nWall; k++) {
+    const x = xdc + ((xa - xdc) * k) / nWall;
+    const f = (x - xdc) / (xa - xdc);
+    mid.push({ x, r: rBot + (gapI(x) - rBot) * Math.min(1, f * 1.6) });
+  }
+  // offset both ways along the mid-curve normal
+  const off = (sign: number): P2[] =>
+    mid.map((p, i) => {
+      const prev = mid[Math.max(0, i - 1)] ?? p;
+      const next = mid[Math.min(mid.length - 1, i + 1)] ?? p;
+      const dx = next.x - prev.x;
+      const dr = next.r - prev.r;
+      const l = Math.hypot(dx, dr) || 1;
+      return { x: p.x + (sign * t * dr) / (2 * l), r: p.r - (sign * t * dx) / (2 * l) };
+    });
+  const loop = dedupe([...off(1), ...off(-1).reverse()]);
+  // counter-clockwise in (x, r)
+  let area = 0;
+  for (let i = 0; i < loop.length; i++) {
+    const p = loop[i];
+    const q = loop[(i + 1) % loop.length];
+    if (p !== undefined && q !== undefined) area += p.x * q.r - q.x * p.r;
+  }
+  return area > 0 ? loop : loop.reverse();
 }
 
 /** A path from its start (a lip apex) to the first crossing of x = xEnd, interpolated. */
@@ -211,8 +298,9 @@ export function engineParts(def: EngineDefinition, walls: EngineWalls): PartSpec
     loop: P2[],
     spool: Spool | null = null,
     skin = false,
+    decorative = false,
   ) => {
-    parts.push({ id, module, material, spool, skin, loop });
+    parts.push({ id, module, material, spool, skin, loop, ...(decorative ? { decorative } : {}) });
   };
   const { hub, coreOuter, coreCowl, nacelleInner: nIn, nacelleOuter: nOut } = walls;
   const r =
@@ -248,9 +336,10 @@ export function engineParts(def: EngineDefinition, walls: EngineWalls): PartSpec
     null,
     true,
   );
+  // the fan case moves with the intake in the exploded view, so the fan shows
   add(
     'fan-case',
-    'fan',
+    'inlet',
     'fanCase',
     bandLoop('fan-case', r(nIn), r(nIn, T.fanCase), xsBetween(X.fanCaseStart, X.fanCaseEnd, [nIn])),
   );
@@ -334,6 +423,17 @@ export function engineParts(def: EngineDefinition, walls: EngineWalls): PartSpec
       r(coreCowl),
       xsBetween(X.coreLipStart, coreOuter.xMax, [coreOuter, coreCowl]),
     ),
+  );
+
+  const combustor = comp('combustor');
+  add(
+    'combustor-liner',
+    'combustor',
+    'combustorLiner',
+    linerLoop(hub, coreOuter, combustor.xStart, combustor.xEnd),
+    null,
+    false,
+    true,
   );
 
   // inner body

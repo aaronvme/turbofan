@@ -9,6 +9,7 @@ import type { MeshData } from './mesh';
 import { engineParts, type PartSpec } from './parts';
 import { revolveLoop } from './revolve';
 import { instanceAngles, rowPhase } from './rows';
+import { frameStrutRows } from './struts';
 import { componentWalls, engineWalls, type EngineWalls } from './walls';
 
 export interface GeometryQuality {
@@ -18,6 +19,8 @@ export interface GeometryQuality {
   readonly segments: number;
   readonly fanBlade: BladeOptions;
   readonly coreBlade: BladeOptions;
+  /** HPT and LPT rows: more span sections than the compressors (close-ups, pass-3 V1). */
+  readonly turbineBlade: BladeOptions;
 }
 
 export const GEOMETRY_QUALITY = {
@@ -26,14 +29,28 @@ export const GEOMETRY_QUALITY = {
     segments: 24,
     fanBlade: { sections: 5, pointsPerSide: 9 },
     coreBlade: { sections: 3, pointsPerSide: 7 },
+    turbineBlade: { sections: 3, pointsPerSide: 7 },
   },
   high: {
     wallSamples: 10,
     segments: 192,
-    fanBlade: { sections: 21, pointsPerSide: 41 },
+    fanBlade: { sections: 25, pointsPerSide: 45 },
     coreBlade: { sections: 6, pointsPerSide: 15 },
+    turbineBlade: { sections: 10, pointsPerSide: 15 },
   },
 } as const satisfies Readonly<Record<string, GeometryQuality>>;
+
+/**
+ * Triangles per quality preset: the whole model (every part, row and strut, instances
+ * counted) and what the closed engine draws (./visibility). The tests hold the geometry to
+ * these, so a finer loft is a deliberate budget change.
+ */
+export const TRIANGLE_BUDGET = {
+  test: { total: 260_000, closed: 85_000 },
+  high: { total: 1_800_000, closed: 820_000 },
+} as const satisfies Readonly<
+  Record<keyof typeof GEOMETRY_QUALITY, { total: number; closed: number }>
+>;
 
 export const ROW_MATERIALS = [
   'fanBlade',
@@ -43,6 +60,7 @@ export const ROW_MATERIALS = [
   'hptVane',
   'lptBlade',
   'lptVane',
+  'strut',
 ] as const;
 export type RowMaterial = (typeof ROW_MATERIALS)[number];
 
@@ -68,7 +86,10 @@ export interface PartGeometry {
 export interface EngineGeometry {
   readonly walls: EngineWalls;
   readonly parts: readonly PartGeometry[];
+  /** One per definition row, in its order. */
   readonly rows: readonly RowGeometry[];
+  /** Synthesized frame struts (./struts), visual only. */
+  readonly struts: readonly RowGeometry[];
 }
 
 function rowMaterial(row: BladeRow): RowMaterial {
@@ -90,7 +111,8 @@ export function buildEngineGeometry(def: EngineDefinition, q: GeometryQuality): 
   const rows = def.bladeRows.map((row, index): RowGeometry => {
     const c = def.flowpath.components.find((k) => k.id === row.component);
     if (c === undefined) throw new Error(`engineGeometry: no component ${row.component}`);
-    const options = row.component === 'fan' ? q.fanBlade : q.coreBlade;
+    const turbine = row.component === 'hpt' || row.component === 'lpt';
+    const options = row.component === 'fan' ? q.fanBlade : turbine ? q.turbineBlade : q.coreBlade;
     const phase = rowPhase(index);
     return {
       row,
@@ -103,5 +125,26 @@ export function buildEngineGeometry(def: EngineDefinition, q: GeometryQuality): 
       material: rowMaterial(row),
     };
   });
-  return { walls, parts, rows };
+  const wallFor = (id: ComponentId) => {
+    const c = def.flowpath.components.find((k) => k.id === id);
+    if (c === undefined) throw new Error(`engineGeometry: no component ${id}`);
+    return componentWalls(walls, c);
+  };
+  const struts = frameStrutRows(def, (id, side, x) =>
+    side === 'hub' ? wallFor(id).hub.radiusAt(x) : wallFor(id).casing.radiusAt(x),
+  ).map((row, k): RowGeometry => {
+    const index = def.bladeRows.length + k;
+    const phase = rowPhase(index);
+    return {
+      row,
+      index,
+      blade: loftBlade(row, wallFor(row.component), q.coreBlade),
+      angles: instanceAngles(row.count, phase),
+      phase,
+      spool: null,
+      module: row.component,
+      material: 'strut',
+    };
+  });
+  return { walls, parts, rows, struts };
 }

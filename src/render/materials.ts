@@ -259,6 +259,9 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
       m = phys({ color: c3(0.68, 0.67, 0.65), metalness: 1, roughness: 0.22, anisotropy: 0.7 });
       m.anisotropyNode = vec2(0.7, 0);
       break;
+    case 'combustorLiner':
+      m = phys({ color: c3(0.55, 0.51, 0.45), metalness: 1, roughness: 0.45 });
+      break;
   }
   m.maskNode = outsideWedge(u);
   return m;
@@ -297,6 +300,7 @@ const CAP_TINT: Readonly<Record<PartMaterial, readonly [number, number, number]>
   disk: [0.45, 0.5, 0.6],
   innerCase: [0.52, 0.53, 0.55],
   shaft: [0.6, 0.6, 0.62],
+  combustorLiner: [0.72, 0.42, 0.22],
 };
 
 function capMaterial(kind: PartMaterial): NodeMaterial {
@@ -362,6 +366,8 @@ function rowSurface(kind: RowMaterial, u: LookUniforms): MeshPhysicalNodeMateria
       m.colorNode = mix(tbc, scorched, burn.clamp(0, 1));
       return m;
     }
+    case 'strut':
+      return phys({ color: c3(0.5, 0.5, 0.5), metalness: 0.3, roughness: 0.55 });
     case 'lptBlade':
     case 'lptVane': {
       const m = phys({
