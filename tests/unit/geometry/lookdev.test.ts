@@ -51,12 +51,18 @@ const rowTriangles = (g: EngineGeometry['rows'][number]) =>
   (g.blade.mesh.indices.length / 3) * g.row.count;
 
 describe.each(PRESETS)('quality preset %s (W1G-I1)', (id) => {
-  it('every part, row and strut is watertight, manifold, outward and free of slivers', () => {
-    const geo = geoOf(id);
-    for (const p of geo.parts) expectClosed(`${id} part ${p.spec.id}`, p.mesh);
-    for (const r of [...geo.rows, ...geo.struts])
-      expectClosed(`${id} row ${r.row.id}`, r.blade.mesh);
-  });
+  // the first test per preset builds its geometry (cached for the rest): `high` takes ~5 s
+  // under coverage instrumentation on a loaded machine, past vitest's 5 s default
+  it(
+    'every part, row and strut is watertight, manifold, outward and free of slivers',
+    { timeout: 30_000 },
+    () => {
+      const geo = geoOf(id);
+      for (const p of geo.parts) expectClosed(`${id} part ${p.spec.id}`, p.mesh);
+      for (const r of [...geo.rows, ...geo.struts])
+        expectClosed(`${id} row ${r.row.id}`, r.blade.mesh);
+    },
+  );
 
   it('every part loop is a simple counter-clockwise polygon', () => {
     for (const p of geoOf(id).parts) {

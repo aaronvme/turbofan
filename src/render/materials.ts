@@ -433,7 +433,7 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
     }
     case 'spinner': {
       // matte enough that it no longer mirrors the softboxes as dark chrome (W1L-N1)
-      m = phys({ color: c3(0.045, 0.046, 0.048), metalness: 0, roughness: 0.58 });
+      m = phys({ color: c3(0.04, 0.041, 0.043), metalness: 0, roughness: 0.52 });
       m.colorNode = spinnerSpiral();
       // the spinner turns with the fan and is drawn (and blurred) in the rotor pass
       m.mrtNode = mrt({ blur: vec4(u.lpBlur, TWO_PI, 0, 1) });
@@ -698,9 +698,9 @@ export function createMaterials(u: LookUniforms): MaterialSet {
         const m = rowSurface(kind, u);
         m.positionNode = bladeHideOf(u);
         // inside the nacelle (fan) or the core (every other row): see CAVITY
-        // the fan sees the studio only through the intake mouth: 0.45 (pass 4 had 0.62, and
+        // the fan sees the studio only through the intake mouth: 0.52 (pass 4 had 0.62, and
         // its blades read as white streaks once the key no longer lit them, W1L-I2)
-        m.aoNode = float(kind === 'fanBlade' ? 0.45 : 0.5);
+        m.aoNode = float(kind === 'fanBlade' ? 0.52 : 0.5);
         if (spool !== null) {
           // the rotor pass records the angle this spool turns while the shutter is open and
           // the row's blade pitch (the image is periodic in it: see src/render/post.ts)
