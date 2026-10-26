@@ -436,3 +436,161 @@ None.
 - **W1M-N5 OPEN: interface kinks are not in the risks.** Grid-line kinks of up to 52° across interfaces (lip, plume-outer, far field) appear in the quality tables, but MESH.md R3 lists only skew. A line that turns 52° at an interface degrades dimension-split MUSCL there. Tell W2.
 
 **Verdict w1/mesh @959bce1: MERGE.** No blocking items. I explicitly allow W1M-I1 after the merge (the orchestrator, in `ci.yml`, before D2-2's regeneration). The nits go to the next mesh touch or to W2.
+
+## Critic pass 2: w0/gpu-spikes @8e4ffdc
+
+Reviewed 2026-10-26 by the pass-2 critic:
+- the production modules: `src/gpu/{device,timestamps}.ts`, `src/render/rendererOnDevice.ts`;
+- `spikes/**`: kernel generator, f64 reference, stage solver, resample, timestamp ring, bench harness, scene, throughput and worker pages;
+- `tests/{unit,gpu,browser}/**`, the configs, GPU_FACTS M1-M33, the two official JSONs and the quick JSONs.
+
+Checklists applied: typescript-reviewer, silent-failure-hunter, pr-test-analyzer, security-review. The harness serves Vite on 127.0.0.1 and calls powercfg, the PowerShell counters and git with fixed arguments; no input reaches a shell. Nothing found. **No benchmark was run** (D0-1).
+
+**Gates at HEAD** (the handoff's were not rerun at HEAD; I ran them; tracked files unchanged):
+- `npm test`: 110 passed (15 files).
+- `npm run lint`: clean. `npm run typecheck`: clean.
+- `npm run coverage`: lines 99.84 %, statements 99.03 %, branches 82.38 %, functions 99.29 %.
+- `npm run test:gpu`: 15 passed (4 files; Dawn/D3D12 in Node, 1.6 s).
+- `npm run test:browser`: 14 passed (2 files: 12 interop + 2 chrome-gpu; headed Chrome 155, 2.9 s). This settles the handoff's "full suite not rerun after chrome-gpu".
+
+**Checked and sound:**
+- **Kernel vs the f64 reference** (`tests/gpu/stage-kernel.test.ts`):
+  - WGSL SLAU2 on 256 seeded random faces (sub- and supersonic, both directions), within 2e-6 of a stated scale.
+  - One full iteration cell by cell on a wiggled 12-block 48×24 mesh, covering every BC, MUSCL/van Albada, SLAU2, the radial source, local dt and RK: within 1 Pa, 1e-2 m/s and 1e-5 kg/m³, while the step moves p′ by more than 100 Pa.
+  - Tile-shape and block-split invariance to 1e-6, quiescent and freestream preservation, 200 iterations finite.
+  - The tolerances are justified in the test. This is adequate for a cost-model spike (M32 lists what the kernel lacks). The independent check of SLAU2 itself is `slau2.test.ts` (consistency, symmetry, contact, supersonic). See W0G-N4.
+- **Interop** (`tests/browser/interop.test.ts`, 12 tests):
+  - three adopts our device in core mode;
+  - raw WGSL → `rgba16float` → TSL material and TSL compute is pixel-exact;
+  - queue order holds;
+  - three never re-uploads over our texture or buffer until `needsUpdate`/`DynamicDrawUsage`;
+  - buffer injection, itemSize-3 padding, vertex-stage storage reads and `float32-filterable` behave as recorded.
+- **Error routing** (`src/gpu/device.ts:111-157`):
+  - `attachErrorHandlers` listens with `addEventListener('uncapturederror')`, which three's assignment of `onuncapturederror` cannot clobber; the interop test "uncaptured errors reach our listener although three replaced device.onuncapturederror" pins this.
+  - It falls back to chaining the property only when there is no EventTarget, and reports every loss except our own `destroy()`.
+  - `createRendererOnDevice` throws if three did not adopt the device or fell into compatibility mode, and `computeNow` throws instead of deferring.
+  - Nothing is swallowed. The one downstream trap is an empty loss message (W1F-I1).
+- **Recording of conditions:** power source, plan, Windows power mode, GPU name and driver, Chrome version and chrome://gpu, CPU load before/during/after, other processes' GPU use before/after, git head and dirty flag, the protocol, and the page's hidden time.
+- **Statistics:** Hyndman-Fan type 7 quantiles, the median of an odd number of runs per metric, rates over the fixed window, and GPU samples attributed by frame time. Sound, apart from W0G-I1, I2, N1 and N2.
+- **Official throughput JSON:** every 130k and 256k configuration and 80k 8x8/32x4 are valid (60 fps, p99 16.8-17 ms, 0-1 long frames, page visible, GPU otherwise idle). 80k-16x8 is not (below).
+
+**The first-config "warm-up bug" is not a warm-up bug.** The run records of 80k-16x8:
+- **Run 0:** 2561 frames, p50 16.7 / p95 16.8 / p99 17.0 ms, 312.7 it/s at 0.909 ms/it, and 23 long frames (max 1017 ms). The frame budget puts the onset about 42 s into run 0, i.e. ~52 s after the configuration started, well after the 10 s warm-up.
+- **Runs 1 and 2:** 59 and 60 frames, every delta ~1016 ms (1 fps).
+  - The scheduler still asked for ~4.8 it/frame, so the rate fell to 4.8 it/s.
+  - GPU time was 6 ms per frame. The 1.33-1.35 ms/it reflects the GPU clocking down at one frame per second.
+- **The next configuration**, after the harness's `page.bringToFront()`, ran at 60 fps.
+
+So rAF was throttled to 1 Hz for about 2.4 min in the middle of a configuration. That is M31's signature (an occluded or unfocused window), and the harness recorded it as data. Four reasons nothing flagged it:
+1. **`pageHiddenMs` cannot see occlusion here.**
+   - Playwright 1.64.1 launches Chrome with `--disable-backgrounding-occluded-windows` and `--disable-renderer-backgrounding` (`playwright-core/lib/coreBundle.js`), so an occluded window stays `visibilityState === 'visible'`.
+   - `pageHiddenMs` has been 0 in every recorded run, this one included. M31's mitigation does not work.
+2. **`longFrames` is relative to the run's own median** (`spikes/lib/benchRun.ts:148`, delta > 1.5 × median). In a run that is entirely at 1 fps the median is 1016 ms, so runs 1-2 report 0 long frames, and so does the aggregate.
+3. **There is no validity gate.** A configuration whose median frame time is 60 × the refresh period is aggregated and printed like any other.
+4. **The median of 3 picks a broken run** when two of the three are broken.
+
+Impact: D2-5 is unaffected, since it quotes 80k ≈ 384-427 from 8x8 and 32x4. But the official JSON holds an unflagged invalid row, and the same harness will produce the P2/P3 and L13 numbers.
+
+**Worker evidence vs D2-4** (`worker-2026-10-25-2247-official.json`; 130k, 16x8, a fixed 3 it/frame, 1080p):
+
+| configuration | frame p50 / p95 / p99 (ms) | long frames per run (runs) | rAF delay p95 / p99 (ms) |
+|---|---|---|---|
+| main, idle | 16.7 / 16.8 / 16.8 | 0 | 0.8 / 1.2 |
+| worker, idle | 16.7 / 16.8 / 16.9 | 0 (0, 0, 1) | 0.4 / 0.5 |
+| main, React 15 Hz | 16.7 / 16.8 / 16.8 | 0 | 5.2 / 10.0 |
+| worker, React 15 Hz | 16.7 / 16.8 / 16.9 | 0 | 0.2 / 0.3 |
+| main, React 60 Hz | 16.7 / 33.2 / 33.5 | 177 (138, 177, 187) | 15.8 / 20.7 |
+| worker, React 60 Hz | 16.7 / 16.8 / 33.3 | 60 (60, 67, 51) | 5.7 / 12.7 |
+
+The evidence supports D2-4 as a headroom decision. The decision text should carry four caveats:
+- At the realistic 15 Hz load neither mode drops a frame. The gain is the rAF start delay (p99 10.0 → 0.3 ms), which matters once the app's per-frame CPU work grows.
+- The worker is not immune at 60 Hz: 60 missed frames per minute. M29's quick-run claim "the worker holds 60 fps" is wrong.
+- The solver ran a fixed 3 it/frame (~3.8 ms of GPU), about half the 7 ms budget.
+- React was the development build.
+
+The JSON's `gitDirty: true` comes only from the throughput JSON of the run before, which was untracked at the time (W0G-N2).
+
+**GPU_FACTS "Measured" vs evidence:** the functional entries M1-M3, M5, M7-M28, M32 and M33 match their tests and scripts, all rerun green above. The problems are W0G-B1 and W0G-N3.
+
+### Blocking
+- **W0G-B1 OPEN: GPU_FACTS does not record the official runs, contradicts them in two Measured entries, and points to a file that does not exist.**
+  - Where:
+    - `docs/GPU_FACTS.md:9`: "The official quiet runs are in `spikes/README.md`" (no such file).
+    - `:119` and `:160`: "P1 needs the official quiet run".
+    - M29 (`:73-91`): "at 60 Hz … the worker holds 60 fps", from 1 s quick runs.
+    - M31 (`:120-123`): the harness's "PAGE HIDDEN … INVALID" is presented as the mitigation for occlusion.
+  - Failure:
+    - D2-4 and D2-5 rest on `docs/bench/*-official.json`.
+    - The facts file a later builder reads says the opposite about the worker at 60 Hz (official: 60 long frames per run), says no official run exists, and implies occlusion is detected (it is not, W0G-I1).
+    - CLAUDE.md requires facts to be measured, with evidence.
+  - Fix:
+    - write `spikes/README.md`: how to run each spike, the official commands and their durations, and the D0-1 checklist;
+    - add an "Official D0-1 runs" section to GPU_FACTS with both official tables and their conditions, and the 80k-16x8 row marked invalid with the reason;
+    - correct M29 and M31, and drop the stale "P1 needs …" lines.
+
+### Important
+- **W0G-I1 OPEN: the harness cannot detect an invalid run, and the official 80k-16x8 row is one** (the analysis above).
+  - Where:
+    - `spikes/scene/visibilityTracker.ts` and `spikes/lib/visibility.ts`: blind under Playwright's flags;
+    - `spikes/lib/benchRun.ts:148`: long frames relative to the run's median;
+    - `spikes/bench/run.ts:316-335`: no validity gate, and the refocus happens only between configurations.
+  - Fix:
+    - take the refresh period from the warm-up's median frame delta, or record it, and count long frames against that absolute period;
+    - mark a configuration INVALID when its fps < 0.95 × refresh or its median delta > 1.1 × the period, and rerun it once after `bringToFront()`;
+    - record the launch flags including Playwright's defaults (N1);
+    - annotate the 80k-16x8 row as invalid next to the JSON, without editing the recorded file;
+    - unit-test the gate with a synthetic 1 Hz run.
+  - Fix it before any further official run (P2/P3, L13).
+- **W0G-I2 OPEN: the fixed configuration order confounds the tile comparison behind D2-5's "16x8".**
+  - Where: `spikes/bench/run.ts:48-60` always runs 16x8, then 8x8, then 32x4 within each grid.
+  - Evidence:
+    - In the official run the per-grid ranking follows run order at all three sizes: 130k 1.277 / 1.403 / 1.498 ms/it, 256k 2.863 / 2.904 / 2.968.
+    - Within a configuration, later runs are slower (130k-8x8: 281.7, 265.2, 264.7 it/s).
+    - The builder's single-configuration runs put every 130k tile at 0.88-0.97 ms/it, inside that drift (GPU_FACTS M30).
+  - Fix: rotate or interleave the order (ABC, BCA, CAB) and report the order effect.
+  - D2-5's PASS stands, since every 130k tile reaches ≥ 250 it/s. But 16x8 is a default, not a measured optimum.
+- **W0G-I3 OPEN: the branch is based on fe260dd (the scaffold), not on main.**
+  - The trial merge conflicts in `.prettierignore` (`docs/mesh/` vs `docs/bench/`) and `vitest.config.ts` (coverage include `tools/mesh` vs `spikes/lib`).
+  - Both resolve as unions, and with them every gate passes (trial merge below).
+  - Fix: merge main into the branch (keeping both sides) and rerun the gates.
+- **W0G-I4 OPEN: `passWithNoTests: true` in `vitest.gpu.config.ts:13` and `vitest.browser.config.ts:11`.** Now that both suites exist, a broken include or a moved directory reports green with 0 tests. Fix: remove it. It comes from main's scaffold; this branch's fix round adds the suites, so it removes the flag.
+
+### Nits
+- **W0G-N1 OPEN: incomplete launch record.** `conditions.chromeFlags` is `[]` although Playwright adds about 25 switches, including the two that hide occlusion. The display refresh rate is not recorded either, though "long frame" and "60 fps" assume 60 Hz. Record the launch arguments with Playwright's defaults and the measured refresh period.
+- **W0G-N2 OPEN: `gitDirty` counts untracked files** (`run.ts:276`). The official worker run reads as dirty only because the throughput JSON from just before was untracked. Use `--untracked-files=no` or exclude `docs/bench/`.
+- **W0G-N3 OPEN: two anecdotes filed as Measured.** M4 (dawn.node segfaults when the GPU object is collected) and M6 (the first timestamp is ~200 s stale) have no repro script; their tests pin the mitigation, not the phenomenon. Label them "observed, no repro".
+- **W0G-N4 OPEN: a one-iteration reference check.** The f64-reference comparison covers one iteration with absolute tolerances (1 Pa, 1e-2 m/s). That is fine for the spike. W2's kernel test should compare several iterations with relative errors on the real mesh.
+
+**Verdict w0/gpu-spikes @8e4ffdc: FIX FIRST.**
+- One fix round: B1 and I1 must be fixed; I3 and I4 (a few lines each) go in the same round.
+- I2 may follow after the merge, in the same fix round or with W4 performance work, because it does not change D2-5's PASS.
+- The production modules (`src/gpu/device.ts`, `src/gpu/timestamps.ts`, `src/render/rendererOnDevice.ts`) and the evidence behind D2-4 and D2-5 are sound.
+
+## Critic pass 2: trial merge (w1/contracts-fix @3969af7 → w1/mesh @959bce1 → w0/gpu-spikes @8e4ffdc)
+
+- **Merge:** sequential `git merge --no-ff --no-commit`, on a detached HEAD at the critic's HEAD (main 951f504 plus this log), with a scratch commit between steps.
+  - contracts-fix: clean.
+  - mesh: clean. The files are disjoint; the contracts' far-extent test reads w1/mesh's new metrics JSON domain and passes.
+  - gpu-spikes: 2 conflicts, `.prettierignore` and `vitest.config.ts` (W0G-I3). Neither is resolved in any branch. For the gate run only, I applied the obvious unions in the scratch tree: both ignore lines, and coverage include `src`, `tools/mesh` and `spikes/lib`.
+- **Gates on the combined tree:**
+  - `npm test`: 1077 passed (46 files), the union of the three suites.
+  - `npm run lint`: clean.
+  - `npm run typecheck`: clean. The gpu-spikes code compiles against the new contracts; nothing on it uses `FlowStatus.available` or the far extent's height.
+  - `npm run coverage`: lines 99.49 %, statements 98.52 %, branches 87.26 %, functions 99.38 %; every threshold passes.
+  - `npm run test:mesh`: 29 passed.
+  - `npm run build`: ok. The prebuild regenerates the assets, and the manifest is unchanged.
+  - `npm run test:gpu`: 15 passed. `npm run test:browser`: 14 passed.
+  - `npm run mesh`: byte-identical.
+- **Restore:** `git merge --abort`, then back to branch `critic` at its HEAD, and the generated `public/` and `dist/` removed. The builder worktrees are untouched (`git status` clean at 3969af7, 959bce1 and 8e4ffdc), and my scratch files in their ignored `reports/` are removed.
+- **Cross-branch findings:**
+  - W1F-I1: an empty loss message and a NaN GPU time, against `device.ts` and `timestamps.ts`.
+  - W1F-N2, W1M-N2, W1M-N4: the domain definitions and the domain's source.
+
+**Orchestrator decisions needed (pass 2):**
+- (g) **W1F-I1:** accept the contract change (a default message on a failed status; a NaN GPU time becomes null without `diverged`) for W2 or the next contracts touch.
+- (h) **W1M-I1:** add `npm run test:mesh` to `ci.yml`, which the orchestrator owns.
+- (i) **D2-5 wording:**
+  - the 80k-16x8 official row is invalid: a 1 Hz rAF throttle (occlusion/focus) in the middle of the configuration, not warm-up;
+  - 16x8 is a default, because the tile ranking is confounded by run order (W0G-I2).
+- (j) **D2-4:** the decision stands. Add the caveats above: no frame difference at 15 Hz (the gain is the rAF delay), the worker drops 60 frames per minute at 60 Hz, the solver ran 3 it/frame, and React was the development build.
+- (k) **Coordination:** w1/cycle adds `source: 'model'` once w1/contracts-fix is on main.
