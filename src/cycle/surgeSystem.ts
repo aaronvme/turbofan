@@ -17,7 +17,6 @@
 
 import type { EngineDefinition, FlowComponent } from '../contracts/engine';
 import { casingRadiusAt, hubRadiusAt } from '../contracts/engine';
-import { at } from './at';
 import { compressorPoint, type ScaledCompressorMap } from './componentMaps';
 import type { GreitzerParams } from './greitzer';
 
@@ -185,9 +184,4 @@ export function engineGreitzerParams(
   const x = phiEquilibrium / fit.w - 1;
   const psi = fit.psi0 + fit.h * (1 + 1.5 * x - 0.5 * x * x * x);
   return { b, psi0: fit.psi0, h: fit.h, w: fit.w, gammaT: throttleThrough(phiEquilibrium, psi) };
-}
-
-/** The first and last R-lines of a map (for tests and callers that sweep a speed line). */
-export function rlineRange(map: ScaledCompressorMap): readonly [number, number] {
-  return [at(map.map.rline, 0), at(map.map.rline, map.map.rline.length - 1)];
 }
