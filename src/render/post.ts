@@ -96,7 +96,8 @@ export interface LookPipeline {
   readonly bokehScale: UniformNode<'float', number>;
   /** Depth of field on (cinematic presets) or off (default: it is not drawn at all). */
   setCinematic(on: boolean): void;
-  render(): void;
+  /** Renders a frame; `traa` false skips TRAA (and depth of field): tests and debugging. */
+  render(traa?: boolean): void;
   dispose(): void;
 }
 
@@ -317,6 +318,9 @@ export function createPipeline(
   if (settings.debug === 'rotorBlur')
     pipeline.outputNode = vec4(rotorBlur.r.div(Math.PI), rotorColor.a, 0, 1);
   if (settings.debug === 'ao') pipeline.outputNode = vec4(vec3(aoTex.r), 1);
+  // the chain without TRAA (built on first use): the fan-blur reference test averages
+  // un-accumulated frames (tests/browser/fanBlur.test.ts)
+  let rawPipeline: RenderPipeline | null = null;
   let cinematic = false;
 
   return {
@@ -327,12 +331,21 @@ export function createPipeline(
     setCinematic: (on) => {
       cinematic = on && !settings.debug;
     },
-    render: () => {
+    render: (withTraa = true) => {
+      if (!withTraa) {
+        if (rawPipeline === null) {
+          rawPipeline = new RenderPipeline(renderer);
+          rawPipeline.outputNode = vignette(compositeTex);
+        }
+        rawPipeline.render();
+        return;
+      }
       (cinematic ? cinePipeline : pipeline).render();
     },
     dispose: () => {
       pipeline.dispose();
       cinePipeline.dispose();
+      rawPipeline?.dispose();
       compositeTex.dispose();
     },
   };

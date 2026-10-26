@@ -91,6 +91,10 @@ export interface DebugFlags {
   readonly noShadow?: boolean;
   /** Skip the post chain: the scene pass straight to the screen. */
   readonly noPost?: boolean;
+  /** The post chain without TRAA (the fan-blur reference test compares un-accumulated frames). */
+  readonly noTraa?: boolean;
+  /** Extra LP spool angle, rad (the fan-blur reference renders stills across the exposure). */
+  readonly lpPhase?: number;
 }
 
 const FPS = 60;
@@ -283,7 +287,8 @@ async function assemble(
       const st = speeds();
       lp = advanceAngle(lp, st.n1Rpm, def.rotation.lp, dtS);
       hp = advanceAngle(hp, st.n2Rpm, def.rotation.hp, dtS);
-      for (const g of scene.spoolGroups.lp) g.rotation.x = lp;
+      const lpShown = lp + (flags.lpPhase ?? 0);
+      for (const g of scene.spoolGroups.lp) g.rotation.x = lpShown;
       for (const g of scene.spoolGroups.hp) g.rotation.x = hp;
       uniforms.lpBlur.value = shutterBlurAngle(st.n1Rpm, shutterDeg, FPS);
       uniforms.hpBlur.value = shutterBlurAngle(st.n2Rpm, shutterDeg, FPS);
@@ -322,7 +327,7 @@ async function assemble(
 
       post.focusDistance.value = camera.position.distanceTo(target);
       if (flags.noPost === true) renderer.render(scene.main, camera);
-      else post.render();
+      else post.render(flags.noTraa !== true);
       timer.endFrame(performance.now() - t0);
     },
     stats() {
