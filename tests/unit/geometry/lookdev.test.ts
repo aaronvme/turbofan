@@ -130,6 +130,10 @@ describe('closed-engine culling (LD-6)', () => {
       'trf-strut',
     ])
       expect(vis.rows.has(id), id).toBe(true);
+    // W1L-I1: every booster row shows through the fan and every LPT row up the core nozzle
+    // (the critic's pixel probe saw booster rows 2-4 and LPT stages 1-3 culled)
+    for (const r of def.bladeRows.filter((k) => k.component === 'booster' || k.component === 'lpt'))
+      expect(vis.rows.has(r.id), r.id).toBe(true);
   });
 
   it('drops what the cowls and the inner body hide: the core rows, cases, liner, disks and shafts', () => {
@@ -151,8 +155,6 @@ describe('closed-engine culling (LD-6)', () => {
       'hpc-s9',
       'hpt-n1',
       'hpt-r1',
-      'lpt-r1',
-      'lpt-r3',
       'fan-frame-strut',
     ])
       expect(vis.rows.has(id), id).toBe(false);
@@ -160,10 +162,17 @@ describe('closed-engine culling (LD-6)', () => {
 
   it('hides only what lies fully inside the inner body, or inside the core cowl between the sight limits', () => {
     const lim = closedViewLimits(def);
-    expect(lim.xFront).toBeGreaterThan(
-      def.flowpath.components.find((c) => c.id === 'booster')?.xStart ?? 0,
-    );
-    expect(lim.xRear).toBeLessThan(def.flowpath.components.find((c) => c.id === 'lpt')?.xEnd ?? 0);
+    // W1L-I1: the limits sit aft of the booster's last row and ahead of the first LPT row
+    const rowsOf = (c: string) => def.bladeRows.filter((r) => r.component === c);
+    for (const r of rowsOf('booster'))
+      expect(lim.xFront, r.id).toBeGreaterThanOrEqual(
+        Math.max(r.trailingEdge.hub.x, r.trailingEdge.tip.x),
+      );
+    for (const r of rowsOf('lpt'))
+      expect(lim.xRear, r.id).toBeLessThanOrEqual(
+        Math.min(r.leadingEdge.hub.x, r.leadingEdge.tip.x),
+      );
+    expect(lim.xRear).toBeGreaterThan(lim.xFront);
     const w = geo.walls;
     // a point inside the inner body anywhere along the engine is hidden
     expect(hiddenWhenClosed([{ x: 0.1, r: 0.05 }], w, lim)).toBe(true);
