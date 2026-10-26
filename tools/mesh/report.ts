@@ -4,7 +4,7 @@
 import type { BlockName, EngineMesh } from './engineMesh';
 import { keyPoints } from './geometry/flowpath';
 import { meshQuality, type BlockQuality, type Where } from './metrics';
-import { nodeIndex, type Block, type Pt } from './types';
+import { nodeIndex, type Block, type MultiBlockMesh, type Pt } from './types';
 
 export interface Worst {
   readonly value: number;
@@ -185,7 +185,7 @@ export interface DtLimit {
  * (decision D0-7 records this limit for physical-time mode).
  */
 export function explicitDtLimit(
-  mesh: EngineMesh,
+  mesh: Pick<MultiBlockMesh, 'blocks'>,
   speeds: (x: number, r: number, block: string) => WaveSpeeds,
 ): DtLimit {
   let best: DtLimit = { dt: Infinity, block: '', at: { i: 0, j: 0, x: 0, r: 0 } };

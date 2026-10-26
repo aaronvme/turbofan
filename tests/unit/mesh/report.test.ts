@@ -9,7 +9,7 @@ import {
   explicitDtLimit,
   type EngineMeshReport,
 } from '../../../tools/mesh/report';
-import { MESH_SMOKE } from './fixtures';
+import { MESH_SMOKE, rectBlock } from './fixtures';
 
 describe('engineMeshReport', () => {
   let mesh: EngineMesh;
@@ -90,21 +90,27 @@ describe('engineMeshReport', () => {
 });
 
 describe('explicitDtLimit', () => {
-  it('is 1 / (a_x / dx + a_r / dr) on the smallest cell, and says where', () => {
-    const mesh = buildEngineMesh(flowpathFromDefinition(ENGINE_DEFINITION), MESH_SMOKE);
-    // uniform speeds: the limit sits in the cell with the largest 1/dx + 1/dr
-    const lim = explicitDtLimit(mesh, () => ({ ax: 700, ar: 500 }));
-    expect(lim.dt).toBeGreaterThan(0);
-    const b = mesh.blocks[mesh.index[lim.block as keyof typeof mesh.index]];
-    expect(b).toBeDefined();
-    // doubling every speed halves the limit, at the same cell
-    const twice = explicitDtLimit(mesh, () => ({ ax: 1400, ar: 1000 }));
-    expect(twice.dt).toBeCloseTo(lim.dt / 2, 15);
-    expect(twice.at).toEqual(lim.at);
-    // speeds that are zero everywhere except one block move the limit into that block
-    const plug = explicitDtLimit(mesh, (_x, _r, name) =>
-      name === 'plug' ? { ax: 700, ar: 500 } : { ax: 1e-6, ar: 1e-6 },
+  it('is 1 / (a_x / dx + a_r / dr) on the limiting cell, and says where', () => {
+    // 0.1 m x 0.05 m cells in A, 0.05 m x 0.05 m in B
+    const A = rectBlock('A', 0, 1, 0, 0.5, 10, 10);
+    const B = rectBlock('B', 1, 1.5, 0, 0.5, 10, 10);
+    const uniform = explicitDtLimit({ blocks: [A, B] }, () => ({ ax: 700, ar: 500 }));
+    expect(uniform.dt).toBeCloseTo(1 / (700 / 0.05 + 500 / 0.05), 15);
+    expect(uniform.block).toBe('B');
+    // every cell of B ties up to rounding: the location is somewhere in B
+    expect(uniform.at.x).toBeGreaterThan(1);
+    // speeds that vanish in B move the limit into A
+    const onlyA = explicitDtLimit({ blocks: [A, B] }, (_x, _r, name) =>
+      name === 'A' ? { ax: 700, ar: 500 } : { ax: 1e-9, ar: 1e-9 },
     );
-    expect(plug.block).toBe('plug');
+    expect(onlyA.block).toBe('A');
+    expect(onlyA.dt).toBeCloseTo(1 / (700 / 0.1 + 500 / 0.05), 15);
+    // the speed field is sampled at the cell centre
+    const seen: number[] = [];
+    explicitDtLimit({ blocks: [A] }, (x) => {
+      seen.push(x);
+      return { ax: 1, ar: 1 };
+    });
+    expect(seen[0]).toBeCloseTo(0.05, 15);
   });
 });
