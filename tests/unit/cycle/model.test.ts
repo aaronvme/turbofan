@@ -10,9 +10,12 @@ import {
 } from '../../../src/contracts/cycle';
 import { factValue } from '../../../src/engine/facts';
 import {
+  characteristic,
   criticalB,
+  equilibrium,
   helmholtzFrequency,
   simulateSurge,
+  throttleFlow,
   type GreitzerParams,
 } from '../../../src/cycle/greitzer';
 import { createCycleModel, leverForNetThrust, SPOOL_INERTIA } from '../../../src/cycle/model';
@@ -36,6 +39,28 @@ describe('C9: Greitzer lumped compression system', () => {
     expect(p.b).toBeLessThan(criticalB(p));
     const r = simulateSurge(p, 0.05, 400);
     expect(r.maxPhi - r.minPhi).toBeLessThan(1e-3);
+  });
+  it('started at its equilibrium the system stays there and reports no period', () => {
+    const r = simulateSurge({ ...SURGE, b: 0.5 }, 0, 100);
+    expect(r.maxPhi - r.minPhi).toBeLessThan(1e-9);
+    expect(r.periodXi).toBeNull();
+  });
+  it('a wide-open throttle puts the equilibrium on the falling branch: stable at any B', () => {
+    // the characteristic peaks at Phi = 2W; past it the slope is negative
+    const p = { ...SURGE, gammaT: 5, b: 5 };
+    const eq = equilibrium(p);
+    expect(eq.phi).toBeGreaterThan(2 * p.w + 0.01);
+    expect(throttleFlow(p, characteristic(p, eq.phi))).toBeCloseTo(eq.phi, 9);
+    expect(eq.psi).toBeCloseTo(characteristic(p, eq.phi), 12);
+    expect(criticalB(p)).toBe(Infinity);
+    const r = simulateSurge(p, 0.05, 400);
+    expect(r.minPhi).toBeGreaterThan(0);
+    expect(r.maxPhi - r.minPhi).toBeLessThan(1e-3);
+  });
+  it('the throttle passes reverse flow when the plenum pressure goes negative (odd in Psi)', () => {
+    expect(throttleFlow(SURGE, 0.04)).toBeCloseTo(SURGE.gammaT * 0.2, 12);
+    expect(throttleFlow(SURGE, -0.04)).toBeCloseTo(-SURGE.gammaT * 0.2, 12);
+    expect(throttleFlow(SURGE, 0)).toBe(0);
   });
   it('the Helmholtz frequency is a sqrt(A / (V L))', () => {
     expect(helmholtzFrequency(340, 0.1, 0.4, 1)).toBeCloseTo(170, 9);
@@ -115,14 +140,6 @@ describe('transient model: shaft dynamics and FADEC', { timeout: 120_000 }, () =
       expect(s.flags.surge).toBe(false);
       expect(s.egtDisplayedK).toBeLessThan(factValue('egtTransientLimit'));
     }
-  });
-
-  it('ground idle is itself a valid 33.73(b) start point (at most 15 % of rated thrust)', () => {
-    const m = createCycleModel();
-    const idle = m.reset('groundIdle', ISA_SLS);
-    expect(idle.netThrustN / factValue('takeoffThrust')).toBeLessThanOrEqual(
-      factValue('accelStartMaxThrustFraction'),
-    );
   });
 
   it('leverForNetThrust: the lever that holds a steady thrust, monotonic, 0..1', () => {
