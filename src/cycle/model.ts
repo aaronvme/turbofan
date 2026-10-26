@@ -90,6 +90,12 @@ const TD_LIMIT = 0.3;
  */
 const TD_EGT = 0.3;
 const TF_EGT = TD_EGT / 3;
+/**
+ * EGT error that drives the Wf/P3 rate by K_LOOP x K_LIMIT_FACTOR per second, K. 150 K holds a
+ * slam from ground idle under the 960 C transitory limit (33.73(a)); 100 K makes an EGT-limited
+ * steady point chatter between the EGT and N1 loops.
+ */
+const EGT_ERROR_SCALE_K = 150;
 /** Accel/decel schedules as multiples of the steady Wf/P3 at the same corrected N2. */
 const ACCEL_FACTOR = 2.2;
 /** The accel schedule opens up by this much more between 68 and 80 % corrected N2. */
@@ -453,7 +459,7 @@ class TurbofanCycleModel implements CycleModel {
           loop((100 * lim.n2MaxRpm) / cal.n2ReferenceRpm - 1, n2p, this.dn2, 100, TD_LIMIT),
         ],
         // TCDS E.004 VI note 4: 960 C transitory at takeoff for up to 20 s
-        ['egtMax', loop(lim.egtTransientK - 5, egt, this.dEgt, 300, TD_EGT)],
+        ['egtMax', loop(lim.egtTransientK - 5, egt, this.dEgt, EGT_ERROR_SCALE_K, TD_EGT)],
       ];
       for (const [name, rLimit] of caps) {
         const r = K_LIMIT_FACTOR * rLimit;
