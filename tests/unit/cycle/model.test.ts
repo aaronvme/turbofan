@@ -15,7 +15,7 @@ import {
   simulateSurge,
   type GreitzerParams,
 } from '../../../src/cycle/greitzer';
-import { createCycleModel, SPOOL_INERTIA } from '../../../src/cycle/model';
+import { createCycleModel, leverForNetThrust, SPOOL_INERTIA } from '../../../src/cycle/model';
 
 const C9 = THRESHOLDS.C9.values;
 const SURGE: GreitzerParams = { psi0: 0.3, h: 0.18, w: 0.25, gammaT: 0.5, b: 1 };
@@ -73,30 +73,69 @@ describe('transient model: shaft dynamics and FADEC', { timeout: 120_000 }, () =
     expect(SPOOL_INERTIA.hpKgM2).toBeGreaterThan(0);
   });
 
-  it('C5 (14 CFR 33.73): stabilised ground idle to 95 % rated takeoff thrust within 5.0 s', () => {
+  it('C5 (14 CFR 33.73(b)): from a stabilised 15 % of rated takeoff thrust to 95 % within 5.0 s', () => {
+    // D2-1. 33.73(b) starts the 5 s clock at the fixed flight-idle lever position or, when there
+    // is none (no published flight-idle point; ENGINE_FACTS "Flight-idle N1"), at not more than
+    // 15 % of rated takeoff thrust (accelStartMaxThrustFraction), from a stabilized static
+    // condition. The start point sits START_MARGIN below that ceiling so a settling residual can
+    // never put it above.
+    const takeoff = factValue('takeoffThrust');
+    const ceiling = factValue('accelStartMaxThrustFraction');
+    const START_MARGIN = 0.001;
+    const lever0 = leverForNetThrust((ceiling - START_MARGIN) * takeoff, ISA_SLS);
+    expect(lever0).toBeGreaterThan(0);
+    expect(lever0).toBeLessThan(1);
     const m = createCycleModel();
-    const idle = m.reset('groundIdle', ISA_SLS);
+    m.reset('groundIdle', ISA_SLS);
     expect(m.source).toBe('model');
-    expect(idle.netThrustN / factValue('takeoffThrust')).toBeLessThanOrEqual(
-      factValue('accelStartMaxThrustFraction'),
+    const settle = run(m, 30, 0.05, () => inputs({ throttleLever: lever0 }));
+    const start = m.state();
+    // stabilised: N1 moved less than 0.05 points over the last second
+    expect(Math.abs(start.n1Percent - (settle[settle.length - 21]?.n1Percent ?? 0))).toBeLessThan(
+      0.05,
     );
-    const target = THRESHOLDS.C5.values.thrustFraction.value * factValue('takeoffThrust');
-    // 33.73(a): the lever goes from minimum to maximum in 1 s
+    expect(start.netThrustN / takeoff).toBeLessThanOrEqual(ceiling);
+    expect(start.netThrustN / takeoff).toBeGreaterThan(ceiling - 2 * START_MARGIN);
+    const target = THRESHOLDS.C5.values.thrustFraction.value * takeoff;
+    const t0 = start.timeS;
+    // 33.73(a): the lever goes from the start position to maximum in 1 s
     const states = run(
       m,
       8,
       0.02,
-      (t) => inputs({ throttleLever: Math.min(1, t) }),
+      (t) => inputs({ throttleLever: Math.min(1, lever0 + (1 - lever0) * (t - t0)) }),
       (s) => s.netThrustN >= target,
     );
     const last = states[states.length - 1];
     expect(last?.netThrustN ?? 0).toBeGreaterThanOrEqual(target);
-    expect(last?.timeS ?? Infinity).toBeLessThanOrEqual(THRESHOLDS.C5.values.maxTimeS.value);
+    expect((last?.timeS ?? Infinity) - t0).toBeLessThanOrEqual(THRESHOLDS.C5.values.maxTimeS.value);
+    // 33.73(a): without overtemperature or surge
     for (const s of states) {
       expect(validateCycleState(s, refs)).toEqual([]);
       expect(s.flags.surge).toBe(false);
       expect(s.egtDisplayedK).toBeLessThan(factValue('egtTransientLimit'));
     }
+  });
+
+  it('ground idle is itself a valid 33.73(b) start point (at most 15 % of rated thrust)', () => {
+    const m = createCycleModel();
+    const idle = m.reset('groundIdle', ISA_SLS);
+    expect(idle.netThrustN / factValue('takeoffThrust')).toBeLessThanOrEqual(
+      factValue('accelStartMaxThrustFraction'),
+    );
+  });
+
+  it('leverForNetThrust: the lever that holds a steady thrust, monotonic, 0..1', () => {
+    const takeoff = factValue('takeoffThrust');
+    const a = leverForNetThrust(0.3 * takeoff, ISA_SLS);
+    const b = leverForNetThrust(0.6 * takeoff, ISA_SLS);
+    expect(a).toBeGreaterThan(0);
+    expect(b).toBeGreaterThan(a);
+    expect(leverForNetThrust(takeoff, ISA_SLS)).toBeCloseTo(1, 6);
+    const m = createCycleModel();
+    m.reset('groundIdle', ISA_SLS);
+    run(m, 30, 0.05, () => inputs({ throttleLever: b }));
+    expect(m.state().netThrustN / takeoff).toBeCloseTo(0.6, 3);
   });
 
   it('settles at rated takeoff without overspeed and holds N1 inside the limits', () => {

@@ -141,7 +141,11 @@ const conditionsOf = (i: CycleInputs): OperatingConditions => ({
   powerExtractionW: i.powerExtractionW,
 });
 
-function buildSchedules(e: SizedEngine, ambient: AmbientConditions): Schedules {
+/**
+ * The lever's two end points at an ambient: ground idle, and the N1 of rated takeoff thrust
+ * (flat rated to flatRatingTemperature, then held at that corrected N1 above it).
+ */
+function leverEnds(e: SizedEngine, ambient: AmbientConditions) {
   const c: OperatingConditions = { ambient, customerBleedFraction: 0, powerExtractionW: 0 };
   const idle = groundIdle(e, c);
   const tFlat = factValue('flatRatingTemperature');
@@ -153,6 +157,31 @@ function buildSchedules(e: SizedEngine, ambient: AmbientConditions): Schedules {
   );
   const n1TakeoffPercent =
     rated.point.n1Percent * Math.sqrt(ambient.temperatureK / ratingAmbient.temperatureK);
+  return { c, idle, n1TakeoffPercent };
+}
+
+/** The FADEC's lever schedule: N1 target linear in the lever from ground idle to takeoff. */
+function leverToN1(lever: number, idleN1: number, takeoffN1: number): number {
+  return lever <= 0 ? 0 : idleN1 + lever * (takeoffN1 - idleN1);
+}
+
+/**
+ * The throttle lever whose N1 target holds a given steady net thrust (no bleed or extraction),
+ * e.g. the 14 CFR 33.73(b) start point at 15 % of rated takeoff thrust. Inverse of leverToN1.
+ */
+export function leverForNetThrust(
+  thrustN: number,
+  ambient: AmbientConditions = ISA_SLS,
+  engine: SizedEngine = REFERENCE_ENGINE,
+): number {
+  const { c, idle, n1TakeoffPercent } = leverEnds(engine, ambient);
+  const s = solveSteady(engine, c, { kind: 'netThrust', value: thrustN }, idle.unknowns);
+  const idleN1 = idle.point.n1Percent;
+  return (s.point.n1Percent - idleN1) / (n1TakeoffPercent - idleN1);
+}
+
+function buildSchedules(e: SizedEngine, ambient: AmbientConditions): Schedules {
+  const { c, idle, n1TakeoffPercent } = leverEnds(e, ambient);
   const ruN2c: number[] = [];
   const ruSteady: number[] = [];
   let s = idle;
@@ -389,7 +418,7 @@ class TurbofanCycleModel implements CycleModel {
     } else if (this.mode === 'run') {
       const lever = inp.throttleLever;
       const idleN1 = this.sched.idle.point.n1Percent;
-      this.n1Target = lever <= 0 ? 0 : idleN1 + lever * (this.sched.n1TakeoffPercent - idleN1);
+      this.n1Target = leverToN1(lever, idleN1, this.sched.n1TakeoffPercent);
       const loop = (target: number, value: number, rate: number, scale = 100, td = TD) =>
         K_LOOP * ((target - value) / scale - (td * rate) / scale);
       const rN1 = loop(this.n1Target, this.pct1(), this.dn1);
