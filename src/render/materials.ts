@@ -378,8 +378,9 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
     }
     case 'fanCase':
       // painted aluminium containment case: a dark grey satin
-      m = phys({ color: c3(0.11, 0.115, 0.11), metalness: 0.2, roughness: 0.55 });
-      m.colorNode = vec3(0.11, 0.115, 0.11).add(
+      // (0.2, not 0.11: in the cutaway's shadow the darker case read as a hole, W1L-N2)
+      m = phys({ color: c3(0.2, 0.205, 0.2), metalness: 0.2, roughness: 0.55 });
+      m.colorNode = vec3(0.2, 0.205, 0.2).add(
         mx_fractal_noise_float(positionLocal.mul(3), 2, 2, 0.5).mul(0.012),
       );
       break;
@@ -467,7 +468,7 @@ const CAVITY: Readonly<Record<PartMaterial, number>> = {
   inletLip: 1,
   nacellePaint: 1,
   acousticLiner: 0.65,
-  fanCase: 0.5,
+  fanCase: 0.65,
   splitter: 0.75,
   cowlPaint: 0.9,
   compressorCase: 0.5,
