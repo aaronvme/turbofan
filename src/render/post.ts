@@ -230,7 +230,9 @@ export function createPipeline(
         // a pixel on a fan blade first follows its own surface point (keeps the blade body
         // coherent); only where that point has moved off the blades does the march look for
         // the blade sweeping in behind it
-        If(ownFan, () => {
+        // (short exposures only: over most of a pitch the own point lands on other blades at
+        // other depths and the march alone gives the smoother disc)
+        If(ownFan.and(fanAngle.lessThan(fan.pitch * 0.6)), () => {
           const quv = toUv(rotX(pRotor, c, s));
           const smp = rotorColor.sample(quv);
           If(rotorBlur.sample(quv).b.greaterThan(0.5).and(smp.a.greaterThan(0.5)), () => {
