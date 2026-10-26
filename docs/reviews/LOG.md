@@ -948,3 +948,32 @@ None.
 - The code is sound: pure, deterministic geometry with real topology checks, worker-safe rendering, and errors routed rather than swallowed.
 - The visual quality is below the bar, and the look-dev round takes it with D3-1's studio look: LD-1..LD-6, refined above, plus V1-V5.
 - I1 and I2 are allowed after the merge, as the round's first tasks. The nits go to the same round.
+
+## Critic pass 3: trial merge (w0/gpu-spikes @d1cb041 → w1/cycle @5d17120 → w1/geometry @93e9877)
+
+- **Merge:** sequential `git merge --no-ff --no-commit`, on a detached HEAD at the critic's HEAD (main 738ac4a plus this log), with a scratch commit between steps. All three steps are **clean, with no conflicts**:
+  - **gpu-spikes:** clean. It already contains main up to b5c2736.
+  - **cycle:** clean, though it is based on 3969af7 (before w1/mesh).
+  - **geometry:**
+    - ENGINE_FACTS.md auto-merged. The cycle's "Cycle model calibration" text is now stale (W1C-I3).
+    - `vitest.browser.config.ts` keeps gpu-spikes' version (no `passWithNoTests`).
+    - `NOTICE` and `NOTICE.md` now sit side by side (W1G-N4).
+- **Gates on the combined tree:**
+  - `npm run mesh`: byte-identical to geometry's committed outputs (hashes 130k 33c76df6, 80k 6f316568; manifest, SVGs and metrics unchanged). The build's prebuild also left the manifest unchanged.
+  - `npm test`: 1406 passed (61 files), exit 0. That is 972 on main + 135 (gpu-spikes) + 102 (cycle) + 197 (geometry).
+  - `npm run lint`: clean. `npm run typecheck`: clean.
+  - `npm run coverage`: lines 98.57 %, statements 97.66 %, branches 88.04 %, functions 98.35 %. Every threshold passes: src/cycle lines 100 %, src/thermo 100 %, src/geometry 99.62 %, tools/mesh 99.21 %, spikes/lib 100 %.
+  - `npm run test:mesh`: 29 passed. `npm run build`: ok.
+  - `npm run test:gpu`: 15 passed. `npm run test:browser`: 16 passed (3 files: interop 12, chrome-gpu 2, engineView 2).
+  - Quiet reruns of gpu-spikes' `test:gpu` (no Stryker running): 15/15 three times. So W0G-N7 fails only under load.
+- **Restore:** back to branch `critic`, then the generated `public/mesh/*.bin` and `dist/` removed. The builder worktrees are untouched: `git status` is clean at d1cb041, 5d17120 and 93e9877. The critic's Stryker scratch configs in the cycle worktree are removed, and its `.stryker-tmp/critic*` sandboxes were cleaned by Stryker.
+- **Cross-branch findings:** W1C-I3 (the A8/A18 tie and the stale facts text) and W1G-N4 (the notice files). W0G-N5 also matters for W1G-I2's measurement: a heavy preset below 30 fps would read as INVALID.
+
+**Orchestrator decisions needed (pass 3):**
+- (l) **W1C-I1:**
+  - Do the MPA (N1 65 %) and idle ground-run points become validation tests?
+  - With which tolerances (suggestion: EGT ±25 K, N2 ±1.5 points)?
+  - Are the ground-run loads (bleed, extraction) model defaults, or test inputs?
+- (m) **W1C-I2:** either derive the Greitzer B and characteristic from the engine and let the episode end on recovery, or relabel the surge row of the fidelity ledger and correct the plan's "100-300 ms surge cycles".
+- (n) **W1C-N2:** T3's reference. Run one NASA CEA frozen point, or reword T3 as "frozen complete-combustion JANAF mixture" with a ledger note (no dissociation).
+- (o) **W0G-N5:** amend D2-11's throttle rule so that a slow load (3-10 display intervals per frame) is a warning and only a ~1 Hz cadence is INVALID. This is needed before P2/L13 on heavy presets.
