@@ -143,7 +143,7 @@ No public source gives these. The SI column is the **model assumption**, not a f
 
 Not known and not needed as a model input (the model reports them; nothing checks them):
 - **Cruise TSFC.** No primary source for the -7B27/3. The cycle model reports its own value; no threshold uses it.
-- **Flight-idle N1.** No published figure. C5 uses the 33.73(b) alternative instead: it starts from stabilized ground idle, which the model must show is at most `accelStartMaxThrustFraction` (15 %) of rated takeoff thrust.
+- **Flight-idle N1.** No published figure. C5 uses the 33.73(b) alternative instead (decision D2-1): with no flight-idle stop, the 5 s clock starts from a stabilized point at not more than `accelStartMaxThrustFraction` (15 %) of rated takeoff thrust. The test holds the lever at 14.9 % (0.1 point under the ceiling, so a settling residual cannot put it above) until N1 is steady, then moves it to maximum in 1 s. Ground idle (1.0 % of rated thrust) would also qualify but is a harsher start than 33.73(b) requires.
 - **N1 at rated takeoff, ISA SLS.** Not published; the measured static takeoff run (`staticTakeoffN1`, OAT 25 °C) is the nearest point.
 - **Blade counts other than the fan, VBV/TBV valve counts, the VSV schedule shape.** Not published; definition.ts picks counts from a target solidity and the schedule from the rows above.
 
@@ -163,7 +163,7 @@ Not known and not needed as a model input (the model reports them; nothing check
 > (b) From the fixed minimum flight idle power lever position when provided, or if not provided, from not more than 15 percent of the rated takeoff power or thrust available to 95 percent rated takeoff power or thrust in not over 5 seconds. The 5-second power or thrust response must occur from a stabilized static condition using only the bleed air and accessories loads necessary to run the engine. This takeoff rating is specified by the applicant and need not include thrust augmentation.
 > [Amdt. 33-1, 36 FR 5493, Mar. 24, 1971]
 
-PHYSICS.md C5 (≤ 5.0 s to 95 % takeoff thrust) is 33.73(b). The lever movement in at most 1 second from 33.73(a) is the input the C5 test applies.
+PHYSICS.md C5 (≤ 5.0 s to 95 % takeoff thrust) is 33.73(b), timed from the stabilized 15 % start point above (D2-1). The lever movement in at most 1 second from 33.73(a) is the input the C5 test applies, and 33.73(a)'s "without overtemperature, surge, stall" is checked along the way: no surge flag, and displayed EGT below the 960 °C transitory limit (egtTransientLimit).
 
 ## Design-point estimate (derivation of the assumed values)
 
@@ -205,17 +205,44 @@ T49.5 (after LPT stage 1, equal stage work) comes out at 1174 K = 901 °C, i.e. 
 
 ## Model vs published (updated every wave)
 
-The model column stays empty until the W1 cycle model exists (the mocks are not the model).
+Model: the W1 cycle model (`src/cycle`, w1/cycle), ISA SLS static unless stated. Tests: tests/unit/cycle/engine.test.ts, model.test.ts and modelPaths.test.ts.
 
 | Figure | Published | Model | Delta | Threshold (PHYSICS.md) |
 |---|---|---|---|---|
-| SLS takeoff thrust | 121430 N (takeoffThrust) | pending W1 | | C1: within 3 % |
-| SLS takeoff BPR | 5.1 (bypassRatio) | pending W1 | | C2: within 3 % |
-| SLS takeoff OPR | 29 (overallPressureRatio) | pending W1 | | C2: within 3 % |
-| SLS takeoff total airflow | 359.245 kg/s (totalAirflow) | pending W1 | | C2: within 3 % |
-| SLS takeoff TSFC | 1.0648e-5 kg/(N s) (tsfcTakeoff, estimate) | pending W1 | | C3: within 3 % |
-| Ground idle N1 | 20-22 % (idleN1Min, idleN1Max) | pending W1 | | C4: inside the range |
-| Ground idle N2 | 60-62 % (idleN2Min, idleN2Max) | pending W1 | | C4: inside the range |
-| Ground idle EGT | below 773.15 K (idleEgtMax) | pending W1 | | C4: inside the range |
-| Ground idle to 95 % takeoff thrust | 5.0 s (33.73(b)) | pending W1 | | C5: ≤ 5.0 s |
-| Takeoff EGT (displayed) | below 1223.15 K (egtTakeoffLimit) | pending W1 | | C6: below the redline |
+| SLS takeoff thrust | 121430 N (takeoffThrust) | 121430 N | 0.0 % (sizing closure) | C1: within 3 % |
+| SLS takeoff BPR | 5.1 (bypassRatio) | 5.100 | 0.0 % | C2: within 3 % |
+| SLS takeoff OPR | 29 (overallPressureRatio) | 29.00 | 0.0 % | C2: within 3 % |
+| SLS takeoff total airflow | 359.245 kg/s (totalAirflow) | 359.245 kg/s | 0.0 % | C2: within 3 % |
+| SLS takeoff TSFC | 1.0648e-5 kg/(N s) (tsfcTakeoff, estimate) | 1.0648e-5 kg/(N s) | 0.0 % | C3: within 3 % |
+| Ground idle N1 | 20-22 % (idleN1Min, idleN1Max) | 20.5 % | inside | C4: inside the range |
+| Ground idle N2 | 60-62 % (idleN2Min, idleN2Max) | 61.0 % (FADEC floor) | inside | C4: inside the range |
+| Ground idle EGT | below 773.15 K (idleEgtMax) | 592 K (319 C displayed) | inside; 150 K below the measured 466-493 C | C4: inside the range |
+| 15 % to 95 % rated takeoff thrust, lever to maximum in 1 s (33.73(b), D2-1) | 5.0 s | 2.60 s; peak displayed EGT 946.5 C (limit 960 C), min HPC surge margin 0.106, no surge | 2.40 s margin | C5: ≤ 5.0 s |
+| Ground idle (1.0 % thrust) to rated takeoff, lever to maximum in 1 s (33.73(a)) | no overtemperature (displayed EGT below 960 C, egtTransientLimit) or surge | peak 958.3 C, min HPC surge margin 0.025, no surge; 95 % thrust at 5.22 s (no time limit applies) | 1.7 K under | 33.73(a) check in model.test.ts (not a PHYSICS.md threshold) |
+| Takeoff EGT (displayed), 30 C corner (D1-1) | below 1223.15 K (egtTakeoffLimit) | 1195.7 K (922.5 C) | 27.5 K margin | C6: below the redline |
+| Static takeoff run, OAT 25 C, N1 97.4 % | 855 C EGT, N2 99.8 % (staticTakeoffEgt, staticTakeoffN2) | 853.1 C, N2 99.9 % | -1.9 K, +0.1 pt | calibration target (W0C-I6) |
+
+## Cycle model calibration (W1)
+
+The W1 model is thermally perfect (src/thermo) and map-based (pyCycle maps, NOTICE). It takes every W0 assumption above unchanged (pressure ratios, efficiencies, losses, cooling, LHV) except the two rows below. Its own sized outputs replace the W0 estimate's derived values for the cycle; the definition's flowpath still uses the W0 placeholders (see the w1-cycle handoff).
+
+Sized at ISA SLS takeoff (D1-2): the fan bypass pressure ratio is solved so that net thrust equals takeoffThrust at fuelFlowTakeoff, so C1 and C3 close exactly and BPR, OPR and airflow are inputs.
+
+| Quantity | W0 estimate | W1 cycle | How |
+|---|---|---|---|
+| Fan bypass pressure ratio | 1.55 (assumed) | 1.537 | sizing output: thrust closure at the EEDB fuel flow |
+| Core nozzle area A8 | 0.1778 m² | 0.1852 m² (+4.2 %), `estimate` | sizing output: A8 = W5 / (choked flux at P8, T5), thermally perfect, at ISA SLS takeoff with fuelFlowTakeoff |
+| Bypass nozzle area A18 | 0.9067 m² | 0.9161 m² (+1.0 %), `estimate` | sizing output: A18 = W13 / (flux at P18, T13, p0), unchoked at SLS |
+| T3 / T4 / T41 / T45 | 836 / 1746 / 1627 / 1243 K | 810.6 / 1641 / 1551 / 1200.6 K | thermally perfect cp(T, FAR) instead of cold 1004.7 and hot 1150 J/(kg K) |
+| T49.5 at ISA takeoff, displayed EGT | 1174 K, 931 C | 1112 K, 866.5 C | thermally perfect gas plus the two calibrations below |
+
+Decision D2-2: the sized A8 and A18 replace the definition's placeholders (bypassNozzleArea above, the core nozzle lip in definition.ts) only after w1/mesh merges, because the flowpath, the mesh and the 3D geometry all derive from definition.ts. Until then the cycle uses its own sized areas and the definition keeps 0.1778 / 0.9067 m².
+
+Calibrated parameters (W0C-I6), each a model assumption with no public value, both `estimate` (calibrated):
+
+| Parameter | W0 | W1 | Confidence | Plausible range and why |
+|---|---|---|---|---|
+| N1 at ISA SLS rated takeoff | 100 % (5175 rpm) | 101 % (5227 rpm) | estimate (calibrated) | not published. With 100 % the model's N2 at the measured run (N1 97.4 %, 25 C) is 100.3 % against 99.8 % measured; 101 % gives 99.9 %. Above about 101.5 % the 30 C corner would exceed the 104 % TCDS N1 limit. |
+| Share of LPT work upstream of the EGT probe (station 49.5) | 0.25 (equal work over 4 stages) | 0.35 | estimate (calibrated; accepted by D2-3) | Station 49.5 is the LPT stage 2 nozzle ([TCDS] IV.1.1), so the probe sees the gas after stage 1 of 4. Stage 1 does more than an equal share of the LPT work: the last stage is usually lightly loaded to keep the exhaust swirl low, so the first stages carry more than 0.25 each (the flowpath's rising mean radius pulls the other way, and no stage split is published). 0.35 is fitted to the measured 855 C ([WIDURI]); it also absorbs any low reading of the probe (thermocouple radiation to the cooler vanes). An energy balance pins T45 (1200.6 K at ISA takeoff) from the fuel flow and T25 alone, so efficiencies and cooling flows cannot move the EGT by the 36 K needed without leaving their ranges. |
+
+Model choices that matter for the comparison: ground idle is a FADEC N2 floor of 61 %; idle EGT is 150 K below the measured ground run because the model has no customer bleed, accessory load or VBV flow at idle (an on-wing run has all three); the VBV opening is reported but not fed to the gas path.
