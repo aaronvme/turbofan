@@ -27,8 +27,8 @@ Reference variant: **CFM56-7B27/3** (Tech Insertion, "TI"), the 27,300 lbf ratin
 
 | ID | Figure | Source value | SI | Source | Confidence |
 |---|---|---|---|---|---|
-| takeoffThrust | Takeoff thrust, SLS, flat rated (-7B27/3) | 12143 daN | 121430 N | [TCDS] I.6 Ratings | official |
-| maxContinuousThrust | Maximum continuous thrust (-7B27/3) | 11521 daN | 115210 N | [TCDS] I.6 Ratings | official |
+| takeoffThrust | Takeoff thrust, SLS, flat rated (-7B27/3) | 12143 daN | 121430 N | [TCDS] III.6 Ratings | official |
+| maxContinuousThrust | Maximum continuous thrust (-7B27/3) | 11521 daN | 115210 N | [TCDS] III.6 Ratings | official |
 | takeoffThrustFiche | Takeoff thrust, manufacturer sheet (cross-check of takeoffThrust, +0.005 %) | 27300 lbf | 121436 N | [FICHE] | official |
 | flatRatingTemperature | Flat-rating temperature (takeoff thrust held up to it) | 86 °F | 303.15 K | [FICHE] | official |
 | bypassRatio | Bypass ratio, SLS takeoff (fiche: 5.10) | 5.1 | 5.1 | [EEDB] 8CM066; [FICHE] | official |
@@ -50,16 +50,16 @@ Reference variant: **CFM56-7B27/3** (Tech Insertion, "TI"), the 27,300 lbf ratin
 | fanBladeCount | Fan blades (wide chord, Ti-6-4) | 24 | 24 | [NTSB] 1.3.1 | published |
 | fanBladeChord | Fan blade chord at its widest point | 11 in | 0.2794 m | [NTSB] 1.3.1 ("about 11 inches") | published |
 | fanBladeMass | Fan blade nominal weight | 10.83 lb | 4.9124 kg | [NTSB] 1.3.1 ("about 10.83 pounds") | published |
-| fanStages | Fan stages | 1 | 1 | [TCDS] I.2 | official |
-| boosterStages | Low-pressure compressor (booster) stages | 3 | 3 | [TCDS] I.2 | official |
-| hpcStages | High-pressure compressor stages | 9 | 9 | [TCDS] I.2 | official |
-| hptStages | High-pressure turbine stages | 1 | 1 | [TCDS] I.2 | official |
-| lptStages | Low-pressure turbine stages | 4 | 4 | [TCDS] I.2 | official |
-| engineLength | Overall engine length (model value; see Contradictions) | 2508 mm | 2.508 m | [TCDS] I.4 | official |
+| fanStages | Fan stages | 1 | 1 | [TCDS] III.2 | official |
+| boosterStages | Low-pressure compressor (booster) stages | 3 | 3 | [TCDS] III.2 | official |
+| hpcStages | High-pressure compressor stages | 9 | 9 | [TCDS] III.2 | official |
+| hptStages | High-pressure turbine stages | 1 | 1 | [TCDS] III.2 | official |
+| lptStages | Low-pressure turbine stages | 4 | 4 | [TCDS] III.2 | official |
+| engineLength | Overall engine length (model value; see Contradictions) | 2508 mm | 2.508 m | [TCDS] III.4 | official |
 | engineLengthFiche | Engine length, manufacturer sheet (contradicts engineLength by +4.8 %) | 103.5 in | 2.6289 m | [FICHE] | official |
-| engineWidth | Overall width | 2118 mm | 2.118 m | [TCDS] I.4 | official |
-| engineHeight | Overall height | 1829 mm | 1.829 m | [TCDS] I.4 | official |
-| dryWeight | Dry weight, "TI" engines | 2386 kg | 2386 kg | [TCDS] I.5 | official |
+| engineWidth | Overall width | 2118 mm | 2.118 m | [TCDS] III.4 | official |
+| engineHeight | Overall height | 1829 mm | 1.829 m | [TCDS] III.4 | official |
+| dryWeight | Dry weight, "TI" engines | 2386 kg | 2386 kg | [TCDS] III.5 | official |
 | envelopeDiameterAvWeek | Maximum envelope diameter | 65 in | 1.651 m | [AW08] | published |
 | rotationSense | Rotation sense, "The engine rotates clockwise (aft looking forward)": the angular velocity about +x (downstream) is negative | clockwise, aft looking forward | -1 | [NTSB] 1.3.1 | published |
 | n1MaxRpm | Maximum N1 (104 %) | 5382 rpm | 5382 rpm | [TCDS] IV.2 | official |
