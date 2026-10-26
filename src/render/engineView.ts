@@ -1,35 +1,36 @@
-// The engine look-dev view: device, renderer, procedural engine, post chain and the MOCK
-// cycle driving the spools. Worker-safe (D2-4): no DOM, the canvas may be an OffscreenCanvas,
-// size and DPR come in from the caller (setSize(w, h, false)), the HDRI comes through
-// HDRLoader (fetch), and the caller owns the frame loop.
+// The engine look-dev view: device, renderer, procedural engine, studio, post chain and the
+// MOCK cycle driving the spools. Worker-safe (D2-4): no DOM, the canvas may be an
+// OffscreenCanvas, size and DPR come in from the caller (setSize(w, h, false)), the studio is
+// procedural (no asset fetch), and the caller owns the frame loop.
+//
+// The device is the shared one of src/gpu/device.ts (requestSimDevice: addEventListener error
+// routing, intentional-destroy handling) and three adopts it through createRendererOnDevice
+// (core mode checked). Every failure after the device exists destroys it (W1G-N3).
 
 import {
   AgXToneMapping,
-  BackSide,
-  DirectionalLight,
-  EquirectangularReflectionMapping,
-  Mesh,
-  MeshBasicNodeMaterial,
+  PCFShadowMap,
   PerspectiveCamera,
-  SphereGeometry,
   Vector3,
-  WebGPURenderer,
-  type DataTexture,
+  type WebGPURenderer,
 } from 'three/webgpu';
-import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
-import { mix, positionWorld, smoothstep, vec3 } from 'three/tsl';
 import { DEFAULT_CYCLE_INPUTS, type CycleInputs } from '../contracts/cycle';
 import type { EngineDefinition } from '../contracts/engine';
 import { buildEngineGeometry, GEOMETRY_QUALITY } from '../geometry/engineGeometry';
 import { cutawayWedge } from '../geometry/cutaway';
 import { easeInOut, explodeOffsets } from '../geometry/explode';
 import { advanceAngle, shutterBlurAngle } from '../geometry/motion';
+import { closedViewVisibility } from '../geometry/visibility';
+import { requestSimDevice, type GpuErrorReport, type SimDevice } from '../gpu/device';
+import type { PassMedians } from '../gpu/passTimings';
 import { createMockCycle, mockSteadyState, MOCK_LABEL } from '../mocks/mockCycle';
-import { createEngineDevice, type EngineDevice, type GpuErrorReport } from './gpuDevice';
 import { buildEngineScene, type EngineScene } from './engineScene';
 import { createLookUniforms, createMaterials, type LookUniforms } from './materials';
-import { createPipeline, type LookPipeline } from './post';
-import { LOOK_PRESETS, type LookMode, type LookPresetId } from './presets';
+import { createPassTimer, type PassTimer } from './passTimer';
+import { createPipeline, type LookPipeline, type PostDebug } from './post';
+import { LOOK_PRESETS, SHUTTER_1000, type LookMode, type LookPresetId } from './presets';
+import { createRendererOnDevice } from './rendererOnDevice';
+import { createStudio, type Studio } from './studio';
 
 export interface EngineViewOptions {
   readonly gpu: GPU;
@@ -38,25 +39,31 @@ export interface EngineViewOptions {
   readonly width: number;
   readonly height: number;
   readonly dpr: number;
-  readonly hdriUrl: string;
   readonly quality?: keyof typeof GEOMETRY_QUALITY;
   readonly onError?: (r: GpuErrorReport) => void;
-  readonly debug?: 'rotorAlpha' | 'rotorBlur' | 'ao' | 'visible' | null;
+  readonly debug?: PostDebug;
+  /** Per-pass GPU timestamps (default on when the adapter has timestamp-query). */
+  readonly timing?: boolean;
 }
 
 export interface EngineViewStats {
   readonly triangles: number;
+  /** Triangles in the scene graph that the current mode draws (culling applied). */
+  readonly drawnTriangles: number;
   readonly n1Rpm: number;
   readonly n2Rpm: number;
   readonly lpBlurDeg: number;
   readonly errors: readonly GpuErrorReport[];
   readonly cycleLabel: typeof MOCK_LABEL;
+  /** Rolling medians of GPU ms per pass and CPU ms per frame (W1G-I2). */
+  readonly timings: PassMedians;
+  readonly timestamps: boolean;
 }
 
 export interface EngineView {
   readonly renderer: WebGPURenderer;
   readonly camera: PerspectiveCamera;
-  readonly device: EngineDevice;
+  readonly device: SimDevice;
   readonly uniforms: LookUniforms;
   setSize(width: number, height: number, dpr: number): void;
   setPreset(id: LookPresetId): void;
@@ -64,11 +71,26 @@ export interface EngineView {
   /** Throttle lever 0..1; `settle` jumps to the MOCK steady state instead of spooling. */
   setThrottle(lever: number, settle?: boolean): void;
   setShutter(angleDeg: number): void;
+  setCinematic(on: boolean): void;
   setCameraPose(position: readonly number[], target: readonly number[]): void;
+  /** Look-dev A/B switches (e.g. caps or culling off) for timing comparisons. */
+  setDebugFlags(flags: DebugFlags): void;
   /** Advances the simulation clock by dt seconds and renders one frame. */
   frame(dtS: number): void;
   stats(): EngineViewStats;
-  dispose(): void;
+  dispose(): Promise<void>;
+}
+
+/** Look-dev A/B switches for timing comparisons (never set by the app). */
+export interface DebugFlags {
+  readonly noCull?: boolean;
+  readonly noCaps?: boolean;
+  /** Hide the cyclorama (background cost). */
+  readonly noStage?: boolean;
+  /** No shadow lookups at all. */
+  readonly noShadow?: boolean;
+  /** Skip the post chain: the scene pass straight to the screen. */
+  readonly noPost?: boolean;
 }
 
 const FPS = 60;
@@ -77,52 +99,73 @@ const EXPLODE_GAP = 0.22;
 const TRANSITION_S = 1.4;
 
 export async function createEngineView(o: EngineViewOptions): Promise<EngineView> {
-  const device = await createEngineDevice(o.gpu, o.onError);
-  const renderer = new WebGPURenderer({
-    device: device.device,
-    canvas: o.canvas as HTMLCanvasElement,
-    antialias: false,
+  const errors: GpuErrorReport[] = [];
+  const sink = (r: GpuErrorReport) => {
+    errors.push(r);
+    if (o.onError) o.onError(r);
+    else console.error(`[gpu ${r.kind}] ${r.message}`);
+  };
+  const device = await requestSimDevice(o.gpu, {
+    label: 'turbofan-render',
+    powerPreference: 'high-performance',
+    optionalFeatures: ['float32-filterable', 'timestamp-query'],
+    // the scene pass writes 3 rgba16float targets (colour, normal, velocity): 24 B/sample
+    maxLimits: ['maxColorAttachmentBytesPerSample'],
+    onError: sink,
   });
-  await renderer.init();
+  let renderer: WebGPURenderer | null = null;
+  try {
+    const timing = (o.timing ?? true) && device.hasTimestamps;
+    renderer = await createRendererOnDevice({
+      device: device.device,
+      canvas: o.canvas,
+      trackTimestamp: timing,
+    });
+    return await assemble(o, device, renderer, errors, timing);
+  } catch (e) {
+    if (renderer !== null) await Promise.resolve(renderer.dispose()).catch(() => undefined);
+    device.destroy();
+    throw e;
+  }
+}
+
+async function assemble(
+  o: EngineViewOptions,
+  device: SimDevice,
+  renderer: WebGPURenderer,
+  errors: GpuErrorReport[],
+  timing: boolean,
+): Promise<EngineView> {
   renderer.toneMapping = AgXToneMapping;
-  renderer.toneMappingExposure = 1.5;
+  renderer.toneMappingExposure = 1.0;
   // the rotor pass must start transparent: its alpha is the blade coverage
   renderer.setClearColor(0x000000, 0);
   renderer.setPixelRatio(o.dpr);
   renderer.setSize(o.width, o.height, false);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = PCFShadowMap;
+  const timer: PassTimer = createPassTimer(renderer, timing);
 
   const def = o.definition;
   const geo = buildEngineGeometry(def, GEOMETRY_QUALITY[o.quality ?? 'high']);
   const uniforms = createLookUniforms();
-  const scene: EngineScene = buildEngineScene(geo, createMaterials(uniforms));
-
-  const hdri: DataTexture = await new HDRLoader().loadAsync(o.hdriUrl);
-  hdri.mapping = EquirectangularReflectionMapping;
-  for (const s of [scene.main, scene.rotors]) {
-    s.environment = hdri;
-    s.environmentIntensity = 1.35;
-    s.environmentRotation.set(0, 2.2, 0);
-  }
-  // a dark studio sweep around the engine (the HDRI lights and reflects; it is not shown)
-  const dirUp = positionWorld.normalize().y;
-  const backdropMat = new MeshBasicNodeMaterial({ side: BackSide, depthWrite: false });
-  backdropMat.colorNode = mix(
-    vec3(0.05, 0.054, 0.06),
-    vec3(0.004, 0.0045, 0.005),
-    smoothstep(-0.35, 0.6, dirUp),
+  const scene: EngineScene = buildEngineScene(
+    geo,
+    createMaterials(uniforms),
+    closedViewVisibility(def, geo),
   );
-  const backdrop = new Mesh(new SphereGeometry(80, 48, 24), backdropMat);
-  backdrop.position.set(1.2, 0, 0);
-  scene.main.add(backdrop);
-  const key = new DirectionalLight(0xfff4e8, 1.6);
-  key.position.set(-2, 4, 3);
-  const keyR = key.clone();
-  scene.main.add(key);
-  scene.rotors.add(keyR);
+  const studio: Studio = await createStudio(renderer);
+  for (const s of [scene.main, scene.rotors]) {
+    s.environment = studio.environment;
+    s.environmentIntensity = 0.55;
+  }
+  scene.main.add(studio.stage);
+  scene.rotors.add(studio.rotorLights);
 
   const camera = new PerspectiveCamera(30, o.width / o.height, 0.05, 200);
   const fanRow = def.bladeRows.find((r) => r.id === 'fan');
-  if (fanRow === undefined) throw new Error('engineView: no fan row');
+  const fanGeo = geo.rows.find((r) => r.row.id === 'fan');
+  if (fanRow === undefined || fanGeo === undefined) throw new Error('engineView: no fan row');
   const post: LookPipeline = createPipeline(
     renderer,
     scene.main,
@@ -130,16 +173,21 @@ export async function createEngineView(o: EngineViewOptions): Promise<EngineView
     camera,
     uniforms,
     {
-      x: (fanRow.leadingEdge.hub.x + fanRow.trailingEdge.tip.x) / 2,
-      rHub: fanRow.leadingEdge.hub.r,
-      // out to the casing and a little past it: at an oblique view the swept blade tips
-      // project beyond the tip radius on the mid-chord disc
-      rTip: fanRow.leadingEdge.tip.r + 0.04,
+      rHub: fanGeo.blade.rMin,
+      rTip: fanGeo.blade.rMax + 0.002,
       pitch: (2 * Math.PI) / fanRow.count,
-      xFore: Math.min(fanRow.leadingEdge.hub.x, fanRow.leadingEdge.tip.x) - 0.004,
-      xAft: Math.max(fanRow.trailingEdge.hub.x, fanRow.trailingEdge.tip.x) + 0.03,
+      xFore: fanGeo.blade.xMin - 0.002,
+      xAft: fanGeo.blade.xMax + 0.002,
     },
-    { blurSamples: 24, aoStrength: 0.85, bloomStrength: 0.12, debug: o.debug ?? null },
+    {
+      fanSamples: 8,
+      rotorSamples: 8,
+      fanPlanes: 4,
+      aoStrength: 0.9,
+      bloomStrength: 0.06,
+      bloomThreshold: 1.6,
+      debug: o.debug ?? null,
+    },
   );
 
   const cycle = createMockCycle(def);
@@ -149,10 +197,13 @@ export async function createEngineView(o: EngineViewOptions): Promise<EngineView
   let settle = true;
   let lp = 0;
   let hp = 0;
-  let shutterDeg = 180;
+  let shutterDeg = SHUTTER_1000;
   let mode: LookMode = 'realistic';
   let cut = 0;
   let explode = 0;
+  let lastCut = -1;
+  let lastExplode = -1;
+  let flags: DebugFlags = {};
   const target = new Vector3(0.5, 0, 0);
 
   const inputs = (): CycleInputs => ({
@@ -161,6 +212,16 @@ export async function createEngineView(o: EngineViewOptions): Promise<EngineView
     throttleLever: lever,
   });
   const speeds = () => (settle ? settled : cycle.state());
+  const drawnTriangles = () => {
+    let n = 0;
+    for (const s of [scene.main, scene.rotors])
+      s.traverseVisible((obj) => {
+        const g = (obj as { geometry?: { index?: { count: number } | null } }).geometry;
+        const count = (obj as { count?: number }).count ?? 1;
+        if (g?.index) n += (g.index.count / 3) * count;
+      });
+    return n;
+  };
 
   const view: EngineView = {
     renderer,
@@ -179,6 +240,8 @@ export async function createEngineView(o: EngineViewOptions): Promise<EngineView
       view.setCameraPose(p.camera, p.target);
       view.setMode(p.mode, true);
       view.setThrottle(p.throttle, true);
+      view.setShutter(p.shutterDeg);
+      view.setCinematic(p.cinematic);
       post.focalLength.value = p.focalLength;
       post.bokehScale.value = p.bokehScale;
     },
@@ -197,13 +260,25 @@ export async function createEngineView(o: EngineViewOptions): Promise<EngineView
     setShutter(a) {
       shutterDeg = a;
     },
+    setCinematic(on) {
+      post.setCinematic(on);
+    },
     setCameraPose(position, t) {
       camera.position.set(position[0] ?? 0, position[1] ?? 0, position[2] ?? 0);
       target.set(t[0] ?? 0, t[1] ?? 0, t[2] ?? 0);
       camera.lookAt(target.x, target.y, target.z);
       camera.updateProjectionMatrix();
     },
+    setDebugFlags(f) {
+      flags = { ...f };
+      const cove = studio.stage.getObjectByName('cyclorama');
+      if (cove) cove.visible = f.noStage !== true;
+      renderer.shadowMap.enabled = f.noShadow !== true;
+      studio.key.shadow.needsUpdate = true;
+    },
     frame(dtS) {
+      const t0 = performance.now();
+      timer.beginFrame();
       if (!settle) cycle.step(Math.min(dtS, 0.1), inputs());
       const st = speeds();
       lp = advanceAngle(lp, st.n1Rpm, def.rotation.lp, dtS);
@@ -221,46 +296,64 @@ export async function createEngineView(o: EngineViewOptions): Promise<EngineView
       const wedge = cutawayWedge(easeInOut(cut), center, CUT_WIDTH);
       uniforms.cutCenter.value = wedge.center;
       uniforms.cutHalf.value = wedge.halfWidth;
-      const showCaps = wedge.halfWidth > 1e-3;
+      const showCaps = wedge.halfWidth > 1e-3 && flags.noCaps !== true;
       for (const [a, b] of scene.caps) {
         a.visible = b.visible = showCaps;
         a.rotation.x = wedge.center - wedge.halfWidth;
         b.rotation.x = wedge.center + wedge.halfWidth;
       }
+      // the static shadow map follows the engine only while it moves (mode transitions)
+      if (cut !== lastCut || explode !== lastExplode) studio.key.shadow.needsUpdate = true;
+      lastCut = cut;
+      lastExplode = explode;
       const offsets = explodeOffsets(def, explode, EXPLODE_GAP);
       for (const m of scene.modules) {
         const dx = m.id === null ? 0 : offsets[m.id];
         for (const g of m.groups) g.position.x = dx;
       }
+      // closed engine (LD-6): draw only what the cowls can show
+      const closed = cut === 0 && explode === 0 && flags.noCull !== true;
+      for (const obj of scene.closedHidden) obj.visible = !closed;
       const skinsVisible = explode < 0.02;
       for (const s of scene.skins) if (!s.name.startsWith('cap:')) s.visible = skinsVisible;
       if (!skinsVisible)
         for (const s of scene.skins) if (s.name.startsWith('cap:')) s.visible = false;
+      studio.contact.value = 1 - easeInOut(explode);
 
       post.focusDistance.value = camera.position.distanceTo(target);
-      post.render();
+      if (flags.noPost === true) renderer.render(scene.main, camera);
+      else post.render();
+      timer.endFrame(performance.now() - t0);
     },
     stats() {
       const st = speeds();
       return {
         triangles: scene.triangles,
+        drawnTriangles: drawnTriangles(),
         n1Rpm: st.n1Rpm,
         n2Rpm: st.n2Rpm,
         lpBlurDeg: (uniforms.lpBlur.value * 180) / Math.PI,
-        errors: device.errors,
+        errors,
         cycleLabel: MOCK_LABEL,
+        timings: timer.medians(),
+        timestamps: timer.enabled,
       };
     },
-    dispose() {
+    async dispose() {
       post.dispose();
       scene.dispose();
-      hdri.dispose();
-      // three's dispose is asynchronous; the device goes only after it (three never destroys a
-      // supplied device, GPU_FACTS M15)
-      void Promise.resolve(renderer.dispose()).then(() => {
+      studio.dispose();
+      // three's dispose is asynchronous; the device goes only after it, whatever happens
+      // (three never destroys a supplied device, GPU_FACTS M15)
+      try {
+        await Promise.resolve(renderer.dispose());
+      } catch (e: unknown) {
+        errors.push({ kind: 'unknown', message: `renderer.dispose: ${String(e)}` });
+      } finally {
         device.destroy();
-      });
+      }
     },
   };
+  view.setPreset('threeQuarterFront');
   return view;
 }

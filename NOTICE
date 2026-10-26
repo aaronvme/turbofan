@@ -24,3 +24,9 @@ Changes made: the map tables were converted from Python (numpy arrays) to TypeSc
 constants by a script that parses the files without executing them; only one alpha slice
 of each map is kept; the numbers are unchanged. The thermodynamic data in src/thermo are
 not from pyCycle.
+
+The full text of the Apache License, Version 2.0 is in LICENSES/Apache-2.0.txt
+(copied from the typescript package, which ships the same licence).
+
+The look-dev studio is procedural (src/render/studio.ts); no third-party image
+assets are shipped.

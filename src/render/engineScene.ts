@@ -23,6 +23,7 @@ import { COMPONENT_IDS, type ComponentId } from '../contracts/engine';
 import type { EngineGeometry } from '../geometry/engineGeometry';
 import type { MeshData } from '../geometry/mesh';
 import { instanceMatrices } from '../geometry/rows';
+import type { ClosedViewSet } from '../geometry/visibility';
 import type { MaterialSet } from './materials';
 
 export interface EngineScene {
@@ -39,6 +40,8 @@ export interface EngineScene {
   readonly skins: readonly Object3D[];
   /** Cap meshes: [start face, end face] per part. */
   readonly caps: readonly (readonly [Mesh, Mesh])[];
+  /** Objects the closed engine never shows (src/geometry/visibility.ts): culled in realistic mode. */
+  readonly closedHidden: readonly Object3D[];
   readonly triangles: number;
   dispose(): void;
 }
@@ -54,7 +57,11 @@ function toGeometry(m: MeshData, withTangents = false): BufferGeometry {
   return g;
 }
 
-export function buildEngineScene(geo: EngineGeometry, materials: MaterialSet): EngineScene {
+export function buildEngineScene(
+  geo: EngineGeometry,
+  materials: MaterialSet,
+  closed: ClosedViewSet,
+): EngineScene {
   const main = new Scene();
   const rotors = new Scene();
   const moduleIds: (ComponentId | null)[] = [...COMPONENT_IDS, null];
@@ -74,15 +81,25 @@ export function buildEngineScene(geo: EngineGeometry, materials: MaterialSet): E
   const spoolGroups: Record<'lp' | 'hp', Group[]> = { lp: [], hp: [] };
   const skins: Object3D[] = [];
   const caps: [Mesh, Mesh][] = [];
+  const closedHidden: Object3D[] = [];
   const disposables: BufferGeometry[] = [];
   let triangles = 0;
 
   for (const p of geo.parts) {
-    const g = toGeometry(p.mesh);
+    // exact circumferential tangents (lathe-turned surfaces): a uv-derivative frame is
+    // constant per triangle and facets the anisotropic highlights of the lip and drums
+    const g = toGeometry(p.mesh, true);
     disposables.push(g);
     triangles += p.mesh.indices.length / 3;
     const mesh = new Mesh(g, materials.part(p.spec.material));
     mesh.name = p.spec.id;
+    mesh.castShadow = true;
+    mesh.receiveShadow = p.spec.material !== 'spinner';
+    // outer skins first: they fill the depth buffer, so the cases and internals behind them
+    // fail the early depth test instead of being shaded and overdrawn (the opaque pass is
+    // fill-bound, not triangle-bound)
+    mesh.renderOrder = p.spec.skin ? 0 : 1;
+    if (!closed.parts.has(p.spec.id)) closedHidden.push(mesh);
     // only the spinner shows that it turns (its paint); drums and disks are axisymmetric
     if (p.spec.material === 'spinner') {
       const spin = new Group();
@@ -107,7 +124,7 @@ export function buildEngineScene(geo: EngineGeometry, materials: MaterialSet): E
     if (p.spec.skin) skins.push(a, b);
   }
 
-  for (const r of geo.rows) {
+  for (const r of [...geo.rows, ...geo.struts]) {
     const g = toGeometry(r.blade.mesh);
     g.setAttribute('instanceAngle', new InstancedBufferAttribute(Float32Array.from(r.angles), 1));
     disposables.push(g);
@@ -123,6 +140,10 @@ export function buildEngineScene(geo: EngineGeometry, materials: MaterialSet): E
     mesh.userData.thetaMin = r.blade.thetaMin;
     mesh.userData.thetaMax = r.blade.thetaMax;
     mesh.name = `row:${r.row.id}`;
+    mesh.renderOrder = 1;
+    mesh.castShadow = r.spool === null;
+    mesh.receiveShadow = r.spool === null;
+    if (!closed.rows.has(r.row.id)) closedHidden.push(mesh);
     triangles += (r.blade.mesh.indices.length / 3) * r.row.count;
     const rowGroup = new Group();
     rowGroup.name = `rowGroup:${r.row.id}`;
@@ -138,6 +159,7 @@ export function buildEngineScene(geo: EngineGeometry, materials: MaterialSet): E
     modules,
     skins,
     caps,
+    closedHidden,
     triangles,
     dispose: () => {
       for (const g of disposables) g.dispose();

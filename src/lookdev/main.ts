@@ -1,11 +1,13 @@
 // Main-thread look-dev entry (D2-4 allows it for look-dev; the same EngineView runs in the
 // worker, src/render/worker.ts). Query: ?preset=<id>&clean=1&shutter=<deg>&quality=test.
-// Keys: 1-7 presets, c cutaway, e exploded, r realistic, t/g throttle up/down.
-// window.lookdev drives it from Playwright (docs/look-dev screenshots).
+// Keys: 1-8 presets, c cutaway, e exploded, r realistic, t/g throttle up/down, p the GPU
+// pass overlay. window.lookdev drives it from Playwright (tools/lookdev/capture.ts).
 
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { ENGINE_DEFINITION } from '../engine/definition';
-import { createEngineView, type EngineView } from '../render/engineView';
+import { PASS_GROUPS, type PassMedians } from '../gpu/passTimings';
+import { createEngineView, type DebugFlags, type EngineView } from '../render/engineView';
+import type { PostDebug } from '../render/post';
 import { LOOK_PRESET_IDS, LOOK_PRESETS, type LookMode, type LookPresetId } from '../render/presets';
 
 declare global {
@@ -20,10 +22,11 @@ interface LookdevApi {
   setMode(mode: LookMode, immediate?: boolean): void;
   setThrottle(lever: number, settle?: boolean): void;
   setShutter(deg: number): void;
-  /** Renders n frames at a fixed 1/60 s step, then waits for the GPU. */
+  setDebugFlags(flags: DebugFlags): void;
+  /** Renders n frames at a fixed 1/60 s step, one per animation frame, then waits for the GPU. */
   renderFrames(n: number): Promise<void>;
-  /** Mean wall-clock ms per frame over n frames, GPU-synchronised. */
-  timeFrames(n: number): Promise<number>;
+  /** Renders n frames and returns the per-pass GPU and CPU medians over them. */
+  timeFrames(n: number): Promise<PassMedians>;
   pause(paused: boolean): void;
   stats(): ReturnType<EngineView['stats']>;
 }
@@ -31,7 +34,37 @@ interface LookdevApi {
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const hud = document.getElementById('hud') as HTMLDivElement;
+const passes = document.getElementById('passes') as HTMLDivElement;
 if (params.get('clean') === '1') document.body.classList.add('clean');
+
+const nextFrame = () =>
+  new Promise<void>((resolve) => {
+    requestAnimationFrame(() => {
+      resolve();
+    });
+  });
+
+const PASS_LABEL: Record<(typeof PASS_GROUPS)[number], string> = {
+  shadow: 'Shadow map',
+  opaque: 'Opaque + caps',
+  rotors: 'Rotors',
+  gtao: 'GTAO (half)',
+  composite: 'Fan blur + AO',
+  traa: 'TRAA',
+  dof: 'Depth of field',
+  bloom: 'Bloom',
+  output: 'Tone map + out',
+  other: 'Other',
+};
+
+function renderPasses(m: PassMedians, timestamps: boolean): string {
+  if (!timestamps) return '<div class="t">GPU timestamps unavailable</div>';
+  if (m.frames === 0) return '<div class="t">measuring…</div>';
+  const rows = PASS_GROUPS.filter((g) => m.gpu[g] > 0.0005 || g === 'opaque')
+    .map((g) => `<div class="r"><span>${PASS_LABEL[g]}</span><b>${m.gpu[g].toFixed(2)}</b></div>`)
+    .join('');
+  return `<div class="t">GPU ms / frame <i>median of ${m.frames}</i></div>${rows}<div class="r sum"><span>GPU total</span><b>${m.gpuTotal.toFixed(2)}</b></div><div class="r"><span>CPU encode</span><b>${m.cpu.toFixed(2)}</b></div>`;
+}
 
 async function main(): Promise<void> {
   if (!('gpu' in navigator)) throw new Error('WebGPU is not available');
@@ -42,9 +75,8 @@ async function main(): Promise<void> {
     width: innerWidth,
     height: innerHeight,
     dpr: devicePixelRatio,
-    hdriUrl: '/hdri/aircraft_workshop_01_1k.hdr',
     quality: params.get('quality') === 'test' ? 'test' : 'high',
-    debug: (params.get('debug') as 'rotorAlpha' | 'rotorBlur' | 'ao' | 'visible' | null) ?? null,
+    debug: (params.get('debug') as PostDebug) ?? null,
   });
   const controls = new OrbitControls(view.camera, canvas);
   controls.enableDamping = true;
@@ -69,7 +101,6 @@ async function main(): Promise<void> {
   let paused = false;
   let last = performance.now();
   let lever = 0;
-  let frames = 0;
   let acc = 0;
   const tick = (now: number) => {
     const dt = Math.min(0.1, (now - last) / 1000);
@@ -77,12 +108,11 @@ async function main(): Promise<void> {
     if (!paused) {
       controls.update();
       view.frame(dt);
-      frames++;
       acc += dt;
       if (acc > 0.5) {
         const s = view.stats();
-        hud.textContent = `${s.cycleLabel} cycle  N1 ${s.n1Rpm.toFixed(0)} rpm  N2 ${s.n2Rpm.toFixed(0)} rpm  blur ${s.lpBlurDeg.toFixed(0)} deg  ${((1000 * acc) / frames).toFixed(1)} ms/frame  ${(s.triangles / 1e6).toFixed(2)} M tris  GPU errors ${s.errors.length}`;
-        frames = 0;
+        hud.textContent = `${s.cycleLabel} cycle · N1 ${s.n1Rpm.toFixed(0)} rpm · N2 ${s.n2Rpm.toFixed(0)} rpm · blur ${s.lpBlurDeg.toFixed(1)}° · ${(s.drawnTriangles / 1e6).toFixed(2)} of ${(s.triangles / 1e6).toFixed(2)} M tris · GPU errors ${s.errors.length}`;
+        passes.innerHTML = renderPasses(s.timings, s.timestamps);
         acc = 0;
       }
     }
@@ -99,6 +129,7 @@ async function main(): Promise<void> {
     if (e.key === 'r') view.setMode('realistic');
     if (e.key === 't') view.setThrottle((lever = Math.min(1, lever + 0.25)));
     if (e.key === 'g') view.setThrottle((lever = Math.max(0, lever - 0.25)));
+    if (e.key === 'p') document.body.classList.toggle('nopasses');
   });
 
   window.lookdev = {
@@ -113,18 +144,27 @@ async function main(): Promise<void> {
     setShutter: (d) => {
       view.setShutter(d);
     },
+    setDebugFlags: (f) => {
+      view.setDebugFlags(f);
+    },
     async renderFrames(n) {
-      for (let i = 0; i < n; i++) view.frame(1 / 60);
+      paused = true;
+      for (let i = 0; i < n; i++) {
+        view.frame(1 / 60);
+        await nextFrame();
+      }
       await view.device.device.queue.onSubmittedWorkDone();
     },
     async timeFrames(n) {
-      await view.device.device.queue.onSubmittedWorkDone();
-      const t0 = performance.now();
+      paused = true;
       for (let i = 0; i < n; i++) {
         view.frame(1 / 60);
-        await view.device.device.queue.onSubmittedWorkDone();
+        await nextFrame();
       }
-      return (performance.now() - t0) / n;
+      await view.device.device.queue.onSubmittedWorkDone();
+      // let the last timestamp read-backs land
+      for (let i = 0; i < 4; i++) await nextFrame();
+      return view.stats().timings;
     },
     pause(p) {
       paused = p;

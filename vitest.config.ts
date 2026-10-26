@@ -24,6 +24,8 @@ export default defineConfig({
         'src/**/*.test.ts',
         'src/**/*.d.ts',
         'src/render/**',
+        // the look-dev page entry, like src/render (W1G-N5)
+        'src/lookdev/**',
         'src/ui/**',
         'src/app/**',
         'src/audio/worklet/**',
