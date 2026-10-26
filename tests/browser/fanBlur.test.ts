@@ -18,6 +18,7 @@
 // side, hub comb and dark crescents are tiles far off the reference.
 
 import { afterAll, describe, expect, it } from 'vitest';
+import { commands } from 'vitest/browser';
 import { ENGINE_DEFINITION } from '../../src/engine/definition';
 import { createEngineView, type EngineView } from '../../src/render/engineView';
 import { LOOK_PRESETS, type LookPresetId } from '../../src/render/presets';
@@ -154,6 +155,8 @@ describe('W1L-I3: the fan blur matches a 64-still box-shutter reference', () => 
         failures.push(`${shot} shipped`);
     }
     console.warn(`W1L-I3 fan blur\n${rows.join('\n')}`);
+    // the measured numbers, for the handoff (the browser console does not reach the log)
+    await commands.writeFile('test-results/fanBlur.txt', `${rows.join('\n')}\n`);
     expect(v.stats().errors).toEqual([]);
     expect(failures, rows.join('\n')).toEqual([]);
   });
