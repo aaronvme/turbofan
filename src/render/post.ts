@@ -15,8 +15,10 @@
 //   Every pixel is therefore an exact still of the fan at one instant, and TRAA's history
 //   (zero velocity: the fan is not in the main pass) averages the instants: exact in the
 //   limit, with no reprojection, so no disoccluded holes (the pass-4 march shredded the far
-//   side and left a comb at the hub). tests/browser/fanBlur.test.ts holds it to the mean of
-//   64 stills.
+//   side and left a comb at the hub). The composite averages each pixel's 3 x 3 neighbours'
+//   instants, so every frame is already a nine-sample estimate (the fan turns between frames,
+//   so TRAA alone cannot average one sample per pixel). tests/browser/fanBlur.test.ts holds
+//   it to the mean of 64 stills.
 // - Other rotors (cutaway rows, the spinner) use the pixel's own rotor depth: exact for
 //   surfaces of revolution, and the rows are thin. Their samples are jittered per pixel and
 //   frame and TRAA averages the noise out; the angle is capped at one blade pitch (the image
@@ -48,6 +50,7 @@ import {
   pass,
   rtt,
   screenCoordinate,
+  screenSize,
   screenUV,
   select,
   sin,
@@ -206,7 +209,43 @@ export function createPipeline(
         select(visibleRotor, float(1), float(0)),
         1,
       );
-    return vec4(lit.mul(float(1).sub(rot.a)).add(rot.rgb), 1);
+    const own = lit.mul(float(1).sub(rot.a)).add(rot.rgb);
+
+    // The fan's time samples: every pixel holds one instant (one fan copy), so one frame is
+    // binary noise, and TRAA cannot average a fan that turns between frames. The 3 x 3
+    // neighbourhood holds about all eight copies (interleaved gradient noise), so the pixel
+    // takes the mean of its neighbours' instants: a neighbour's fan fragment where it lies in
+    // front of what this pixel shows behind the fan, else this pixel's own view past the fan.
+    // A pixel whose front surface is ahead of every neighbouring fan fragment (the spinner,
+    // the lip) keeps its own colour. One pixel of spatial blur on the fan, none on the rest.
+    const zBehind = select(covered.and(isFan.not()).and(visibleRotor), zRotor, zScene);
+    const centreFan = isFan.and(visibleRotor);
+    const sum = vec3(0).toVar();
+    const weight = float(0).toVar();
+    const fanHits = float(0).toVar();
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const nuv = suv.add(vec2(dx, dy).div(screenSize));
+        const nc = rotorColor.sample(nuv);
+        const nFan = rotorBlur.sample(nuv).b.greaterThan(0.5).and(nc.a.greaterThan(0.5));
+        const nz = viewZOf(rotorDepth.sample(nuv).r);
+        const valid = nFan.and(nz.greaterThan(zBehind));
+        // the view past the fan: this pixel's own composite where it sees no fan; on a fan
+        // pixel, the neighbour's own (a booster blade or the spinner there, else the scene)
+        const nsd = sceneDepth.sample(nuv).r;
+        const nzs = select(nsd.lessThan(1), viewZOf(nsd), float(-1e9));
+        const nRotor = nc.a.greaterThan(0.001).and(nFan.not()).and(nz.greaterThan(nzs));
+        const nPast = select(nRotor, nc.rgb, sceneColor.sample(nuv).rgb.mul(occl));
+        // on a fan pixel, a neighbour whose front surface is ahead of this fan fragment (the
+        // spinner's or the lip's edge) is left out, so occluding edges stay sharp
+        const nFront = select(nRotor, nz, nzs);
+        const occludes = centreFan.and(valid.not()).and(nFront.greaterThan(zRotor.add(0.002)));
+        const w = select(occludes, float(0), float(1));
+        sum.addAssign(select(valid, nc.rgb, select(centreFan, nPast, own)).mul(w));
+        weight.addAssign(w);
+        fanHits.addAssign(select(valid, float(1), float(0)));
+      }
+    return vec4(select(fanHits.greaterThan(0), sum.div(weight.max(1)), own), 1);
   })();
   const compositeTex = rtt(composite, null, null, { type: HalfFloatType });
   compositeTex.name = 'Composite';

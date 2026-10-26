@@ -27,9 +27,13 @@ const W = 960;
 const H = 540;
 const N_REF = 64;
 const MOVING = 0.01;
-// measured (Arc 140T, 2026-10-26): estimator MAE 0.0031-0.0036, worst tile 0.025-0.027; shipped MAE 0.009-0.011,
-// worst tile 0.082-0.100 (the pass-4 march, in display units: MAE 0.07-0.12, worst tile 0.40-0.50)
-const LIMITS = { raw: { mae: 0.006, tile: 0.04 }, traa: { mae: 0.02, tile: 0.14 } } as const;
+// Measured (Arc 140T, 2026-10-26, half-linear units): estimator MAE 0.0024-0.0033, worst tile
+// 0.072-0.083; shipped MAE 0.0055-0.0067, worst tile 0.081-0.092. The worst tiles sit on
+// occluding edges (the fan tip against the case, the blade roots against the hub), where the
+// composite's 3 x 3 average of the neighbours' instants bleeds one pixel; before that filter
+// the estimator's worst tile was 0.025, but one frame was binary noise. The pass-4 march
+// measured MAE 0.07-0.12 and worst tile 0.40-0.50 (display units).
+const LIMITS = { raw: { mae: 0.005, tile: 0.11 }, traa: { mae: 0.012, tile: 0.13 } } as const;
 
 interface Stack {
   readonly mean: Float32Array;

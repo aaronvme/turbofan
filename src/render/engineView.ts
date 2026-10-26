@@ -279,14 +279,17 @@ async function assemble(
       for (const g of scene.spoolGroups.hp) g.rotation.x = hp;
       uniforms.lpBlur.value = shutterBlurAngle(st.n1Rpm, shutterDeg, FPS);
       uniforms.hpBlur.value = shutterBlurAngle(st.n2Rpm, shutterDeg, FPS);
-      // the fan's time copies spread over the exposure, re-jittered every frame (golden-ratio
-      // sequence) so the pixels' instants cover the shutter interval (W1L-I3). Up to two
+      // the fan's time copies spread over the exposure, re-jittered every frame, and the copy
+      // each pixel picks offset every frame: the two offsets are the 2-D R2 sequence (plastic
+      // number), so they are jointly well spread and every pixel's instants cover the shutter
+      // interval (W1L-I3). Up to two
       // pitches the exposure is exact; beyond, one pitch (the image is periodic in it, so
       // only the per-blade jitter differs) keeps the copies at distinct phases
       const fanSpan = uniforms.lpBlur.value <= 2 * fanPitch ? uniforms.lpBlur.value : fanPitch;
       const fanLive = fanSpan > 1e-5;
       fanFrame = (fanFrame + 1) % 1_000_000;
-      const j = (fanFrame * 0.6180339887498949) % 1;
+      const j = (fanFrame * 0.5698402909980532) % 1;
+      uniforms.fanSeed.value = (fanFrame * 0.7548776662466927) % 1;
       const nCopies = scene.fanTimeCopies.length;
       uniforms.fanCopies.value = fanLive ? nCopies : 1;
       scene.fanTimeCopies.forEach((m, k) => {

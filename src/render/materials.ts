@@ -37,7 +37,6 @@ import {
   floor,
   Fn,
   fract,
-  frameId,
   fwidth,
   hash,
   instanceIndex,
@@ -77,6 +76,8 @@ export interface LookUniforms {
   readonly heat: UniformNode<'float', number>;
   /** Fan time copies a pixel chooses among this frame (1 when the fan is still). */
   readonly fanCopies: UniformNode<'float', number>;
+  /** Per-frame offset in [0, 1) of the fan copy each pixel picks (an R2 sequence, the view). */
+  readonly fanSeed: UniformNode<'float', number>;
 }
 
 /** Time-offset copies of the fan drawn per frame (stochastic blur, src/render/post.ts). */
@@ -90,6 +91,7 @@ export function createLookUniforms(): LookUniforms {
     hpBlur: uniform(0),
     heat: uniform(1),
     fanCopies: uniform(FAN_TIME_SAMPLES),
+    fanSeed: uniform(0),
   };
 }
 
@@ -415,19 +417,18 @@ function bladeHide(
 
 /**
  * Stochastic time sampling of the fan (W1L-I3): each pixel keeps the fragments of one of the
- * fan's time copies (userData.timeSample), chosen per pixel and frame by interleaved gradient
- * noise (well spread in every 3 x 3 neighbourhood, so TRAA's colour clamp spans the samples
- * and keeps the history). Within that copy the depth test is the ordinary one.
+ * fan's time copies (userData.timeSample). The choice is interleaved gradient noise (well
+ * spread in every 3 x 3 neighbourhood, so TRAA's colour clamp spans the samples and keeps the
+ * history) plus a per-frame offset, so every pixel cycles through all copies over the frames
+ * (a static pattern left each pixel on one copy: vertical streaks). Within that copy the depth
+ * test is the ordinary one.
  */
 function fanTimeMask(u: LookUniforms): Node<'bool'> {
   const sample = uniform(0).onObjectUpdate(({ object }) =>
     Number(object?.userData.timeSample ?? 0),
   );
-  const f = float(frameId.mod(64));
   const pick = floor(
-    interleavedGradientNoise(screenCoordinate.xy.add(vec2(f.mul(5.588), f.mul(3.117)))).mul(
-      u.fanCopies,
-    ),
+    fract(interleavedGradientNoise(screenCoordinate.xy).add(u.fanSeed)).mul(u.fanCopies),
   ).min(u.fanCopies.sub(1));
   return pick.equal(sample);
 }
