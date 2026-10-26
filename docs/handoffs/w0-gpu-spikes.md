@@ -1,42 +1,72 @@
-w0/gpu-spikes: STOP-CLEAN (WIP). All spikes run in --quick mode; GPU_FACTS Measured written; spikes/README.md NOT written (from fe260dd; HEAD = the commit of this handoff)
+w0/gpu-spikes: DONE, fix round for critic pass 2 (FIX FIRST @8e4ffdc); every W0G finding fixed or documented, all gates green (from 8e4ffdc + main b5c2736 merged in; HEAD = the commit of this handoff)
 
-DONE
-- Lint clean on the bench, worker and scene code; bench JSON excluded from Prettier as generated output (.prettierignore).
-- Harness (spikes/bench/run.ts) records D0-1/D0-3 conditions in every JSON:
-  - power source, power plan (powercfg), Windows 11 power mode overlay, GPU name and driver
-  - CPU load before, during and after
-  - other processes' GPU use before and after (gpuBusyByProcess)
-  - pageHiddenMs per configuration, with an INVALID flag when the page was hidden
-  - Vite pre-bundles the deps, which fixes a mid-run page reload in worker mode.
-  - Files are named docs/bench/<kind>-<local date>-<HHMM>-<protocol>.json.
-- benchRun gains longFrames, window, solverMsPerItP10 and callbackDelay (rAF callback lateness). New tests: tests/unit/spikes/{system,protocol,benchRun,visibility}.
-- Worker spike: runs idle, React 15 Hz and React 60 Hz on the main thread and in the worker. The probe now also covers GLTFLoader, OrbitControls and devicePixelRatio. COOP/COEP check run.
-- Resample follows D0-4 (gauge ratios); tests/gpu/resample.test.ts.
-- tests/browser/chrome-gpu.test.ts covers adapter.info and unquantized timestamps; spikes/dawn/exit-probe.ts.
-- docs/GPU_FACTS.md M1-M33: every researched item is confirmed or corrected.
+DONE (W0G ID -> commit)
+- W0G-I3 -> 175078a: main (b5c2736) merged into the branch once (orchestrator-authorized exception to CLAUDE.md). Both conflicts resolved as unions: `.prettierignore` ignores `docs/bench/` and `docs/mesh/`; the coverage include is `src`, `tools/mesh`, `spikes/lib`.
+- W0G-I1 -> f363280 (TDD, RED), 9d7bd60 (GREEN), 9a75238 (comment).
+  - `spikes/lib/validity.ts` (pure, 100% covered, `tests/unit/spikes/validity.test.ts`). Frames are judged against the display interval, never the run's own median.
+    - long frame: over 1.5 intervals;
+    - throttled: over 2.5 intervals.
+  - A run is INVALID if:
+    - throttled frames last more than 500 ms in a row;
+    - or its median frame is over 1.5 intervals (a 30 Hz throttle);
+    - or the page was hidden.
+  - Tests:
+    - a synthetic 1 Hz run (the old rule reported 0 long frames: the RED evidence);
+    - the official 80k-16x8 shape (60 Hz, then 1 Hz from 52 s) is invalid in all 3 runs;
+    - the official main-react60 shape (scattered 2-4-interval frames) stays valid.
+  - `RunRecorder` takes the display interval, falls back to the warm-up's median, and refuses to guess with neither. `RunResult` gains `displayIntervalMs`, `throttledMs`, `longestThrottledMs`.
+  - The harness (`spikes/bench/run.ts`):
+    - measures the display interval with an idle rAF probe on about:blank and refuses to start if the probe is throttled;
+    - sends CDP `Page.bringToFront` before every run;
+    - reruns an invalid run once;
+    - stores and prints an invalid configuration as INVALID with `aggregate: null` and the reasons, instead of numbers. Rejected attempts are kept in `rejectedAttempts`.
+  - The 80k-16x8 official row is annotated in `docs/bench/README.md`; the recorded JSON is untouched.
+- W0G-I2 -> f363280, 9d7bd60.
+  - `spikes/lib/order.ts` (pure, tests in `tests/unit/spikes/order.test.ts`).
+    - The protocol's 3 runs are now 3 repetitions of the whole sweep. Compared configurations stay together (the tiles of a grid; main vs worker at a load).
+    - The order rotates between repetitions: a Latin square for groups of 3, so each tile takes each in-grid position once, and the grids rotate too. A mulberry32-seeded shuffle picks the base order.
+    - `orderEffect` fits the drift of ms/it with sweep position, within each configuration.
+  - The harness records `order: { seed, repetitions, effectOnMsPerIt }` and prints the effect. `--seed=N` replays an order; otherwise a random seed is drawn and recorded.
+- W0G-I4 -> 1e4535a: `passWithNoTests` removed from `vitest.gpu.config.ts` and `vitest.browser.config.ts`.
+- D2-7 -> 1e4535a: `npm run test:mesh` added to `.github/workflows/ci.yml` (it reads only the committed manifest and rebuilds in memory). The GPU and browser suites stay out of CI.
+- W0G-B1 -> f375a68.
+  - `docs/GPU_FACTS.md` "Measured" now opens with "Official D0-1 runs":
+    - M34, throughput: conditions, the valid rows, 80k-16x8 INVALID per D2-8 with the evidence, P1 PASS, 16x8 a default (not a best);
+    - M35, worker: the full table and the D2-9 caveats.
+  - M29 corrected: the worker drops ~60 frames/min at 60 Hz.
+  - M31 corrected: `pageHiddenMs` is blind under Playwright; the new gate is the mitigation.
+  - The stale "P1 needs the official run" lines are gone. The broken `spikes/README.md` pointer is fixed: the file now exists, with every spike, the official commands and durations, the JSON layout and the D0-1 checklist. `docs/bench/README.md` indexes and annotates every recorded file.
+- W0G-N1 -> 9d7bd60: `conditions.chromeCommandLine` and `chromeFlags` come from chrome://version, so Playwright's ~45 switches are recorded, including the two that hide occlusion. `conditions.display` holds the probe's interval and Hz, and `gpu[].currentRefreshHz` the Windows refresh rate.
+- W0G-N2 -> 9d7bd60: `gitDirty` uses `--untracked-files=no`.
+- W0G-N3 -> f375a68: M4 and M6 are labelled "observed, no repro".
+- W0G-N4 -> b303263: DEFERRED to W2 (the test belongs to the production kernel). M32 records the one-iteration, absolute-tolerance limit and what W2's kernel test should do.
 
 NEXT
-1. Write spikes/README.md: how to run each spike, plus the official commands.
-   - `npm run bench:throughput`: about 30 min.
-   - `npm run bench:worker`: about 20 min.
-   - Quick modes: about 75 s and 60 s.
-2. Orchestrator official runs (D0-1). Set the power plan AND the power mode: the AC mode changed to Best performance at about 21:40 while the plan stayed Balanced. Check that gpuBusyBefore is empty and pageHiddenMs is 0.
-3. D0-2 recommendation: **worker**, pending the quiet run.
-   - Quick results, contaminated:
-     - CPU 42%, React 60 Hz: main thread 14/60 long frames per run, p95 50 ms; worker 0.
-     - CPU 14%, React 60 Hz: main thread has 0 long frames, but its rAF callbacks start up to 13.4 ms late (p99); worker 0.4 ms.
-     - Idle: no cost to the worker.
-   - Three caveats (M28): TextureLoader fails (use ImageBitmapLoader); OrbitControls needs an event proxy; setSize(w, h, false); DPR and resize must come from the main thread.
+1. Critic pass 3 on this branch.
+2. Orchestrator decisions (below).
+3. After the merge, the orchestrator's next official runs (P2/P3, L13) use the fixed harness. Before them, a `--quick` smoke run in a quiet window. No benchmark was run in this round (D0-1); the live harness path is untested end to end. Smoke-checked in a throwaway script:
+   - chrome://version `#command_line` (45 switches);
+   - CDP `Page.bringToFront` across navigations;
+   - the about:blank rAF probe: 16.70 ms.
+
+ORCHESTRATOR DECISIONS
+- (a) **Gate rule.** The critic suggested "fps < 0.95 x refresh or median > 1.1 x period". The fps rule would have invalidated the valid official main-react60 row (56.6 fps < 57). So the gate uses a sustained-throttle rule instead: more than 500 ms in a row of frames over 2.5 intervals, or a median over 1.5 intervals. Confirm the thresholds.
+- (b) **Protocol shape.** Each of the 3 runs now has its own 10 s warm-up, interleaved across the sweep (W0G-I2).
+  - It still reads as "10 s warm-up, then 3 runs of 60 s" per configuration, but D0-1's wording could say so explicitly.
+  - Official durations become ~33 min (throughput) and ~23 min (worker), from 29 and 19.5.
+- (c) The median rule also marks a configuration INVALID when a real load cannot hold the display rate, not only under a 30 Hz throttle. The reason text names both causes. Keep it as INVALID, or demote it to a warning?
 
 GOTCHAS
-- The quick throughput numbers vary up to 2x per configuration from one sweep to the next. Run alone, the 130k tiles all measure 0.88-0.97 ms/it (2154-2156). Order and clock drift dominate, so there is no tile winner yet.
-- A game on the GPU (GeometryDash, 63%) inflated timings 1.2-2.5x and occlusion throttled rAF to 1 Hz (2133).
-- f32 -> rgba16float stores truncate (M8).
+- Node runs `spikes/bench/run.ts` with type stripping. Every `spikes/lib` module it imports at runtime (benchRun, validity, order, stats, protocol, system) must use `.ts` extensions in its relative imports.
+- If rAF stopped entirely (rather than dropping to ~1 Hz), `page.evaluate` would wait forever: there is no per-run timeout. Under Playwright's switches rAF throttles rather than stops, so this was not seen.
+- An invalid configuration has `aggregate: null` in new JSON files. Readers must check `validity.valid` and never fall back to the per-repetition numbers.
+- Ports: harness default 5181 (+1 for COOP/COEP). This round started no dev server; no Chrome or server is left running.
 
-GATES @this handoff (run before the last bench changes; not rerun at HEAD)
-- npm test: 109 passed (then +1 benchRun test: benchRun file 10/10)
-- lint: eslint + prettier clean at the last check
-- typecheck: clean
-- coverage: lines 99.84%, branches 79.89%
-- test:gpu: 15/15
-- test:browser: 12/12 interop + 2/2 chrome-gpu (the full suite was not rerun after chrome-gpu was added)
+GATES @9a75238 (the commits after it are docs only)
+- npm test: 1107 passed (48 files)
+- npm run lint: clean (eslint --max-warnings 0 + prettier)
+- npm run typecheck: clean
+- npm run coverage: lines 99.5%, statements 98.55%, branches 87.42%, functions 99.39%; all thresholds pass. New modules: validity.ts 100% on all four metrics, order.ts lines 100% / branches 87.5%, benchRun.ts lines 100% / branches 92.2%.
+- npm run test:mesh: 29 passed (2 files)
+- npm run test:gpu: 15 passed (4 files)
+- npm run test:browser: 14 passed (2 files)
