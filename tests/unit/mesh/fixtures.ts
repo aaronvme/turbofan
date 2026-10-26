@@ -1,5 +1,6 @@
-// Small hand-built meshes shared by the mesh unit tests.
+// Small hand-built meshes and a coarse engine spec shared by the mesh unit tests.
 import { uniform } from '../../../tools/mesh/distribution';
+import { MESH_80K, type MeshSpec } from '../../../tools/mesh/engineMesh';
 import { tfi } from '../../../tools/mesh/tfi';
 import { connect } from '../../../tools/mesh/topology';
 import {
@@ -93,3 +94,19 @@ export function reversedPair(): MultiBlockMesh {
   );
   return { blocks: [A, B], patches };
 }
+
+/**
+ * The engine topology at a coarse smoke resolution (coarse axial and plume spacing; the counts
+ * across are the production ones): fast enough for the unit suite, which checks structure. The
+ * production resolutions are checked by the full-size suite (tests/mesh, `npm run test:mesh`).
+ */
+export const MESH_SMOKE: MeshSpec = {
+  ...MESH_80K,
+  name: 'smoke',
+  targetCells: 43_000,
+  cellsPerChord: 4,
+  lipAxialSpacing: 0.02,
+  plumeGrowth: 0.03,
+  plumeSpacingMax: 0.3,
+  nearPlumeD: 1,
+};

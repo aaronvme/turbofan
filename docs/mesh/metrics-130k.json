@@ -20,6 +20,7 @@
     "lipThickness": 0.12,
     "lipOuterSpacingMax": 0.02,
     "bypassLipGrowth": 1.08,
+    "lipNormalSmoothing": 0.5,
     "gradation": 0.08,
     "plumeGrowth": 0.005,
     "plumeSpacingMax": 0.025,
@@ -36,500 +37,500 @@
   "report": {
     "spec": "130k",
     "targetCells": 130000,
-    "totalCells": 129913,
-    "deviation": -0.000669231,
+    "totalCells": 130034,
+    "deviation": 0.000261538,
     "blocks": [
       {
         "name": "upstream",
-        "ni": 43,
-        "nj": 87,
-        "cells": 3741,
-        "minJacobian": 0.000173449,
-        "maxJacobian": 0.509659,
-        "minScaledJacobian": 0.688056,
-        "maxStretch": 1.13658,
+        "ni": 42,
+        "nj": 97,
+        "cells": 4074,
+        "minJacobian": 0.000123261,
+        "maxJacobian": 0.553159,
+        "minScaledJacobian": 0.642159,
+        "maxStretch": 1.13573,
         "maxStretchAt": {
-          "i": 34,
-          "j": 50,
-          "x": -0.939701,
-          "r": 0.956389
+          "i": 30,
+          "j": 61,
+          "x": -1.10033,
+          "r": 1.02612
         },
-        "maxSkewDeg": 46.5236,
+        "maxSkewDeg": 50.047,
         "maxSkewAt": {
-          "i": 42,
-          "j": 50,
-          "x": -0.755912,
-          "r": 0.952043
+          "i": 41,
+          "j": 60,
+          "x": -0.80703,
+          "r": 1.00444
         },
         "wallOrthoMaxDeg": 0,
-        "interfaceOrthoMaxDeg": 46.4756,
-        "interfaceKinkMaxDeg": 46.0683,
-        "aspectMin": 1.00155,
-        "aspectMax": 51.3726,
+        "interfaceOrthoMaxDeg": 49.9953,
+        "interfaceKinkMaxDeg": 45.6937,
+        "aspectMin": 1.0001,
+        "aspectMax": 83.9435,
         "aspectMaxAt": {
-          "i": 42,
-          "j": 86,
-          "x": -1.34964,
-          "r": 8.31685
+          "i": 0,
+          "j": 41,
+          "x": -8.18945,
+          "r": 0.81586
         },
-        "minEdge": 0.0136714,
-        "maxEdge": 0.866316
+        "minEdge": 0.00834969,
+        "maxEdge": 0.878891
       },
       {
         "name": "inlet",
-        "ni": 78,
+        "ni": 87,
         "nj": 32,
-        "cells": 2496,
-        "minJacobian": 0.000088024,
-        "maxJacobian": 0.000411912,
-        "minScaledJacobian": 0.802671,
-        "maxStretch": 1.09663,
+        "cells": 2784,
+        "minJacobian": 0.0000184536,
+        "maxJacobian": 0.000505863,
+        "minScaledJacobian": 0.903025,
+        "maxStretch": 1.09285,
         "maxStretchAt": {
-          "i": 34,
-          "j": 12,
-          "x": -0.469467,
-          "r": 0.284346
+          "i": 83,
+          "j": 31,
+          "x": -0.0198052,
+          "r": 0.588586
         },
-        "maxSkewDeg": 36.6141,
+        "maxSkewDeg": 25.4414,
         "maxSkewAt": {
-          "i": 36,
+          "i": 86,
           "j": 0,
-          "x": -0.487753,
-          "r": 0.0195681
+          "x": -0.000838854,
+          "r": 0.234331
         },
-        "wallOrthoMaxDeg": 36.4671,
-        "interfaceOrthoMaxDeg": 20.5656,
-        "interfaceKinkMaxDeg": 38.9665,
-        "aspectMin": 1.00123,
-        "aspectMax": 2.55213,
+        "wallOrthoMaxDeg": 25.1991,
+        "interfaceOrthoMaxDeg": 24.068,
+        "interfaceKinkMaxDeg": 45.6937,
+        "aspectMin": 1.0003,
+        "aspectMax": 6.22089,
         "aspectMaxAt": {
-          "i": 35,
-          "j": 4,
-          "x": -0.489203,
-          "r": 0.107333
+          "i": 86,
+          "j": 0,
+          "x": -0.000838854,
+          "r": 0.234331
         },
-        "minEdge": 0.00792409,
-        "maxEdge": 0.0295431
+        "minEdge": 0.00179093,
+        "maxEdge": 0.030073
       },
       {
         "name": "lip",
-        "ni": 219,
+        "ni": 252,
         "nj": 16,
-        "cells": 3504,
-        "minJacobian": 0.0000108022,
-        "maxJacobian": 0.000630096,
-        "minScaledJacobian": 0.986051,
+        "cells": 4032,
+        "minJacobian": 0.0000102611,
+        "maxJacobian": 0.00066394,
+        "minScaledJacobian": 0.921806,
         "maxStretch": 1.11236,
         "maxStretchAt": {
-          "i": 84,
+          "i": 96,
           "j": 14,
-          "x": -0.797971,
-          "r": 0.793326
+          "x": -0.871554,
+          "r": 0.783637
         },
-        "maxSkewDeg": 9.58107,
+        "maxSkewDeg": 22.8085,
         "maxSkewAt": {
           "i": 84,
           "j": 0,
-          "x": -0.701439,
-          "r": 0.801696
+          "x": -0.742878,
+          "r": 0.749916
         },
-        "wallOrthoMaxDeg": 6.64265,
-        "interfaceOrthoMaxDeg": 6.63247,
-        "interfaceKinkMaxDeg": 46.2541,
-        "aspectMin": 1.00005,
-        "aspectMax": 6.38924,
+        "wallOrthoMaxDeg": 20.8618,
+        "interfaceOrthoMaxDeg": 8.54724,
+        "interfaceKinkMaxDeg": 52.0241,
+        "aspectMin": 1.00001,
+        "aspectMax": 4.16355,
         "aspectMaxAt": {
-          "i": 106,
+          "i": 145,
           "j": 0,
-          "x": -0.537241,
-          "r": 0.932953
+          "x": -0.356868,
+          "r": 1.0385
         },
         "minEdge": 0.003,
         "maxEdge": 0.0285495
       },
       {
         "name": "fan",
-        "ni": 48,
+        "ni": 47,
         "nj": 48,
-        "cells": 2304,
-        "minJacobian": 0.0000320689,
-        "maxJacobian": 0.000106487,
-        "minScaledJacobian": 0.954192,
-        "maxStretch": 1.08434,
+        "cells": 2256,
+        "minJacobian": 0.0000184551,
+        "maxJacobian": 0.000107457,
+        "minScaledJacobian": 0.890038,
+        "maxStretch": 1.10308,
         "maxStretchAt": {
-          "i": 41,
-          "j": 0,
-          "x": 0.376764,
-          "r": 0.320493
+          "i": 2,
+          "j": 47,
+          "x": 0.0166931,
+          "r": 0.770981
         },
-        "maxSkewDeg": 17.4094,
+        "maxSkewDeg": 27.122,
         "maxSkewAt": {
-          "i": 8,
+          "i": 18,
           "j": 0,
-          "x": 0.0772306,
-          "r": 0.268453
+          "x": 0.0555487,
+          "r": 0.254796
         },
-        "wallOrthoMaxDeg": 17.4094,
-        "interfaceOrthoMaxDeg": 15.2275,
-        "interfaceKinkMaxDeg": 20.2405,
-        "aspectMin": 1.00006,
-        "aspectMax": 2.27558,
+        "wallOrthoMaxDeg": 26.9852,
+        "interfaceOrthoMaxDeg": 18.7534,
+        "interfaceKinkMaxDeg": 31.3416,
+        "aspectMin": 1.00068,
+        "aspectMax": 6.42641,
         "aspectMaxAt": {
-          "i": 47,
-          "j": 37,
-          "x": 0.417371,
-          "r": 0.646512
+          "i": 0,
+          "j": 0,
+          "x": 0.000839493,
+          "r": 0.23499
         },
-        "minEdge": 0.00525721,
-        "maxEdge": 0.0120078
+        "minEdge": 0.00172943,
+        "maxEdge": 0.0133032
       },
       {
         "name": "bypass",
-        "ni": 103,
+        "ni": 115,
         "nj": 32,
-        "cells": 3296,
-        "minJacobian": 0.0000313458,
-        "maxJacobian": 0.000131933,
-        "minScaledJacobian": 0.95864,
-        "maxStretch": 1.08557,
+        "cells": 3680,
+        "minJacobian": 0.0000256877,
+        "maxJacobian": 0.000136308,
+        "minScaledJacobian": 0.865104,
+        "maxStretch": 1.11029,
         "maxStretchAt": {
-          "i": 99,
-          "j": 0,
-          "x": 1.56749,
-          "r": 0.503294
+          "i": 6,
+          "j": 19,
+          "x": 0.29974,
+          "r": 0.62869
         },
-        "maxSkewDeg": 16.5363,
+        "maxSkewDeg": 30.1054,
         "maxSkewAt": {
-          "i": 0,
+          "i": 6,
           "j": 0,
-          "x": 0.422582,
-          "r": 0.443809
+          "x": 0.296189,
+          "r": 0.452588
         },
-        "wallOrthoMaxDeg": 16.5356,
-        "interfaceOrthoMaxDeg": 16.3894,
-        "interfaceKinkMaxDeg": 20.2405,
-        "aspectMin": 1.00193,
-        "aspectMax": 2.55235,
+        "wallOrthoMaxDeg": 29.9661,
+        "interfaceOrthoMaxDeg": 28.6169,
+        "interfaceKinkMaxDeg": 31.3416,
+        "aspectMin": 1.00013,
+        "aspectMax": 2.63232,
         "aspectMaxAt": {
-          "i": 93,
-          "j": 0,
-          "x": 1.49587,
-          "r": 0.504916
+          "i": 0,
+          "j": 21,
+          "x": 0.262478,
+          "r": 0.646949
         },
-        "minEdge": 0.00475,
-        "maxEdge": 0.0124136
+        "minEdge": 0.00497958,
+        "maxEdge": 0.0133032
       },
       {
         "name": "core",
-        "ni": 550,
+        "ni": 534,
         "nj": 16,
-        "cells": 8800,
-        "minJacobian": 0.00000259666,
-        "maxJacobian": 0.00011101,
-        "minScaledJacobian": 0.958542,
-        "maxStretch": 1.12815,
+        "cells": 8544,
+        "minJacobian": 0.00000260977,
+        "maxJacobian": 0.00011333,
+        "minScaledJacobian": 0.724318,
+        "maxStretch": 1.12775,
         "maxStretchAt": {
-          "i": 100,
-          "j": 15,
-          "x": 0.830591,
-          "r": 0.395623
-        },
-        "maxSkewDeg": 16.556,
-        "maxSkewAt": {
-          "i": 549,
+          "i": 157,
           "j": 0,
-          "x": 2.99596,
-          "r": 0.186384
+          "x": 1.04406,
+          "r": 0.237578
         },
-        "wallOrthoMaxDeg": 16.5293,
-        "interfaceOrthoMaxDeg": 16.4861,
-        "interfaceKinkMaxDeg": 4.07625,
-        "aspectMin": 1.00001,
-        "aspectMax": 4.12653,
+        "maxSkewDeg": 43.5878,
+        "maxSkewAt": {
+          "i": 91,
+          "j": 0,
+          "x": 0.766512,
+          "r": 0.287063
+        },
+        "wallOrthoMaxDeg": 43.5018,
+        "interfaceOrthoMaxDeg": 11.0695,
+        "interfaceKinkMaxDeg": 6.92733,
+        "aspectMin": 1,
+        "aspectMax": 3.65865,
         "aspectMaxAt": {
-          "i": 340,
-          "j": 15,
-          "x": 1.63476,
-          "r": 0.292459
+          "i": 531,
+          "j": 0,
+          "x": 2.72799,
+          "r": 0.312658
         },
-        "minEdge": 0.00138616,
-        "maxEdge": 0.0112256
+        "minEdge": 0.0010223,
+        "maxEdge": 0.0119257
       },
       {
         "name": "afterbody",
-        "ni": 145,
+        "ni": 127,
         "nj": 32,
-        "cells": 4640,
-        "minJacobian": 0.0000381379,
-        "maxJacobian": 0.000103682,
-        "minScaledJacobian": 0.921002,
-        "maxStretch": 1.0839,
+        "cells": 4064,
+        "minJacobian": 0.0000400566,
+        "maxJacobian": 0.0000993132,
+        "minScaledJacobian": 0.921024,
+        "maxStretch": 1.07518,
         "maxStretchAt": {
-          "i": 64,
+          "i": 58,
           "j": 30,
-          "x": 2.20972,
-          "r": 0.657499
+          "x": 2.09553,
+          "r": 0.697856
         },
-        "maxSkewDeg": 22.9269,
+        "maxSkewDeg": 22.9237,
         "maxSkewAt": {
-          "i": 141,
+          "i": 117,
           "j": 0,
-          "x": 2.97172,
-          "r": 0.351391
+          "x": 2.67192,
+          "r": 0.423671
         },
-        "wallOrthoMaxDeg": 22.9269,
-        "interfaceOrthoMaxDeg": 22.7443,
-        "interfaceKinkMaxDeg": 22.7527,
-        "aspectMin": 1.00006,
-        "aspectMax": 2.42835,
+        "wallOrthoMaxDeg": 22.9237,
+        "interfaceOrthoMaxDeg": 16.0384,
+        "interfaceKinkMaxDeg": 29.0641,
+        "aspectMin": 1.00015,
+        "aspectMax": 2.1881,
         "aspectMaxAt": {
-          "i": 72,
-          "j": 14,
-          "x": 2.3,
-          "r": 0.562976
+          "i": 59,
+          "j": 13,
+          "x": 2.10631,
+          "r": 0.596828
         },
-        "minEdge": 0.00463437,
-        "maxEdge": 0.0115203
+        "minEdge": 0.00493587,
+        "maxEdge": 0.0110817
       },
       {
         "name": "plug",
-        "ni": 59,
+        "ni": 68,
         "nj": 16,
-        "cells": 944,
-        "minJacobian": 0.0000722942,
-        "maxJacobian": 0.000299256,
-        "minScaledJacobian": 0.941112,
-        "maxStretch": 1.11046,
+        "cells": 1088,
+        "minJacobian": 0.0000222891,
+        "maxJacobian": 0.000319653,
+        "minScaledJacobian": 0.635935,
+        "maxStretch": 1.1384,
         "maxStretchAt": {
-          "i": 58,
+          "i": 67,
           "j": 14,
-          "x": 3.54463,
-          "r": 0.280983
+          "x": 3.39442,
+          "r": 0.335847
         },
-        "maxSkewDeg": 19.7608,
+        "maxSkewDeg": 50.5106,
         "maxSkewAt": {
-          "i": 58,
+          "i": 57,
           "j": 0,
-          "x": 3.54463,
-          "r": 0.0157756
+          "x": 3.30691,
+          "r": 0.103281
         },
-        "wallOrthoMaxDeg": 19.7608,
-        "interfaceOrthoMaxDeg": 18.9499,
-        "interfaceKinkMaxDeg": 18.949,
-        "aspectMin": 1.00055,
-        "aspectMax": 2.43874,
+        "wallOrthoMaxDeg": 50.1774,
+        "interfaceOrthoMaxDeg": 42.5081,
+        "interfaceKinkMaxDeg": 42.5069,
+        "aspectMin": 1.00039,
+        "aspectMax": 3.5295,
         "aspectMaxAt": {
-          "i": 58,
+          "i": 0,
           "j": 0,
-          "x": 3.54463,
-          "r": 0.0157756
+          "x": 2.75441,
+          "r": 0.309282
         },
-        "minEdge": 0.0082005,
-        "maxEdge": 0.0278637
+        "minEdge": 0.00253006,
+        "maxEdge": 0.0347342
       },
       {
         "name": "plume-core",
-        "ni": 833,
+        "ni": 823,
         "nj": 16,
-        "cells": 13328,
-        "minJacobian": 0.0000970621,
-        "maxJacobian": 0.00732968,
-        "minScaledJacobian": 0.999827,
-        "maxStretch": 1.11193,
+        "cells": 13168,
+        "minJacobian": 0.000101706,
+        "maxJacobian": 0.00733904,
+        "minScaledJacobian": 0.999868,
+        "maxStretch": 1.14016,
         "maxStretchAt": {
           "i": 0,
           "j": 14,
-          "x": 3.55539,
-          "r": 0.280979
+          "x": 3.40564,
+          "r": 0.335844
         },
-        "maxSkewDeg": 1.06578,
+        "maxSkewDeg": 0.931243,
         "maxSkewAt": {
-          "i": 758,
+          "i": 748,
           "j": 15,
-          "x": 23.8734,
-          "r": 0.534507
+          "x": 23.6099,
+          "r": 0.556229
         },
         "wallOrthoMaxDeg": 0,
-        "interfaceOrthoMaxDeg": 1.06578,
-        "interfaceKinkMaxDeg": 18.949,
-        "aspectMin": 1.00004,
-        "aspectMax": 4.64539,
+        "interfaceOrthoMaxDeg": 0.931243,
+        "interfaceKinkMaxDeg": 42.5069,
+        "aspectMin": 1.00007,
+        "aspectMax": 4.64795,
         "aspectMaxAt": {
-          "i": 729,
+          "i": 719,
           "j": 15,
-          "x": 20.8416,
-          "r": 0.480714
+          "x": 20.5777,
+          "r": 0.509516
         },
-        "minEdge": 0.00901132,
-        "maxEdge": 0.162568
+        "minEdge": 0.00901583,
+        "maxEdge": 0.162641
       },
       {
         "name": "plume-bypass",
-        "ni": 892,
+        "ni": 891,
         "nj": 32,
-        "cells": 28544,
-        "minJacobian": 0.0000722942,
-        "maxJacobian": 0.00731483,
-        "minScaledJacobian": 0.971074,
-        "maxStretch": 1.10532,
+        "cells": 28512,
+        "minJacobian": 0.0000723775,
+        "maxJacobian": 0.0073183,
+        "minScaledJacobian": 0.971025,
+        "maxStretch": 1.10546,
         "maxStretchAt": {
-          "i": 778,
+          "i": 775,
           "j": 31,
-          "x": 20.1848,
-          "r": 1.32117
+          "x": 19.8559,
+          "r": 1.33739
         },
-        "maxSkewDeg": 13.8144,
+        "maxSkewDeg": 13.8263,
         "maxSkewAt": {
           "i": 0,
           "j": 0,
-          "x": 3.00402,
-          "r": 0.338512
+          "x": 2.75402,
+          "r": 0.39351
         },
         "wallOrthoMaxDeg": 0,
-        "interfaceOrthoMaxDeg": 13.8144,
-        "interfaceKinkMaxDeg": 8.92983,
-        "aspectMin": 1.00001,
-        "aspectMax": 4.64551,
+        "interfaceOrthoMaxDeg": 13.8263,
+        "interfaceKinkMaxDeg": 10.4959,
+        "aspectMin": 1,
+        "aspectMax": 4.64805,
         "aspectMaxAt": {
-          "i": 788,
+          "i": 787,
           "j": 0,
-          "x": 20.8416,
-          "r": 0.501631
+          "x": 20.5777,
+          "r": 0.530422
         },
-        "minEdge": 0.00803269,
-        "maxEdge": 0.162741
+        "minEdge": 0.00804195,
+        "maxEdge": 0.162809
       },
       {
         "name": "plume-outer",
-        "ni": 1037,
+        "ni": 1018,
         "nj": 16,
-        "cells": 16592,
-        "minJacobian": 0.0000707965,
-        "maxJacobian": 0.00731483,
-        "minScaledJacobian": 0.95242,
-        "maxStretch": 1.10533,
+        "cells": 16288,
+        "minJacobian": 0.000068512,
+        "maxJacobian": 0.0073183,
+        "minScaledJacobian": 0.911581,
+        "maxStretch": 1.10546,
         "maxStretchAt": {
-          "i": 923,
+          "i": 902,
           "j": 15,
-          "x": 20.1848,
-          "r": 1.74593
+          "x": 19.8559,
+          "r": 1.75925
         },
-        "maxSkewDeg": 17.7455,
+        "maxSkewDeg": 24.2752,
         "maxSkewAt": {
-          "i": 48,
+          "i": 44,
           "j": 15,
-          "x": 2.12731,
-          "r": 0.918306
+          "x": 2.0631,
+          "r": 0.947778
         },
         "wallOrthoMaxDeg": 0,
-        "interfaceOrthoMaxDeg": 17.6863,
-        "interfaceKinkMaxDeg": 46.2723,
-        "aspectMin": 1.00002,
-        "aspectMax": 4.48839,
+        "interfaceOrthoMaxDeg": 24.2079,
+        "interfaceKinkMaxDeg": 52.0457,
+        "aspectMin": 1.00006,
+        "aspectMax": 4.51284,
         "aspectMaxAt": {
-          "i": 933,
+          "i": 914,
           "j": 0,
-          "x": 20.8416,
-          "r": 1.38353
+          "x": 20.5777,
+          "r": 1.40252
         },
-        "minEdge": 0.00749079,
-        "maxEdge": 0.162961
+        "minEdge": 0.00725336,
+        "maxEdge": 0.163027
       },
       {
         "name": "farfield",
-        "ni": 1159,
+        "ni": 1154,
         "nj": 36,
-        "cells": 41724,
-        "minJacobian": 0.00017321,
-        "maxJacobian": 0.0656379,
-        "minScaledJacobian": 0.691167,
-        "maxStretch": 1.123,
+        "cells": 41544,
+        "minJacobian": 0.00016074,
+        "maxJacobian": 0.0667833,
+        "minScaledJacobian": 0.570447,
+        "maxStretch": 1.12344,
         "maxStretchAt": {
-          "i": 4,
-          "j": 19,
-          "x": -0.982465,
-          "r": 2.00247
+          "i": 0,
+          "j": 20,
+          "x": -1.11943,
+          "r": 2.15718
         },
-        "maxSkewDeg": 46.2774,
+        "maxSkewDeg": 55.2186,
         "maxSkewAt": {
-          "i": 121,
+          "i": 127,
           "j": 0,
-          "x": 1.6958,
-          "r": 0.986458
+          "x": 1.58597,
+          "r": 1.06161
         },
         "wallOrthoMaxDeg": 0,
-        "interfaceOrthoMaxDeg": 46.261,
-        "interfaceKinkMaxDeg": 46.2723,
-        "aspectMin": 1.00031,
-        "aspectMax": 95.8814,
+        "interfaceOrthoMaxDeg": 55.1771,
+        "interfaceKinkMaxDeg": 52.0457,
+        "aspectMin": 1.0001,
+        "aspectMax": 99.4901,
         "aspectMaxAt": {
-          "i": 266,
+          "i": 262,
           "j": 35,
-          "x": 2.53195,
-          "r": 8.38603
+          "x": 2.32618,
+          "r": 8.45451
         },
-        "minEdge": 0.00749079,
-        "maxEdge": 0.86984
+        "minEdge": 0.00725336,
+        "maxEdge": 0.878891
       }
     ],
     "worst": {
       "minJacobian": {
-        "value": 0.00000259666,
+        "value": 0.00000260977,
         "block": "core"
       },
       "minScaledJacobian": {
-        "value": 0.688056,
-        "block": "upstream"
+        "value": 0.570447,
+        "block": "farfield"
       },
       "maxStretch": {
-        "value": 1.13658,
-        "block": "upstream",
+        "value": 1.14016,
+        "block": "plume-core",
         "at": {
-          "i": 34,
-          "j": 50,
-          "x": -0.939701,
-          "r": 0.956389
+          "i": 0,
+          "j": 14,
+          "x": 3.40564,
+          "r": 0.335844
         }
       },
       "maxSkewDeg": {
-        "value": 46.5236,
-        "block": "upstream",
+        "value": 55.2186,
+        "block": "farfield",
         "at": {
-          "i": 42,
-          "j": 50,
-          "x": -0.755912,
-          "r": 0.952043
+          "i": 127,
+          "j": 0,
+          "x": 1.58597,
+          "r": 1.06161
         }
       },
       "maxAspect": {
-        "value": 95.8814,
+        "value": 99.4901,
         "block": "farfield",
         "at": {
-          "i": 266,
+          "i": 262,
           "j": 35,
-          "x": 2.53195,
-          "r": 8.38603
+          "x": 2.32618,
+          "r": 8.45451
         }
       },
       "wallOrthoMaxDeg": {
-        "value": 36.4671,
-        "block": "inlet"
+        "value": 50.1774,
+        "block": "plug"
       },
       "interfaceOrthoMaxDeg": {
-        "value": 46.4756,
-        "block": "upstream"
+        "value": 55.1771,
+        "block": "farfield"
       },
       "interfaceKinkMaxDeg": {
-        "value": 46.2723,
+        "value": 52.0457,
         "block": "plume-outer"
       },
       "minEdge": {
-        "value": 0.00138616,
+        "value": 0.0010223,
         "block": "core"
       }
     },
     "cellsAcross": {
-      "upstream": 87,
+      "upstream": 97,
       "inlet": 32,
       "lip": 16,
       "fan": 48,
@@ -544,237 +545,231 @@
     },
     "cellsPerChord": [
       {
-        "name": "Fan rotor",
+        "name": "fan",
         "duct": "fan",
-        "chord": 0.17,
-        "cells": 19
+        "chord": 0.1375,
+        "cells": 29
       },
       {
-        "name": "Fan OGV",
+        "name": "fan-ogv",
         "duct": "bypass",
-        "chord": 0.16,
-        "cells": 14
+        "chord": 0.1,
+        "cells": 9
       },
       {
-        "name": "Booster IGV",
-        "duct": "core",
-        "chord": 0.03,
-        "cells": 8
-      },
-      {
-        "name": "Booster R1",
-        "duct": "core",
-        "chord": 0.03,
-        "cells": 8
-      },
-      {
-        "name": "Booster S1",
-        "duct": "core",
-        "chord": 0.03,
-        "cells": 8
-      },
-      {
-        "name": "Booster R2",
-        "duct": "core",
-        "chord": 0.03,
-        "cells": 8
-      },
-      {
-        "name": "Booster S2",
-        "duct": "core",
-        "chord": 0.03,
-        "cells": 8
-      },
-      {
-        "name": "Booster R3",
-        "duct": "core",
-        "chord": 0.03,
-        "cells": 8
-      },
-      {
-        "name": "Booster S3",
-        "duct": "core",
-        "chord": 0.03,
-        "cells": 8
-      },
-      {
-        "name": "HPC IGV",
-        "duct": "core",
-        "chord": 0.03,
-        "cells": 8
-      },
-      {
-        "name": "HPC R1",
-        "duct": "core",
-        "chord": 0.0291667,
-        "cells": 8
-      },
-      {
-        "name": "HPC S1",
-        "duct": "core",
-        "chord": 0.0283333,
-        "cells": 8
-      },
-      {
-        "name": "HPC R2",
-        "duct": "core",
-        "chord": 0.0275,
-        "cells": 8
-      },
-      {
-        "name": "HPC S2",
-        "duct": "core",
-        "chord": 0.0266667,
-        "cells": 8
-      },
-      {
-        "name": "HPC R3",
-        "duct": "core",
-        "chord": 0.0258333,
-        "cells": 8
-      },
-      {
-        "name": "HPC S3",
-        "duct": "core",
-        "chord": 0.025,
-        "cells": 8
-      },
-      {
-        "name": "HPC R4",
-        "duct": "core",
-        "chord": 0.0241667,
-        "cells": 8
-      },
-      {
-        "name": "HPC S4",
-        "duct": "core",
-        "chord": 0.0233333,
-        "cells": 8
-      },
-      {
-        "name": "HPC R5",
-        "duct": "core",
-        "chord": 0.0225,
-        "cells": 8
-      },
-      {
-        "name": "HPC S5",
-        "duct": "core",
-        "chord": 0.0216667,
-        "cells": 8
-      },
-      {
-        "name": "HPC R6",
-        "duct": "core",
-        "chord": 0.0208333,
-        "cells": 8
-      },
-      {
-        "name": "HPC S6",
-        "duct": "core",
-        "chord": 0.02,
-        "cells": 8
-      },
-      {
-        "name": "HPC R7",
-        "duct": "core",
-        "chord": 0.0191667,
-        "cells": 8
-      },
-      {
-        "name": "HPC S7",
-        "duct": "core",
-        "chord": 0.0183333,
-        "cells": 8
-      },
-      {
-        "name": "HPC R8",
-        "duct": "core",
-        "chord": 0.0175,
-        "cells": 8
-      },
-      {
-        "name": "HPC S8",
-        "duct": "core",
-        "chord": 0.0166667,
-        "cells": 8
-      },
-      {
-        "name": "HPC R9",
-        "duct": "core",
-        "chord": 0.0158333,
-        "cells": 8
-      },
-      {
-        "name": "HPC S9",
-        "duct": "core",
-        "chord": 0.015,
-        "cells": 8
-      },
-      {
-        "name": "HPT NGV",
-        "duct": "core",
-        "chord": 0.04,
-        "cells": 8
-      },
-      {
-        "name": "HPT R1",
+        "name": "booster-igv",
         "duct": "core",
         "chord": 0.035,
         "cells": 8
       },
       {
-        "name": "LPT S1",
-        "duct": "core",
-        "chord": 0.03,
-        "cells": 8
-      },
-      {
-        "name": "LPT R1",
-        "duct": "core",
-        "chord": 0.0321429,
-        "cells": 9
-      },
-      {
-        "name": "LPT S2",
-        "duct": "core",
-        "chord": 0.0342857,
-        "cells": 8
-      },
-      {
-        "name": "LPT R2",
-        "duct": "core",
-        "chord": 0.0364286,
-        "cells": 8
-      },
-      {
-        "name": "LPT S3",
-        "duct": "core",
-        "chord": 0.0385714,
-        "cells": 8
-      },
-      {
-        "name": "LPT R3",
-        "duct": "core",
-        "chord": 0.0407143,
-        "cells": 8
-      },
-      {
-        "name": "LPT S4",
-        "duct": "core",
-        "chord": 0.0428571,
-        "cells": 8
-      },
-      {
-        "name": "LPT R4",
+        "name": "booster-r1",
         "duct": "core",
         "chord": 0.045,
         "cells": 8
       },
       {
-        "name": "TRF struts",
+        "name": "booster-s1",
         "duct": "core",
-        "chord": 0.07,
+        "chord": 0.04,
+        "cells": 8
+      },
+      {
+        "name": "booster-r2",
+        "duct": "core",
+        "chord": 0.043,
+        "cells": 8
+      },
+      {
+        "name": "booster-s2",
+        "duct": "core",
+        "chord": 0.038,
+        "cells": 8
+      },
+      {
+        "name": "booster-r3",
+        "duct": "core",
+        "chord": 0.041,
+        "cells": 8
+      },
+      {
+        "name": "booster-s3",
+        "duct": "core",
+        "chord": 0.036,
+        "cells": 8
+      },
+      {
+        "name": "hpc-igv",
+        "duct": "core",
+        "chord": 0.03,
+        "cells": 9
+      },
+      {
+        "name": "hpc-r1",
+        "duct": "core",
+        "chord": 0.04,
+        "cells": 9
+      },
+      {
+        "name": "hpc-s1",
+        "duct": "core",
+        "chord": 0.032,
+        "cells": 8
+      },
+      {
+        "name": "hpc-r2",
+        "duct": "core",
+        "chord": 0.036,
+        "cells": 8
+      },
+      {
+        "name": "hpc-s2",
+        "duct": "core",
+        "chord": 0.029,
+        "cells": 8
+      },
+      {
+        "name": "hpc-r3",
+        "duct": "core",
+        "chord": 0.033,
+        "cells": 10
+      },
+      {
+        "name": "hpc-s3",
+        "duct": "core",
+        "chord": 0.027,
+        "cells": 10
+      },
+      {
+        "name": "hpc-r4",
+        "duct": "core",
+        "chord": 0.03,
+        "cells": 11
+      },
+      {
+        "name": "hpc-s4",
+        "duct": "core",
+        "chord": 0.025,
+        "cells": 9
+      },
+      {
+        "name": "hpc-r5",
+        "duct": "core",
+        "chord": 0.027,
+        "cells": 10
+      },
+      {
+        "name": "hpc-s5",
+        "duct": "core",
+        "chord": 0.023,
+        "cells": 9
+      },
+      {
+        "name": "hpc-r6",
+        "duct": "core",
+        "chord": 0.025,
+        "cells": 9
+      },
+      {
+        "name": "hpc-s6",
+        "duct": "core",
+        "chord": 0.021,
+        "cells": 8
+      },
+      {
+        "name": "hpc-r7",
+        "duct": "core",
+        "chord": 0.023,
+        "cells": 9
+      },
+      {
+        "name": "hpc-s7",
+        "duct": "core",
+        "chord": 0.02,
+        "cells": 8
+      },
+      {
+        "name": "hpc-r8",
+        "duct": "core",
+        "chord": 0.021,
+        "cells": 8
+      },
+      {
+        "name": "hpc-s8",
+        "duct": "core",
+        "chord": 0.019,
+        "cells": 8
+      },
+      {
+        "name": "hpc-r9",
+        "duct": "core",
+        "chord": 0.02,
+        "cells": 8
+      },
+      {
+        "name": "hpc-s9",
+        "duct": "core",
+        "chord": 0.019,
+        "cells": 8
+      },
+      {
+        "name": "hpt-n1",
+        "duct": "core",
+        "chord": 0.04,
+        "cells": 8
+      },
+      {
+        "name": "hpt-r1",
+        "duct": "core",
+        "chord": 0.035,
+        "cells": 8
+      },
+      {
+        "name": "lpt-n1",
+        "duct": "core",
+        "chord": 0.034,
+        "cells": 8
+      },
+      {
+        "name": "lpt-r1",
+        "duct": "core",
+        "chord": 0.032,
+        "cells": 8
+      },
+      {
+        "name": "lpt-n2",
+        "duct": "core",
+        "chord": 0.036,
+        "cells": 8
+      },
+      {
+        "name": "lpt-r2",
+        "duct": "core",
+        "chord": 0.034,
+        "cells": 8
+      },
+      {
+        "name": "lpt-n3",
+        "duct": "core",
+        "chord": 0.038,
+        "cells": 9
+      },
+      {
+        "name": "lpt-r3",
+        "duct": "core",
+        "chord": 0.036,
+        "cells": 8
+      },
+      {
+        "name": "lpt-n4",
+        "duct": "core",
+        "chord": 0.04,
+        "cells": 9
+      },
+      {
+        "name": "lpt-r4",
+        "duct": "core",
+        "chord": 0.038,
         "cells": 8
       }
     ],
@@ -785,17 +780,319 @@
       "coreOutside": 0.009
     },
     "domain": {
-      "xIn": -8.46,
-      "xOut": 34.01,
-      "rOut": 8.75,
-      "D": 1.55,
-      "upstreamD": 5.00645,
-      "radialD": 5.64516,
-      "downstreamD": 20.0065
+      "xIn": -8.54,
+      "xOut": 33.75,
+      "rOut": 8.82,
+      "D": 1.5494,
+      "upstreamD": 5.01162,
+      "radialD": 5.69253,
+      "downstreamD": 20.0077
+    }
+  },
+  "stations": [
+    {
+      "id": "2",
+      "x": 0,
+      "block": "fan",
+      "i": 0
+    },
+    {
+      "id": "13",
+      "x": 0.6,
+      "block": "bypass",
+      "i": 34
+    },
+    {
+      "id": "18",
+      "x": 1.55,
+      "block": "bypass",
+      "i": 115
+    },
+    {
+      "id": "25",
+      "x": 0.86,
+      "block": "core",
+      "i": 111
+    },
+    {
+      "id": "3",
+      "x": 1.46,
+      "block": "core",
+      "i": 316
+    },
+    {
+      "id": "4",
+      "x": 1.74,
+      "block": "core",
+      "i": 360
+    },
+    {
+      "id": "45",
+      "x": 1.97,
+      "block": "core",
+      "i": 401
+    },
+    {
+      "id": "49.5",
+      "x": 2.065,
+      "block": "core",
+      "i": 424
+    },
+    {
+      "id": "5",
+      "x": 2.37,
+      "block": "core",
+      "i": 493
+    },
+    {
+      "id": "8",
+      "x": 2.75,
+      "block": "core",
+      "i": 534
+    }
+  ],
+  "rows": [
+    {
+      "id": "fan",
+      "block": "fan",
+      "i0": 3,
+      "i1": 32
+    },
+    {
+      "id": "fan-ogv",
+      "block": "bypass",
+      "i0": 18,
+      "i1": 27
+    },
+    {
+      "id": "booster-igv",
+      "block": "core",
+      "i0": 3,
+      "i1": 11
+    },
+    {
+      "id": "booster-r1",
+      "block": "core",
+      "i0": 13,
+      "i1": 21
+    },
+    {
+      "id": "booster-s1",
+      "block": "core",
+      "i0": 23,
+      "i1": 31
+    },
+    {
+      "id": "booster-r2",
+      "block": "core",
+      "i0": 33,
+      "i1": 41
+    },
+    {
+      "id": "booster-s2",
+      "block": "core",
+      "i0": 43,
+      "i1": 51
+    },
+    {
+      "id": "booster-r3",
+      "block": "core",
+      "i0": 53,
+      "i1": 61
+    },
+    {
+      "id": "booster-s3",
+      "block": "core",
+      "i0": 63,
+      "i1": 71
+    },
+    {
+      "id": "hpc-igv",
+      "block": "core",
+      "i0": 113,
+      "i1": 122
+    },
+    {
+      "id": "hpc-r1",
+      "block": "core",
+      "i0": 123,
+      "i1": 132
+    },
+    {
+      "id": "hpc-s1",
+      "block": "core",
+      "i0": 133,
+      "i1": 141
+    },
+    {
+      "id": "hpc-r2",
+      "block": "core",
+      "i0": 142,
+      "i1": 150
+    },
+    {
+      "id": "hpc-s2",
+      "block": "core",
+      "i0": 151,
+      "i1": 159
+    },
+    {
+      "id": "hpc-r3",
+      "block": "core",
+      "i0": 160,
+      "i1": 170
+    },
+    {
+      "id": "hpc-s3",
+      "block": "core",
+      "i0": 172,
+      "i1": 182
+    },
+    {
+      "id": "hpc-r4",
+      "block": "core",
+      "i0": 184,
+      "i1": 195
+    },
+    {
+      "id": "hpc-s4",
+      "block": "core",
+      "i0": 197,
+      "i1": 206
+    },
+    {
+      "id": "hpc-r5",
+      "block": "core",
+      "i0": 208,
+      "i1": 218
+    },
+    {
+      "id": "hpc-s5",
+      "block": "core",
+      "i0": 220,
+      "i1": 229
+    },
+    {
+      "id": "hpc-r6",
+      "block": "core",
+      "i0": 231,
+      "i1": 240
+    },
+    {
+      "id": "hpc-s6",
+      "block": "core",
+      "i0": 242,
+      "i1": 250
+    },
+    {
+      "id": "hpc-r7",
+      "block": "core",
+      "i0": 252,
+      "i1": 261
+    },
+    {
+      "id": "hpc-s7",
+      "block": "core",
+      "i0": 263,
+      "i1": 271
+    },
+    {
+      "id": "hpc-r8",
+      "block": "core",
+      "i0": 273,
+      "i1": 281
+    },
+    {
+      "id": "hpc-s8",
+      "block": "core",
+      "i0": 283,
+      "i1": 291
+    },
+    {
+      "id": "hpc-r9",
+      "block": "core",
+      "i0": 293,
+      "i1": 301
+    },
+    {
+      "id": "hpc-s9",
+      "block": "core",
+      "i0": 303,
+      "i1": 311
+    },
+    {
+      "id": "hpt-n1",
+      "block": "core",
+      "i0": 361,
+      "i1": 369
+    },
+    {
+      "id": "hpt-r1",
+      "block": "core",
+      "i0": 372,
+      "i1": 380
+    },
+    {
+      "id": "lpt-n1",
+      "block": "core",
+      "i0": 402,
+      "i1": 410
+    },
+    {
+      "id": "lpt-r1",
+      "block": "core",
+      "i0": 413,
+      "i1": 421
+    },
+    {
+      "id": "lpt-n2",
+      "block": "core",
+      "i0": 424,
+      "i1": 432
+    },
+    {
+      "id": "lpt-r2",
+      "block": "core",
+      "i0": 435,
+      "i1": 443
+    },
+    {
+      "id": "lpt-n3",
+      "block": "core",
+      "i0": 446,
+      "i1": 455
+    },
+    {
+      "id": "lpt-r3",
+      "block": "core",
+      "i0": 458,
+      "i1": 466
+    },
+    {
+      "id": "lpt-n4",
+      "block": "core",
+      "i0": 469,
+      "i1": 478
+    },
+    {
+      "id": "lpt-r4",
+      "block": "core",
+      "i0": 481,
+      "i1": 489
+    }
+  ],
+  "explicitDt": {
+    "dt": 0.00000121711,
+    "block": "core",
+    "at": {
+      "i": 311,
+      "j": 0,
+      "x": 1.4472,
+      "r": 0.261783
     }
   },
   "binaryBytes": {
-    "f64": 12809408,
-    "f32": 7546376
+    "f64": 12823320,
+    "f32": 7555408
   }
 }

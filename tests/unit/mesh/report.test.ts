@@ -1,23 +1,29 @@
 // The mesh report: the numbers docs/MESH.md quotes, computed from a built engine mesh.
 import { beforeAll, describe, expect, it } from 'vitest';
-import { MESH_80K, buildEngineMesh, type EngineMesh } from '../../../tools/mesh/engineMesh';
-import { placeholderFlowpath } from '../../../tools/mesh/geometry/placeholder';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
+import { buildEngineMesh, type EngineMesh } from '../../../tools/mesh/engineMesh';
+import { flowpathFromDefinition } from '../../../tools/mesh/geometry/definition';
 import { meshQuality } from '../../../tools/mesh/metrics';
-import { engineMeshReport, type EngineMeshReport } from '../../../tools/mesh/report';
+import {
+  engineMeshReport,
+  explicitDtLimit,
+  type EngineMeshReport,
+} from '../../../tools/mesh/report';
+import { MESH_SMOKE } from './fixtures';
 
 describe('engineMeshReport', () => {
   let mesh: EngineMesh;
   let report: EngineMeshReport;
   beforeAll(() => {
-    mesh = buildEngineMesh(placeholderFlowpath(), MESH_80K);
+    mesh = buildEngineMesh(flowpathFromDefinition(ENGINE_DEFINITION), MESH_SMOKE);
     report = engineMeshReport(mesh);
   });
 
   it('reports the total, the target and the per-block counts', () => {
-    expect(report.spec).toBe('80k');
+    expect(report.spec).toBe('smoke');
     expect(report.totalCells).toBe(mesh.totalCells);
-    expect(report.targetCells).toBe(80_000);
-    expect(report.deviation).toBeCloseTo(mesh.totalCells / 80_000 - 1, 12);
+    expect(report.targetCells).toBe(MESH_SMOKE.targetCells);
+    expect(report.deviation).toBeCloseTo(mesh.totalCells / MESH_SMOKE.targetCells - 1, 12);
     expect(report.blocks.map((b) => b.name)).toEqual(mesh.blocks.map((b) => b.name));
     expect(report.blocks.reduce((s, b) => s + b.cells, 0)).toBe(mesh.totalCells);
   });
@@ -46,20 +52,20 @@ describe('engineMeshReport', () => {
     expect(report.cellsAcross.fan).toBe(48);
     expect(report.cellsAcross.core).toBe(16);
     expect(report.cellsAcross.bypass).toBe(32);
-    expect(report.cellsAcross.lip).toBe(MESH_80K.nLip);
+    expect(report.cellsAcross.lip).toBe(MESH_SMOKE.nLip);
   });
 
-  it('counts at least 4 cells per chord in every blade row, at mid-span', () => {
-    const rows = placeholderFlowpath().bladeRows;
+  it('counts the cells of every blade row zone', () => {
+    const rows = mesh.geometry.bladeRows;
     expect(report.cellsPerChord.map((r) => r.name)).toEqual(rows.map((r) => r.name));
     for (const r of report.cellsPerChord) {
       expect(r.cells, r.name).toBeGreaterThanOrEqual(4);
       expect(r.chord).toBeGreaterThan(0);
     }
-    // the HPC's last rotor and stator have the shortest chords (15 mm), so the fewest cells
-    const hpc = report.cellsPerChord.filter((r) => r.name.startsWith('HPC'));
-    const fan = report.cellsPerChord.find((r) => r.name === 'Fan rotor');
-    expect(Math.min(...hpc.map((r) => r.cells))).toBeLessThan(fan?.cells ?? 0);
+    report.cellsPerChord.forEach((r) => {
+      const z = mesh.rows.find((q) => q.id === r.name);
+      expect(r.cells).toBe((z?.i1 ?? 0) - (z?.i0 ?? 0));
+    });
   });
 
   it('reports the radial spacing at both nozzle lips, inside and outside', () => {
@@ -80,5 +86,25 @@ describe('engineMeshReport', () => {
     expect(report.domain.radialD).toBeGreaterThanOrEqual(5);
     expect(report.domain.downstreamD).toBeGreaterThanOrEqual(20);
     expect(report.domain.downstreamD).toBeLessThan(21);
+  });
+});
+
+describe('explicitDtLimit', () => {
+  it('is 1 / (a_x / dx + a_r / dr) on the smallest cell, and says where', () => {
+    const mesh = buildEngineMesh(flowpathFromDefinition(ENGINE_DEFINITION), MESH_SMOKE);
+    // uniform speeds: the limit sits in the cell with the largest 1/dx + 1/dr
+    const lim = explicitDtLimit(mesh, () => ({ ax: 700, ar: 500 }));
+    expect(lim.dt).toBeGreaterThan(0);
+    const b = mesh.blocks[mesh.index[lim.block as keyof typeof mesh.index]];
+    expect(b).toBeDefined();
+    // doubling every speed halves the limit, at the same cell
+    const twice = explicitDtLimit(mesh, () => ({ ax: 1400, ar: 1000 }));
+    expect(twice.dt).toBeCloseTo(lim.dt / 2, 15);
+    expect(twice.at).toEqual(lim.at);
+    // speeds that are zero everywhere except one block move the limit into that block
+    const plug = explicitDtLimit(mesh, (_x, _r, name) =>
+      name === 'plug' ? { ax: 700, ar: 500 } : { ax: 1e-6, ar: 1e-6 },
+    );
+    expect(plug.block).toBe('plug');
   });
 });

@@ -76,7 +76,7 @@ describe('flowpathFromDefinition', () => {
   });
 
   it('keeps every curve monotonic in x, the closed boattails falling and the edges thick', () => {
-    for (const [name, c] of Object.entries(g.curves)) {
+    for (const [name, c] of Object.entries(g.curves) as [string, readonly Pt[]][]) {
       for (let k = 1; k < c.length; k++) {
         expect((c[k] as Pt).x, `${name} point ${k}`).toBeGreaterThan((c[k - 1] as Pt).x);
       }

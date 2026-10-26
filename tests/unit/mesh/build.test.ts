@@ -1,6 +1,12 @@
 // Building helpers for duct blocks with fixed grid lines (station planes, blade edges).
 import { describe, expect, it } from 'vitest';
-import { ductWalls, fixedSpacing, pchip, segmentCounts } from '../../../tools/mesh/build';
+import {
+  fixedSpacing,
+  pchip,
+  segmentCounts,
+  wallRows,
+  wallSpacing,
+} from '../../../tools/mesh/build';
 import { Polyline } from '../../../tools/mesh/curve';
 import { maxRatio } from '../../../tools/mesh/distribution';
 import type { Pt } from '../../../tools/mesh/types';
@@ -101,8 +107,44 @@ describe('fixedSpacing', () => {
   });
 });
 
-describe('ductWalls with fixed cut lines', () => {
-  // a straight duct with a sloping hub, 0..1 m long
+describe('wallSpacing', () => {
+  it('holds exactly the prescribed cells per segment with nodes on the fixed arc lengths', () => {
+    const fixed = [0, 0.3, 0.33, 0.7, 1];
+    const counts = [30, 1, 40, 25];
+    const { s, fixedIndex } = wallSpacing(1, () => 0.012, fixed, counts);
+    expect(fixedIndex).toEqual([0, 30, 31, 71, 96]);
+    fixedIndex.forEach((i, k) => {
+      expect(s[i]).toBe(fixed[k]);
+    });
+    for (let k = 1; k < s.length; k++) expect(s[k] ?? 0).toBeGreaterThan(s[k - 1] ?? 0);
+  });
+
+  it('steps from a one-cell gap to finer chord cells without a jump', () => {
+    // a 4.5 mm gap between two 30 mm chords at 3.75 mm (8 cells each)
+    const fixed = [0, 0.03, 0.0345, 0.0645];
+    const { s } = wallSpacing(0.0645, () => 0.00375, fixed, [8, 1, 8]);
+    expect(maxRatio(s)).toBeLessThanOrEqual(1.15);
+  });
+
+  it('puts extra cells in the interior of a segment, not at its ends', () => {
+    // twice the natural count in the middle segment: its end cells still match the neighbours
+    const fixed = [0, 0.2, 0.4, 0.6];
+    const { s, fixedIndex } = wallSpacing(0.6, () => 0.01, fixed, [20, 40, 20]);
+    expect(maxRatio(s)).toBeLessThanOrEqual(1.15);
+    const i = fixedIndex[1] ?? 0;
+    const before = (s[i] ?? 0) - (s[i - 1] ?? 0);
+    const after = (s[i + 1] ?? 0) - (s[i] ?? 0);
+    expect(after / before).toBeGreaterThan(1 / 1.15);
+  });
+
+  it('reports the cells each segment needs at least', () => {
+    const { need } = wallSpacing(0.6, () => 0.01, [0, 0.2, 0.4, 0.6], [20, 20, 20]);
+    for (const n of need) expect(n).toBeCloseTo(20, 0);
+  });
+});
+
+describe('wallRows', () => {
+  // a duct with a sloping hub, 0..1 m long
   const lower = new Polyline([
     { x: 0, r: 0.2 },
     { x: 0.5, r: 0.25 },
@@ -112,45 +154,58 @@ describe('ductWalls with fixed cut lines', () => {
     { x: 0, r: 0.5 },
     { x: 1, r: 0.45 },
   ]);
-  const ends = {
-    lower0: lower.atX(0),
-    upper0: upper.atX(0),
-    lower1: lower.atX(1),
-    upper1: upper.atX(1),
-  };
   const radial = (x: number) => ({ hub: lower.atX(x), tip: upper.atX(x) });
 
-  it('puts a node row exactly on every fixed line, radial ones bitwise radial', () => {
-    const slanted = { hub: lower.atX(0.62), tip: upper.atX(0.64) };
-    const fixed = [radial(0.3), radial(0.3045), slanted];
-    const { lo, up, fixed: idx } = ductWalls(lower, upper, 0, 1, () => 0.012, ends, { fixed });
-    expect(idx.length).toBe(3);
-    fixed.forEach((f, k) => {
-      const i = idx[k] ?? -1;
-      expect(lo[i]).toEqual(f.hub);
-      expect(up[i]).toEqual(f.tip);
+  it('puts a node row exactly on every fixed line, slanted ones included', () => {
+    const slanted = { hub: lower.atX(0.6), tip: upper.atX(0.64) };
+    const cuts = [radial(0), radial(0.3), radial(0.3045), slanted, radial(1)];
+    const { lo, up, fixed } = wallRows(lower, upper, () => 0.012, cuts);
+    expect(lo.length).toBe(up.length);
+    expect(fixed.length).toBe(3);
+    cuts.slice(1, -1).forEach((c, k) => {
+      const i = fixed[k] ?? -1;
+      expect(lo[i]).toEqual(c.hub);
+      expect(up[i]).toEqual(c.tip);
     });
-    expect((lo[idx[0] ?? 0] as Pt).x).toBe(0.3);
-    expect((up[idx[0] ?? 0] as Pt).x).toBe(0.3);
-    // the cuts stay in order along both walls
+    expect(lo[0]).toEqual(cuts[0]?.hub);
+    expect(up[up.length - 1]).toEqual(cuts[4]?.tip);
     for (let i = 1; i < lo.length; i++) {
       expect((lo[i] as Pt).x).toBeGreaterThan((lo[i - 1] as Pt).x);
       expect((up[i] as Pt).x).toBeGreaterThan((up[i - 1] as Pt).x);
     }
+    // each wall's own spacing stays smooth across the fixed lines
+    const arc = (pts: readonly Pt[]) => {
+      const out = [0];
+      for (let i = 1; i < pts.length; i++)
+        out.push(
+          (out[i - 1] ?? 0) +
+            Math.hypot(
+              (pts[i] as Pt).x - (pts[i - 1] as Pt).x,
+              (pts[i] as Pt).r - (pts[i - 1] as Pt).r,
+            ),
+        );
+      return out;
+    };
+    expect(maxRatio(arc(lo))).toBeLessThanOrEqual(1.15);
+    expect(maxRatio(arc(up))).toBeLessThanOrEqual(1.15);
   });
 
   it('keeps at least the minimum cell count between two fixed lines', () => {
-    const fixed = [radial(0.4), radial(0.43)];
-    const { fixed: idx } = ductWalls(lower, upper, 0, 1, () => 0.012, ends, {
-      fixed,
-      minCells: (k) => (k === 1 ? 6 : 1),
-    });
-    expect((idx[1] ?? 0) - (idx[0] ?? 0)).toBe(6);
+    const cuts = [radial(0), radial(0.4), radial(0.43), radial(1)];
+    const { fixed } = wallRows(
+      lower,
+      upper,
+      () => 0.012,
+      cuts,
+      (k) => (k === 1 ? 6 : 1),
+    );
+    expect((fixed[1] ?? 0) - (fixed[0] ?? 0)).toBe(6);
   });
 
-  it('rejects fixed lines out of order', () => {
+  it('rejects fixed lines out of order or without both ends', () => {
     expect(() =>
-      ductWalls(lower, upper, 0, 1, () => 0.012, ends, { fixed: [radial(0.5), radial(0.4)] }),
+      wallRows(lower, upper, () => 0.012, [radial(0), radial(0.5), radial(0.4), radial(1)]),
     ).toThrow(/order/);
+    expect(() => wallRows(lower, upper, () => 0.012, [radial(0)])).toThrow(/end lines/);
   });
 });

@@ -326,144 +326,6 @@ export interface DuctCut {
   readonly tip: Pt;
 }
 
-export interface DuctWallOptions {
-  /** Interior cuts the node rows must contain exactly (station planes, blade edges), in order. */
-  readonly fixed?: readonly DuctCut[];
-  /** Minimum cells of segment k (between consecutive fixed lines, the ends included). */
-  readonly minCells?: (k: number) => number;
-  /** Length, in local duct heights, over which the cuts blend into each fixed line (1.5). */
-  readonly blendHeights?: number;
-  /** Spacing growth per unit length around short segments (0.08). */
-  readonly gradation?: number;
-}
-
-/**
- * Wall node rows of a duct between `lower` and `upper` from x0 to x1. Nodes are placed on the
- * duct's mean line by the spacing function h(x) and each node's cross-duct cut runs along the
- * mean-line normal. The normal direction is smoothed along the mean line over about one duct
- * height (the walls are polylines, so an unsmoothed normal would turn their kinks into
- * wall-spacing jumps on the inside of bends). Every fixed line (the two radial end lines, and any
- * interior station planes and blade edges) is reproduced exactly by one node row, and the cuts
- * blend into each fixed line's direction over `blendHeights` local duct heights with a C1
- * smoothstep, so radial station planes stay radial without compressing the first wall cells.
- * Returns the rows and the node index of each interior fixed line.
- */
-export function ductWalls(
-  lower: Polyline,
-  upper: Polyline,
-  x0: number,
-  x1: number,
-  h: (x: number) => number,
-  ends: { lower0: Pt; upper0: Pt; lower1: Pt; upper1: Pt },
-  opts: DuctWallOptions = {},
-): { lo: Pt[]; up: Pt[]; fixed: number[] } {
-  const blendHeights = opts.blendHeights ?? 1.5;
-  const M = 1500;
-  const height = (x: number): number => upper.atX(x).r - lower.atX(x).r;
-  const pts = Array.from({ length: M + 1 }, (_, m) => {
-    const x = m === M ? x1 : x0 + ((x1 - x0) * m) / M;
-    return { x, r: 0.5 * (lower.atX(x).r + upper.atX(x).r) };
-  });
-  const mean = new Polyline(pts);
-  const L = mean.length;
-  const cum = mean.cum;
-  // normal angle at each sample, from a central difference over a few samples
-  const raw = pts.map((_, m) => {
-    const a = pts[Math.max(0, m - 2)] as Pt;
-    const b = pts[Math.min(M, m + 2)] as Pt;
-    return Math.atan2(b.x - a.x, -(b.r - a.r));
-  });
-  // moving average over half a local duct height either side, three passes
-  const H = pts.map((p) => height(p.x));
-  let ang = raw;
-  for (let pass = 0; pass < 3; pass++) {
-    const prev = ang;
-    let lo = 0;
-    let hi = 0;
-    let sum = 0;
-    ang = pts.map((_, m) => {
-      const s = cum[m] ?? 0;
-      const w = 0.5 * (H[m] ?? 0);
-      while (hi <= M && (cum[hi] ?? Infinity) <= s + w) sum += prev[hi++] ?? 0;
-      while (lo < hi && (cum[lo] ?? 0) < s - w) sum -= prev[lo++] ?? 0;
-      return hi > lo ? sum / (hi - lo) : (prev[m] ?? 0);
-    });
-  }
-  // the fixed lines: the two end lines and the interior cuts, by position along the mean line
-  const cuts: DuctCut[] = [
-    { hub: ends.lower0, tip: ends.upper0 },
-    ...(opts.fixed ?? []),
-    { hub: ends.lower1, tip: ends.upper1 },
-  ];
-  const lines = cuts.map((c, k) => {
-    const dir = { x: c.tip.x - c.hub.x, r: c.tip.r - c.hub.r };
-    const s = k === 0 ? 0 : k === cuts.length - 1 ? L : mean.rayHit(c.hub, dir);
-    if (s === null) throw new Error(`fixed duct line ${k} misses the mean line`);
-    return {
-      s,
-      angle: Math.atan2(dir.r, dir.x),
-      blend: blendHeights * Math.hypot(dir.x, dir.r),
-    };
-  });
-  for (let k = 1; k < lines.length; k++) {
-    if (!((lines[k]?.s ?? 0) > (lines[k - 1]?.s ?? 0)))
-      throw new Error(`fixed duct lines are out of order at line ${k}`);
-  }
-  const angleAt = (s: number): number => {
-    const u = clamp((s / L) * M, 0, M);
-    const m = Math.min(M - 1, Math.floor(u));
-    // samples are near-uniform in arc length; interpolate on the sample index
-    const f = u - m;
-    const a = (ang[m] ?? 0) * (1 - f) + (ang[m + 1] ?? 0) * f;
-    let k = 0;
-    while (k + 2 < lines.length && (lines[k + 1]?.s ?? 0) <= s) k++;
-    const A = lines[k] as (typeof lines)[number];
-    const B = lines[k + 1] as (typeof lines)[number];
-    const near = A.angle + ((B.angle - A.angle) * (s - A.s)) / (B.s - A.s);
-    let w = 1;
-    for (const l of lines) w *= smoothstep(Math.abs(s - l.s) / l.blend);
-    return near + w * (a - near);
-  };
-  const { s, fixedIndex } = fixedSpacing(
-    L,
-    (sv) => h(mean.at(sv).x),
-    lines.map((l) => l.s),
-    lines.slice(1).map((_, k) => opts.minCells?.(k) ?? 1),
-    opts.gradation,
-  );
-  const n = s.length - 1;
-  const lo: Pt[] = [];
-  const up: Pt[] = [];
-  let lastLo = -Infinity;
-  let lastUp = -Infinity;
-  let next = 0;
-  for (let k = 0; k <= n; k++) {
-    if (k === fixedIndex[next]) {
-      const c = cuts[next] as DuctCut;
-      lo.push(c.hub);
-      up.push(c.tip);
-      lastLo = lower.sAtX(c.hub.x);
-      lastUp = upper.sAtX(c.tip.x);
-      next++;
-      continue;
-    }
-    const sk = s[k] ?? 0;
-    const m = mean.at(sk);
-    const a = angleAt(sk);
-    const dir = { x: Math.cos(a), r: Math.sin(a) };
-    const sl = lower.rayHit(m, dir);
-    const su = upper.rayHit(m, dir);
-    if (sl === null || su === null || !(sl > lastLo) || !(su > lastUp)) {
-      throw new Error(`duct cut ${k} at x = ${m.x.toFixed(3)} does not cross both walls in order`);
-    }
-    lastLo = sl;
-    lastUp = su;
-    lo.push(lower.at(sl));
-    up.push(upper.at(su));
-  }
-  return { lo, up, fixed: fixedIndex.slice(1, -1) };
-}
-
 /**
  * Node arc lengths along one wall [0, L] with nodes exactly at sFixed and exactly counts[k] cells
  * in segment k (counts shared with the opposite wall of a duct, so they can exceed what this wall
@@ -508,24 +370,28 @@ export function wallSpacing(
     });
     return Math.max(out, Math.min(floor, out * (1 + gradation) ** 2));
   };
-  // per segment: samples, the base spacing on them, and the cap that gives exactly n cells
-  const M = 512;
+  // per segment: M sample midpoints, the base spacing there (computed once), and the cap that
+  // gives exactly n cells
+  const M = 256;
   const caps: number[] = [];
   const need: number[] = [];
-  const seg = (k: number, cap: number) => {
-    const a = F(k);
-    const b = F(k + 1);
-    const sa = sigma[k] ?? 0;
-    const sb = sigma[k + 1] ?? 0;
-    return (v: number): number =>
-      Math.min(base(v), Math.max(cap, sa - gradation * (v - a), sb - gradation * (b - v)));
+  const mid = (k: number, m: number): number => F(k) + ((m + 0.5) * len(k)) / M;
+  const baseAt = Array.from({ length: K }, (_, k) =>
+    Float64Array.from({ length: M }, (_, m) => base(mid(k, m))),
+  );
+  const at = (k: number, m: number, cap: number): number => {
+    const v = mid(k, m);
+    const ramp = Math.max(
+      cap,
+      (sigma[k] ?? 0) - gradation * (v - F(k)),
+      (sigma[k + 1] ?? 0) - gradation * (F(k + 1) - v),
+    );
+    return Math.min(baseAt[k]?.[m] ?? Infinity, ramp);
   };
   const cells = (k: number, cap: number): number => {
-    const f = seg(k, cap);
-    const a = F(k);
     const d = len(k) / M;
     let sum = 0;
-    for (let m = 0; m < M; m++) sum += d / f(a + (m + 0.5) * d);
+    for (let m = 0; m < M; m++) sum += d / at(k, m, cap);
     return sum;
   };
   for (let k = 0; k < K; k++) {
@@ -544,21 +410,18 @@ export function wallSpacing(
     }
     caps.push(0.5 * (lo + hi));
   }
-  const spacing = (v: number): number => {
-    let k = 0;
-    while (k + 1 < K && F(k + 1) <= v) k++;
-    return seg(k, caps[k] ?? Infinity)(v);
-  };
   // the integral of ds / spacing, then node index -> integral by a monotone cubic through the
   // fixed nodes (the counts now match the integral to within the rigid segments' rounding)
   const S: number[] = [];
   for (let k = 0; k < K; k++) for (let m = 0; m < M; m++) S.push(F(k) + (len(k) * m) / M);
   S.push(L);
   const G = new Float64Array(S.length);
-  for (let m = 1; m < S.length; m++) {
-    const a = S[m - 1] ?? 0;
-    const b = S[m] ?? 0;
-    G[m] = (G[m - 1] ?? 0) + (b - a) / spacing(0.5 * (a + b));
+  for (let k = 0; k < K; k++) {
+    const d = len(k) / M;
+    for (let m = 0; m < M; m++) {
+      const q = k * M + m;
+      G[q + 1] = (G[q] ?? 0) + d / at(k, m, caps[k] ?? Infinity);
+    }
   }
   const fixedIndex = [0];
   for (let k = 0; k < K; k++) fixedIndex.push((fixedIndex[k] ?? 0) + n(k));
@@ -626,19 +489,12 @@ export function wallRows(
     counts = counts.map((c, k) => Math.max(c, (fixedIndex[k + 1] ?? 0) - (fixedIndex[k] ?? 0)));
   }
   for (let it = 0; it < 20; it++) {
-    let raised = false;
+    const before = counts.join();
     for (const w of walls) {
       const { need } = wallSpacing(w.sub.length, w.hs, w.sFixed, counts, gradation);
-      counts = counts.map((c, k) => {
-        const want = Math.ceil((need[k] ?? 0) - 0.3);
-        if (want > c) {
-          raised = true;
-          return want;
-        }
-        return c;
-      });
+      counts = counts.map((c, k) => Math.max(c, Math.ceil((need[k] ?? 0) - 0.3)));
     }
-    if (!raised) break;
+    if (counts.join() === before) break;
   }
   const place = (w: (typeof walls)[number], pick: (c: DuctCut) => Pt) => {
     const { s, fixedIndex } = wallSpacing(w.sub.length, w.hs, w.sFixed, counts, gradation);
