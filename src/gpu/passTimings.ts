@@ -5,7 +5,8 @@
 //
 // Names come from three r186 (pinned): a PassNode renders its scene under the pass's name
 // ("Opaque", "Rotors"), the post nodes render quads named "AO", "TRAA", "DoF [ ... ]",
-// "Bloom [ ... ]", an RTT node "<name> [ RTT ]", the shadow map "Shadow Map [ <light> ]"
+// "Bloom [ ... ]" (the depth of field also blurs its circle of confusion with "Gaussian Blur
+// [ ... ]"), an RTT node "<name> [ RTT ]", the shadow map "Shadow Map [ <light> ]"
 // (plus "VSM..." blurs), and the RenderPipeline's final quad "Render Pipeline".
 
 import { MAX_PASS_MS } from './timestamps';
@@ -32,7 +33,7 @@ const RULES: readonly (readonly [RegExp, PassGroup])[] = [
   [/^AO$/, 'gtao'],
   [/^Composite \[ RTT \]$/, 'composite'],
   [/^TRAA$/, 'traa'],
-  [/^DoF \[/, 'dof'],
+  [/^DoF \[|^Gaussian Blur \[/, 'dof'],
   [/^Bloom \[/, 'bloom'],
   [/^Render Pipeline$/, 'output'],
 ];

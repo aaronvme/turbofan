@@ -281,8 +281,10 @@ export function createPipeline(
   const focusDistance = uniform(4);
   const focalLength = uniform(2.5);
   const bokehScale = uniform(1.2);
-  const dofNode = dof(traaNode, scenePass.getViewZNode(), focusDistance, focalLength, bokehScale);
-  const bloomNode = bloom(traaNode, settings.bloomStrength, 0.5, settings.bloomThreshold);
+  // TRAA's own output texture: passing the node itself made dof copy it through an RTT
+  const traaTex = traaNode.getTextureNode();
+  const dofNode = dof(traaTex, scenePass.getViewZNode(), focusDistance, focalLength, bokehScale);
+  const bloomNode = bloom(traaTex, settings.bloomStrength, 0.5, settings.bloomThreshold);
   // a gentle lens vignette, in linear light before the tone map
   const vignette = Fn(([c]: [Node<'vec4'>]) => {
     const d = length(screenUV.sub(0.5).mul(vec2(1.25, 1)));

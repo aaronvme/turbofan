@@ -206,12 +206,11 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
         resolved(vec2(x, th.mul(r)), 0.045),
       );
       const seam = max(max(joints, longi), rivet.mul(0.7));
-      // a subtle large-scale paint variation, so the white is not a flat CG white
-      const mottle = mx_fractal_noise_float(positionLocal.mul(1.7), 2, 2, 0.5).mul(0.015);
-      m.colorNode = white.mul(float(1).sub(seam.mul(0.45))).add(mottle);
-      // handling marks: a broad, faint roughness variation breaks up the reflections
-      const smudge = mx_fractal_noise_float(positionLocal.mul(2.2), 2, 2, 0.5).mul(0.06);
-      m.roughnessNode = float(0.24).add(smudge).add(seam.mul(0.35));
+      // one broad noise for a subtle paint variation (so the white is not a flat CG white) and
+      // handling marks in the roughness that break up the reflections
+      const broad = mx_fractal_noise_float(positionLocal.mul(2.2), 2, 2, 0.5);
+      m.colorNode = white.mul(float(1).sub(seam.mul(0.45))).add(broad.mul(0.012));
+      m.roughnessNode = float(0.24).add(broad.mul(0.06)).add(seam.mul(0.35));
       break;
     }
     case 'inletLip':

@@ -101,6 +101,8 @@ async function main(): Promise<void> {
         ['cutaway, caps off', 'cutaway', { noCaps: true }],
         ['exploded', 'exploded', {}],
         ['hotSection', 'hotSection', {}],
+        // the GPU clock and other load drift during a run: the default again, last
+        ['default (threeQuarterFront), repeat', 'threeQuarterFront', {}],
       ];
       for (const [label, preset, flags] of runs) {
         const r = await page.evaluate(
