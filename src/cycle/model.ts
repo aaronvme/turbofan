@@ -48,7 +48,7 @@ import { enthalpy, gamma, gasConstant, temperatureFromEnthalpy } from '../thermo
 import { at } from './at';
 import { hermite1 } from './componentMaps';
 import {
-  REFERENCE_ENGINE,
+  referenceEngine,
   egtShunt,
   groundIdle,
   solveGasPath,
@@ -234,7 +234,7 @@ function leverToN1(lever: number, idleN1: number, takeoffN1: number): number {
 export function leverForNetThrust(
   thrustN: number,
   ambient: AmbientConditions = ISA_SLS,
-  engine: SizedEngine = REFERENCE_ENGINE,
+  engine: SizedEngine = referenceEngine(),
 ): number {
   const { c, idle, n1TakeoffPercent } = leverEnds(engine, ambient);
   const s = solveSteady(engine, c, { kind: 'netThrust', value: thrustN }, idle.unknowns);
@@ -321,7 +321,7 @@ class TurbofanCycleModel implements CycleModel {
 
   constructor(definition: EngineDefinition, opts: CycleModelOptions) {
     this.definition = definition;
-    this.e = opts.engine ?? REFERENCE_ENGINE;
+    this.e = opts.engine ?? referenceEngine();
     this.startFuelScale = opts.startFuelScale ?? 1;
     this.surgeSystem = compressionSystem(definition);
   }

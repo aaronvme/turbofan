@@ -3,7 +3,7 @@ import { DEFAULT_CYCLE_INPUTS, type CycleInputs } from '../../../src/contracts/c
 import { casingRadiusAt, hubRadiusAt } from '../../../src/contracts/engine';
 import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 import { gamma, gasConstant } from '../../../src/thermo/gas';
-import { REFERENCE_ENGINE } from '../../../src/cycle/engine';
+import { REF } from './fixtures';
 import { compressorPoint } from '../../../src/cycle/componentMaps';
 import {
   characteristic,
@@ -79,19 +79,24 @@ describe('W1C-I2 / D3-4: the compression system comes from the definition', () =
 
 describe('W1C-I2 / D3-4: the post-surge cubic extends the scaled HPC map', () => {
   const sys = compressionSystem(def);
-  const p = REFERENCE_ENGINE.design.point;
-  const st = p.stations;
-  const inlet = {
-    pt25Pa: st['25'].ptPa,
-    tt25K: st['25'].ttK,
-    n2Rpm: p.n2Rpm,
-    rJPerKgK: gasConstant(0),
+  // read inside the tests (D2-15: nothing sized at collection)
+  const design = () => {
+    const p = REF.design.point;
+    const st = p.stations;
+    const inlet = {
+      pt25Pa: st['25'].ptPa,
+      tt25K: st['25'].ttK,
+      n2Rpm: p.n2Rpm,
+      rJPerKgK: gasConstant(0),
+    };
+    return { p, st, inlet, maps: REF.maps };
   };
-  const maps = REFERENCE_ENGINE.maps;
-  for (const speed of [p.hpc.speedFraction, 0.8, 0.7]) {
-    it(`speed ${speed.toFixed(3)}: peak on the map's stall point, shut-off head bounded`, () => {
-      const fit = hpcCubic(maps.hpc, speed, sys, inlet);
-      const q = compressorPoint(maps.hpc, speed, maps.hpc.map.rlineStall);
+  for (const speed of ['design', 0.8, 0.7] as const) {
+    it(`speed ${String(speed)}: peak on the map's stall point, shut-off head bounded`, () => {
+      const { p, inlet, maps } = design();
+      const nc = speed === 'design' ? p.hpc.speedFraction : speed;
+      const fit = hpcCubic(maps.hpc, nc, sys, inlet);
+      const q = compressorPoint(maps.hpc, nc, maps.hpc.map.rlineStall);
       const stallPoint = ductVariables(sys, inlet, q.correctedFlow, q.pressureRatio);
       const params: GreitzerParams = { ...SURGE, psi0: fit.psi0, h: fit.h, w: fit.w };
       expect(2 * fit.w).toBeCloseTo(stallPoint.phi, 12);
@@ -102,6 +107,7 @@ describe('W1C-I2 / D3-4: the post-surge cubic extends the scaled HPC map', () =>
   }
 
   it('takeoff: B is above critical inside the surge line, so a surge is a deep surge', () => {
+    const { p, st, inlet, maps } = design();
     const t3 = st['3'].ttK;
     const a3 = Math.sqrt(gamma(t3, 0) * gasConstant(0) * t3);
     const omegaH = systemHelmholtzFrequency(sys, a3);

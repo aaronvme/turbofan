@@ -977,5 +977,14 @@ export function surgeMargins(
 /** Sanity: the ISA gas constant the contracts use differs from the thermo mixture by < 1e-4. */
 export const R_MISMATCH = Math.abs(gasConstant(0) / R_AIR - 1);
 
-/** The reference engine: CYCLE_CALIBRATION sized on the reference definition. */
-export const REFERENCE_ENGINE: SizedEngine = sizeEngine(CYCLE_CALIBRATION, ENGINE_DEFINITION);
+let reference: SizedEngine | undefined;
+
+/**
+ * The reference engine: CYCLE_CALIBRATION sized on the reference definition, built on first use
+ * and memoized (D2-15: sizing at import made every sizing mutant "static" for Stryker, so each
+ * one reran the whole suite).
+ */
+export function referenceEngine(): SizedEngine {
+  reference ??= sizeEngine(CYCLE_CALIBRATION, ENGINE_DEFINITION);
+  return reference;
+}

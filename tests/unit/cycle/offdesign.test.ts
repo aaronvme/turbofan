@@ -8,7 +8,6 @@ import { factValue } from '../../../src/engine/facts';
 import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 import { enthalpy, entropyFunction, gamma, gasConstant } from '../../../src/thermo/gas';
 import {
-  REFERENCE_ENGINE,
   balances,
   egtShunt,
   evaluateGasPath,
@@ -20,8 +19,9 @@ import {
 } from '../../../src/cycle/engine';
 import { compressorPoint, surgeMargin } from '../../../src/cycle/componentMaps';
 import { at } from '../../../src/cycle/at';
+import { REF, lazy } from './fixtures';
 
-const E = REFERENCE_ENGINE;
+const E = REF;
 const C7 = THRESHOLDS.C7.values;
 const C8 = THRESHOLDS.C8.values;
 const SLS: AmbientConditions = { temperatureK: 288.15, pressurePa: 101325, machNumber: 0 };
@@ -47,9 +47,12 @@ describe('W1C-I4: customer bleed, power extraction and VBV (C7, C8)', () => {
     powerExtractionW: 150e3,
     vbvFraction: 0.15,
   };
-  const base = solveSteady(E, clean(SLS), { kind: 'n1Percent', value: 70 });
-  const s = solveSteady(E, loaded, { kind: 'n1Percent', value: 70 });
+  const pair = lazy(() => ({
+    base: solveSteady(E, clean(SLS), { kind: 'n1Percent', value: 70 }),
+    s: solveSteady(E, loaded, { kind: 'n1Percent', value: 70 }),
+  }));
   it('converges from the design guess and closes the books with bleed in them', () => {
+    const { base, s } = pair();
     expectC7C8(base);
     expectC7C8(s);
     const p = s.point;
@@ -62,6 +65,7 @@ describe('W1C-I4: customer bleed, power extraction and VBV (C7, C8)', () => {
     );
   });
   it('the VBV dumps its fraction of the booster flow into the bypass stream', () => {
+    const { s } = pair();
     const p = s.point;
     const w21 = p.stations['21'].wKgPerS;
     expect(p.vbvFlowKgPerS).toBeCloseTo(0.15 * w21, 9);
@@ -69,6 +73,7 @@ describe('W1C-I4: customer bleed, power extraction and VBV (C7, C8)', () => {
     expect(p.stations['18'].wKgPerS).toBeCloseTo(p.stations['13'].wKgPerS + 0.15 * w21, 9);
   });
   it('bleed and extraction cost fuel and heat the core at the same N1; the extraction is in the HP balance', () => {
+    const { base, s } = pair();
     expect(s.point.fuelFlowKgPerS).toBeGreaterThan(1.05 * base.point.fuelFlowKgPerS);
     expect(s.point.stations['4'].ttK).toBeGreaterThan(base.point.stations['4'].ttK + 20);
     const p = s.point;
@@ -77,6 +82,7 @@ describe('W1C-I4: customer bleed, power extraction and VBV (C7, C8)', () => {
     expect(Math.abs(p.netPowerHpW)).toBeLessThan(1e-6 * p.power.hpt);
   });
   it('surge margins stay positive and the HPC margin is pinned at this point', () => {
+    const { s } = pair();
     const m = surgeMargins(E, s.point);
     expect(m.hpc).toBeGreaterThan(0.2);
     expect(m.fan).toBeGreaterThan(0.1);
@@ -88,11 +94,12 @@ describe('W1C-I4: customer bleed, power extraction and VBV (C7, C8)', () => {
 
 describe('W1C-I4: flight Mach > 0 (free stream, ram drag)', () => {
   const m25: AmbientConditions = { ...SLS, machNumber: 0.25 };
-  const s = solveSteady(E, clean(m25), { kind: 'n1Percent', value: 95 });
+  const mach = lazy(() => solveSteady(E, clean(m25), { kind: 'n1Percent', value: 95 }));
   it('C7 and C8 at Mach 0.25', () => {
-    expectC7C8(s);
+    expectC7C8(mach());
   });
   it('the inlet sees the isentropic free-stream totals and the net thrust carries the ram drag', () => {
+    const s = mach();
     const p = s.point;
     const t0 = m25.temperatureK;
     const v0 = 0.25 * Math.sqrt(gamma(t0, 0) * gasConstant(0) * t0);
@@ -107,30 +114,35 @@ describe('W1C-I4: flight Mach > 0 (free stream, ram drag)', () => {
 
 describe('W1C-I4: cruise, 35,000 ft ISA, Mach 0.8 (both nozzles choked)', () => {
   const cruise: AmbientConditions = { temperatureK: 218.81, pressurePa: 23842, machNumber: 0.8 };
-  // continuation from SLS, as the engine climbs
-  let s = solveSteady(E, clean(SLS), { kind: 'n1Percent', value: 85 });
-  for (let k = 1; k <= 8; k++) {
-    const f = k / 8;
-    const ambient = {
-      temperatureK: 288.15 + f * (cruise.temperatureK - 288.15),
-      pressurePa: 101325 * Math.pow(cruise.pressurePa / 101325, f),
-      machNumber: 0.8 * f,
-    };
-    s = solveSteady(E, clean(ambient), { kind: 'n1Percent', value: 85 + 5 * f }, s.unknowns);
-  }
-  const climb = solveSteady(
-    E,
-    clean(cruise),
-    { kind: 'netThrust', value: factValue('maxClimbThrust') },
-    s.unknowns,
-  );
+  // continuation from SLS, as the engine climbs; solved on first use (D2-15)
+  const flight = lazy(() => {
+    let s = solveSteady(E, clean(SLS), { kind: 'n1Percent', value: 85 });
+    for (let k = 1; k <= 8; k++) {
+      const f = k / 8;
+      const ambient = {
+        temperatureK: 288.15 + f * (cruise.temperatureK - 288.15),
+        pressurePa: 101325 * Math.pow(cruise.pressurePa / 101325, f),
+        machNumber: 0.8 * f,
+      };
+      s = solveSteady(E, clean(ambient), { kind: 'n1Percent', value: 85 + 5 * f }, s.unknowns);
+    }
+    const climb = solveSteady(
+      E,
+      clean(cruise),
+      { kind: 'netThrust', value: factValue('maxClimbThrust') },
+      s.unknowns,
+    );
+    return { s, climb };
+  });
   it('C7 and C8 at cruise and at the published max climb thrust', () => {
+    const { s, climb } = flight();
     expectC7C8(s);
     expectC7C8(climb);
     expect(climb.point.coreNozzleChoked).toBe(true);
     expect(climb.point.bypassNozzleChoked).toBe(true);
   });
   it('gross thrust = sum of W V + (p - p0) A over both nozzles, pressure thrust included', () => {
+    const { climb } = flight();
     const p = climb.point;
     const p0 = cruise.pressurePa;
     const st = p.stations;
@@ -145,6 +157,7 @@ describe('W1C-I4: cruise, 35,000 ft ISA, Mach 0.8 (both nozzles choked)', () => 
     expect(p.grossThrustN).toBeCloseTo(fg, 4);
   });
   it('validation: OPR at max climb thrust vs the published 32.7 (FICHE), within 1 %', () => {
+    const { climb } = flight();
     // not a PHYSICS.md threshold: an independent published point the model was not fitted to
     // (32.63 at this commit)
     const opr = climb.point.overallPressureRatio;
