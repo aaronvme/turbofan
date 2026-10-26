@@ -228,6 +228,19 @@ export function validateCycleInputs(inputs: CycleInputs): string[] {
 
 /** Tolerance for percent-vs-rpm consistency (percent points). */
 const PERCENT_TOLERANCE = 1e-6;
+/** egtMeasuredK is stations['49.5'].ttK; this only absorbs float noise, K. */
+const EGT_TOLERANCE_K = 1e-9;
+
+const CYCLE_FLAG_NAMES = [
+  'surge',
+  'flameout',
+  'hungStart',
+  'hotStart',
+  'noLightOff',
+  'n1Overspeed',
+  'n2Overspeed',
+  'egtExceedance',
+] as const satisfies readonly (keyof CycleFlags)[];
 
 function checkMapPoint(name: string, p: MapOperatingPoint, problems: string[]): void {
   if (!(isFiniteNumber(p.correctedFlowKgPerS) && p.correctedFlowKgPerS >= 0)) {
@@ -320,6 +333,23 @@ export function validateCycleState(
     problems.push('egtDisplayedK must be > 0');
   if (!(isFiniteNumber(state.egtMeasuredK) && state.egtMeasuredK > 0))
     problems.push('egtMeasuredK must be > 0');
+  else {
+    const t495 = (state.stations as Partial<Record<StationId, StationState>>)['49.5']?.ttK;
+    if (t495 !== undefined && Math.abs(state.egtMeasuredK - t495) > EGT_TOLERANCE_K) {
+      problems.push(
+        `egtMeasuredK ${state.egtMeasuredK} must equal stations['49.5'].ttK ${t495} (W0C-N5)`,
+      );
+    }
+  }
+  const switches = {
+    starterEngaged: state.starterEngaged,
+    ignitersOn: state.ignitersOn,
+    combustorLit: state.combustorLit,
+  };
+  for (const [name, v] of Object.entries(switches))
+    if (typeof v !== 'boolean') problems.push(`${name} must be a boolean`);
+  for (const name of CYCLE_FLAG_NAMES)
+    if (typeof state.flags[name] !== 'boolean') problems.push(`flags.${name} must be a boolean`);
   checkMapPoint('fan', state.fan, problems);
   checkMapPoint('hpc', state.hpc, problems);
   finite('vsvClosureRad', state.vsvClosureRad);
