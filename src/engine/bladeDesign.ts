@@ -151,6 +151,23 @@ export interface DesignLimits {
 }
 export const DESIGN_LIMITS: DesignLimits = { maxIterations: 200, maxCountPasses: 10 };
 
+/**
+ * The blade count to keep when the count iteration asks for `next` again. visited holds
+ * [count, |its own mid solidity - target|] in visit order. Returns null while `next` is new
+ * (keep iterating). Otherwise the counts from `next`'s first visit on form a cycle: a rounding
+ * limit cycle, where the target sits on a blade-count boundary and count c gives a chord that
+ * asks for c + 1 and back. The member nearest the target wins, the first visited on a tie
+ * (W0C-N4). Counts visited on the way into the cycle are not candidates.
+ */
+export function nearestInCycle(
+  visited: readonly (readonly [number, number])[],
+  next: number,
+): number | null {
+  const cycleStart = visited.findIndex(([c]) => c === next);
+  if (cycleStart < 0) return null;
+  return visited.slice(cycleStart).reduce((a, b) => (b[1] < a[1] ? b : a))[0];
+}
+
 export function designRow(
   edges: RowEdges,
   aero: RowAerodynamics,
@@ -240,12 +257,8 @@ export function designRow(
       }
       const solidityMid = (chordOf(stagger).mid * count) / (2 * Math.PI * rRow.mid);
       visited.push([count, Math.abs(solidityMid - target)]);
-      const cycleStart = visited.findIndex(([c]) => c === next);
-      if (cycleStart >= 0) {
-        // A rounding limit cycle: the target sits on a blade-count boundary, where count c
-        // gives a chord that asks for c + 1 and back. Keep the member whose own mid solidity
-        // is nearest the target (W0C-N4); ties keep the first visited.
-        const [best] = visited.slice(cycleStart).reduce((a, b) => (b[1] < a[1] ? b : a));
+      const best = nearestInCycle(visited, next);
+      if (best !== null) {
         if (best !== count) {
           count = best;
           solve();
