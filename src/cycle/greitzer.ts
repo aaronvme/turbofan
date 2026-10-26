@@ -9,6 +9,8 @@
 // The equilibrium on the characteristic's rising (positive-slope) branch loses stability when
 // B > B_crit = sqrt(Phi_T' / Psi_c') (trace of the Jacobian through zero, Greitzer 1976 eq. 18).
 
+import { at } from './at';
+
 export interface GreitzerParams {
   readonly b: number;
   readonly psi0: number;
@@ -39,10 +41,13 @@ export function throttleFlow(p: GreitzerParams, psi: number): number {
 
 /** The equilibrium where the throttle line crosses the characteristic (bisection on Phi). */
 export function equilibrium(p: GreitzerParams): GreitzerState {
-  // Phi_T(Psi_c(Phi)) - Phi changes sign once between 0 and the characteristic's far end 2W
+  // g = Phi_T(Psi_c(Phi)) - Phi is positive at Phi = 0 (Psi_c(0) = psi0 > 0). A throttled
+  // system crosses on the rising branch, below the peak at 2W; a wide-open throttle crosses on
+  // the falling branch beyond it, where the cubic heads to Psi < 0 and so g < 0 eventually.
   const g = (phi: number) => throttleFlow(p, characteristic(p, phi)) - phi;
   let lo = 0;
   let hi = 2 * p.w;
+  while (g(hi) > 0) hi *= 2;
   for (let i = 0; i < 100; i++) {
     const mid = 0.5 * (lo + hi);
     if (g(mid) > 0) lo = mid;
@@ -111,12 +116,8 @@ export function simulateSurge(
     }
     s = next;
   }
-  const first = crossings[0];
-  const last = crossings[crossings.length - 1];
-  const periodXi =
-    crossings.length >= 2 && first !== undefined && last !== undefined
-      ? (last - first) / (crossings.length - 1)
-      : null;
+  const nc = crossings.length;
+  const periodXi = nc >= 2 ? (at(crossings, nc - 1) - at(crossings, 0)) / (nc - 1) : null;
   return { minPhi, maxPhi, periodXi, final: s };
 }
 
