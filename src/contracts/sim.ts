@@ -1,7 +1,10 @@
 // The thread-agnostic sim/UI boundary (decision D0-2, docs/reviews/LOG.md). The UI reads
 // immutable, versioned SimSnapshots and sends SimCommands as messages; it never touches sim
 // objects. Everything here is structured-clone-safe plain data, so the same code works with
-// the sim on the main thread or in a Worker (postMessage clones it).
+// the cycle model and the snapshots on the main thread or in a Worker (postMessage clones it).
+// Caveat (W0C-N7): FlowSolver.fields() returns GPUTextures, which cannot cross threads, so
+// the flow solver lives on the thread that renders (whichever the D0-2 spike picks); only
+// its FlowStatus crosses the boundary, inside the snapshot.
 
 import { validateAmbient, type AmbientConditions } from './ambient';
 import {

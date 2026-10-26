@@ -96,6 +96,11 @@ export interface StationTarget {
 /** What the coupling trims the solver toward (the cycle model is the truth). */
 export interface FlowTargets {
   readonly timeS: number;
+  /**
+   * Shaft speeds as unsigned magnitudes, rad/s (from rpm). Body forces need the signed angular
+   * velocity about +x: multiply by EngineDefinition.rotation[spool] (W0C-N3), as blade design
+   * and StationReduction torques ("sign about +x") do.
+   */
   readonly n1RadPerS: number;
   readonly n2RadPerS: number;
   readonly fuelFlowKgPerS: number;
