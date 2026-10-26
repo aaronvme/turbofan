@@ -984,3 +984,204 @@ None.
 - (m) **W1C-I2:** either derive the Greitzer B and characteristic from the engine and let the episode end on recovery, or relabel the surge row of the fidelity ledger and correct the plan's "100-300 ms surge cycles".
 - (n) **W1C-N2:** T3's reference. Run one NASA CEA frozen point, or reword T3 as "frozen complete-combustion JANAF mixture" with a ledger note (no dissociation).
 - (o) **W0G-N5:** amend D2-11's throttle rule so that a slow load (3-10 display intervals per frame) is a warning and only a ~1 Hz cadence is INVALID. This is needed before P2/L13 on heavy presets.
+
+## Critic pass 4: w1/lookdev @09c6a11
+
+Reviewed 2026-10-26 by the pass-4 critic: the branch diff from ca0f264 (45 files: `src/geometry/{parts,engineGeometry,visibility,struts,explode}.ts`, `src/gpu/passTimings.ts`, `src/render/**`, `src/lookdev/main.ts`, `tools/lookdev/capture.ts`, the tests, LOOKDEV, GPU_FACTS M36-M42, NOTICE and LICENSES), the eight new screenshots in `docs/look-dev/` against the seven in `docs/look-dev/before/`, under D3-1 (studio), D3-7 (performance acceptance waits for a quiet AC re-measure) and D3-8 (the procedural studio and the Apache licence file accepted).
+
+Checklists applied: typescript-reviewer, silent-failure-hunter, pr-test-analyzer, and the three/WebGPU pitfalls in GPU_FACTS (M15-M17 device ownership and error routing, M37 node-frame ids, M12 timestamp quantization). Nothing was timed (D0-1: battery, another agent running); no `bench:*` and no capture timing run.
+
+New probe: `docs/reviews/probes/w1l-culling.browser.probe.ts.txt` (a browser probe). For every closed view, plus two orbit poses a user can reach (straight into the intake, and up the core nozzle from behind), it compares the frame with culling on against culling off, at quality `high`, with the on/on difference as the noise floor.
+
+**Gates at HEAD** (rerun in the builder worktree; tracked files unchanged):
+- `npm test`: 1445 passed (63 files, 49.7 s), exit 0.
+- `npm run lint`: clean. `npm run typecheck`: clean.
+- `npm run coverage`: lines 99.57 %, statements 98.65 %, branches 88.54 %, functions 99.55 %. Per directory: src/geometry lines 99.56 % (branches 90.07 %), src/cycle 100 %, src/thermo 100 %, src/gpu 99.04 %, tools/mesh 99.21 %. Every threshold passes.
+- `npm run test:mesh`: 29 passed.
+- `npm run test:browser`: 18 passed (3 files: interop 12, chrome-gpu 2, engineView 4). Zero WebGPU errors, and no warnings in the output. Every preset renders at `test`; `hero` and `cutaway` render at `high`.
+- The handoff's numbers are confirmed.
+
+**Items, checked against their commits:**
+- **W1G-I1 FIXED (270c652 TDD / b1da8f9).** `xsBetween` and `dedupe` merge samples closer than `X_MERGE` = 1e-6 m (`parts.ts:84-108`, `:129-145`); both ends are kept exactly. `tests/unit/geometry/lookdev.test.ts:52-100` runs boundary, non-manifold, misoriented and degenerate counts, positive volume and simple CCW loops for every part, row and strut, for every key of `GEOMETRY_QUALITY` (so `high` too, and any preset added later). The pass-3 probe's 384 non-manifold fan-case edges are gone.
+- **W1G-N1 FIXED (same commits).** Every part-loop vertex against every component annulus, 1 mm inside the walls, at both presets. The liner skips it through `decorative`, which is honest: the solver sees the definition's annulus, not the liner.
+- **W1G-I2 FIXED for the method, OPEN for the number (D3-7).** The per-pass timer is sound (see "Timing method" below), but the capture's timing protocol is not D0-1 (W1L-I4), and the worker's timings were not run.
+- **W1G-N2 FIXED (48c60ca).** The canvas is read back per preset (mean, structure, black fraction, centre contrast), `high` renders `hero` and `cutaway`, and the worker runs with messages queued before init. Only 2 of the 8 presets run at `high` (W1L-N4).
+- **W1G-N3 FIXED (48c60ca).** `createEngineView` destroys the device on any failure after it exists (`engineView.ts:117-129`). `dispose()` awaits three and records a rejection (`:342-355`). The worker serializes messages through a promise chain, so a message sent during init waits for it (`worker.ts:106-113`), and it posts `gpu-error` from `onError` at once.
+- **W1G-N4 FIXED (09c6a11, D3-8).** One NOTICE, `NOTICE.md` and the HDRI removed (no references left outside the old handoff and the screenshots), `LICENSES/Apache-2.0.txt` holds the full terms (sections 1-9, "END OF TERMS AND CONDITIONS").
+- **W1G-N5 FIXED.** `src/lookdev/**` is excluded from unit coverage in `vitest.config.ts`.
+- **D2-4 device swap, checked.** `src/render/gpuDevice.ts` is gone. The view uses `requestSimDevice` (addEventListener error routing that three's `onuncapturederror` assignment cannot clobber, M16; intentional-destroy-aware loss reporting, M17) and `createRendererOnDevice` (it checks that three adopted the device and is not in compatibility mode). No DOM in `src/render`; `setSize(w, h, false)`; the studio is procedural, so the worker fetches nothing.
+- **LD-6 culling, checked.** `src/geometry/visibility.ts` hides a part or row only if every vertex lies inside the inner body or inside the core cowl between the sight limits (the first booster stator's TE, the last LPT stator's LE). It is applied only when `cut === 0 && explode === 0` (`engineView.ts:315`), so the cutaway and the exploded view draw everything, from the first frame of a transition. The unit tests pin both directions, but only geometrically. The browser test compares triangle counts only. **The pixel comparison fails: culling removes visible geometry in five of the seven closed views (W1L-I1).**
+- **LD-1..LD-5, V1-V5:** see the visual review.
+
+**Code, checked and sound:**
+- `passTimings.ts` is pure and tested. Unknown labels fall into `other`, which still counts in the total, and the timer warns once per unclassified label.
+- `passTimer.ts` labels three's timestamp uids through an `InspectorBase` and resolves without blocking. It drops stale labels after 8 frames, so a pool overflow cannot leak memory.
+- The renderOrder (skins first, the cyclorama last) is correct and cheap, and so is the static shadow map, re-rendered only while the engine moves. The culling *mechanism* is right too: it is applied per mode, and the cutaway and exploded views stay complete. Its sight limits are not (W1L-I1).
+- The fan-blur march (`post.ts:162-290`) is careful work: it is limited to the fan's swept volume, and it never takes the spinner or a booster blade as a fan hit.
+- No new dependencies. The TDD commits (270c652, 3c260e8, a33646c) are test-only.
+
+**Timing method (for the orchestrator's quiet AC run, D3-7):**
+- **GPU-only, per pass.** three writes a timestamp pair at the begin and end of every render pass (`timestampWrites`), and `passTimer` reads three's per-uid durations. So each number is GPU execution time of one pass, independent of the thread that encoded it and of CPU load (CPU load still lowers the shared clock on the Arc 140T, which is why D0-1 applies anyway). CPU encode time is separate (`performance.now()` around `frame()`).
+- **Complete for render passes.** Shadow, Opaque, Rotors, AO, the Composite RTT, TRAA, DoF and its Gaussian blur, every bloom mip, and the final output quad are all labelled. Anything new lands in `other`, which is in the total.
+- **Not included, so "GPU total" is a lower bound on GPU frame time:**
+  - work outside render passes (texture copies, mipmap generation, the query resolve itself);
+  - the browser compositor's copy and present of the canvas;
+  - bubbles between passes;
+  - compute passes: only `'render'` is resolved, so W2's solver needs `'compute'` as well.
+  
+  Put this bound next to an upper bound: the serialized `onSubmittedWorkDone` round trip that pass 3 criticised. A frame that fits the budget on the lower bound but not on the upper bound needs a closer look.
+- **Unquantized only in the capture.** The capture launches Chrome with `--enable-unsafe-webgpu`, so timestamps are exact. The look-dev overlay in a normal Chrome is quantized to 65.5 µs steps (M12), which biases the short passes, so quote only capture numbers.
+- **The protocol is not yet D0-1** (W1L-I4).
+- **The command:** see W1L-I4.
+
+**Visual review, new against before** (1920x1080; crops at 1.2-2x for the details):
+
+What now reads right:
+- **The studio (LD-3, D3-1).** It reads as a product shot: an infinity cove, soft key shadow, a contact shadow, and long strip highlights on the nacelle (01, 02). The black void and the bloom halos are gone.
+- **The nacelle (LD-2).** It is satin white instead of glossy plastic, with no texel-block reflections (before/01 against 01).
+- **The lip (LD-2).** It reads as brushed aluminium, not chrome (05).
+- **Materials (LD-5, V2).** The cutaway materials are no longer uniformly chrome: matte cases, dull superalloy, a ceramic liner. The tube highlights on the core blades are gone (before/07 against 07).
+- **Caps (LD-4).** The cut faces are a distinct red-orange with a crisp anti-aliased hatch (03, 07).
+- **Combustor (LD-4).** It now reads as an annular liner with a dome (07).
+- **V1.** The turbine-blade silhouettes are smooth.
+- **The spinner's spiral (V4)** reads, in 05 and 06.
+- **The exploded view (V5).** The fan shows clear of its case, and the plug is inside the frame (04).
+- **Moiré (V3).** The acoustic-liner moiré is gone.
+
+This is a large step from the pass-3 shots. It does not yet read as a premium product render of a real engine. Most of what remains is in the fan, which every hero and default shot is built around (W1L-I1, I2, I3), then the nits (W1L-N1, N2).
+
+### Blocking
+None.
+
+### Important
+- **W1L-I1 OPEN: the closed-engine culling removes visible geometry.**
+  - Evidence: the probe (`w1l-culling.browser.probe.ts.txt`, at `high`, run on the trial merge). It counts changed 16 px tiles, culling off against culling on; the noise floor is the on/on difference.
+    - `hero`: 48 tiles change (noise floor 0); 25 with shadow lookups off.
+    - `fanIdle` 34 (32 without shadows), `fanTakeoff` 30 (30).
+    - An on-axis look into the intake: 35 (37).
+    - A look up the core nozzle from behind: 24 (24).
+    - `threeQuarterFront` and `side` sit at the noise floor.
+  - The shadow-free runs rule out a culled part's shadow as the cause.
+  - The diff images place the changes:
+    - beside the hub on the far side of the fan, where the booster rows behind the first stator show through the fan gaps (the same area as the fan "blotches", see W1L-I3);
+    - in the core-nozzle annulus, where LPT stages 1-3 show through the last stage.
+  - Where:
+    - the sight limits in `src/geometry/visibility.ts:31-43` (the first booster stator's TE, the last LPT stator's LE) and the test at `:60-63`;
+    - the browser test checks a triangle ratio only (`tests/browser/engineView.test.ts:137-147`).
+  - Failure:
+    - the committed `00-hero`, `05-fan-idle` and `06-fan-takeoff` were captured with these rows missing;
+    - any user orbit into the intake or the nozzle shows the gaps;
+    - the frame times were measured on a draw set that is too small.
+  - Fix:
+    - keep every booster row and every LPT row in the closed set: move `xFront` aft of the booster's last row, and `xRear` ahead of the first LPT row;
+    - the HPC and HPT rows, the cases and the disks are still culled, and they are the bulk of the hidden triangles;
+    - make the probe's check a browser test over every closed preset plus the two orbit poses (on/off within the noise floor);
+    - regenerate 00, 05 and 06.
+  - Allowed after merge: the first task of the follow-up round, before the D3-7 re-measure.
+- **W1L-I2 OPEN: the rotor pass is lit by an unshadowed key, so the fan is lit through the nacelle.**
+  - Where:
+    - `src/render/studio.ts:210-217` copies the key and the rim into `rotorLights` with no shadow;
+    - the rotor scene holds only rotating parts (`engineScene.ts:66-73`), so nothing in it can occlude them;
+    - the comment at `materials.ts:314-318` ("direct light keeps the key's shadow map") holds only for the main scene.
+  - Failure, in 00, 01, 05 and 06:
+    - the fan blades are near paper white, with span-long streaks from the anisotropic highlight;
+    - the inlet barrel just above them is in the lip's shadow;
+    - the booster blades and the spinner get the same unshadowed light.
+  - The geometry says the whole fan face is in shadow. The key sits at (-1.2, 7, 3.2) and aims at (1, 0, 0). A ray from a fan point toward it crosses the inlet highlight plane about 2.8 m off the axis, far outside the ~0.8 m inlet. A real intake is lit through its mouth only: the front strip and the image-based light.
+  - Fix: shadow the rotor pass's direct light. Either:
+    - sample the main key's shadow map in the rotor materials (the same shadow matrix, as a TSL lookup);
+    - or use an analytic aperture test per light: is the ray to the light still inside the inlet radius at the highlight plane?
+
+    Then re-balance the exposure and the front strip.
+  - Allowed after merge (follow-up round).
+- **W1L-I3 OPEN: the fan blur still breaks up in the hero, default and fan shots.**
+  - The pictures:
+    - 00 (hero): a dark and light "comb" radiating from the hub at 4-6 o'clock, and stair-stepped blotches at 7-8 o'clock;
+    - 01 (default): the blades are ragged, feathery white smears;
+    - 05: the far side, 1-6 o'clock, is shredded (black voids and torn slivers, about a third of the disc), and the leading edges on the left are stair-stepped;
+    - 06: dark scalloped crescents in the lower left of the disc, and dotted dark streaks right of the hub;
+    - the probe's on-axis view: the far half is near black with torn fragments (part of that is the metal reflecting the dark room).
+  - This is more than the handoff's "small blotches".
+  - Cause:
+    - the march reprojects into one rasterised rotor image (`post.ts:243-258`), so a turned-back point that lands on a disoccluded or edge-on region has no data;
+    - the switch between the own-surface estimator and the march (`fanAngle < 0.6 pitch`, `:235-242`) shows as blotch edges;
+    - the booster seen through the fan is unblurred.
+  - Fix, the builder's own NEXT 3: a stochastic, time-sampled fan render. Each pixel keeps the fragment of one of N time-offset fan instances (a per-pixel, per-frame hash), depth-tested within that sample, with zero velocity into TRAA. It is exact in the limit. The other option is N instanced time copies into an accumulation target (N times the fan's triangles).
+  - Acceptance needs a ground truth:
+    - per shot (fanIdle, hero, fanTakeoff): the mean of 64 renders at shutter 0, at angles spread over the exposure (an exact box shutter);
+    - a mean absolute error and worst-tile bound against it, committed beside the shot.
+  - Judge it after W1L-I1, because the culled rows sit in the same pixels.
+  - Allowed after merge (follow-up round).
+- **W1L-I4 OPEN: the timing harness is not D0-1, so the D3-7 quiet run cannot use it as it is.**
+  - Where: `tools/lookdev/capture.ts:113-147`, `src/lookdev/main.ts:158-168`, `src/render/passTimer.ts:47`.
+  - Failure:
+    - 30 warm-up frames (0.5 s), then 150 timed frames (2.5 s), one run, a fixed config order. D0-1/D2-12 ask for a 10 s warm-up before each of 3 × 60 s runs, in a seeded rotated order.
+    - `timeFrames(n)` returns the timer's rolling 120-frame window, not the n frames: a 60 s run would report its last 2 s, and n < 120 mixes in the previous config.
+    - The JSON note is hard-coded ("indicative ... D0-1 not applied"). The header says the script "records the load it cannot control", but it records no conditions: power source, power plan, Chrome version, adapter.
+    - There is no validity check (D3-6: the occlusion signature, page hidden or blurred).
+    - The worker's timings were never run (W1G-I2 asked for them).
+  - Fix:
+    - flags `--warmup-s`, `--run-s`, `--reps` and `--seed`;
+    - reset the stats at the start of each run and keep every frame (median, p10 and p90 per pass);
+    - rotate the configs;
+    - record `navigator.getBattery()` charging, `powercfg /getactivescheme`, the user agent and the adapter info, and the rAF intervals and visibility events;
+    - mark a run INVALID per D3-6;
+    - add a `--worker` mode through the worker's `timings` message;
+    - keep the official set small (the default, `cutaway`, `hero`: about 11 min), and run the A/B diagnostics once at 20 s each.
+  - **The quiet re-measure command (D3-7)**, after this fix, on AC with nothing else running:
+    - shell 1: `npx vite --port 5184 --strictPort`;
+    - shell 2: `node tools/lookdev/capture.ts --only none --warmup-s 10 --run-s 60 --reps 3 --seed 1` (the flag names as the fix defines them).
+
+    Today's `node tools/lookdev/capture.ts --only none` gives only a 2.5 s, single-run median per config.
+  - Allowed after merge; due before the quiet run.
+
+### Nits
+- **W1L-N1 OPEN (visual): the closed engine still reads as a CG capsule.**
+  - The nacelle is a smooth white shell. It has no fan-cowl latches, hinge or access panels, thrust-reverser translating-sleeve split, pressure-relief doors, drain mast or stencils. Its joints are 1.1 mm half-width lines, invisible beyond a few metres (02).
+  - The engine floats about 0.37 m above the floor with no stand or pylon stub (01, 02). The nacelle's lowest point is about 0.95 m below the axis, and the floor is at -1.32 m. A transport cradle or a pylon stub would ground it.
+  - In 00 and 01 the spinner reads as glossy dark chrome: a dielectric at roughness 0.42 on a 0.035 base mostly mirrors the softboxes. The spiral reads only in 05 and 06.
+  - 04's framing is loose: the engine fills the middle third of the frame.
+- **W1L-N2 OPEN (visual): cutaway render defects.**
+  - 03: the lower inner-barrel acoustic-liner panels render solid black (albedo 0.2 × cavity 0.5, in the key's shadow), with a stair-stepped edge along the cap. They read as holes.
+  - 07: a coarse, sandpaper-like speckle on the grey cases, the liner and the shafts at close range, and a white crumbly patch between the liner and the outer case (around x 770-1000, y 380-440). Tell GTAO noise from the shadow filter with `?debug=ao` and with `noShadow`.
+  - 07: the heat tint is now so low in chroma that the hot section reads neutral grey.
+- **W1L-N3 OPEN (question p): the plug and centre body are still the definition's ogive (LD-4).** It reads right in profile (02), but as a bulbous bullet in section (03, 07). Changing it is a definition and mesh change, so it needs an orchestrator decision against a public CFM56-7B dimension.
+- **W1L-N4 OPEN: test gaps.**
+  - Only `hero` and `cutaway` run at `high`. Every preset at `high` costs about 2 s more.
+  - The culling test compares triangle counts, not pixels (W1L-I1's fix adds the pixel test).
+- **W1L-N5 OPEN (silent failure): a dispose failure is dropped on the init-failure path.** At `engineView.ts:126`, `await Promise.resolve(renderer.dispose()).catch(() => undefined)` drops a dispose rejection. Attach it to the rethrown error (as `cause`) or send it to the error sink.
+- **W1L-N6 OPEN: "fill-bound; more culling will not help" (GPU_FACTS M42, LOOKDEV) is premature.**
+  - The same table has opaque 6.06 ms with culling off against 6.76 ms with it on.
+  - It has 9.24 ms for the scene drawn straight to the screen, against 6.76 for the opaque pass inside the full chain.
+  - Both are inside the ~2x noise. Keep M42 as a hypothesis, and test it in the quiet run (culling on/off, and a 0.5-scale 3D pass).
+- **W1L-N7 OPEN: timer uids can collide.** three's timestamp uid ends in `renderer.info.frame`, which only three's own rAF loop advances (`Animation.js:85`); `beginFrame` advances only `nodeFrame`.
+  - Two `frame()` calls inside one rAF share uids, so the older frame's queries are overwritten.
+  - A pass drawn in only one of the two frames (the static shadow) is then pushed as a frame of its own.
+  - It is harmless with one frame per rAF (the capture and the worker both do that). Set `renderer.info.frame` in `beginFrame`, or document the rule.
+
+**Verdict w1/lookdev @09c6a11: MERGE, with a named follow-up round `w1/lookdev-2`.**
+- The round delivers what pass 3 asked for: W1G-I1, W1G-N1..N5, the device swap, the studio (D3-1, D3-8), and LD-2..LD-5 and V1-V5 reading right. The per-pass GPU timer is the right method. The gates are green, and the trial merge is clean.
+- Nothing blocks. Main has no culling and the pass-3 look, so this branch is better in every view.
+- Order for `w1/lookdev-2`:
+  1. W1L-I1 (culling limits plus the pixel test, then regenerate 00/05/06);
+  2. W1L-I4 (the D0-1 harness);
+  3. **the orchestrator's D3-7 quiet re-measure**;
+  4. W1L-I2 (fan lighting) and W1L-I3 (fan blur, against a ground truth), then a re-measure of the rotor and composite passes;
+  5. the nits.
+- For D3-2: the committed 00, 05 and 06 show the W1L-I1 gaps and the W1L-I3 artefacts. Showing Aaron the shots after step 1 would avoid reviewing a known defect.
+
+## Critic pass 4: trial merge (w1/lookdev @09c6a11)
+
+- **Merge:** `git merge --no-ff --no-commit w1/lookdev` on the critic branch (main ca0f264) is clean: 45 files, no conflicts. The branch sits directly on ca0f264.
+- **Gates on the combined tree:**
+  - `npm run mesh`: the manifest is unchanged (130k 33c76df6, 80k 6f316568), and the worst-cell report matches MESH.md.
+  - `npm test`: 1445 passed (63 files).
+  - `npm run lint` and `npm run typecheck`: clean.
+  - `npm run coverage`: lines 99.57 %, statements 98.65 %, branches 88.54 %, functions 99.55 %; every threshold passes.
+  - `npm run test:mesh`: 29 passed. `npm run build`: ok.
+  - `npm run test:browser`: 18 passed. The critic's culling probe, copied in, fails as W1L-I1 describes (the only failure).
+- **Restore:** `git merge --abort`, then the probe copy, its diff images, `dist/` and the generated `public/mesh/*.bin` removed. The builder worktree is untouched: `git status` is clean at 09c6a11. Nothing was timed.
+
+**Orchestrator decisions needed (pass 4):**
+- (p) **W1L-N3:** keep the definition's plug and centre-body ogive, or check it against a public CFM56-7B dimension (a definition change: mesh regenerated, `test:mesh` rerun).
+- (q) **D3-2 timing:** show Aaron the W1 shots now, or after `w1/lookdev-2`'s first task (W1L-I1).
