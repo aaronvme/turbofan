@@ -95,6 +95,10 @@ export function buildEngineScene(
     mesh.name = p.spec.id;
     mesh.castShadow = true;
     mesh.receiveShadow = p.spec.material !== 'spinner';
+    // outer skins first: they fill the depth buffer, so the cases and internals behind them
+    // fail the early depth test instead of being shaded and overdrawn (the opaque pass is
+    // fill-bound, not triangle-bound)
+    mesh.renderOrder = p.spec.skin ? 0 : 1;
     if (!closed.parts.has(p.spec.id)) closedHidden.push(mesh);
     // only the spinner shows that it turns (its paint); drums and disks are axisymmetric
     if (p.spec.material === 'spinner') {
@@ -136,6 +140,7 @@ export function buildEngineScene(
     mesh.userData.thetaMin = r.blade.thetaMin;
     mesh.userData.thetaMax = r.blade.thetaMax;
     mesh.name = `row:${r.row.id}`;
+    mesh.renderOrder = 1;
     mesh.castShadow = r.spool === null;
     mesh.receiveShadow = r.spool === null;
     if (!closed.rows.has(r.row.id)) closedHidden.push(mesh);

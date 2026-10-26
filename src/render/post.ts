@@ -215,6 +215,7 @@ export function createPipeline(
     const spinnerFront = covered.and(pRotor.x.lessThan(fan.xFore));
     const useFan = inFan.and(spinnerFront.not());
 
+    const ownFan = covered.and(rotorBlur.sample(suv).b.greaterThan(0.5));
     const acc = vec4(rc.rgb.mul(rc.a), rc.a).toVar();
     const fanAngle = u.lpBlur.min(fan.pitch);
     If(useFan.and(fanAngle.greaterThan(1e-4)), () => {
@@ -226,6 +227,17 @@ export function createPipeline(
         const s = sin(t);
         const hit = bool(false).toVar();
         const col = vec4(0).toVar();
+        // a pixel on a fan blade first follows its own surface point (keeps the blade body
+        // coherent); only where that point has moved off the blades does the march look for
+        // the blade sweeping in behind it
+        If(ownFan, () => {
+          const quv = toUv(rotX(pRotor, c, s));
+          const smp = rotorColor.sample(quv);
+          If(rotorBlur.sample(quv).b.greaterThan(0.5).and(smp.a.greaterThan(0.5)), () => {
+            hit.assign(true);
+            col.assign(smp);
+          });
+        });
         for (const pl of planes) {
           If(hit.not().and(pl.valid), () => {
             const q = rotX(pl.p, c, s);

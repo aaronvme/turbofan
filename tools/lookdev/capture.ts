@@ -40,6 +40,12 @@ const out = arg('--out') ?? 'docs/look-dev';
 const only = arg('--only')?.split(',');
 const timing = !args.includes('--no-timing');
 const port = arg('--port') ?? '5184';
+// --clip x,y,w,h saves only that region (close inspection of artefacts)
+const clipArg = arg('--clip')?.split(',').map(Number);
+const clip =
+  clipArg?.length === 4
+    ? { x: clipArg[0] ?? 0, y: clipArg[1] ?? 0, width: clipArg[2] ?? 1, height: clipArg[3] ?? 1 }
+    : undefined;
 
 interface Medians {
   frames: number;
@@ -85,7 +91,7 @@ async function main(): Promise<void> {
         await l?.renderFrames(90);
       }, preset);
       const path = join(out, `${file}.jpg`);
-      await page.screenshot({ path, type: 'jpeg', quality: 92 });
+      await page.screenshot({ path, type: 'jpeg', quality: 92, ...(clip ? { clip } : {}) });
       log(`saved ${path}`);
     }
     if (timing) {

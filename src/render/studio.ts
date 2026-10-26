@@ -176,6 +176,8 @@ export async function createStudio(renderer: WebGPURenderer): Promise<Studio> {
   const cove = new Mesh(coveGeometry(), coveMat);
   cove.position.x = CENTRE_X;
   cove.receiveShadow = true;
+  // last: everything in front of it is already in the depth buffer
+  cove.renderOrder = 2;
   cove.name = 'cyclorama';
   stage.add(cove);
 
