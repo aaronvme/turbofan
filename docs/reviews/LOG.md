@@ -1196,3 +1196,153 @@ None.
 **Orchestrator decisions needed (pass 4):**
 - (p) **W1L-N3:** keep the definition's plug and centre-body ogive, or check it against a public CFM56-7B dimension (a definition change: mesh regenerated, `test:mesh` rerun).
 - (q) **D3-2 timing:** show Aaron the W1 shots now, or after `w1/lookdev-2`'s first task (W1L-I1).
+
+## Critic pass 5: w1/cycle-calib + w1/cycle-calib-2 @8a962c4
+
+Reviewed 2026-10-26 by the pass-5 critic: the stack tip `w1/cycle-calib-2` @8a962c4 (which contains `w1/cycle-calib` @1e5e5b7) against main 8f066af as one unit. The stack branches from ca0f264, so the review diff is `ca0f264...8a962c4` (43 files; the two-dot diff against main also shows main's look-dev merge as reverted, which the merge does not do). Judged under the new orchestrator decision **D3-15** (accept the residual part-power gap for W1: the C10/C11 KNOWN-FAIL markers stay visible, the gap is in the PHYSICS.md fidelity ledger with its likely cause, part-power map fidelity goes to the backlog). Checklists applied: typescript-reviewer, silent-failure-hunter, pr-test-analyzer. Stryker not run (D3-13).
+
+New probe: `docs/reviews/probes/w1k-calib.probe.ts.txt` (the reference at every C10/C11/C4 point, the VBV schedules, and the 33.73(a) slam on the reference and on the rejected fit).
+
+**Gates at the stack tip** (rerun in the builder worktree; tracked files unchanged afterwards):
+- `npm test`: 1538 passed, **5 expected fail** (1543 tests, 67 files), exit 0, 50 s.
+  - The 5 are `it.fails`: C10 MPA N2, C10 MPA EGT, C10 idle position 2 N2 (`tests/unit/cycle/c10.test.ts:86-91`), C11 approach and idle (`tests/unit/cycle/c11.test.ts:78`). Each flips red if it starts passing. Each check has a plain `it` convergence test beside it, so an `it.fails` cannot pass on a solver exception or a missing point. The labels' stated reasons are stale (W1K-I1).
+- `npm run lint`: clean (ESLint, Prettier). `npm run typecheck`: clean.
+- `npm run coverage`: lines 98.55 %, statements 97.62 %, branches 87.43 %, functions 98.46 %; every threshold passes. Per file: `engine.ts` lines 100 % / branches 91.2 %, `partPower.ts` 100 / 92.9, `model.ts` 100 / 98.4, `surgeSystem.ts` 98.3 / 75.0, `boundedLeastSquares.ts` 95.7 / **69.9**; `src/thermo` lines 100 %.
+- `npm run test:mesh`: 29 passed.
+
+**Pre-registration (D3-3, D3-11, D3-5).**
+- C10: 6009cdd (10:29) is the stack's first commit and touches only PHYSICS.md 3.2, `thresholds.ts` and `thresholds.test.ts`. The first `src/cycle` change is b918b75, after it.
+- C11: 5f035f3 (17:01) is `w1/cycle-calib-2`'s first commit, with the same three files. The mechanisms arrive later (0b69ed6 TDD, dd13fcd).
+- The wording is D3-3's and D3-11's, word for word (C10: idle 436-523 C, MPA 585 ± 30 C, takeoff 855 ± 30 C, N2 ± 1.5 points at 60.6 / 60.7 / 89.3 / 99.8 %; C11: 7 / 30 / 85 % rated thrust, ISA SLS, ± 5 %). `thresholds.test.ts` pins 30 K, 1.5 points, 0.05, 7 / 30 / 85 and the count 4 + 11 + 13 + 3.
+- T3 is reworded per D3-5 at 041cf2d, with PHYSICS.md and `thresholds.ts` changed together. The tolerance stays 0.5 %.
+- Across the stack the `thresholds.ts` diff only adds lines. Nothing was loosened. The surge ledger row's "100-300 ms" became "period from the derived Helmholtz frequency" (D3-4).
+
+**Physics: the mechanisms, their sources and bounds.** None acts at the design point. `partPower.test.ts:213-230` checks that on the rejected fit: the sizing is identical to 1e-12, there is no VBV or VSV offset, and the design residual is under 1e-9. C1-C3 pass.
+- **Combustion efficiency from the EEDB EIs (D3-14 (a), in the reference).**
+  - The rows (8CM066: CO 0.31 / 0.17 / 2.82 / 29.39 g/kg, HC 0.03 / 0.02 / 0.05 / 1.54 g/kg) are `official` ENGINE_FACTS rows, with the NME test-engine status stated.
+  - eta = 1 - (EI_CO Q_CO + EI_HC Q_fuel) / (1000 Q_fuel) is the ARP1533 energy balance. Q_CO = (393.52 - 110.53) / 28.01 = 10.10 MJ/kg is right (JANAF).
+  - By hand: idle 0.841 % against 0.0103 % at takeoff, so -0.83 % relative; approach -0.06 %. Both are pinned in `partPower.test.ts:115-123`.
+  - The design knot is the takeoff fuel flow, so the relative efficiency is exactly 1 at the sizing point and is held above it. It enters the C8 books: `engine.ts:837` uses the same `etaB`.
+  - It is data, not a fit, so putting it in the reference does not break the adoption rule, and every gate passes with it. The corrected-fuel-flow key leaves out the pressure effect at altitude (W1K-N3).
+- **Fan / booster part-speed loss.**
+  - [SDT] Table 3 (the R4 fan at 61.7 / 87.5 / 100 % speed) against the map's +3.1 / +1.4 point rise on the model's own operating line gives the 3.2-4.2 point loss. The arithmetic checks.
+  - The form scales the map efficiency by (1 - loss / eta_des), so no efficiency goes negative.
+  - The booster's 0-4.2 range has no data; it is capped at the fan's falloff, and the text says so (`estimate`).
+- **LPT Reynolds lapse.** (1 - eta) grows by (Re/Re_des)^-n, with Re ~ P / (sqrt(T) mu) at a fixed corrected point, which is the right index at constant Mach. n = 0-0.2 comes from Dunham-Came ([AMDC]). The implementation gives exactly 1 - eta_new = (1 - eta)(Re ratio)^-n at the design level. Floored at 1e-3 for standstill.
+- **HPC Reynolds lapse.** It reuses the turbine bound because no compressor correlation was verified. This is marked `estimate` honestly, and it acts only in the rejected fit (W1K-N5).
+- **HPT clearance.** k (1 - (N2/N2des)^2), 2-4 points, from [LS02]. The reference already had 4 points from W1C-I1, and the fit lands on the same 4.
+- **VBV / VSV.**
+  - The VBV dump leaves at h24 and joins the bypass stream, conserving mass and energy (C8 at a VBV point, `offdesign.test.ts:67`).
+  - The VSV flow sensitivity, 0.688 per rad, comes from the definition's IGV / rotor-1 velocity triangle and is checked against a numerical derivative.
+  - The ±6 deg bound uses [VGV]'s implanted mis-rig as "beyond this it would read as a fault". That is a defensible upper bound, and the text states it.
+  - Both schedules use N2 corrected to T2, while the [QAR] CFM schedule is on N2K25 (W1K-N2).
+- **Probe share.** It is fitted in [0.25, 0.45] per D3-14 and lands at 0.385, inside. The reference keeps the D2-3 value 0.35, which is also inside.
+- **W1C-I1's own mechanisms (cycle-calib).** Mechanical loss ~ N^2, (1/eta_m - 1) of the design compressor power, which is exact at design. The cold duct and combustor losses go with (W sqrt T / P)^2 (Walsh & Fletcher 5.10-5.11). The silent 0.5 cap on the cold losses is W1K-N4.
+
+**The fit tool and the solver.**
+- `tools/cycle/fit-part-power.ts` is deterministic and documented in its header and in ENGINE_FACTS "Fit procedure": a fixed start (the middle of each bound), fixed forward differences, no randomness. `--relax` is a diagnostic only and never written.
+- `boundedLeastSquares.ts` is a standard projected LM in scaled variables. Its tests cover a row swap, a singular matrix, Rosenbrock, the active bound, a failed step, the backward difference, a failed Jacobian, determinism and onStep. The 69.9 % branch figure is mostly `?? 0` arms.
+- "No descent step at any damping" is reported as `converged` (W1K-N1).
+- `partPower.test.ts:261-276` checks that two more LM iterations from the committed values gain under 0.1 % in cost and move every value less than 1 % of its bound width. That is a fair bounded-optimum check.
+
+**The adoption rule (D3-14).**
+- `CYCLE_CALIBRATION` (`engine.ts:213-249`) spreads `W0_CALIBRATION.partPower`. The fan and booster losses, both Reynolds exponents and the VSV offsets are 0. The probe share stays 0.35, and the VBV comes from the `unknown` facts rows (0.25 / 70 / 85 %).
+- Only the combustion table and the VSV sensitivity, which does nothing at zero offset, are added.
+- `partPowerFit.ts` is read only by `PART_POWER_FIT_CALIBRATION`, which is used in no `src` module, only in `partPower.test.ts`. `partPower.test.ts:79-88` pins the reference with its mechanisms off.
+- **The rejected fit is not in the reference.** The text around it says otherwise in places (W1K-I1).
+- The rejection itself (10 transient tests fail on the fit) was run on a scratch copy. The critic reran the 33.73(a) slam on the committed fit (probe `w1k-calib`): it surges and hangs at 10.7 kN, so the rejection is right, though its recorded reason is incomplete (W1K-I2).
+
+**Pass-3 items.**
+- **W1C-I2 / D3-4: CLOSED.** `surgeSystem.ts` derives A_c, L_c = A_c * integral dx/A, V_p (stations 3-4) and the rotor-1 tip from the definition. B = U / (2 omega_H L_c) at the current N2 (0.187 at SLS takeoff, omega_H 1012 rad/s, Helmholtz period 6.2 ms). The cubic peak sits on the map's stall point. The throttle goes through the matched point, and the episode ends on the Greitzer state's recovery, capped at 5 s. `surge.test.ts:109-120` asserts B > criticalB inside the surge line and reverse flow at the derived period. criticalB's closed form, RK4 order 4 and Helmholtz with L != 1 kill the pass-3 greitzer survivors. The ledger row is reworded per D3-4.
+- **W1C-I3: CLOSED.** `engine.test.ts:71-90` pins the sized A8 / A18 to the facts within 5e-4 and the station 8 / 18 annuli within 1e-9. D2-2 was redone (0.1851 / 0.9162 m^2), with the mesh regenerated and `test:mesh` at 29/29.
+- **W1C-I4: CLOSED** (mutation follows D3-13). `offdesign.test.ts` adds:
+  - C7/C8 with bleed + extraction + VBV, at M 0.25, and at 35 kft M 0.8 at the published max-climb thrust, with the pressure thrust recomposed and OPR 32.63 against 32.7;
+  - a design residual under 1e-9;
+  - the throat against an independent max-flux search;
+  - the surge margin at a hand-computed point;
+  - the product composition against Cantera within 1e-5;
+  - the shunt ramp.
+- **W1C-I1: ACCEPTED as the D3-15 gap.** The part-power physics is in, and the residual is in the ledger.
+- **N1-N5: CLOSED.**
+  - N1: N2 from TM-4513, with JANAF at 200 / 250 K and +0.001 % at 200 K against Cantera.
+  - N2: T3 reworded per D3-5, with an independent frozen composition.
+  - N3: the sizing secant throws on a miss.
+  - N4: the comments fixed and at() used.
+  - N5: 955 C for at most 20 s, then 945 C, with a time-aware `egtExceedance`. The N1 limiter is 0.5 point under 104 %, and the 30 C corner makes rated thrust.
+
+**The Cantera cross-check (D3-5)** is documented: `tools/thermo/cantera_crosscheck.py`, a venv outside the repo, and the printed values carried into `gas.test.ts`.
+- It is independent of the model: nasa_gas.yaml, Cantera's own mixing, and the product composition from Cantera's equilibrium at 1000 K. My hand check gives CO2 13.29 %, H2O 12.71 %, N2 73.12 %, Ar 0.87 %, matching.
+- The dissociation note in PHYSICS.md 2 (0.23 % at 1641 K and 2.8 MPa) comes from the same script.
+
+**The fidelity-ledger entry** (PHYSICS.md 1) is honest:
+- the bounded fit's result (C11 approach -6.4 %) and why it is rejected;
+- the reference's gap (MPA 536 vs 585 C, N2 2.6 points low, EEDB -12 % / -10 %);
+- the likely cause (generic scaled pyCycle maps too efficient at part power);
+- the dataset difference (NME test bed vs an on-wing, likely deteriorated engine).
+
+The ENGINE_FACTS "What binds" and "Likely cause" sections agree with it.
+
+**Probe `w1k-calib` at the reference** (the values the `it.fails` markers see):
+- **The five markers miss:** C11 approach -12.3 % and idle -9.7 %; C10 MPA N2 86.71 vs 89.3 % and EGT 536.4 vs 585 C; idle position 2 N2 62.23 vs 60.7 %.
+- **Every other point passes:** C11 climb-out -2.5 %; takeoff N2 99.88 % / 856.0 C; idle position 1; idle position 2 EGT 461.3 C; C4 at N1 20.09 % / 414.4 C; the booster R-line peaks at 2.62.
+- These match the handoff table.
+
+### Blocking
+None.
+
+### Important
+- **W1K-I1 OPEN: the text around the rejected fit and the KNOWN FAIL markers gives stale or wrong reasons.** Under D3-15 these markers are the visible record of the gap, so their reasons have to be right.
+  - Where:
+    - `src/cycle/partPower.ts:10` says the fit file is one "which CYCLE_CALIBRATION reads". That is false. Only `PART_POWER_FIT_CALIBRATION` reads it, and the reference is not the fit.
+    - `src/cycle/engine.ts:237-241` is D3-11-round text. It says the fit "meets C10 but not C11 and costs the 33.73(a) slam its HPC surge margin: adopting it is an orchestrator decision". After D3-14 the fit meets everything except C11 approach, and the adoption rule has already rejected it.
+    - `engine.ts:250-254` says the probe share is "re-derived to the measured 855 C (W0C-I6)". It is now fitted in [0.25, 0.45]. The list also leaves out the HPC Reynolds lapse and the HPT clearance.
+    - `tests/unit/cycle/c11.test.ts:73-82` gives the reason as "D3-11 bounds bind". For idle that is untrue: the bounded fit meets it (-4.3 %), and the reference misses it because that fit was rejected.
+    - `tests/unit/cycle/c10.test.ts:86-98` says the checks "cannot [be met] with physically justified parameters (W1C-I1 limit, orchestrator decision)". The D3-14 fit meets all three C10 markers inside the bounds.
+    - `docs/ENGINE_FACTS.md:160` says "the D3-11 fit ... puts it at 0.276". The committed fit is 0.284.
+  - Failure: the next calibration round, or a reader of the test output, takes the wrong cause. They may think idle fuel flow is out of reach inside the bounds, or that `partPowerFit.ts` drives the reference. Either way they look in the wrong place for the backlog item D3-15 creates.
+  - Fix (text only):
+    - relabel both marker sets "KNOWN FAIL (D3-15: accepted part-power gap, PHYSICS.md ledger)";
+    - make the doc comments say what is true: in the reference the mechanisms are off; the bounded fit meets C10 and C11 idle/climb-out but misses approach; the fit is rejected for the transients;
+    - fix the three code comments and the facts row.
+  - Allowed after merge (the first cycle round, or a small fix commit before it).
+- **W1K-I2 OPEN: the adoption-rule rejection is real, but its recorded reason is incomplete and nothing in the repo reproduces it.**
+  - Where: ENGINE_FACTS "What binds" (last bullet), the handoff, and the PHYSICS.md ledger ("breaks the transient model"). The evidence was a scratch copy outside the repo.
+  - Probe `w1k-calib`, the 33.73(a) ground-idle slam (lever to maximum in 1 s, 10 s, dt 0.02):
+    - **reference:** 121.3 kN at 10 s, 95 % at 5.82 s, peak EGT 958.3 C, min HPC margin 0.034, no surge;
+    - **committed fit:** min HPC margin **-0.010** with the **surge flag raised**, then a hang at N1 34.7 % / N2 75.3 %, **10.7 kN at 10 s** (the handoff's number), peak EGT 860.4 C.
+  - So the rejection stands, and on stronger grounds than recorded. The committed fit itself surges in the slam. ENGINE_FACTS gives the surge margin only for "an earlier fit" and lists the 10.7 kN as a failure to reach thrust.
+  - Also, the slam's surge on the fit ends in a hung engine, not a recovery. Nobody has looked at that post-surge path, because the reference never surges in the slam. W3's surge scenarios will meet it.
+  - Fix:
+    - correct the recorded reason (the committed fit surges in the 33.73(a) slam, min margin -1.0 %, and hangs at 10.7 kN);
+    - add one pinned test that runs the slam on `PART_POWER_FIT_CALIBRATION` and expects the surge. It marks the rejection the way `partPower.test.ts:251-259` marks the C11 miss, so a future refit is checked against the adoption rule in the repo, not on a scratch copy;
+    - put the post-surge hang in the D3-15 backlog item.
+  - Allowed after merge.
+
+### Nits
+- **W1K-N1: the solver calls a stall "converged".** `boundedLeastSquares.ts:194-198` sets `converged = true` when no damped step lowers the cost after 20 tries. That also happens when every trial returns `null`, i.e. the solves fail all around the point, so a failing neighbourhood reads as an optimum. `partPowerFit.ts:4` prints "converged: true" without the criterion. Fix: return the stop reason (gradient, cost tolerance, no descent, Jacobian failed) and print it in the generated header.
+- **W1K-N2: the VBV / VSV schedules use N2 corrected to T2** (`engine.ts:392`; called with `s2.tt`). The [QAR] CFM schedule cited for them is on N2K25. At ground idle the two frames differ by about 4 %. The knots are `unknown` / `estimate`, so this is a labelling issue. Fix: state "corrected to T2" in the facts rows and the bounds' reasons, or schedule on T25.
+- **W1K-N3: combustion efficiency is keyed on corrected fuel flow** (`engine.ts:689`). At a given corrected point P3 scales with delta2, so at altitude flight idle the real efficiency falls further than the sea-level EEDB table gives (combustor loading). Fix: a ledger note, or a loading-parameter key in the backlog item.
+- **W1K-N4: the duct cold loss is capped at 0.5 silently** (`engine.ts:701`). That is fine as a Newton guard, but a converged point on the cap would be unphysical and unflagged. Fix: assert in the C7/C8 sweeps that no converged point is on the cap, or expose it on the EnginePoint.
+- **W1K-N5: if a later round adopts a fit, the HPC Reynolds exponent needs a compressor source.** The turbine bound reused now is honestly marked `estimate`. This is a backlog note, not a defect.
+
+### Trial merge (w1/cycle-calib-2 @8a962c4 into the critic branch at main 8f066af)
+- **Merge:** `git merge --no-ff --no-commit w1/cycle-calib-2` is clean. 43 files, no conflicts with main's look-dev merge.
+- **`npm run mesh`:** no working-tree change, so the stack's regenerated mesh, manifest and metrics (after the D2-2 redo) are exactly what main's generator produces.
+- **Gates on the combined tree:**
+  - `npm test`: 1577 passed, 5 expected fail (69 files).
+  - `npm run lint` and `npm run typecheck`: clean.
+  - `npm run coverage`: lines 99.5 %, statements 98.56 %, branches 87.91 %, functions 99.58 %; every threshold passes.
+  - `npm run test:mesh`: 29 passed. `npm run build`: ok.
+  - The probe `w1k-calib`: 3 passed.
+- **Restore:** `git merge --abort` (after an index stat refresh: the build's `mesh:assets` had touched `manifest.json` without changing it). Then `dist/`, `coverage/`, the generated `public/mesh/*.bin` and the probe copy were removed. The critic branch is back at its own commits on 8f066af. The builder worktree is clean at 8a962c4.
+
+**Verdict w1/cycle-calib + w1/cycle-calib-2 @8a962c4: MERGE.**
+- C10 and C11 were pre-registered before any tuning, word for word as D3-3 and D3-11. T3 follows D3-5 with its tolerance unchanged, and nothing was loosened.
+- Every mechanism is sourced and bounded, and none acts at the design point. The fit is deterministic, and the adoption rule was applied: the reference is not the fit. The probe confirms the rejection, which is in fact stronger than recorded.
+- W1C-I2, I3, I4 and N1-N5 are closed. The gap W1C-I1 leaves is honestly in the fidelity ledger, as D3-15 asks.
+- The gates are green on the tip and on the merged tree.
+- W1K-I1 (the marker labels and comments state stale reasons) and W1K-I2 (record the slam surge as the reason, and pin it in a test) are allowed after merge. They go to the first cycle round with the nits, the D3-15 backlog item and the D3-13 mutation runs.
+
+**Orchestrator decisions needed (pass 5):**
+- (r) **D3-15 on main:** record D3-15 in the LOG with this merge, so that the relabelled markers (W1K-I1) can cite it.
+- (s) **The post-surge hang (W1K-I2):** the fit's slam surges, then hangs at 10.7 kN instead of recovering. Either add it to the part-power backlog item, or schedule a check of the surge-recovery path (FADEC fuel cut and re-acceleration) before W3's surge scenarios.

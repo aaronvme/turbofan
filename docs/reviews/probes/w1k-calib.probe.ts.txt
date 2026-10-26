@@ -1,0 +1,80 @@
+// Critic pass 5, w1/cycle-calib + w1/cycle-calib-2 @8a962c4. Each test prints or pins what the
+// critic observed for a finding. Run from a checkout of the branch (see vitest.probes.config.mjs).
+import { appendFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { ISA_SLS } from '../../../src/contracts/ambient';
+import { DEFAULT_CYCLE_INPUTS, type CycleInputs, type CycleState } from '../../../src/contracts/cycle';
+import { factValue } from '../../../src/engine/facts';
+import {
+  CYCLE_CALIBRATION,
+  PART_POWER_FIT_CALIBRATION,
+  referenceEngine,
+  vbvScheduleFraction,
+} from '../../../src/cycle/engine';
+import { evaluatePartPower, withCalibration } from '../../../src/cycle/partPower';
+import { createCycleModel } from '../../../src/cycle/model';
+
+/** Probe output goes to the file named by PROBE_OUT (vitest swallows console output here). */
+const log = (line: string) => appendFileSync(process.env.PROBE_OUT ?? 'probe-out.txt', `${line}\n`);
+const TIMEOUT = 1_200_000;
+
+describe('W1K probes', { timeout: TIMEOUT }, () => {
+  it('the reference calibration at the C10 / C11 / C4 points (what the it.fails markers see)', () => {
+    const ev = evaluatePartPower(referenceEngine());
+    expect(ev.converged).toBe(true);
+    for (const p of ev.points) {
+      log(`REF ${p.id.padEnd(28)} model ${p.model.toFixed(4)} target ${p.target.toFixed(4)} ${p.unit} r ${p.residual.toFixed(3)}`);
+    }
+    const r = (id: string) => ev.points.find((p) => p.id === id)?.residual ?? NaN;
+    // the five KNOWN FAIL checks fail in the reference, the rest pass
+    for (const id of ['C11 approach fuel flow', 'C11 idle fuel flow', 'C10 MPA N2', 'C10 MPA EGT', 'C10 idle position 2 N2']) {
+      expect(Math.abs(r(id)), id).toBeGreaterThan(1);
+    }
+    for (const id of ['C11 climb-out fuel flow', 'C10 takeoff N2', 'C10 takeoff EGT', 'C10 idle position 1 N2', 'C10 idle position 1 EGT', 'C10 idle position 2 EGT']) {
+      expect(Math.abs(r(id)), id).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('the VBV schedule: reference vs the rejected fit at hot-day takeoff corrected speeds', () => {
+    for (const n2c of [75, 80, 85, 90, 93, 95, 98, 100]) {
+      log(`VBV n2c ${n2c}: ref ${vbvScheduleFraction(CYCLE_CALIBRATION, n2c).toFixed(4)} fit ${vbvScheduleFraction(PART_POWER_FIT_CALIBRATION, n2c).toFixed(4)}`);
+    }
+    expect(vbvScheduleFraction(CYCLE_CALIBRATION, 100)).toBe(0);
+  });
+
+  const slam = (label: string, cal: typeof CYCLE_CALIBRATION) => {
+    const m = createCycleModel({ engine: withCalibration(referenceEngine(), cal) });
+    m.reset('groundIdle', ISA_SLS);
+    const inp = (t: number): CycleInputs => ({ ...DEFAULT_CYCLE_INPUTS, fuelLever: 'run', ignition: 'auto', throttleLever: Math.min(1, t) });
+    let last: CycleState | undefined;
+    let peakEgt = 0;
+    let minMargin = Infinity;
+    let surged = false;
+    let t95 = NaN;
+    const target = 0.95 * factValue('takeoffThrust');
+    let error = '';
+    try {
+      for (let i = 0; i < 500; i++) {
+        last = m.step(0.02, inp(m.state().timeS));
+        peakEgt = Math.max(peakEgt, last.egtDisplayedK);
+        minMargin = Math.min(minMargin, last.hpc.surgeMarginFraction);
+        surged ||= last.flags.surge;
+        if (Number.isNaN(t95) && last.netThrustN >= target) t95 = last.timeS;
+      }
+    } catch (e) {
+      error = String(e).slice(0, 160);
+    }
+    const s0 = last;
+    log(`SLAM ${label}: t=${s0?.timeS.toFixed(2)} thrust ${((s0?.netThrustN ?? NaN) / 1000).toFixed(1)} kN, t95 ${t95.toFixed(2)} s, N1 ${s0?.n1Percent?.toFixed(2)} N2 ${s0?.n2Percent?.toFixed(2)}, peak EGT ${(peakEgt - 273.15).toFixed(1)} C, min HPC margin ${minMargin.toFixed(4)}, surge ${surged}${error ? `, ERROR ${error}` : ''}`);
+    return { t95, error, s0 };
+  };
+
+  it('33.73(a) slam: the reference vs the rejected fit (the adoption-rule rejection)', () => {
+    const ref = slam('reference', CYCLE_CALIBRATION);
+    const fit = slam('fit', PART_POWER_FIT_CALIBRATION);
+    expect(ref.error).toBe('');
+    expect(Number.isFinite(ref.t95)).toBe(true);
+    // the handoff: the fit makes no 95 % thrust inside the 10 s slam
+    expect(Number.isFinite(fit.t95) && fit.error === '').toBe(false);
+  });
+});
