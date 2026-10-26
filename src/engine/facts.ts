@@ -134,6 +134,10 @@ export const ENGINE_FACTS = {
   vsvOpenAboveN2c: f(95, '%', 'unknown'),
   vbvMaxFraction: f(0.25, '', 'unknown'),
   tbvMaxFraction: f(0.05, '', 'unknown'),
+  vbvOpenBelowN2c: f(70, '%', 'unknown'),
+  vbvClosedAboveN2c: f(85, '%', 'unknown'),
+  groundRunCustomerBleed: f(0, '', 'unknown'),
+  groundRunAccessoryLoad: f(40000, 'W', 'unknown'),
 } as const satisfies Readonly<Record<string, EngineFact>>;
 
 export type EngineFactId = keyof typeof ENGINE_FACTS;

@@ -141,6 +141,10 @@ No public source gives these. The SI column is the **model assumption**, not a f
 | vsvOpenAboveN2c | Corrected N2 above which the VSVs are fully open | unknown | 95 % | none | unknown |
 | vbvMaxFraction | Booster variable bleed valve (VBV) maximum dump, fraction of booster flow | unknown | 0.25 | none; the VBV itself is known from secondary sources only | unknown |
 | tbvMaxFraction | Transient bleed valve (TBV, HPC 9th stage to the LPT) maximum, fraction of core flow | unknown | 0.05 | none; the TBV itself is known from secondary sources only | unknown |
+| vbvOpenBelowN2c | Corrected N2 below which the VBVs are fully open (vbvMaxFraction dumped) | unknown | 70 % | none; with vbvClosedAboveN2c, the linear schedule the W1 model already displays, now fed to the gas path (W1C-I1) | unknown |
+| vbvClosedAboveN2c | Corrected N2 above which the VBVs are closed | unknown | 85 % | none; open at ground idle, closed well before takeoff, as the VBV's booster-stall role needs | unknown |
+| groundRunCustomerBleed | Customer (pack) bleed during the measured ground run, fraction of HPC inlet flow | unknown | 0 | none; [WIDURI] does not state the bleed configuration. 0 assumes the AMM power-assurance practice of packs off (not verified for this run) | unknown |
+| groundRunAccessoryLoad | Aircraft accessory load on the HP gearbox during the measured ground run (IDG electrical load, engine-driven hydraulic pump pressurised) | unknown | 40000 W | none; an on-wing run carries the aircraft's electrical and hydraulic loads, which a test bed (EEDB) does not. The engine's own bearings, seals, windage and fuel/lube pumps are the speed-dependent mechanical loss, not this | unknown |
 
 Not known and not needed as a model input (the model reports them; nothing checks them):
 - **Cruise TSFC.** No primary source for the -7B27/3. The cycle model reports its own value; no threshold uses it.
