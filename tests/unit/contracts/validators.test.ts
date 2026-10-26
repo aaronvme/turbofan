@@ -68,6 +68,31 @@ describe('validateCycleState: map points, temperatures, FADEC', () => {
     expect(problems(patch)).toMatch(pattern);
   });
 
+  it('W0C-N5: the measured EGT is the station 49.5 total temperature', () => {
+    const s = sampleCycleState();
+    expect(validateCycleState(s, SAMPLE_REFERENCE_SPEEDS)).toEqual([]);
+    expect(s.egtMeasuredK).toBe(s.stations['49.5'].ttK);
+    expect(problems({ egtMeasuredK: s.stations['49.5'].ttK - 30 })).toMatch(
+      /egtMeasuredK 1070 must equal stations\['49\.5'\]\.ttK 1100/,
+    );
+  });
+
+  it('W0C-N5: flags and switches must be booleans', () => {
+    const s = sampleCycleState();
+    const bad = {
+      ...s,
+      starterEngaged: 1,
+      combustorLit: 'yes',
+      flags: { ...s.flags, surge: 'no', egtExceedance: undefined },
+    } as unknown as CycleState;
+    const text = validateCycleState(bad, SAMPLE_REFERENCE_SPEEDS).join('; ');
+    expect(text).toMatch(/starterEngaged must be a boolean/);
+    expect(text).toMatch(/combustorLit must be a boolean/);
+    expect(text).toMatch(/flags\.surge must be a boolean/);
+    expect(text).toMatch(/flags\.egtExceedance must be a boolean/);
+    expect(text).not.toMatch(/ignitersOn/);
+  });
+
   it('reports a non-physical station temperature and an unknown FADEC limiter', () => {
     const s = sampleCycleState();
     const bad = {
@@ -142,6 +167,26 @@ describe('validateEngineDefinition: remaining geometry and performance checks', 
         ],
       })),
     ).toMatch(/VSV schedule hpc-vsv: point 0 must be finite/);
+  });
+
+  it('W0C-N5: VSV closures must be in [0, pi/2) from the open design setting', () => {
+    const sched = (closure: number) => (d: EngineDefinition) => ({
+      ...d,
+      vsvSchedules: [
+        {
+          id: 'hpc-vsv',
+          points: [
+            { n2CorrectedPercent: 50, closure },
+            { n2CorrectedPercent: 100, closure: 0 },
+          ],
+        },
+      ],
+    });
+    expect(problems(sched(-2))).toMatch(
+      /VSV schedule hpc-vsv: point 0 closure -2 rad must be in \[0, pi\/2\)/,
+    );
+    expect(problems(sched(Math.PI / 2))).toMatch(/point 0 closure .* must be in \[0, pi\/2\)/);
+    expect(problems(sched(0))).toBe('');
   });
 
   it('combustor loss, cooling fraction, N2 limit and EGT shunt ranges', () => {

@@ -11,8 +11,20 @@ import {
   nextSnapshot,
   validateSimCommand,
   validateSimCommandMessage,
+  SNAPSHOT_ROOTS,
+  FLOW_RUN_STATUSES,
+  sanitizeFlowStatus,
+  snapshotHasMockData,
+  type FlowStatus,
   type SimClock,
+  type SnapshotParts,
 } from '../../../src/contracts/sim';
+import type { FlowStepStats, StationReduction } from '../../../src/contracts/flow';
+import { SOLVER_REDUCTION_STATIONS } from '../../../src/contracts/stations';
+import { validateScenario } from '../../../src/contracts/scenario';
+import { ISA_SLS } from '../../../src/contracts/ambient';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
+import { mockSteadyState } from '../../../src/mocks/mockCycle';
 import { SAMPLE_COMMANDS, sampleSnapshot, sampleSnapshotParts } from './fixtures/snapshotFixture';
 
 describe('the sim/UI boundary is structured-clone-safe plain data (D0-2)', () => {
@@ -93,6 +105,21 @@ describe('the sim/UI boundary is structured-clone-safe plain data (D0-2)', () =>
     expect(findNonPlainData({ a: undefined, b: [true, false, 0, -1.5], c: bare })).toBeNull();
   });
 
+  it('W0C-N9: rejects non-enumerable properties and non-index keys on arrays', () => {
+    // structuredClone silently drops a non-enumerable property ...
+    const hidden = {};
+    Object.defineProperty(hidden, 'secret', { value: 1, enumerable: false });
+    expect(structuredClone(hidden)).toEqual({});
+    expect(findNonPlainData({ a: hidden })).toMatch(/^a\.secret: non-enumerable property/);
+    // ... and keeps extra keys on an array, where the check used to look away
+    const tagged = Object.assign([1, 2], { fn: () => 1 });
+    expect(() => structuredClone(tagged)).toThrow();
+    expect(findNonPlainData({ list: tagged })).toMatch(/^list\.fn: non-index key on an array/);
+    expect(findNonPlainData({ list: Object.assign([1], { n: Number.NaN }) })).toMatch(
+      /^list\.n: non-index key on an array/,
+    );
+  });
+
   it('allows shared (non-cyclic) references', () => {
     const shared = { v: 1 };
     expect(findNonPlainData({ a: shared, b: shared })).toBeNull();
@@ -106,6 +133,20 @@ describe('snapshots are immutable and versioned', () => {
     expect(first.schemaVersion).toBe(SIM_SCHEMA_VERSION);
     const second = nextSnapshot(first, sampleSnapshotParts());
     expect(second.version).toBe(2);
+  });
+
+  it('W0C-I1: stamps version and schema even when the parts carry stale ones', () => {
+    // updating one part by spreading the previous snapshot compiles (excess-property checks
+    // do not apply to spread members) and used to freeze version at its old value
+    const first = nextSnapshot(null, sampleSnapshotParts());
+    const second = nextSnapshot(first, { ...first, lastCommandSeq: 8 });
+    const third = nextSnapshot(second, { ...second, lastCommandSeq: 9 });
+    expect([first.version, second.version, third.version]).toEqual([1, 2, 3]);
+    expect(third.lastCommandSeq).toBe(9);
+    const forged = { ...sampleSnapshotParts(), schemaVersion: 0, version: 99 } as SnapshotParts;
+    const fourth = nextSnapshot(third, forged);
+    expect(fourth.version).toBe(4);
+    expect(fourth.schemaVersion).toBe(SIM_SCHEMA_VERSION);
   });
 
   it('deep-freezes the snapshot so the UI cannot mutate sim state', () => {
@@ -129,6 +170,203 @@ describe('snapshots are immutable and versioned', () => {
     const obj = { a: shared, b: shared };
     expect(deepFreeze(obj)).toBe(obj);
     expect(Object.isFrozen(obj.a.v)).toBe(true);
+  });
+});
+
+describe('W0C-I3: snapshots carry the provenance of their data (MOCK badge under D0-2)', () => {
+  const mockParts = (): SnapshotParts => ({
+    ...sampleSnapshotParts(),
+    cycle: mockSteadyState(ENGINE_DEFINITION, 0.5),
+    sources: { cycle: 'mock', flow: 'mock' },
+  });
+
+  it('a snapshot built from the MOCK cycle says so, so the UI can label it', () => {
+    const s = nextSnapshot(null, mockParts());
+    expect(s.sources).toEqual({ cycle: 'mock', flow: 'mock' });
+    expect(snapshotHasMockData(s)).toBe(true);
+    const real = nextSnapshot(s, { ...mockParts(), sources: { cycle: 'model', flow: 'solver' } });
+    expect(snapshotHasMockData(real)).toBe(false);
+    const half = nextSnapshot(s, { ...mockParts(), sources: { cycle: 'model', flow: 'mock' } });
+    expect(snapshotHasMockData(half)).toBe(true);
+    const noFlow = nextSnapshot(s, { ...mockParts(), sources: { cycle: 'mock', flow: 'none' } });
+    expect(snapshotHasMockData(noFlow)).toBe(true);
+    expect(snapshotHasMockData({ ...real, sources: { cycle: 'model', flow: 'none' } })).toBe(false);
+  });
+
+  it('bumps the schema version for the new fields', () => {
+    expect(SIM_SCHEMA_VERSION).toBe(2);
+    expect(sampleSnapshot().schemaVersion).toBe(SIM_SCHEMA_VERSION);
+  });
+
+  it('makes sources a snapshot root that scenario paths can address', () => {
+    expect(SNAPSHOT_ROOTS).toContain('sources');
+    const scenario = {
+      id: 'src',
+      title: 'sources',
+      description: '',
+      initial: 'groundIdle' as const,
+      ambient: ISA_SLS,
+      durationS: 1,
+      timeline: [],
+      outcomes: [
+        {
+          id: 'model',
+          description: 'the real cycle model is running',
+          window: { kind: 'at' as const, atS: 0 },
+          predicate: {
+            kind: 'compare' as const,
+            path: ['sources', 'cycle'],
+            op: '==' as const,
+            value: 'model',
+          },
+          thresholdId: null,
+        },
+      ],
+    };
+    expect(validateScenario(scenario, sampleSnapshot())).toEqual([]);
+  });
+
+  it('refuses a snapshot whose sources are missing or unknown', () => {
+    const bad = (sources: unknown) =>
+      nextSnapshot(null, { ...sampleSnapshotParts(), sources } as unknown as SnapshotParts);
+    expect(() => bad(undefined)).toThrow(/sources/);
+    expect(() => bad({ cycle: 'MOCK', flow: 'none' })).toThrow(/sources\.cycle "MOCK"/);
+    expect(() => bad({ cycle: 'model', flow: 'gpu' })).toThrow(/sources\.flow "gpu"/);
+  });
+});
+
+describe('W0C-I5: the solver has a failure channel in the snapshot', () => {
+  const healthyStats: FlowStepStats = {
+    iterationsThisStep: 5,
+    totalIterations: 12_000,
+    gpuTimeMs: 5.8,
+    residualDensityL2: 3.2e-6,
+    physicalTimeS: 0,
+  };
+  const reduction = (grossThrustN: number): StationReduction => ({
+    iteration: 12_000,
+    stations: Object.fromEntries(
+      SOLVER_REDUCTION_STATIONS.map((id) => [
+        id,
+        {
+          massFlowKgPerS: 50,
+          ptMassAvgPa: 150_000,
+          ttMassAvgK: 320,
+          psAreaAvgPa: 140_000,
+          swirlAngleMassAvgRad: 0,
+          areaM2: 0.3,
+        },
+      ]),
+    ) as StationReduction['stations'],
+    grossThrustN,
+    lpTorqueNm: -1000,
+    hpTorqueNm: -2000,
+  });
+  const withFlow = (patch: Partial<FlowStatus>): SnapshotParts => {
+    const p = sampleSnapshotParts();
+    return { ...p, flow: { ...p.flow, ...patch } };
+  };
+
+  it('names the solver states', () => {
+    expect([...FLOW_RUN_STATUSES]).toEqual([
+      'unavailable',
+      'initialising',
+      'running',
+      'diverged',
+      'lost',
+    ]);
+    expect(sampleSnapshotParts().flow).toMatchObject({ status: 'running', error: null });
+  });
+
+  it('a NaN residual publishes a diverged snapshot instead of stopping publication', () => {
+    const first = nextSnapshot(null, sampleSnapshotParts());
+    const s = nextSnapshot(
+      first,
+      withFlow({ stats: { ...healthyStats, residualDensityL2: Number.NaN } }),
+    );
+    // the cycle (the truth) and the UI keep getting snapshots
+    expect(s.version).toBe(2);
+    expect(s.cycle).toEqual(first.cycle);
+    expect(s.flow.status).toBe('diverged');
+    expect(s.flow.error).toMatch(/stats\.residualDensityL2 is NaN/);
+    expect(s.flow.stats).toEqual({ ...healthyStats, residualDensityL2: null });
+  });
+
+  it('drops a station reduction with a non-finite value and reports it', () => {
+    const s = nextSnapshot(null, withFlow({ reduction: reduction(Number.POSITIVE_INFINITY) }));
+    expect(s.flow).toMatchObject({ status: 'diverged', reduction: null });
+    expect(s.flow.error).toMatch(/reduction\.grossThrustN is Infinity/);
+    expect(s.flow.stats).toEqual(healthyStats);
+    const ok = nextSnapshot(null, withFlow({ reduction: reduction(120_000) }));
+    expect(ok.flow).toMatchObject({ status: 'running', error: null });
+    expect(ok.flow.reduction?.grossThrustN).toBe(120_000);
+  });
+
+  it('nulls a non-finite GPU time and drops stats whose counters are not finite', () => {
+    const gpu = nextSnapshot(null, withFlow({ stats: { ...healthyStats, gpuTimeMs: Infinity } }));
+    expect(gpu.flow.stats).toEqual({ ...healthyStats, gpuTimeMs: null });
+    expect(gpu.flow.error).toMatch(/stats\.gpuTimeMs is Infinity/);
+    const counters = nextSnapshot(
+      null,
+      withFlow({ stats: { ...healthyStats, totalIterations: Number.NaN } }),
+    );
+    expect(counters.flow).toMatchObject({ status: 'diverged', stats: null });
+    expect(counters.flow.error).toMatch(/stats\.totalIterations is NaN/);
+  });
+
+  it('keeps a lost device (the root cause) and its message, and still drops the bad numbers', () => {
+    const s = nextSnapshot(
+      null,
+      withFlow({
+        status: 'lost',
+        error: 'device lost: unknown',
+        stats: { ...healthyStats, residualDensityL2: Number.NaN },
+      }),
+    );
+    expect(s.flow).toMatchObject({ status: 'lost', error: 'device lost: unknown' });
+    expect(s.flow.stats?.residualDensityL2).toBeNull();
+    const diverged = sanitizeFlowStatus({
+      ...sampleSnapshotParts().flow,
+      status: 'diverged',
+      error: 'density residual grew 1e6 x',
+      stats: { ...healthyStats, residualDensityL2: Number.NaN },
+    });
+    expect(diverged).toMatchObject({ status: 'diverged', error: 'density residual grew 1e6 x' });
+  });
+
+  it('publishes device loss and WGSL errors as data', () => {
+    const lost = nextSnapshot(
+      null,
+      withFlow({ status: 'lost', error: 'device lost: destroyed', stats: null, reduction: null }),
+    );
+    expect(lost.flow).toMatchObject({ status: 'lost', error: 'device lost: destroyed' });
+    const none = nextSnapshot(
+      null,
+      withFlow({ status: 'unavailable', error: 'navigator.gpu is undefined', stats: null }),
+    );
+    expect(none.flow.status).toBe('unavailable');
+  });
+
+  it('refuses unknown states and failures without a message', () => {
+    expect(() => nextSnapshot(null, withFlow({ status: 'exploded' as never }))).toThrow(
+      /flow\.status "exploded"/,
+    );
+    expect(() => nextSnapshot(null, withFlow({ status: 'diverged', error: null }))).toThrow(
+      /flow\.error/,
+    );
+    expect(() => nextSnapshot(null, withFlow({ status: 'lost', error: '' }))).toThrow(
+      /flow\.error/,
+    );
+    expect(() => nextSnapshot(null, withFlow({ error: 42 as never }))).toThrow(/flow\.error/);
+  });
+
+  it('leaves a healthy status untouched and still refuses NaN in the cycle state', () => {
+    const flow = sampleSnapshotParts().flow;
+    expect(sanitizeFlowStatus(flow)).toBe(flow);
+    const p = sampleSnapshotParts();
+    expect(() => nextSnapshot(null, { ...p, cycle: { ...p.cycle, n1Rpm: Number.NaN } })).toThrow(
+      /cycle\.n1Rpm: non-finite/,
+    );
   });
 });
 

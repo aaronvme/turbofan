@@ -1,5 +1,10 @@
 import { DEFAULT_CYCLE_INPUTS } from '../../../../src/contracts/cycle';
-import type { SimCommand, SimSnapshot, SnapshotParts } from '../../../../src/contracts/sim';
+import {
+  SIM_SCHEMA_VERSION,
+  type SimCommand,
+  type SimSnapshot,
+  type SnapshotParts,
+} from '../../../../src/contracts/sim';
 import { DEFAULT_UI_STATE, renderStateOf } from '../../../../src/contracts/ui';
 import { sampleCycleState } from './cycleFixture';
 
@@ -10,7 +15,8 @@ export function sampleSnapshotParts(): SnapshotParts {
     cycle: sampleCycleState(),
     inputs: { ...DEFAULT_CYCLE_INPUTS, throttleLever: 0.6, fuelLever: 'run' },
     flow: {
-      available: true,
+      status: 'running',
+      error: null,
       mode: 'tracking',
       stats: {
         iterationsThisStep: 5,
@@ -26,14 +32,15 @@ export function sampleSnapshotParts(): SnapshotParts {
       state: 'running',
       elapsedS: 3.25,
       nextStepIndex: 2,
-      outcomes: [{ id: 'reach-95', verdict: 'pending', decidedAtS: null, detail: '' }],
+      outcomes: [{ id: 'reach-95', verdict: 'pending', decidedAtS: null, detail: '', samples: 0 }],
     },
     view: renderStateOf(DEFAULT_UI_STATE),
+    sources: { cycle: 'model', flow: 'solver' },
   };
 }
 
 export function sampleSnapshot(): SimSnapshot {
-  return { schemaVersion: 1, version: 42, ...sampleSnapshotParts() };
+  return { schemaVersion: SIM_SCHEMA_VERSION, version: 42, ...sampleSnapshotParts() };
 }
 
 /** One valid example of every command type. */

@@ -101,6 +101,8 @@ const MOCK = {
   vbvClosedAboveN2c: 85,
   offBelowN2Percent: 1,
   maxSubstepS: 0.02,
+  /** Longest accepted step, s (2.5 x the 0.4 s the sim loop can ask for). */
+  maxStepS: 1,
 } as const;
 
 function interpolate(points: readonly (readonly [number, number])[], x: number): number {
@@ -606,6 +608,7 @@ export function createMockCycle(definition: EngineDefinition): MockCycleModel {
   let current = buildState(ctx, s);
   return {
     label: MOCK_LABEL,
+    source: 'mock',
     definition,
     reset(initial: CycleInitialCondition, ambient: AmbientConditions = ISA_SLS): CycleState {
       s = initialInternal(ctx, initial, ambient);
@@ -613,11 +616,15 @@ export function createMockCycle(definition: EngineDefinition): MockCycleModel {
       return current;
     },
     step(dtS: number, inputs: CycleInputs): CycleState {
-      if (!(Number.isFinite(dtS) && dtS >= 0))
-        throw new Error(`mockCycle: dtS ${String(dtS)} must be finite and >= 0`);
+      // the sim never asks for more than MAX_WALL_STEP_S x TIME_SCALE_MAX = 0.4 s; a runaway
+      // dt would otherwise mean dt / maxSubstepS substeps, i.e. a hang (W0C-N6)
+      if (!(Number.isFinite(dtS) && dtS >= 0 && dtS <= MOCK.maxStepS))
+        throw new Error(
+          `mockCycle: dtS ${String(dtS)} must be finite and in [0, ${MOCK.maxStepS}] s`,
+        );
       const problems = validateCycleInputs(inputs);
       if (problems.length > 0) throw new Error(`mockCycle: ${problems.join('; ')}`);
-      if (dtS === 0) return current;
+      // a zero step (paused) still takes the inputs, so the controls answer while paused
       s.inputs = inputs;
       const n = Math.ceil(dtS / MOCK.maxSubstepS);
       for (let i = 0; i < n; i++) substep(ctx, s, dtS / n);

@@ -32,8 +32,8 @@ export function sampleCycleState(): CycleState {
     grossThrustN: 95_000,
     netThrustN: 95_000,
     tsfcKgPerNs: 1.0 / 95_000,
-    egtDisplayedK: 1100,
-    egtMeasuredK: 1070,
+    egtDisplayedK: 1130, // measured plus the 30 K TCDS shunt
+    egtMeasuredK: 1100, // stations['49.5'].ttK
     fan: {
       correctedFlowKgPerS: 320,
       pressureRatio: 1.5,

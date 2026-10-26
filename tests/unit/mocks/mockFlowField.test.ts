@@ -62,6 +62,8 @@ function texel(field: CpuFieldTextures, x: number, rr: number) {
 describe('mock flow field: layout and encoding (D0-4)', () => {
   it('is labelled MOCK and fills the exact FlowField layout', () => {
     expect(takeoff.label).toBe('MOCK');
+    // W0C-I3: the provenance travels with the data, so the GPU FlowField built from it keeps it
+    expect(takeoff.source).toBe('mock');
     expect(takeoff.version).toBe(7);
     expect(takeoff.reference).toEqual(REF);
     expect(takeoff.extents).toEqual(FIELD_EXTENTS);
@@ -105,7 +107,7 @@ describe('mock flow field: layout and encoding (D0-4)', () => {
     );
     expect(exact.pPa / REF.pInfPa).toBeGreaterThan(5); // mid-HPC
     // far upstream the gauge values are tiny and the texel is ambient to f16 precision
-    const far = texel(takeoff.far, -7.9, 9.9);
+    const far = texel(takeoff.far, -7.9, FIELD_EXTENTS.far.rMax - 0.1); // the upstream top corner
     expect(Math.abs(far.s[0] ?? 1)).toBeLessThan(1e-4);
     expect(Math.abs(far.s[1] ?? 1)).toBeLessThan(1e-4);
   });

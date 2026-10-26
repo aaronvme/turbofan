@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DESIGN_LIMITS,
+  nearestInCycle,
   axialVelocity,
   carterM,
   designRow,
@@ -92,6 +94,17 @@ describe('axialVelocity (continuity on the subsonic branch)', () => {
     });
     expect(r.cxMPerS).toBe(0);
     expect(r.mach).toBe(0);
+    expect(r.choked).toBe(false);
+  });
+
+  it('W0C-I4: rejects a swirl whose kinetic energy reaches the total enthalpy', () => {
+    // cp = 0.5 makes c_theta^2 / (2 cp) = c_theta^2 exactly, so the static enthalpy hits 0
+    const gas = { cpJPerKgK: 0.5, gamma: 1.4 };
+    const at = (cTheta: number) => () =>
+      axialVelocity({ wKgPerS: 1, ttK: 100, ptPa: pt, areaM2: 1, cThetaMPerS: cTheta, gas });
+    expect(at(10)).toThrow(/axialVelocity: the swirl exceeds the total enthalpy/);
+    expect(at(11)).toThrow(/the swirl exceeds the total enthalpy/);
+    expect(at(9.9)).not.toThrow();
   });
 });
 
@@ -214,6 +227,102 @@ describe('designRow', () => {
       /beyond 90 deg/,
     );
     // turning so large that Carter's rule has no solution at a tiny solidity
-    expect(() => designRow(EDGES, stator(80 * DEG, -60 * DEG), { count: 1 })).toThrow();
+    expect(() => designRow(EDGES, stator(80 * DEG, -60 * DEG), { count: 1 })).toThrow(
+      /designRow: Carter's rule has no solution at sigma/,
+    );
+    // W0C-I4: the exit axial velocity is checked as well as the inlet's
+    expect(() =>
+      designRow(
+        EDGES,
+        { ...stator(0, 0), exit: { rcTheta: 0, cxMPerS: 0 } },
+        { targetSolidity: 1 },
+      ),
+    ).toThrow(/axial velocity must be > 0 at both edges/);
+  });
+
+  it('W0C-N4: says so when the stagger or the blade count does not converge', () => {
+    const aero = stator(45 * DEG, 0);
+    expect(() => designRow(EDGES, aero, { targetSolidity: 1.2 }, { maxIterations: 1 })).toThrow(
+      /designRow: the stagger did not converge in 1 iterations/,
+    );
+    expect(() => designRow(EDGES, aero, { targetSolidity: 1.2 }, { maxCountPasses: 0 })).toThrow(
+      /designRow: the blade count did not settle in 0 passes/,
+    );
+    // the defaults converge, and a given count never needs a pass
+    expect(DESIGN_LIMITS).toEqual({ maxIterations: 200, maxCountPasses: 10 });
+    expect(designRow(EDGES, aero, { targetSolidity: 1.2 }).count).toBeGreaterThan(0);
+    expect(designRow(EDGES, aero, { count: 24 }, { maxCountPasses: 0 }).count).toBe(24);
+  });
+
+  it('W0C-N4: a count that flips between two neighbours settles on the one nearer the target solidity', () => {
+    // At a rounding boundary, count c gives a stagger whose chord asks for c + 1 and back
+    // (three rows of the reference engine do this). Sweep the target solidity finely and
+    // check every result: either the count is what its own chord asks for, or it is the
+    // member of the flip-flop whose mid solidity is closer to the target.
+    const aero = stator(45 * DEG, 0);
+    let flipFlops = 0;
+    for (let k = 0; k <= 600; k++) {
+      const target = 1 + k * 0.001;
+      const row = designRow(EDGES, aero, { targetSolidity: target });
+      // whatever the path, the returned row is solved for its own count (not left on the
+      // stagger of another count it visited)
+      const own = designRow(EDGES, aero, { count: row.count });
+      expect(row.stagger.mid).toBeCloseTo(own.stagger.mid, 12);
+      expect(row.chord.mid).toBeCloseTo(own.chord.mid, 12);
+      const asked = Math.round((2 * Math.PI * R_MID * target) / row.chord.mid);
+      if (asked === row.count) continue;
+      flipFlops++;
+      const other = designRow(EDGES, aero, { count: asked });
+      expect(Math.abs(row.solidity.mid - target)).toBeLessThanOrEqual(
+        Math.abs(other.solidity.mid - target),
+      );
+      // the other neighbour flips back: this really is a two-count cycle
+      expect(Math.round((2 * Math.PI * R_MID * target) / other.chord.mid)).toBe(row.count);
+      // a flip-flop takes more than one pass to recognise
+      expect(() =>
+        designRow(EDGES, aero, { targetSolidity: target }, { maxCountPasses: 1 }),
+      ).toThrow(/did not settle in 1 passes/);
+    }
+    expect(flipFlops).toBeGreaterThan(0);
+  });
+
+  it('W0C-N4: nearestInCycle keeps the cycle member nearest the target, the first on a tie', () => {
+    // history of [count, |own mid solidity - target|] in visit order
+    expect(nearestInCycle([[70, 0.001]], 71)).toBeNull(); // 71 not seen yet: keep going
+    // 70 is nearer but was only on the way in; the cycle is 72 -> 73 -> 72
+    expect(
+      nearestInCycle(
+        [
+          [70, 0.001],
+          [72, 0.02],
+          [73, 0.01],
+        ],
+        72,
+      ),
+    ).toBe(73);
+    expect(
+      nearestInCycle(
+        [
+          [60, 0.01],
+          [61, 0.01],
+        ],
+        60,
+      ),
+    ).toBe(60);
+  });
+
+  it('W0C-N4: a count that is right at once needs no pass at all', () => {
+    // a turbine row has no deviation, so the first stagger, chord and count are final
+    const aero: RowAerodynamics = { ...stator(0, -65 * DEG, 200), deviation: 'none' };
+    const once = designRow(EDGES, aero, { targetSolidity: 1.2 }, { maxCountPasses: 0 });
+    expect(once.count).toBe(designRow(EDGES, aero, { targetSolidity: 1.2 }).count);
+  });
+
+  it('W0C-I4: a row that does not turn needs no deviation, even at a tiny solidity', () => {
+    // Carter's k exceeds 1 at sigma ~ 0.04, but there is no turning to deviate from
+    const row = designRow(EDGES, stator(30 * DEG, 30 * DEG), { count: 1 });
+    expect(row.deviation).toEqual({ hub: 0, mid: 0, tip: 0 });
+    // equal speeds in and out: a decelerating row in Carter's sense (n = 1/2), not accelerating
+    expect(row.accelerating).toBe(false);
   });
 });

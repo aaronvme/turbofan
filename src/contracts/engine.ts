@@ -669,6 +669,11 @@ function validateSchedulesAndBleeds(
     s.points.forEach((pt, i) => {
       if (!(isFiniteNumber(pt.n2CorrectedPercent) && isFiniteNumber(pt.closure))) {
         problems.push(`VSV schedule ${s.id}: point ${i} must be finite`);
+      } else if (!(pt.closure >= 0 && pt.closure < ANGLE_LIMIT)) {
+        // closure is measured from the open design setting, positive = closed (W0C-N5)
+        problems.push(
+          `VSV schedule ${s.id}: point ${i} closure ${pt.closure} rad must be in [0, pi/2)`,
+        );
       }
       const prev = s.points[i - 1];
       if (prev !== undefined && !(pt.n2CorrectedPercent > prev.n2CorrectedPercent)) {

@@ -131,7 +131,7 @@ describe('figures taken from ENGINE_FACTS', () => {
     expect(dp.fuelFlowKgPerS).toBe(v('fuelFlowTakeoff'));
   });
 
-  it('stage counts (TCDS E.004 I.2) and the 19 HPC rows with 4 VSV rows', () => {
+  it('stage counts (TCDS E.004 III.2) and the 19 HPC rows with 4 VSV rows', () => {
     expect(rotors('fan').length).toBe(v('fanStages'));
     expect(rotors('booster').length).toBe(v('boosterStages'));
     expect(rotors('hpc').length).toBe(v('hpcStages'));
