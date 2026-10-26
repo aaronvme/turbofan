@@ -289,7 +289,7 @@ export function createPipeline(
   traaState.updateBefore = (frame) => {
     traaUpdate(frame);
     const h = traaState._historyRenderTarget;
-    const d = sceneDepth.value as Texture;
+    const d = sceneDepth.value;
     frame.renderer.getDrawingBufferSize(drawing);
     if (
       (h.width !== drawing.x || h.height !== drawing.y) &&
