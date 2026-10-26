@@ -32,7 +32,7 @@ on a placeholder flowpath, which is now gone.
 | Plume Δr 8 to 10 mm at both lips | 9.0 mm inside and outside both lips | same | `lipSpacing` |
 | ≥ 5 D upstream and radially | 5.01 D from the highlight; r_out = 5.69 D | same | domain test |
 | About 20 D downstream | 20.01 D from the core lip | same | domain test |
-| Stretching ≤ 1.15 everywhere, including across interfaces and at the plug tip | max 1.140 (plug tip 1.140) | max 1.146 | `meshQuality().maxStretch` |
+| Stretching ≤ 1.15 everywhere, including across interfaces and at the plug tip | max 1.140 (plug tip 1.140) | max 1.143 | `meshQuality().maxStretch` |
 | Positive Jacobian at every cell corner | min 2.61e-6 m² | min 2.77e-6 m² | `meshQuality().minJacobian` |
 | Total 130k ± 5 % / 80k ± 5 % | 130,034 (+0.03 %) | 80,588 (+0.7 %) | count test |
 
@@ -51,7 +51,7 @@ D = 1.5494 m, the fan diameter: the fan rotor's tip radius in the definition, ×
 - **The problem:** the definition's nozzle lips have blunt bases (the core cowl is 15 mm thick at its trailing edge, the nacelle 18 mm). The 12-block topology needs a knife edge at each lip.
 - **What the adapter does:** it closes each base onto the duct-side line with a C1 smoothstep ramp over `KNIFE_EDGE_LENGTH_FACTOR` = 10 base thicknesses (150 mm at the core lip, 180 mm at the fan lip).
 - **Stated tolerance:** the closure moves only the external line (coreCowl, nacelleOuter), only over the last 10 base thicknesses, and only inwards. It moves it by at most the base thickness (15.0 / 18.0 mm), and the line keeps falling to the lip.
-- **What stays exact:** the duct-side lines coreOuter and nacelleInner are bitwise the definition's. So the nozzle exit areas A8 and A18 that the cycle is sized on (D1-2) are unchanged.
+- **What stays exact:** the duct-side lines coreOuter and nacelleInner are bitwise the definition's. So the nozzle exit areas A8 = 0.1852 m² and A18 = 0.9161 m² that the cycle is sized on (D1-2, D2-2) are unchanged.
 - **Rendering:** the definition keeps its true thickness, and the 3D geometry renders that.
 - **Tests:** `tests/unit/mesh/definitionGeometry.test.ts` checks all of the above.
 
@@ -180,10 +180,10 @@ The W0M-I2/I3 tests pin each of these on small blocks with known answers.
 | inlet | 1.85e-5 | 5.06e-4 | 0.90 | 1.093 | 25.4 | 25.2 | 24.1 | 45.7 | 1.0–6 | 1.79e-3–0.03 |
 | lip | 1.03e-5 | 6.64e-4 | 0.92 | 1.112 | 22.8 | 20.9 | 8.5 | 52.0 | 1.0–4 | 3.00e-3–0.03 |
 | fan | 1.85e-5 | 1.07e-4 | 0.89 | 1.103 | 27.1 | 27.0 | 18.8 | 31.3 | 1.0–6 | 1.73e-3–0.01 |
-| bypass | 2.57e-5 | 1.36e-4 | 0.87 | 1.110 | 30.1 | 30.0 | 28.6 | 31.3 | 1.0–3 | 4.98e-3–0.01 |
-| core | 2.61e-6 | 1.13e-4 | 0.72 | 1.128 | 43.6 | 43.5 | 11.1 | 6.9 | 1.0–4 | 1.02e-3–0.01 |
-| afterbody | 4.01e-5 | 9.93e-5 | 0.92 | 1.075 | 22.9 | 22.9 | 16.0 | 29.1 | 1.0–2 | 4.94e-3–0.01 |
-| plug | 2.23e-5 | 3.20e-4 | 0.64 | 1.138 | 50.5 | 50.2 | 42.5 | 42.5 | 1.0–4 | 2.53e-3–0.03 |
+| bypass | 2.57e-5 | 1.36e-4 | 0.87 | 1.110 | 30.1 | 30.0 | 28.6 | 31.3 | 1.0–3 | 5.02e-3–0.01 |
+| core | 2.61e-6 | 1.09e-4 | 0.72 | 1.128 | 43.6 | 43.5 | 11.1 | 4.8 | 1.0–4 | 1.02e-3–0.01 |
+| afterbody | 4.15e-5 | 9.93e-5 | 0.92 | 1.076 | 22.9 | 22.9 | 16.0 | 29.1 | 1.0–2 | 4.92e-3–0.01 |
+| plug | 2.34e-5 | 3.19e-4 | 0.64 | 1.138 | 50.5 | 50.2 | 42.5 | 42.5 | 1.0–3 | 2.65e-3–0.03 |
 | plume-core | 1.02e-4 | 7.34e-3 | 1.00 | 1.140 | 0.9 | – | 0.9 | 42.5 | 1.0–5 | 9.02e-3–0.16 |
 | plume-bypass | 7.24e-5 | 7.32e-3 | 0.97 | 1.105 | 13.8 | – | 13.8 | 10.5 | 1.0–5 | 8.04e-3–0.16 |
 | plume-outer | 6.85e-5 | 7.32e-3 | 0.91 | 1.105 | 24.3 | – | 24.2 | 52.0 | 1.0–5 | 7.25e-3–0.16 |
@@ -197,10 +197,10 @@ The W0M-I2/I3 tests pin each of these on small blocks with known answers.
 | inlet | 1.85e-5 | 5.06e-4 | 0.90 | 1.093 | 25.4 | 25.2 | 24.1 | 45.7 | 1.0–6 | 1.79e-3–0.03 |
 | lip | 1.03e-5 | 6.66e-4 | 0.92 | 1.112 | 22.8 | 20.9 | 8.5 | 52.0 | 1.0–4 | 3.00e-3–0.03 |
 | fan | 1.85e-5 | 1.07e-4 | 0.89 | 1.103 | 27.1 | 27.0 | 18.8 | 31.3 | 1.0–6 | 1.73e-3–0.01 |
-| bypass | 2.57e-5 | 1.68e-4 | 0.87 | 1.086 | 30.1 | 29.9 | 28.6 | 31.3 | 1.0–3 | 4.98e-3–0.01 |
-| core | 2.77e-6 | 1.13e-4 | 0.73 | 1.146 | 42.9 | 42.8 | 11.1 | 6.9 | 1.0–4 | 1.02e-3–0.01 |
-| afterbody | 5.00e-5 | 1.33e-4 | 0.92 | 1.075 | 22.9 | 22.9 | 16.2 | 29.1 | 1.0–3 | 4.94e-3–0.01 |
-| plug | 2.80e-5 | 4.33e-4 | 0.64 | 1.146 | 50.4 | 49.9 | 42.5 | 42.5 | 1.0–4 | 2.53e-3–0.03 |
+| bypass | 2.57e-5 | 1.68e-4 | 0.87 | 1.086 | 30.1 | 29.9 | 28.6 | 31.3 | 1.0–3 | 5.02e-3–0.01 |
+| core | 2.77e-6 | 1.08e-4 | 0.73 | 1.143 | 42.9 | 42.8 | 11.1 | 4.8 | 1.0–4 | 1.02e-3–0.01 |
+| afterbody | 5.18e-5 | 1.33e-4 | 0.92 | 1.076 | 22.9 | 22.9 | 16.2 | 29.1 | 1.0–3 | 4.92e-3–0.01 |
+| plug | 2.94e-5 | 4.32e-4 | 0.64 | 1.143 | 50.4 | 50.0 | 42.5 | 42.5 | 1.0–4 | 2.65e-3–0.03 |
 | plume-core | 1.38e-4 | 1.16e-2 | 1.00 | 1.140 | 0.9 | – | 0.9 | 42.5 | 1.0–7 | 9.02e-3–0.26 |
 | plume-bypass | 9.10e-5 | 1.16e-2 | 0.97 | 1.105 | 13.8 | – | 13.8 | 10.5 | 1.0–7 | 9.00e-3–0.26 |
 | plume-outer | 8.55e-5 | 1.16e-2 | 0.91 | 1.105 | 24.3 | – | 24.2 | 52.0 | 1.0–7 | 9.00e-3–0.26 |
@@ -210,7 +210,7 @@ The W0M-I2/I3 tests pin each of these on small blocks with known answers.
 
 | Metric | Value | Where | Why |
 |---|---|---|---|
-| Stretching | 1.140 (80k: 1.146) | plume-core at the plug tip (3.406, 0.336); 80k: core at the core lip | arc-length plug nodes against the axis cells behind the 45° tip |
+| Stretching | 1.140 (80k: 1.143) | plume-core at the plug tip (3.406, 0.336); 80k: core at the core lip | arc-length plug nodes against the axis cells behind the 45° tip |
 | Skew | 55.2° | far field at O (1.59, 1.06) | the C-block's outer corner above the steep (27°) nacelle boattail |
 | Wall orthogonality | 50.2° | plug, near the tip | arc-length plug wall nodes under x-spaced shear-line nodes lean the plug columns |
 | Wall orthogonality in the ducts | 27–44° | station planes and blade edges at sloped or kinked walls (station 25 at the gooseneck exit, combustor inlet) | exact radial lines where the polyline walls slope |
