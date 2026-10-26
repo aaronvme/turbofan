@@ -59,11 +59,11 @@ describe('hermite2 interpolation', () => {
     [9, 4],
   ];
   it('reproduces the nodes', () => {
-    xs.forEach((x, i) =>
-      ys.forEach((y, j) =>
-        expect(hermite2(xs, ys, table, x, y)).toBeCloseTo(table[i]?.[j] ?? 0, 12),
-      ),
-    );
+    xs.forEach((x, i) => {
+      ys.forEach((y, j) => {
+        expect(hermite2(xs, ys, table, x, y)).toBeCloseTo(table[i]?.[j] ?? 0, 12);
+      });
+    });
   });
   it('reproduces a bilinear function exactly and extrapolates linearly', () => {
     const f = (x: number, y: number) => 2 + 3 * x - y + 0.5 * x * y;
@@ -101,7 +101,15 @@ describe('map scaling to the design point (pure)', () => {
   it('scales PR - 1, not PR, and does not mutate the map', () => {
     const before = JSON.stringify(HPC_MAP);
     const s = scaleCompressorMap(HPC_MAP, design);
-    expect(s.prScale).toBeCloseTo((11 - 1) / (HPC_MAP.design.pr - 1), 12);
+    // pyCycle scales with the map's PR at its design (Nc, R-line); design.pr is only a guess
+    const prDes = hermite2(
+      HPC_MAP.nc,
+      HPC_MAP.rline,
+      HPC_MAP.pr,
+      HPC_MAP.design.nc,
+      HPC_MAP.design.rline,
+    );
+    expect(s.prScale).toBeCloseTo((11 - 1) / (prDes - 1), 12);
     expect(JSON.stringify(HPC_MAP)).toBe(before);
     const raw = hermite2(HPC_MAP.nc, HPC_MAP.rline, HPC_MAP.pr, 0.9, 1.5);
     const p = compressorPoint(s, 0.9 / HPC_MAP.design.nc, 1.5);
