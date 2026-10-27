@@ -103,6 +103,18 @@ export interface Settled extends GpuConvergence {
   /** The metric's largest relative change over the last SETTLE_WINDOW iterations. */
   readonly change: number;
   readonly metric: readonly number[];
+  /** The plateau the detection rule sees at the end (also when a stated one was not reached). */
+  readonly seen: number | null;
+}
+
+/** The detected plateau at `it`: the residual has stopped falling (see settle), else null. */
+function detect(hist: readonly { it: number; res: number }[], it: number): number | null {
+  if (it < 2 * SETTLE_WINDOW) return null;
+  const recent = hist.filter((h) => h.it > it - SETTLE_WINDOW).map((h) => h.res);
+  const before = hist
+    .filter((h) => h.it > it - 2 * SETTLE_WINDOW && h.it <= it - SETTLE_WINDOW)
+    .map((h) => h.res);
+  return Math.min(...recent) >= 0.5 * Math.min(...before) ? Math.max(...recent) : null;
 }
 
 /**
@@ -140,20 +152,26 @@ export async function settle(
     );
     let plateau: number | null = null;
     let detected = false;
+    const seen = detect(hist, it);
     if (opts.plateau !== undefined) {
       if (last / first <= opts.plateau) plateau = opts.plateau;
-    } else {
-      const recent = hist.filter((h) => h.it > it - SETTLE_WINDOW).map((h) => h.res);
-      const before = hist
-        .filter((h) => h.it > it - 2 * SETTLE_WINDOW && h.it <= it - SETTLE_WINDOW)
-        .map((h) => h.res);
-      if (it >= 2 * SETTLE_WINDOW && Math.min(...recent) >= 0.5 * Math.min(...before)) {
-        plateau = Math.max(...recent);
-        detected = true;
-      }
+    } else if (seen !== null) {
+      plateau = seen;
+      detected = true;
     }
     if (plateau !== null && change < SETTLE_TOLERANCE) {
-      return { iterations: it, first, last, converged: true, plateau, detected, change, metric: m };
+      const metric = m;
+      return {
+        iterations: it,
+        first,
+        last,
+        converged: true,
+        plateau,
+        detected,
+        change,
+        metric,
+        seen,
+      };
     }
   }
   const lastM = hist.at(-1)?.m ?? [];
@@ -171,6 +189,7 @@ export async function settle(
     detected: false,
     change,
     metric: lastM,
+    seen: detect(hist, hist.at(-1)?.it ?? 0),
   };
 }
 
@@ -178,7 +197,7 @@ export async function settle(
 export function settleRow(id: string, c: Settled, max: number): LadderRow {
   const plateau =
     c.plateau === null
-      ? 'not reached'
+      ? `not reached (${c.seen === null ? 'still falling' : `it stopped falling at ${c.seen.toExponential(2)}`})`
       : `${c.plateau.toExponential(2)}${c.detected ? ' (detected)' : ''}`;
   return {
     id,
