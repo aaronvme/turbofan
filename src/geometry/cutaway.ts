@@ -26,15 +26,23 @@ export function angleInWedge(theta: number, w: CutawayWedge): boolean {
   return Math.abs(wrapAngle(theta - w.center)) < w.halfWidth;
 }
 
-/** A blade at `angle` spanning [angle + thetaMin, angle + thetaMax] touches the wedge. */
+/**
+ * Whether a blade at `angle` spanning [angle + thetaMin, angle + thetaMax] is hidden: by the
+ * default rule `touches` when it touches the wedge; by `inside` (the fan row, W1V-I1) only
+ * when it lies wholly inside it, so the blades at the cut faces keep their profile, as product
+ * cutaways show them (a whole blade has no open section, so nothing hollow shows).
+ */
 export function bladeHidden(
   angle: number,
   thetaMin: number,
   thetaMax: number,
   w: CutawayWedge,
+  rule: BladeCutRule = 'touches',
 ): boolean {
   if (w.halfWidth <= 0) return false;
   const mid = wrapAngle(angle + (thetaMin + thetaMax) / 2 - w.center);
   const half = (thetaMax - thetaMin) / 2;
-  return Math.abs(mid) < w.halfWidth + half;
+  return Math.abs(mid) < w.halfWidth + (rule === 'inside' ? -half : half);
 }
+
+export type BladeCutRule = 'touches' | 'inside';

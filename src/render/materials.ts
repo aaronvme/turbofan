@@ -51,6 +51,7 @@ import {
   mx_fractal_noise_float,
   mx_noise_float,
   normalize,
+  normalLocal,
   normalView,
   positionLocal,
   positionView,
@@ -58,6 +59,7 @@ import {
   screenCoordinate,
   select,
   sign,
+  transformNormalToView,
   smoothstep,
   sqrt,
   uniform,
@@ -65,7 +67,9 @@ import {
   vec2,
   vec3,
   vec4,
+  vertexStage,
 } from 'three/tsl';
+import type { BladeCutRule } from '../geometry/cutaway';
 import type { PartMaterial } from '../geometry/parts';
 import type { RowMaterial } from '../geometry/engineGeometry';
 
@@ -135,11 +139,11 @@ function phys(p: PhysParams): MeshPhysicalNodeMaterial {
  * A view-space normal bumped by a procedural height field (metres), from screen-space
  * derivatives (Mikkelsen's surface-gradient bump).
  */
-function bumpNormal(height: F, scale: number): Node<'vec3'> {
+function bumpNormal(height: F, scale: number, base: Node<'vec3'> = normalView): Node<'vec3'> {
   return Fn(() => {
     const dpdx = positionView.dFdx();
     const dpdy = positionView.dFdy();
-    const n = normalView;
+    const n = base;
     const r1 = cross(dpdy, n);
     const r2 = cross(n, dpdx);
     const det = dot(dpdx, r1);
@@ -156,6 +160,30 @@ const fade = (footprint: F, period: number): F =>
 const resolved = (coord: Node<'vec2'>, period: number): F => fade(length(fwidth(coord)), period);
 const resolved1 = (coord: F, period: number): F => fade(fwidth(coord), period);
 
+/**
+ * A smooth, low-frequency pattern evaluated per vertex and interpolated (LOD round, D4-5: the
+ * opaque pass is bound by its fragment shading, and procedural noise is most of it). Only for
+ * periods well above the mesh's vertex spacing (192 segments: under 4 cm round the nacelle).
+ */
+const perVertex = <T extends Node>(n: T): T => vertexStage(n) as unknown as T;
+
+/**
+ * A view-space normal tilted by the gradient of a smooth height field (metres) evaluated per
+ * vertex by central differences in the object frame and interpolated, so the tilt is smooth
+ * across triangles (a fragment derivative of an interpolated height would facet).
+ */
+function perVertexTilt(height: (p: Node<'vec3'>) => F, step: number): Node<'vec3'> {
+  const p = positionLocal;
+  const d = (axis: Node<'vec3'>): F =>
+    height(p.add(axis.mul(step)))
+      .sub(height(p.sub(axis.mul(step))))
+      .div(2 * step);
+  const g = vec3(d(vec3(1, 0, 0)), d(vec3(0, 1, 0)), d(vec3(0, 0, 1)));
+  const n = normalLocal;
+  const tilted = normalize(n.sub(g.sub(n.mul(dot(n, g)))));
+  return normalize(transformNormalToView(perVertex(tilted)));
+}
+
 /** An anti-aliased line of half-width w at distance d (fwidth of d sets the filter). */
 const aaLine = (d: F, w: number): F => {
   const aa = fwidth(d).max(1e-5);
@@ -171,7 +199,7 @@ function heatTint(base: Node<'vec3'>, u: LookUniforms, amount: number): Node<'ve
   const x = positionLocal.x;
   const z = x.sub(1.82).div(0.32);
   const zone = exp(z.mul(z).negate());
-  const n = mx_fractal_noise_float(positionLocal.mul(vec3(1.5, 3, 3)), 2, 2, 0.5)
+  const n = perVertex(mx_fractal_noise_float(positionLocal.mul(vec3(1.5, 3, 3)), 2, 2, 0.5))
     .mul(0.5)
     .add(0.5);
   const t = zone.mul(0.75).add(n.mul(0.35)).clamp(0, 1);
@@ -296,19 +324,16 @@ function nacellePaint(): MeshPhysicalNodeMaterial {
       mix(float(0.025), float(0.018), right),
     ),
   );
-  // surface: orange peel (two scales), oil canning, seam grooves 0.6 mm deep (up close)
-  const peel = mx_noise_float(p.mul(260))
-    .mul(1.2e-5)
-    .mul(resolved(p.xy, 1 / 260))
-    .add(
-      mx_noise_float(p.mul(90))
-        .mul(2.5e-5)
-        .mul(resolved(p.xy, 1 / 90)),
-    );
-  const canning = mx_noise_float(vec3(x.mul(2.2), p.y.mul(2.8), p.z.mul(2.8))).mul(6e-4);
+  // surface: oil canning (per vertex: a 0.4 m wobble), seam grooves 0.6 mm deep (up close).
+  // The orange peel (1.2e-5 / 2.5e-5 m bumps) is gone: no shot resolved it (pass 6), and its
+  // two noise lookups per pixel were a large part of the opaque pass (LOD round, D4-5)
+  const canning = perVertexTilt(
+    (q) => mx_noise_float(vec3(q.x.mul(2.2), q.y.mul(2.8), q.z.mul(2.8))).mul(6e-4),
+    0.02,
+  );
   const grooveDepth = seam.mul(-6e-4).mul(resolved1(x, 0.02));
-  m.normalNode = bumpNormal(peel.add(canning).add(grooveDepth), 1);
-  const broad = mx_fractal_noise_float(p.mul(2.2), 2, 2, 0.5);
+  m.normalNode = bumpNormal(grooveDepth, 1, canning);
+  const broad = perVertex(mx_fractal_noise_float(p.mul(2.2), 2, 2, 0.5));
   const wipe = mx_noise_float(vec3(x.mul(1.6), p.y.mul(16), p.z.mul(16)));
   const low = smoothstep(-0.35, -0.85, p.y);
   const white = vec3(0.78, 0.785, 0.79);
@@ -346,15 +371,17 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
       const metal = smoothstep(edge.add(0.001), edge.sub(0.001), lx);
       const seam = seamLine(abs(lx.sub(edge)), 0.0012);
       const buff = mx_noise_float(vec3(lx.mul(180), pl.y.mul(6), pl.z.mul(6)));
-      const broad = mx_fractal_noise_float(pl.mul(3), 2, 2, 0.5);
+      const broad = perVertex(mx_fractal_noise_float(pl.mul(3), 2, 2, 0.5));
       const al = vec3(0.8, 0.805, 0.81).mul(float(1).add(broad.mul(0.025)));
       const paint = select(outer, vec3(0.78, 0.785, 0.79), vec3(0.6, 0.605, 0.61)).mul(
         float(1).add(broad.mul(0.012)),
       );
-      m = phys({ color: c3(0.8, 0.805, 0.81), metalness: 1, roughness: 0.34, anisotropy: 0.3 });
+      // no anisotropy (LOD round, D4-5): the lip solid includes the whole inner barrel, which
+      // fills much of the front view, and the anisotropic lobe was ~1 ms of the opaque pass
+      // for a 0.3 stretch the buffing grain in the roughness already carries
+      m = phys({ color: c3(0.8, 0.805, 0.81), metalness: 1, roughness: 0.34 });
       m.colorNode = mix(paint, al, metal).mul(float(1).sub(seam.mul(0.5)));
       m.metalnessNode = metal;
-      m.anisotropyNode = vec2(metal.mul(0.3).max(0.001), 0);
       m.roughnessNode = mix(
         float(0.28).add(broad.mul(0.05)),
         float(0.34)
@@ -381,7 +408,7 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
       // (0.2, not 0.11: in the cutaway's shadow the darker case read as a hole, W1L-N2)
       m = phys({ color: c3(0.2, 0.205, 0.2), metalness: 0.2, roughness: 0.55 });
       m.colorNode = vec3(0.2, 0.205, 0.2).add(
-        mx_fractal_noise_float(positionLocal.mul(3), 2, 2, 0.5).mul(0.012),
+        perVertex(mx_fractal_noise_float(positionLocal.mul(3), 2, 2, 0.5)).mul(0.012),
       );
       break;
     case 'splitter':
@@ -393,7 +420,7 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
       {
         // exhaust staining toward the core nozzle
         const stain = smoothstep(1.9, 2.6, x).mul(
-          mx_fractal_noise_float(positionLocal.mul(vec3(2, 6, 6)), 2, 2, 0.5)
+          perVertex(mx_fractal_noise_float(positionLocal.mul(vec3(2, 6, 6)), 2, 2, 0.5))
             .mul(0.25)
             .add(0.75),
         );
@@ -424,7 +451,7 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
     case 'plug': {
       const base = kind === 'plug' ? vec3(0.4, 0.39, 0.37) : vec3(0.44, 0.43, 0.41);
       m = phys({ color: c3(0.42, 0.41, 0.39), metalness: 0.75, roughness: 0.5 });
-      const soot = mx_fractal_noise_float(positionLocal.mul(vec3(2.5, 9, 9)), 3, 2, 0.5)
+      const soot = perVertex(mx_fractal_noise_float(positionLocal.mul(vec3(2.5, 9, 9)), 3, 2, 0.5))
         .mul(0.5)
         .add(0.5);
       m.colorNode = heatTint(base, u, 0.5).mul(float(1).sub(soot.mul(0.12)));
@@ -541,12 +568,15 @@ function bladeHide(
   rowAngle: UniformNode<'float', number>,
   tMin: UniformNode<'float', number>,
   tMax: UniformNode<'float', number>,
+  rule: BladeCutRule,
 ): Node<'vec3'> {
   return Fn(() => {
     const ang = attribute('instanceAngle', 'float').add(rowAngle);
     const mid = abs(wrapPi(ang.add(tMin.add(tMax).mul(0.5)).sub(u.cutCenter)));
     const half = tMax.sub(tMin).mul(0.5);
-    const hidden = u.cutHalf.greaterThan(0).and(mid.lessThan(u.cutHalf.add(half)));
+    // src/geometry/cutaway.ts bladeHidden: `inside` (the fan) keeps the blades at the faces
+    const reach = rule === 'inside' ? u.cutHalf.sub(half) : u.cutHalf.add(half);
+    const hidden = u.cutHalf.greaterThan(0).and(mid.lessThan(reach));
     return select(hidden, vec3(0, 0, 0), positionLocal);
   })();
 }
@@ -656,14 +686,14 @@ function fanDepthMaterial(u: LookUniforms, positionOf: () => Node<'vec3'>): Node
 }
 
 /** The row's spool angle plus the mesh's own turn, and its blade's angular extent. */
-function bladeHideOf(u: LookUniforms): Node<'vec3'> {
+function bladeHideOf(u: LookUniforms, rule: BladeCutRule): Node<'vec3'> {
   // the row group's spool angle plus the mesh's own turn (a fan time copy's offset)
   const rowAngle = uniform(0).onObjectUpdate(
     ({ object }) => (object?.parent?.rotation.x ?? 0) + (object?.rotation.x ?? 0),
   );
   const tMin = uniform(0).onObjectUpdate(({ object }) => Number(object?.userData.thetaMin ?? 0));
   const tMax = uniform(0).onObjectUpdate(({ object }) => Number(object?.userData.thetaMax ?? 0));
-  return bladeHide(u, rowAngle, tMin, tMax);
+  return bladeHide(u, rowAngle, tMin, tMax, rule);
 }
 
 export interface MaterialSet {
@@ -692,11 +722,12 @@ export function createMaterials(u: LookUniforms): MaterialSet {
   return {
     part: (kind) => get(`part:${kind}`, () => partMaterial(kind, u)),
     cap: (kind) => get(`cap:${kind}`, () => capMaterial(kind)),
-    fanDepth: () => get('fanDepth', () => fanDepthMaterial(u, () => bladeHideOf(u))),
+    // the fan's pre-pass and shaded copies share the rule: EqualDepth needs identical positions
+    fanDepth: () => get('fanDepth', () => fanDepthMaterial(u, () => bladeHideOf(u, 'inside'))),
     row: (kind, spool) =>
       get(`row:${kind}:${String(spool)}`, () => {
         const m = rowSurface(kind, u);
-        m.positionNode = bladeHideOf(u);
+        m.positionNode = bladeHideOf(u, kind === 'fanBlade' ? 'inside' : 'touches');
         // inside the nacelle (fan) or the core (every other row): see CAVITY
         // the fan sees the studio only through the intake mouth: 0.52 (pass 4 had 0.62, and
         // its blades read as white streaks once the key no longer lit them, W1L-I2)

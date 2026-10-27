@@ -27,7 +27,7 @@ import {
 } from '../geometry/engineGeometry';
 import { cutawayWedge } from '../geometry/cutaway';
 import { easeInOut, explodeOffsets } from '../geometry/explode';
-import { advanceAngle, shutterBlurAngle } from '../geometry/motion';
+import { advanceAngle, shutterBlurAngle, spoolDisplayFactor } from '../geometry/motion';
 import { screenRectOfBox, type Box3Like } from '../geometry/screenRect';
 import { closedViewVisibility } from '../geometry/visibility';
 import { requestSimDevice, type GpuErrorReport, type SimDevice } from '../gpu/device';
@@ -273,6 +273,8 @@ async function assemble(
   let lastExplode = -1;
   let flags: DebugFlags = {};
   let fanFrame = 0;
+  // the exploded engine eases its spools to a stop (D4-4); 1 = running
+  let spoolFactor = 1;
   let profile: RenderProfileId = o.profile ?? 'quality';
   let scaleState = initialRenderScale(RENDER_PROFILES[profile]);
   post.setRenderScale(scaleState.scale);
@@ -337,6 +339,7 @@ async function assemble(
       if (immediate) {
         cut = m === 'cutaway' ? 1 : 0;
         explode = m === 'exploded' ? 1 : 0;
+        spoolFactor = m === 'exploded' ? 0 : 1;
       }
     },
     setThrottle(l, s = false) {
@@ -403,7 +406,12 @@ async function assemble(
       const t0 = performance.now();
       timer.beginFrame();
       if (!settle) cycle.step(Math.min(dtS, 0.1), inputs());
-      const st = speeds();
+      const cycleSpeeds = speeds();
+      spoolFactor = spoolDisplayFactor(spoolFactor, mode === 'exploded', dtS);
+      const st = {
+        n1Rpm: cycleSpeeds.n1Rpm * spoolFactor,
+        n2Rpm: cycleSpeeds.n2Rpm * spoolFactor,
+      };
       lp = advanceAngle(lp, st.n1Rpm, def.rotation.lp, dtS);
       hp = advanceAngle(hp, st.n2Rpm, def.rotation.hp, dtS);
       const lpShown = lp + (flags.lpPhase ?? 0);

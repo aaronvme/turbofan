@@ -31,8 +31,12 @@ interface LookdevApi {
   timeFrames(n: number): Promise<PassMedians>;
   /** Renders for `ms`, one frame per animation frame (a warm-up). */
   renderFor(ms: number): Promise<void>;
-  /** One timing run of `ms` (W1L-I4): every frame's passes, the rAF intervals, hidden time. */
-  timeRun(ms: number): Promise<TimingRun>;
+  /**
+   * One timing run of `ms` (W1L-I4): every frame's passes, the rAF intervals, hidden time.
+   * `saturate` renders back to back (one frame queued ahead) instead of one per animation
+   * frame, so the GPU never idles and its clock cannot drop with the load (LOD round, D4-5).
+   */
+  timeRun(ms: number, saturate?: boolean): Promise<TimingRun>;
   /** What the page can tell about the conditions (D0-1): battery, adapter, user agent. */
   conditions(): Promise<Record<string, unknown>>;
   pause(paused: boolean): void;
@@ -185,7 +189,7 @@ async function main(): Promise<void> {
       }
       await view.device.device.queue.onSubmittedWorkDone();
     },
-    async timeRun(ms) {
+    async timeRun(ms, saturate = false) {
       paused = true;
       const events: string[] = [];
       let hiddenMs = 0;
@@ -208,9 +212,15 @@ async function main(): Promise<void> {
       view.beginTimingRun();
       let last = performance.now();
       const end = last + ms;
+      const queue = view.device.device.queue;
+      let ahead: Promise<undefined> = Promise.resolve(undefined);
       while (last < end) {
         view.frame(1 / 60);
-        await nextFrame();
+        if (saturate) {
+          const done = queue.onSubmittedWorkDone();
+          await ahead;
+          ahead = done;
+        } else await nextFrame();
         const t = performance.now();
         rafDeltas.push(t - last);
         last = t;

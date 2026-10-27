@@ -19,6 +19,8 @@ const port = arg('--port') ?? '5184';
 const rounds = Number(arg('--rounds') ?? '6');
 const preset = arg('--preset') ?? 'threeQuarterFront';
 const runMs = Number(arg('--run-ms') ?? '500');
+// --saturate: frames back to back, so the GPU clock cannot fall with the load
+const saturate = args.includes('--saturate');
 
 type Flags = Record<string, boolean | number | string>;
 interface Config {
@@ -55,7 +57,7 @@ interface Api {
     setDebugFlags(f: Flags): void;
     setProfile(id: string): void;
     renderFrames(n: number): Promise<void>;
-    timeRun(ms: number): Promise<{ frames: { gpu: Record<string, number> }[] }>;
+    timeRun(ms: number, saturate?: boolean): Promise<{ frames: { gpu: Record<string, number> }[] }>;
   };
 }
 
@@ -85,19 +87,19 @@ async function main(): Promise<void> {
     ) => {
       await page.setViewportSize({ width: viewport[0], height: viewport[1] });
       const run = await page.evaluate(
-        async ([p, f, ms, prof]) => {
+        async ([p, f, ms, prof, sat]) => {
           const l = (window as Api).lookdev;
           if (l === undefined) throw new Error('no lookdev');
           l.setDebugFlags(f);
           l.setProfile(prof);
           l.setPreset(p);
           await l.renderFrames(8);
-          const out = await l.timeRun(ms);
+          const out = await l.timeRun(ms, sat);
           l.setDebugFlags({});
           l.setProfile('quality');
           return out.frames;
         },
-        [preset, flags, runMs, profile] as const,
+        [preset, flags, runMs, profile, saturate] as const,
       );
       // every frame of the run (timeFrames would return the timer's rolling 120-frame window)
       return {
@@ -106,8 +108,10 @@ async function main(): Promise<void> {
       };
     };
     const got = new Map<string, { opaque: number[]; dOpaque: number[]; dTotal: number[] }>();
+    const only = arg('--only')?.split(',');
+    const configs = only ? CONFIGS.filter((c) => only.includes(c.id)) : CONFIGS;
     for (let r = 0; r < rounds; r++) {
-      for (const c of CONFIGS) {
+      for (const c of configs) {
         const a = await time({}, [1920, 1080]);
         const b = await time(c.flags, c.viewport ?? [1920, 1080], c.profile);
         const e = got.get(c.id) ?? { opaque: [], dOpaque: [], dTotal: [] };
@@ -117,7 +121,7 @@ async function main(): Promise<void> {
         got.set(c.id, e);
       }
     }
-    for (const c of CONFIGS) {
+    for (const c of configs) {
       const e = got.get(c.id);
       if (e === undefined) continue;
       const f = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(2)}`;
