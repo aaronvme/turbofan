@@ -361,7 +361,7 @@ describe('low-Mach dissipation scaling in the solver (D4-20)', () => {
     const g = Math.exp(-((x - 0.25) ** 2 + (r - 0.07) ** 2) / 0.003);
     return { rho: 1.225, u: 3 + g, v: -0.5 * g, w: g, p: 101325 + 20 * g, z: 0 };
   };
-  const make = (pre?: { minMach: number; machCut?: number }) => {
+  const make = (pre?: { minMach: number; machCut?: number; velocityDiffusion?: number }) => {
     const s = new ReferenceSolver(mesh, {
       gas: THERMALLY_PERFECT,
       freeStream: fs,
@@ -382,6 +382,30 @@ describe('low-Mach dissipation scaling in the solver (D4-20)', () => {
     expect(diff).toBeGreaterThan(0);
     // the default cut is minMach: the same residual as machCut = minMach given explicitly
     expect(make({ minMach: 0.01, machCut: 0.01 }).residual()).toEqual(on);
+  });
+
+  // D4-32's trial (section 7): the p_u velocity diffusion of the pressure flux
+  it('adds p_u to the momentum residual only with machCut < 1 and K_u > 0', () => {
+    const on = make({ minMach: 0.01 }).residual();
+    const pu = make({ minMach: 0.01, velocityDiffusion: 0.5 }).residual();
+    let dMass = 0;
+    let dMomentum = 0;
+    for (let k = 0; k < on.length; k += NU) {
+      dMass = Math.max(dMass, Math.abs((pu[k] as number) - (on[k] as number)));
+      dMomentum = Math.max(dMomentum, Math.abs((pu[k + 1] as number) - (on[k + 1] as number)));
+    }
+    expect(dMass).toBe(0);
+    expect(dMomentum).toBeGreaterThan(0);
+    expect(make({ minMach: 0.01, velocityDiffusion: 0 }).residual()).toEqual(on);
+    expect(make({ minMach: 0.01, machCut: 1, velocityDiffusion: 0.5 }).residual()).toEqual(
+      make({ minMach: 0.01, machCut: 1 }).residual(),
+    );
+    const a = make({ minMach: 0.01, velocityDiffusion: 0.5 });
+    const b = make();
+    const dt = b.globalDt();
+    a.stepPhysical(dt);
+    b.stepPhysical(dt);
+    expect(a.U).toEqual(b.U);
   });
 
   it('leaves the physical-time mode unscaled', () => {
