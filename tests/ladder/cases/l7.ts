@@ -54,6 +54,7 @@ export function run() {
   const low = sphere(L7.mach.value, true);
   const ref = sphere(L7.referenceMach.value, true);
   const plain = sphere(L7.referenceMach.value, false);
+  const lowPlain = sphere(L7.mach.value, false);
   const ratio = low.conv.iterations / ref.conv.iterations;
   let dCp = 0;
   for (let j = 0; j < NT; j++)
@@ -84,6 +85,34 @@ export function run() {
       },
       {
         id: 'L7',
+        metric: 'M 0.01 plain (no preconditioning): max |Cp(theta) - Cp(pi - theta)|',
+        threshold: 'reported',
+        value: lowPlain.asym,
+        pass: 'reported' as const,
+      },
+      {
+        id: 'L7',
+        metric: 'M 0.01 plain: |Cd|',
+        threshold: 'reported',
+        value: Math.abs(lowPlain.cd),
+        pass: 'reported' as const,
+      },
+      {
+        id: 'L7',
+        metric: `M 0.01 plain: iterations to 1e-4 (converged: ${String(lowPlain.conv.converged)})`,
+        threshold: 'reported',
+        value: lowPlain.conv.iterations,
+        pass: 'reported' as const,
+      },
+      {
+        id: 'L7',
+        metric: `M 0.01 preconditioned: iterations (converged: ${String(low.conv.converged)}, finite: ${String(Number.isFinite(low.conv.last))})`,
+        threshold: 'reported',
+        value: low.conv.iterations,
+        pass: 'reported' as const,
+      },
+      {
+        id: 'L7',
         metric: 'M 0.3: max |Cp| difference, preconditioned vs plain (both to 1e-4)',
         threshold: 'reported',
         value: dCp,
@@ -104,6 +133,6 @@ export function run() {
         pass: 'reported' as const,
       },
     ],
-    extra: { low, ref, plain },
+    extra: { low, ref, plain, lowPlain },
   };
 }
