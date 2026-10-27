@@ -1,52 +1,43 @@
-w2/followups: STOP-CLEAN at 82 % usage. Done: W1K-I1, W1K-I2, D3-17 / C12 (passes) and the bench harness (D3-6, N6, N7). D3-13 partly done: the mutation config is in, and 7 of 13 core files are scored; the hot files are not run yet. (from main e1ca8a2; HEAD = the commit that adds this file)
+w2/followups: DONE (round 2). D4-13 (lost-solve flag) green, D4-14/D4-15 in the ledger, D3-13 mutation round done (true pause scores, cheap kills, FADEC laws factored out of model.ts). Round 1 (W1K-I1/I2, D3-17/C12, bench harness) is unchanged. (from main e1ca8a2; round 2 from 5a0cf72; HEAD = the commit that adds this file)
 
-DONE
-- 2a2f145 W1K-I1 / W1K-I2:
-  - Both KNOWN FAIL marker sets now read "KNOWN FAIL (D3-15: accepted part-power gap, PHYSICS.md ledger)". The stale fit comments are fixed (engine.ts, partPower.ts), and so are the facts rows (0.284, D3-15).
-  - `tests/unit/cycle/surgeRecovery.test.ts` pins the rejected fit's 33.73(a) slam: it surges, then makes no 95 % thrust.
-  - **New finding, with the true cause:**
-    - The surges at 1.5 s recover on their own.
-    - The hang starts at about 4 s, at N2 about 74 % with the VBV fully open: `solveGasPath` stops converging, and `model.ts snapshot()` silently falls back to the sub-idle similarity model far above sub-idle. Fuel and P3 then chatter between the two models.
-    - So it is a lost gas-path solution, not a locked stall (ENGINE_FACTS "What binds", PHYSICS ledger).
-- fe2e294: C12 pre-registered in PHYSICS.md §3.2 and thresholds.ts before any code, with the doc-sync test and a rationale per clause. Sources [GE74], [GE91], [UTC77], [UTC93], [RR06] and [ARP1420] are in ENGINE_FACTS; no CFM56-7B surge logic is public.
-- 98683d9 (TDD) the C12 tests:
-  - the `hpcSurgeMarginLoss` hook (Delta PRS lowers the reported margin and moves the Greitzer peak down the speed line);
-  - the detector tests;
-  - 8 tests red on the W1 oracle fuel cut.
-- 8998462 green (`surgeDetection.ts`, `model.ts`):
-  - Detection uses only the decay of the sensed P3.
-  - Recovery: fuel to the decel schedule, VBVs open below their closing speed, igniters on, a 0.5 s hold, a 1 s ramp to a biased accel schedule (0.8 of the excess, multiplied again by 0.8 on a repeat surge).
-  - The W1 oracle cut (25 % at every onset, which read the true margin) is gone.
-  - C12 result: one surge at 0.74 s, detected in the same 20 ms step; 95 % thrust at 8.4 s; back at idle N1 20.26 / N2 60.99.
-  - Every existing transient test is unchanged and green.
-- 235258b (TDD) / 29c7e24 the harness:
-  - D3-6: INVALID only on the occlusion signature (rAF intervals of 500 ms or more, consecutive ones spanning at least 1 s), a hidden page, or a window blur. A slow load is a warning with its numbers.
-  - N6: a per-run timeout (warm-up + run + 30 s, then INVALID "stalled" and a page reload), and the warm-up fallback held to the probe's 24-500 Hz check.
-  - N7: `timestamp-ring.test.ts` compares medians at 8x the work.
-  - The README is updated. The `--quick` smoke command is in spikes/README.
-- 4d4ce90 D3-13:
-  - `vitest.mutation.config.ts` leaves out the slow files; a guard test pins the list.
-  - The C9 tests moved to `greitzer.test.ts` and the slow surge transient to `surgeRecovery.test.ts`.
-  - Stryker uses the config, with a JSON report.
-  - Then `MUTATION_TESTS` for targeted sets, and the scores in `docs/MUTATION.md`.
+DONE (round 2)
+- 0302e83, 81666c3: the orchestrator's D3-6 harness smoke run (`--quick --only=130k-16x8`: valid, 240 it/s) committed byte for byte and annotated in docs/bench/README.md.
+- D4-13, a lost gas-path solve is flagged, never patched over:
+  - 2403afc (TDD), cbe666f, a90987a (TDD), 1105b36 green.
+  - **Contract (flag for the critic): the only `src/contracts` change** is `src/contracts/cycle.ts`: `CycleState.gasPathSolve: { status: 'matched' | 'subIdle' | 'held'; lostSolves }` (`GAS_PATH_SOLVE_STATUSES`), with the `validateCycleState` checks. The mock and the contract fixture fill it.
+  - **Design** (`model.ts snapshot()`): the sub-idle model runs only unlit, unfuelled or below 57 % N2. Above the switch the matched solve is warm-started on the last converged point, then retried by continuation from it (`src/cycle/matchedSolve.ts`: the step halves on a failure down to 1/256 and doubles after a success, at most 64 solves; a throw or a BPR <= 1 root counts as a failure). If that fails too, the state holds the last converged gas path (status `held`; `lostSolves` counts since the reset). The spools then run on the held power balance (not physics), and every substep retries.
+  - The zero-lost checks found real losses: the start, the hot start and the flameout relight lost 435/46/136 solves at N2 57-61 %. Cause: at the reset's idle unknowns below about 60.6 % N2 one residual stops depending on the unknowns (a map edge), so the Jacobian is singular. The continuation fixes all three.
+  - Every transient test now asserts zero lost solves (`expectNoLostSolves`, in the run helpers of model/modelPaths/surgeRecovery).
+  - The fast hold tests (`gasPathHold.test.ts`) use the `gasPathSolver` test hook.
+  - The W1K-I2 pin now names the cause: the fit loses the gas path from 5.7 s to 8.5 s (N2 74-88 %, VBV fully open), lost and held, no 95 % thrust in 10 s (about 94 kN at 10 s).
+- 7e1aeb0: PHYSICS.md §1 rows for D4-13, D4-14 (the recovery's VBV opening above the closing speed is not modeled, linked to the booster map backlog) and D4-15 (the idle-floor loop's slow settling). ENGINE_FACTS W1K-I2 note.
+- D3-13 mutation:
+  - 1109c98, ff02ac8, 84d3cf4, fa45524: the cheap kills (surgeDetection 3, greitzer 4; surgeSystem built per test, unmemoized; gas, newton, componentMaps, engine).
+  - 5794941 (TDD), 7bb37c7: `src/cycle/fadec.ts` holds the pure FADEC laws with fast tests. A hash of 4200 transient states is bit-identical before and after.
+  - e7b3829, b19ee84: docs/MUTATION.md has the true per-file scores and every survivor with its reason.
 
 NEXT
-1. D3-13: run the hot files with `MUTATION_TESTS` or line ranges, each under 10 min (MUTATION.md "Not run yet"). Kill the listed cheap survivors (surgeDetection 3, greitzer 4, the surgeSystem lazy-fixture fix). Factor model.ts's pure FADEC pieces out for fast tests.
-2. Orchestrator decisions:
-   - (a) the silent sub-idle fallback above sub-idle in `model.ts snapshot()`: flag it or fail it;
-   - (b) whether the recovery's VBV rule (shut above vbvClosedAboveN2c, because opening them at high power drives the booster off its map) is acceptable;
-   - (c) the idle-floor loop undershoots N2 to 57.4 % (0.4 points above the sub-idle switch) after a takeoff chop and takes about 25 s to settle. It is not new, and C12 passes.
-3. Bench harness: a `--quick --only=130k-16x8` smoke run in a quiet window before the next official run. It was not run here: another builder was active.
+1. Orchestrator decisions:
+   - (a) The start test's C4 check (model.test.ts) moved from the hand-over instant to the settled idle: N1 within 0.1 over 20 s, about 100 s after the hand-over. At the hand-over N1 is 19.91 % now, against C4's 20; it was 20.20 only through the old silent model chatter. The thresholds are unchanged. Accept, or require a FADEC change (e.g. hand over on N1 too).
+   - (b) While held, the spools integrate the held power balance. Accept, or freeze them while held.
+   - (c) D4-15 grew: after a start the idle floor swings N2 by 59.7-62.6 % for 1-2 min, and after a flameout relight it overshoots to N2 69.5 %. Both were there before D4-13 (checked on 5a0cf72's model). Fix now or in W3.
+2. UI (not touched): show `gasPathSolve.status === 'held'` as a visible annunciator.
+3. Mutation:
+   - Factor the sub-idle model and the start state machine out of model.ts (the largest survivor blocks: start 126/43, sub-idle 55/0).
+   - Test hpcCubic's unclamped least squares on a synthetic map.
+   - Run engine.ts with partPower/c10/c11 (36 part-power survivors).
+   - boundedLeastSquares and partPower were not re-run.
 
 GOTCHAS
-- Stryker's vitest runner overrides `testNamePattern`, so slow tests can be excluded by file only.
-- Mutants in code a test builds at describe level never reach that test's per-test coverage (surge.test.ts); use `lazy()`.
-- A Bash timeout moves a command to the background rather than killing it: use the `timeout 560` wrapper and stop Stryker's child node processes by command line (scratch script C:\Users\Aaron\scratch\w2f\mut.sh).
-- The tools' heredocs: long `python - <<EOF` blocks broke the shell twice; write scripts to files instead.
-- `src/contracts/thresholds.ts` was edited only to add C12, as the task asked. Nothing else in src/contracts was touched. No new dependencies. No dev server or Chrome was started (port 5187 unused). Nothing is left running.
+- A memoized `lazy()` fixture maps a mutant to the first test that calls it only. Build per test where mutants matter (surge.test.ts).
+- Runs that share a Stryker incremental file report a running total in their "All files" line. Use a per-file `--incrementalFile`, and read the file's own row.
+- Stryker on model.ts with gasPathHold.test.ts takes over 10 min. Split it into `--mutate src/cycle/model.ts:1-640` and `:641-1039` (about 5 min each). Scratch runner: `C:\Users\Aaron\scratch\w2f\mut.sh <name> <spec> <tests>`.
+- Probes: `node --import ./tools/mesh/ts-resolve.mjs <probe.ts>`. The behaviour fingerprint for pure refactors of model.ts is `C:\Users\Aaron\scratch\w2f\fingerprint.ts` (before/after txt there).
+- The first snapshot of a step is taken before the substep applies the inputs. A cutoff or a flameout still tries one matched solve on the lit engine (see the gasPathHold sub-idle tests).
+- No new dependencies. Dev port 5187 unused; no dev server or Chrome started; no processes left running.
 
-GATES @4d4ce90 (plus the docs commit)
-- npm test: 1639 passed, 5 expected fail (C10 x3, C11 x2), 77 files.
+GATES @b19ee84
+- npm test: 1700 passed, 5 expected fail (C10 x3, C11 x2), 80 files.
 - npm run lint: clean. npm run typecheck: clean.
-- coverage: lines 99.52 %, statements 98.59 %, branches 88.12 %, functions 99.59 %; src/cycle lines 99.48 %, src/thermo 100 %.
-- npm run test:mesh: 29 passed. npm run test:gpu: 15 passed (@29c7e24; GPU code unchanged since). test:browser not run (no render/ui/app change).
+- coverage: lines 99.53 %, statements 98.62 %, branches 88.31 %, functions 99.6 %; src/cycle lines 99.58 %, src/thermo 100 %.
+- npm run test:mesh: 29 passed. npm run test:gpu: 15 passed. test:browser not run (no render/ui/app change).
