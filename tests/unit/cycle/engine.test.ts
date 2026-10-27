@@ -7,9 +7,15 @@ import { casingRadiusAt, hubRadiusAt } from '../../../src/contracts/engine';
 import {
   CYCLE_CALIBRATION,
   balances,
+  correctedN2Percent,
   displayedEgt,
   evaluateGasPath,
   groundIdle,
+  nozzle,
+  reynoldsIndex,
+  sutherlandViscosity,
+  vbvScheduleFraction,
+  vsvOffsetRad,
   sizeEngine,
   solveSteady,
   type SteadySolution,
@@ -220,5 +226,78 @@ describe('EGT calibration (W0C-I6) and C6', () => {
     const s = solveSteady(engine, corner, { kind: 'netThrust', value: factValue('takeoffThrust') });
     expect(s.converged).toBe(true);
     expect(displayedEgt(engine, s.point)).toBeLessThan(factValue('egtTakeoffLimit'));
+  });
+});
+
+describe('engine.ts helpers, checked directly (D3-13 mutation survivors)', () => {
+  it('vbvScheduleFraction: the full dump below openBelow, none above closedAbove, linear between', () => {
+    const cal = {
+      ...CYCLE_CALIBRATION,
+      vbv: { maxFraction: 0.2, openBelowN2cPercent: 70, closedAboveN2cPercent: 80 },
+    };
+    expect(vbvScheduleFraction(cal, 60)).toBe(0.2);
+    expect(vbvScheduleFraction(cal, 72.5)).toBeCloseTo(0.15, 12);
+    expect(vbvScheduleFraction(cal, 75)).toBeCloseTo(0.1, 12);
+    expect(vbvScheduleFraction(cal, 90)).toBe(0);
+  });
+
+  it('vsvOffsetRad: piecewise linear through its knots, constant beyond the end knots', () => {
+    const cal = {
+      ...CYCLE_CALIBRATION,
+      partPower: {
+        ...CYCLE_CALIBRATION.partPower,
+        vsvOffsetN2cPercent: [60, 85, 95],
+        vsvOffsetRad: [0.1, 0, -0.05],
+      },
+    };
+    expect(vsvOffsetRad(cal, 50)).toBe(0.1);
+    expect(vsvOffsetRad(cal, 60)).toBe(0.1);
+    expect(vsvOffsetRad(cal, 72.5)).toBeCloseTo(0.05, 12);
+    expect(vsvOffsetRad(cal, 85)).toBeCloseTo(0, 12);
+    expect(vsvOffsetRad(cal, 90)).toBeCloseTo(-0.025, 12);
+    expect(vsvOffsetRad(cal, 100)).toBe(-0.05);
+  });
+
+  it('the Sutherland air viscosity and the Reynolds index P / (sqrt(T) mu)', () => {
+    // mu = 1.458e-6 T^1.5 / (T + 110.4): about 1.846e-5 Pa s at 300 K
+    expect(sutherlandViscosity(300)).toBeCloseTo((1.458e-6 * 300 ** 1.5) / 410.4, 15);
+    expect(sutherlandViscosity(300)).toBeCloseTo(1.846e-5, 8);
+    expect(reynoldsIndex(2e5, 400) / (2e5 / (20 * sutherlandViscosity(400)))).toBeCloseTo(1, 12);
+  });
+
+  it('correctedN2Percent: 100 N2 / N2_ref / sqrt(T2 / 288.15)', () => {
+    const ref = CYCLE_CALIBRATION.n2ReferenceRpm;
+    expect(correctedN2Percent(CYCLE_CALIBRATION, ref, 288.15 * 1.21)).toBeCloseTo(100 / 1.1, 12);
+    expect(correctedN2Percent(CYCLE_CALIBRATION, 0.5 * ref, 288.15)).toBeCloseTo(50, 12);
+  });
+
+  it('nozzle: no flow at or below the ambient pressure (unchoked, at ambient)', () => {
+    for (const pt of [9e4, 101325]) {
+      expect(nozzle(pt, 600, 0.02, 101325)).toEqual({
+        flux: 0,
+        velocity: 0,
+        staticPressure: 101325,
+        choked: false,
+      });
+    }
+  });
+
+  it('the point carries each map position: the unknowns and the corrected speeds', () => {
+    const s = solveSteady(
+      REF,
+      { ambient: ISA_SLS, customerBleedFraction: 0, powerExtractionW: 0 },
+      { kind: 'n1Percent', value: 80 },
+    );
+    const x = s.unknowns;
+    expect(s.point.fan.rline).toBe(x[0]);
+    expect(s.point.lpc.rline).toBe(x[2]);
+    expect(s.point.hpc.rline).toBe(x[3]);
+    expect(s.point.hpt.pressureRatio).toBe(x[4]);
+    expect(s.point.lpt.pressureRatio).toBe(x[5]);
+    for (const c of [s.point.fan, s.point.lpc, s.point.hpc, s.point.hpt, s.point.lpt]) {
+      expect(c.speedFraction).toBeGreaterThan(0.5);
+      expect(c.speedFraction).toBeLessThan(1.1);
+      expect(c.point).toBeDefined();
+    }
   });
 });
