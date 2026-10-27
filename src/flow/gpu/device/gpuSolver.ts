@@ -27,7 +27,8 @@ import {
   dtKernelWgsl,
   ghostKernelWgsl,
   lambdaKernelWgsl,
-  linearSourceKernelWgsl,
+  CELL_SOURCE_VEC4,
+  cellSourceKernelWgsl,
   primKernelWgsl,
   reductionLength,
   residualFromPartials,
@@ -42,14 +43,22 @@ export interface GpuSolverOptions extends GpuSchemeOptions {
   readonly limiter?: LimiterKind;
   /** BC code -> BC code for physical ghosts (tests only, e.g. ladder L1). */
   readonly bcRemap?: Readonly<Partial<Record<number, number>>>;
-  /** The built-in linear source model (rate = rate0 - k U, damping k; setLinearSource). */
-  readonly linearSource?: boolean;
+  /** The built-in cell source model (setCellSource; wgsl/kernels.ts cellSourceKernelWgsl). */
+  readonly cellSource?: boolean;
   /** Test only: keep every face flux of the last stage (readFaceDump). */
   readonly faceDump?: boolean;
   readonly label?: string;
 }
 
 export type SolverModeIndex = 0 | 1;
+
+export interface CellSourceCoefficients {
+  readonly rate0?: ArrayLike<number>;
+  readonly aRho?: ArrayLike<number>;
+  readonly kU?: ArrayLike<number>;
+  readonly kMass?: ArrayLike<number>;
+  readonly damping?: ArrayLike<number>;
+}
 
 export async function compileWgsl(
   device: GPUDevice,
@@ -178,7 +187,14 @@ export class GpuSolver {
       sp === null || coef === null || srcBuf === null
         ? []
         : this.copies.map((c, k) =>
-            group(sp, `source C${k}`, [uni(0), buf(1, c), buf(2, coef), buf(3, srcBuf)]),
+            group(sp, `source C${k}`, [
+              uni(0),
+              buf(1, c),
+              buf(2, coef),
+              buf(3, srcBuf),
+              buf(4, this.prim),
+              buf(5, this.geo),
+            ]),
           );
     this.ghostGroups = [0, 3].map((block) =>
       group(this.pipes.ghost, `ghost ${block === 0 ? 'tracking' : 'physical'}`, [
@@ -251,7 +267,7 @@ export class GpuSolver {
       gas: opts.gas,
       layout,
       ...(opts.limiter === undefined ? {} : { limiter: opts.limiter }),
-      sources: opts.linearSource === true,
+      sources: opts.cellSource === true,
       faceDump: opts.faceDump === true,
     };
     const pipe = async (code: string, name: string, entryPoint: string) => {
@@ -270,8 +286,8 @@ export class GpuSolver {
       pipe(lambdaKernelWgsl(ko), 'lambda', 'lambdaMain'),
       pipe(dtCode, 'dt', 'dtMain'),
       pipe(dtCode, 'time', 'advanceTime'),
-      opts.linearSource === true
-        ? pipe(linearSourceKernelWgsl(ko), 'source', 'sourceMain')
+      opts.cellSource === true
+        ? pipe(cellSourceKernelWgsl(ko), 'source', 'sourceMain')
         : Promise.resolve(null),
     ]);
 
@@ -294,8 +310,9 @@ export class GpuSolver {
     [...params.tracking, ...params.physical].forEach((v, k) => {
       device.queue.writeBuffer(uniforms, k * PARAMS_STRIDE, packParams(v));
     });
-    const src = opts.linearSource === true ? make(64 * n, 'sources') : null;
-    const coef = opts.linearSource === true ? make(64 * n, 'source coefficients') : null;
+    const src = opts.cellSource === true ? make(64 * n, 'sources') : null;
+    const coef =
+      opts.cellSource === true ? make(16 * CELL_SOURCE_VEC4 * n, 'source coefficients') : null;
     const dump =
       opts.faceDump === true
         ? make(32 * layout.workgroups * tileFaceSlots(layout.tile), 'face dump')
@@ -334,17 +351,31 @@ export class GpuSolver {
     this.device.queue.writeBuffer(this.geo, 16 * this.layout.geo.extB, extB);
   }
 
-  /** Coefficients of the built-in linear source (6 per cell each): rate = rate0 - k U. */
-  setLinearSource(rate0: ArrayLike<number>, k: ArrayLike<number>): void {
-    if (this.coef === null) throw new Error('the solver was created without linearSource');
+  /**
+   * Coefficients of the built-in cell source (6 per cell each, kMass 1 per cell; missing: 0):
+   * rate = rate0 + rho aRho - kU U - kMass rho (1, u, v, rw, Delta h0, Z), damping d.
+   */
+  setCellSource(c: CellSourceCoefficients): void {
+    if (this.coef === null) throw new Error('the solver was created without cellSource');
     const n = this.layout.nCells;
-    const data = new Float32Array(16 * n);
-    for (let c = 0; c < n; c++) {
-      for (let m = 0; m < NU; m++) {
-        // (rate a), (rate b, 0, 0), (k a), (k b, 0, 0)
-        data[16 * c + m] = rate0[NU * c + m] ?? NaN;
-        data[16 * c + 8 + m] = k[NU * c + m] ?? NaN;
+    const data = new Float32Array(4 * CELL_SOURCE_VEC4 * n);
+    const put = (a: ArrayLike<number> | undefined, slot: number) => {
+      if (a === undefined) return;
+      if (a.length !== NU * n) throw new Error(`source coefficients need ${NU * n} values`);
+      for (let k = 0; k < n; k++) {
+        for (let m = 0; m < NU; m++) {
+          data[4 * CELL_SOURCE_VEC4 * k + 4 * slot + m] = a[NU * k + m] ?? NaN;
+        }
       }
+    };
+    put(c.rate0, 0);
+    put(c.aRho, 2);
+    put(c.kU, 4);
+    put(c.damping, 6);
+    // kMass in the z of the second record (after rate0's last two components)
+    if (c.kMass !== undefined) {
+      if (c.kMass.length !== n) throw new Error(`kMass needs ${n} values`);
+      for (let k = 0; k < n; k++) data[4 * CELL_SOURCE_VEC4 * k + 6] = c.kMass[k] ?? NaN;
     }
     this.device.queue.writeBuffer(this.coef, 0, data);
   }

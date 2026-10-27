@@ -361,7 +361,7 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
         jmax: BC.SLIP_WALL,
       }),
     );
-    const s = await create(box, { gas, linearSource: true });
+    const s = await create(box, { gas, cellSource: true });
     const n = box.nCells;
     // a heat source s_eta = 1e4 W/m^3 and a fuel source, no damping: U grows linearly
     const rate0 = new Float64Array(6 * n);
@@ -370,7 +370,7 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
       rate0[6 * c + 4] = 1e4;
       rate0[6 * c + 5] = 1e-3;
     }
-    s.setLinearSource(rate0, k);
+    s.setCellSource({ rate0, kU: k, damping: k });
     const dt = 1e-4;
     for (let step = 0; step < 10; step++) s.stepPhysical(dt);
     const U = await s.readConserved();
@@ -394,13 +394,13 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
         jmax: BC.SLIP_WALL,
       }),
     );
-    const s = await create(box, { linearSource: true });
+    const s = await create(box, { cellSource: true });
     const n = box.nCells;
     const rate0 = new Float64Array(6 * n);
     const kk = new Float64Array(6 * n);
     const K = 5000; // stiff: dt K = 5
     for (let c = 0; c < n; c++) kk[6 * c + 5] = K; // fuel only: no effect on the flow
-    s.setLinearSource(rate0, kk);
+    s.setCellSource({ rate0, kU: kk, damping: kk });
     s.setUniform({ rho: s.ref.rho, u: 0, v: 0, w: 0, p: s.ref.p, z: 0.02 });
     const before = await s.readConserved();
     const dt = 1e-3;

@@ -8,6 +8,14 @@ import { DEFAULT_CFL, DEFAULT_CFL_PHYSICAL, RK3_ALPHA } from '../reference/solve
 
 type FieldType = 'f32' | 'u32';
 
+/**
+ * The tracking CFL with low-Mach preconditioning (minMach < 1) when the caller gives none: D4-32's
+ * interim 0.8 (0.82 x the fully discrete 1D acoustic limit 0.972). It mirrors
+ * DEFAULT_CFL_PRECONDITIONED of src/flow/reference/solver.ts at w2/reference c1094fc; import it
+ * from there once main has it. Not final: the p_u trial may make it 1.15 (SOLVER.md 10).
+ */
+export const DEFAULT_CFL_PRECONDITIONED = 0.8;
+
 /** Field order of the WGSL struct `Params`. Every field is 4 bytes. */
 export const PARAM_FIELDS = [
   // the reference state the gauges are measured from (section 4)
@@ -169,7 +177,8 @@ export function stageParams(
     pOutGauge: bc.pOut - ref.p,
     farBeta2: bc.farFieldBeta2,
     supersonicInflow: ref.u >= ref.c ? 1 : 0,
-    cfl: opts.cfl ?? DEFAULT_CFL,
+    cfl:
+      opts.cfl ?? (pre !== undefined && pre.minMach < 1 ? DEFAULT_CFL_PRECONDITIONED : DEFAULT_CFL),
     cflPhysical: opts.cflPhysical ?? DEFAULT_CFL_PHYSICAL,
     minMach2: pre === undefined ? 0 : pre.minMach * pre.minMach,
     nCells: sizes.nCells,

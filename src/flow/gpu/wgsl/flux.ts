@@ -15,7 +15,7 @@ export const DEFAULT_LIMITER: LimiterKind = 'vanAlbadaSharp';
 export function fluxWgsl(limiter: LimiterKind = DEFAULT_LIMITER): string {
   // the smooth form (D4-25, an oracle option, not the contract: D4-33) is the next LimiterKind
   const known: readonly string[] = ['vanAlbadaSharp'];
-  if (!known.includes(limiter)) throw new Error(`limiter ${String(limiter)} is not implemented`);
+  if (!known.includes(limiter)) throw new Error(`limiter ${limiter} is not implemented`);
   return /* wgsl */ `
 fn sadd(a: f32, b: f32) -> f32 { return max(a, b) + min(a, b); }
 fn sadd4(a: vec4f, b: vec4f) -> vec4f { return max(a, b) + min(a, b); }

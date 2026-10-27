@@ -248,6 +248,16 @@ fn tileFace(f: u32, i0: i32, j0: i32, d0: vec4u, d1: vec4u) -> Flux {
   return Flux(bf * F.a, bf * F.b);
 }
 
+// SOLVER.md 10's increment update, dU <- dU - (1 - beta^2) (dp / c^2) (1, u, v, rw, Dh0, Z), in an
+// algebraically identical but cancellation-free order. With c^2 = cp R T / cv (soundSpeed) and
+// cv = cp - R, dp / c^2 = dRho - n with the non-acoustic density increment
+//   n = (Y dRho - d eta + u d(rho u) + v d(rho v) + w d(rho r w) / r_c) / (cp T),
+//   Y = R T - (R_inf T_inf + (u_inf^2 + q^2) / 2 - De) = R_inf T' + dR T - (u_inf^2 + q^2) / 2 + De,
+// and the density increment becomes n + beta^2 (dRho - n). The literal order computes it as
+// dRho - (1 - beta^2) dp / c^2, the difference of two numbers equal to within beta^2, which in f32
+// leaves a relative error ~1e-7 / beta^2 (2.7e-2 on ladder L8's sink at beta^2 = minMach^2 = 9e-6;
+// found by the 12.2 oracle comparison). The other components keep the literal form: their
+// preconditioning term is not the dominant part of the increment.
 fn preconditionIncrement(da: vec4f, db: vec2f, q: vec4f, z: f32, tP: f32, c: f32, rc: f32,
                          beta2: f32) -> Flux {
   let u = q.y;
@@ -256,16 +266,16 @@ fn preconditionIncrement(da: vec4f, db: vec2f, q: vec4f, z: f32, tP: f32, c: f32
   let w = rw / rc;
   let phi = productsFraction(z);
   let t = P.tInf + tP;
-  let r = gasR(phi);
-  let cv = cpMix(t, phi) - r;
+  let cp = cpMix(t, phi);
   let q2 = u * u + v * v + w * w;
   let dRho = da.x;
-  let bracket = db.x + (P.rInf * P.tInf + 0.5 * (P.uInf * P.uInf + q2) - deltaE(tP, phi)) * dRho
-    - u * da.y - v * da.z - (w * da.w) / rc;
-  let dp = r * t * dRho + (r / cv) * bracket;
-  let k = ((1.0 - beta2) * dp) / (c * c);
+  let y = P.rInf * tP + gasRDelta(phi) * t - 0.5 * (P.uInf * P.uInf + q2) + deltaE(tP, phi);
+  let n = (y * dRho - db.x + u * da.y + v * da.z + (w * da.w) / rc) / (cp * t);
+  let m = dRho - n;
+  let k = (1.0 - beta2) * m;
   let dh0 = deltaH(tP, phi) + 0.5 * dq2(u, v, w);
-  return Flux(da - k * vec4f(1.0, u, v, rw), db - k * vec2f(dh0, z));
+  return Flux(vec4f(n + beta2 * m, da.y - k * u, da.z - k * v, da.w - k * rw),
+              db - k * vec2f(dh0, z));
 }
 
 @compute @workgroup_size(TX, TY)
@@ -546,27 +556,49 @@ fn advanceTime() {
 `;
 }
 
+/** vec4 records per cell of the built-in source model's coefficients. */
+export const CELL_SOURCE_VEC4 = 8;
+
 /**
- * The built-in linear source model (section 8): rate = rate0 - k U_stage, damping = k, per cell
- * and component (coefficients: 4 vec4 per cell: rate0 (4 + 2), k (4 + 2)). Bindings: 1 U_stage,
- * 2 coefficients, 3 sources (rw). A constant source is k = 0; a point-implicit sink rate0 = 0.
+ * The built-in cell source model (section 8), per cell and component, from the stage's state:
+ *   rate = rate0 + rho aRho - kU U + s_m (1, u, v, rw, Delta h0, Z),  s_m = -kMass rho
+ *   damping = the given d
+ * (the last term is massSourceRates: a mass source at the local state, carrying its h0). This
+ * covers a constant source, a force density proportional to rho (ladder L9) and a point-implicit
+ * sink at the local state (ladder L8). Coefficients, 8 vec4 per cell: rate0 (4), (rate0 (2),
+ * kMass, 0), aRho (4), (aRho (2), 0, 0), kU (4), (kU (2), 0, 0), d (4), (d (2), 0, 0).
+ * Bindings: 1 U_stage, 2 coefficients, 3 sources (rw), 4 prim, 5 geo.
  */
-export function linearSourceKernelWgsl(o: KernelOptions): string {
+export function cellSourceKernelWgsl(o: KernelOptions): string {
   return `${header(o)}
 @group(0) @binding(1) var<storage, read> U: array<vec4f>;
 @group(0) @binding(2) var<storage, read> coef: array<vec4f>;
 @group(0) @binding(3) var<storage, read_write> src: array<vec4f>;
+@group(0) @binding(4) var<storage, read> prim: array<vec4f>;
+@group(0) @binding(5) var<storage, read> geo: array<vec4f>;
 
 @compute @workgroup_size(64)
 fn sourceMain(@builtin(global_invocation_id) gid: vec3u) {
   let c = gid.x;
   if (c >= P.nCells) { return; }
-  let ka = coef[4u * c + 2u];
-  let kb = coef[4u * c + 3u];
-  src[4u * c] = coef[4u * c] - ka * U[2u * c];
-  src[4u * c + 1u] = vec4f(coef[4u * c + 1u].xy - kb.xy * U[2u * c + 1u].xy, 0.0, 0.0);
-  src[4u * c + 2u] = ka;
-  src[4u * c + 3u] = vec4f(kb.xy, 0.0, 0.0);
+  let o = ${CELL_SOURCE_VEC4}u * c;
+  let qa = prim[2u * c];
+  let qb = prim[2u * c + 1u];
+  let rho = P.rhoInf + qa.x;
+  var ra = coef[o] + rho * coef[o + 2u] - coef[o + 4u] * U[2u * c];
+  var rb = coef[o + 1u].xy + rho * coef[o + 3u].xy - coef[o + 5u].xy * U[2u * c + 1u].xy;
+  let kMass = coef[o + 1u].z;
+  if (kMass != 0.0) {
+    let sm = -kMass * rho;
+    let w = qa.w / geo[CELL_GEO + c].x;
+    let dh0 = deltaH(qb.z, productsFraction(qb.y)) + 0.5 * dq2(qa.y, qa.z, w);
+    ra += vec4f(sm, sm * qa.y, sm * qa.z, sm * qa.w);
+    rb += vec2f(sm * dh0, sm * qb.y);
+  }
+  src[4u * c] = ra;
+  src[4u * c + 1u] = vec4f(rb, 0.0, 0.0);
+  src[4u * c + 2u] = coef[o + 6u];
+  src[4u * c + 3u] = vec4f(coef[o + 7u].xy, 0.0, 0.0);
 }
 `;
 }

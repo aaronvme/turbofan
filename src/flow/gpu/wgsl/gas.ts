@@ -141,6 +141,13 @@ fn productsFraction(z: f32) -> f32 {
 
 fn gasR(phi: f32) -> f32 { return R_AIR + phi * (R_PRD - R_AIR); }
 
+// R(phi) - R_inf. The ambient is air (R_inf = R_AIR), so this is phi (R_p - R_a) exactly; written
+// so, not as gasR(phi) - R_inf, because in f32 R_AIR + phi dR keeps only the high bits of a small
+// phi dR (at phi 1e-4 a third of it), which put an absolute error of 3e-8 p_inf into every p' and
+// 1e-2 into T' of a lean fuel trace (found by the 12.2 oracle comparison). The oracle's f64
+// gasConstantMix(phi) - ref.r is the same number to its rounding.
+fn gasRDelta(phi: f32) -> f32 { return phi * (R_PRD - R_AIR); }
+
 fn cpMix(t: f32, phi: f32) -> f32 {
   let a = cp_air(t);
   if (phi == 0.0) { return a; }
@@ -175,14 +182,14 @@ fn deltaH(tP: f32, phi: f32) -> f32 {
 
 // Delta e(T', phi) = Delta h - R_inf T' - (R - R_inf) T
 fn deltaE(tP: f32, phi: f32) -> f32 {
-  let dr = gasR(phi) - P.rInf;
+  let dr = gasRDelta(phi);
   return deltaH(tP, phi) - P.rInf * tP - dr * (P.tInf + tP);
 }
 
 // T' with Delta e(T', phi) = de: NEWTON_STEPS Newton steps from the linearised start
 fn temperatureGauge(de: f32, phi: f32) -> f32 {
   let r = gasR(phi);
-  let dr = r - P.rInf;
+  let dr = gasRDelta(phi);
   let cpInf = P.cpaInf + phi * (P.cppInf - P.cpaInf);
   var tP = (de - phi * P.dInf + dr * P.tInf) / (cpInf - r);
   for (var k = 0u; k < NEWTON_STEPS; k++) {
@@ -194,13 +201,12 @@ fn temperatureGauge(de: f32, phi: f32) -> f32 {
 // T' from the pressure and density gauges: rho R (T_inf + T') = p_inf + p'
 fn temperatureFromPressure(rhoP: f32, pP: f32, phi: f32) -> f32 {
   let r = gasR(phi);
-  return (pP - rhoP * r * P.tInf - P.rhoInf * P.tInf * (r - P.rInf)) / ((P.rhoInf + rhoP) * r);
+  return (pP - rhoP * r * P.tInf - P.rhoInf * P.tInf * gasRDelta(phi)) / ((P.rhoInf + rhoP) * r);
 }
 
 fn pressureGauge(rhoP: f32, tP: f32, phi: f32) -> f32 {
-  let r = gasR(phi);
   let rho = P.rhoInf + rhoP;
-  return rhoP * P.rInf * P.tInf + rho * P.rInf * tP + rho * (r - P.rInf) * (P.tInf + tP);
+  return rhoP * P.rInf * P.tInf + rho * P.rInf * tP + rho * gasRDelta(phi) * (P.tInf + tP);
 }
 
 // q^2 - q_inf^2 without cancellation
