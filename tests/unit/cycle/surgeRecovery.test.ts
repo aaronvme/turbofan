@@ -9,12 +9,12 @@ import {
 import { THRESHOLDS } from '../../../src/contracts/thresholds';
 import { factValue } from '../../../src/engine/facts';
 import { PART_POWER_FIT_CALIBRATION, referenceEngine } from '../../../src/cycle/engine';
-import { createCycleModel } from '../../../src/cycle/model';
+import { SUBIDLE_N2_PERCENT, createCycleModel } from '../../../src/cycle/model';
 import { compressionSystem, systemHelmholtzFrequency } from '../../../src/cycle/surgeSystem';
 import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 import { gamma, gasConstant } from '../../../src/thermo/gas';
 import { withCalibration } from '../../../src/cycle/partPower';
-import { lazy } from './fixtures';
+import { expectNoLostSolves, lazy } from './fixtures';
 
 // Transient surge scenarios (slow: whole-engine simulations of 10-40 s). The mutation config
 // (vitest.mutation.config.ts, D3-13) leaves this file out; mutants that only these tests reach are
@@ -29,7 +29,8 @@ const inputs = (over: Partial<CycleInputs>): CycleInputs => ({
   ...over,
 });
 
-function run(
+/** Steps the model, without the D4-13 check (the W1K-I2 pin loses solves on purpose). */
+function steps(
   m: CycleModel,
   seconds: number,
   dt: number,
@@ -41,30 +42,53 @@ function run(
   return out;
 }
 
+/** steps(), then D4-13: no lost gas-path solve since the model's reset. */
+function run(
+  m: CycleModel,
+  seconds: number,
+  dt: number,
+  f: (t: number) => CycleInputs,
+): CycleState[] {
+  const out = steps(m, seconds, dt, f);
+  expectNoLostSolves(m.state());
+  return out;
+}
+
 /** 14 CFR 33.73(a): from ground idle, the lever to maximum in 1 s, run for 10 s at dt 0.02 s. */
 function slam(m: CycleModel): CycleState[] {
   m.reset('groundIdle', ISA_SLS);
-  return run(m, 10, 0.02, (t) => inputs({ throttleLever: Math.min(1, t) }));
+  return steps(m, 10, 0.02, (t) => inputs({ throttleLever: Math.min(1, t) }));
 }
 
 describe('W1K-I2: why the D3-14 part-power fit was rejected', { timeout: TIMEOUT_MS }, () => {
-  it('its 33.73(a) slam surges, then hangs far below 95 % thrust (the adoption rule fails)', () => {
+  it('its 33.73(a) slam surges, then loses the matched gas path: the "hang" is a lost solve (D4-13)', () => {
     // Pins the D3-14 adoption-rule rejection in the repo instead of on a scratch copy (critic pass
     // 5, probe w1k-calib). On the fit the HPC working line crosses the surge line about 1.5 s into
     // the slam (min margin below zero, the surge flag raised). Then, at N2 about 74 % with the VBV
-    // still fully open (the fit opens it below 75 % N2c), the matched gas path stops converging and
-    // the engine hangs at N1 about 35 %, 10-11 kN, until the end of the 10 s. The reference makes
-    // 95 % thrust at about 5.8 s without a surge (model.test.ts).
+    // still fully open (the fit opens it below 75 % N2c), the matched gas path stops converging.
+    // Before D4-13 the model fell back to the sub-idle similarity model there without a word, and
+    // the engine "hung" at N1 about 35 %, 10-11 kN; now the state holds the last converged gas path
+    // and says so. The reference makes 95 % thrust at about 5.8 s without a surge (model.test.ts).
     const states = slam(
       createCycleModel({ engine: withCalibration(referenceEngine(), PART_POWER_FIT_CALIBRATION) }),
     );
     expect(states.some((s) => s.flags.surge)).toBe(true);
     expect(Math.min(...states.map((s) => s.hpc.surgeMarginFraction))).toBeLessThan(0);
+    // the real cause: lost matched solves, lit and fuelled above the sub-idle switch
+    const first = states.find((s) => s.gasPathSolve.lostSolves > 0);
+    expect(first, 'a lost solve').toBeDefined();
+    expect(first?.combustorLit).toBe(true);
+    expect(first?.n2Percent ?? 0).toBeGreaterThan(SUBIDLE_N2_PERCENT);
+    expect(states.some((s) => s.gasPathSolve.status === 'held')).toBe(true);
+    // never the silent switch: above the switch, lit and fuelled, a state is matched or held
+    for (const s of states) {
+      if (s.combustorLit && s.fuelFlowKgPerS > 0 && s.n2Percent >= SUBIDLE_N2_PERCENT) {
+        expect(s.gasPathSolve.status).not.toBe('subIdle');
+      }
+    }
+    // and the adoption rule fails: no 95 % thrust in the 10 s
     const target = THRESHOLDS.C5.values.thrustFraction.value * takeoff;
     expect(Math.max(...states.map((s) => s.netThrustN))).toBeLessThan(target);
-    const end = states[states.length - 1];
-    expect(end?.n1Percent ?? Infinity).toBeLessThan(40);
-    expect(end?.netThrustN ?? Infinity).toBeLessThan(0.15 * takeoff);
   });
 });
 
@@ -196,6 +220,7 @@ describe('W1C-I2: the model surges on its own compression system', { timeout: TI
     expect(p3.length).toBeGreaterThan(0);
     expect(reverse).toBeGreaterThan(0);
     expect(m.state().flags.surge).toBe(false);
+    expectNoLostSolves(m.state());
     // period of the P3 oscillation vs the derived Helmholtz period at the onset state
     const mean = p3.reduce((a, b) => a + b, 0) / p3.length;
     const ups: number[] = [];

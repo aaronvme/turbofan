@@ -557,6 +557,8 @@ function buildState(ctx: Context, s: Internal): CycleState {
       n2Overspeed: n2Rpm > def.limits.n2MaxRpm,
       egtExceedance: egtDisplayedK > egtLimit,
     },
+    // the mock's closed-form gas path has no solve to lose (D4-13)
+    gasPathSolve: { status: 'matched', lostSolves: 0 },
   };
   return deepFreeze(state);
 }

@@ -10,6 +10,7 @@ import {
 } from '../../../src/contracts/cycle';
 import { factValue } from '../../../src/engine/facts';
 import { createCycleModel, leverForNetThrust, SPOOL_INERTIA } from '../../../src/cycle/model';
+import { expectNoLostSolves } from './fixtures';
 
 // The pure C9 Greitzer tests are in greitzer.test.ts; this file holds the slow whole-engine
 // transients, which the mutation config (vitest.mutation.config.ts, D3-13) leaves out.
@@ -38,6 +39,8 @@ function run(
     out.push(s);
     if (stop?.(s) === true) break;
   }
+  // D4-13: no lost gas-path solve since the model's reset, in every run of this file
+  expectNoLostSolves(m.state());
   return out;
 }
 

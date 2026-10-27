@@ -19,6 +19,7 @@ import {
   N2_LIMIT_MARGIN_PERCENT,
   createCycleModel,
 } from '../../../src/cycle/model';
+import { expectNoLostSolves } from './fixtures';
 
 /** Simulation tests take 1-10 s each; Stryker's instrumented runs are several times slower. */
 const TIMEOUT_MS = 600_000;
@@ -33,6 +34,8 @@ const inputs = (over: Partial<CycleInputs> = {}): CycleInputs => ({
 function run(m: CycleModel, seconds: number, dt: number, f: () => CycleInputs): CycleState[] {
   const out: CycleState[] = [];
   for (let i = 0; i < Math.round(seconds / dt); i++) out.push(m.step(dt, f()));
+  // D4-13: no lost gas-path solve since the model's reset, in every run of this file
+  expectNoLostSolves(m.state());
   return out;
 }
 
@@ -55,6 +58,7 @@ describe('CycleModel.step input checks', () => {
     expect(m.state()).toBe(before);
     // dt = 0 is allowed: no time passes
     expect(m.step(0, inputs()).timeS).toBe(0);
+    expectNoLostSolves(m.state());
   });
 });
 
@@ -219,6 +223,7 @@ describe('flameout, relight and shutdown', { timeout: TIMEOUT_MS }, () => {
     expect(s.fadec.mode).toBe('start');
     expect(s.startPhase).toBe('cranking');
     expect(s.starterEngaged).toBe(true);
+    expectNoLostSolves(s);
   });
 });
 
@@ -236,6 +241,7 @@ describe('start aborts', { timeout: TIMEOUT_MS }, () => {
     const later = last(run(m, 5, 0.1, () => inputs({ starter: false, fuelLever: 'cutoff' })));
     expect(later.n2Rpm).toBeLessThan(s.n2Rpm);
     expect(later.fuelFlowKgPerS).toBe(0);
+    expectNoLostSolves(later);
   });
 
   it('fuel cutoff after light-off puts out the fire; with the starter held it is a dry crank', () => {
@@ -255,6 +261,7 @@ describe('start aborts', { timeout: TIMEOUT_MS }, () => {
     expect(cut.startPhase).toBe('cranking');
     const released = m.step(0.1, inputs({ starter: false, fuelLever: 'cutoff' }));
     expect(released.startPhase).toBe('aborted');
+    expectNoLostSolves(released);
   });
 });
 
@@ -272,6 +279,7 @@ describe('surge episode', { timeout: TIMEOUT_MS }, () => {
     const after = run(m, 1, 0.02, () => inputs({ throttleLever: 0.6 }));
     expect(last(after).flags.surge).toBe(false);
     expect(last(after).hpc.surgeMarginFraction).toBeGreaterThan(0);
+    expectNoLostSolves(last(after));
   });
   it('an injected surge on a stopped or sub-idle engine is ignored (no pressurised HPC to surge)', () => {
     const m = createCycleModel();
@@ -280,6 +288,7 @@ describe('surge episode', { timeout: TIMEOUT_MS }, () => {
     const s = m.step(0.05, inputs({ fuelLever: 'cutoff' }));
     expect(s.flags.surge).toBe(false);
     expect(validateCycleState(s, refs)).toEqual([]);
+    expectNoLostSolves(s);
   });
 });
 

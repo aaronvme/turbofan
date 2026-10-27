@@ -97,7 +97,8 @@ export const SPOOL_INERTIA = { lpKgM2: 60, hpKgM2: 10 } as const;
 const DT_INTERNAL = 0.02;
 /** Light-off delay after fuel and igniters (ENGINE_FACTS lightOffDelay, a model assumption). */
 const LIGHT_OFF_DELAY_S = factValue('lightOffDelay');
-const SUBIDLE_N2_PERCENT = 57;
+/** Below this N2 (or unlit, or without fuel) the gas path is the sub-idle similarity model. */
+export const SUBIDLE_N2_PERCENT = 57;
 /** FADEC gains: integrator rate per unit fractional error (1/s), rate-feedback time (s). */
 const K_LOOP = 2;
 const TD = 0.7;
@@ -209,6 +210,11 @@ export interface CycleModelOptions {
    * not. 0 by default.
    */
   readonly hpcSurgeMarginLoss?: number;
+  /**
+   * Test hook: the matched gas-path solver (engine.ts solveGasPath by default), so that a test
+   * can lose a solve on purpose (D4-13).
+   */
+  readonly gasPathSolver?: typeof solveGasPath;
 }
 
 interface Schedules {
@@ -1056,6 +1062,8 @@ class TurbofanCycleModel implements CycleModel {
       fadec: { mode: this.mode, limiter: this.limiter, n1TargetPercent: this.n1Target },
       startPhase: this.phase,
       flags,
+      // D4-13 stub (TDD)
+      gasPathSolve: { status: 'matched', lostSolves: 0 },
     };
   }
 }

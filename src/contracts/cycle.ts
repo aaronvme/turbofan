@@ -109,6 +109,23 @@ export interface FadecStatus {
   readonly n1TargetPercent: number;
 }
 
+/**
+ * D4-13: how the gas path of a state was solved.
+ * - matched: the matched map model converged on a physical root.
+ * - subIdle: the sub-idle similarity model, used only in a genuine sub-idle state (a start, a
+ *   windmill, a shutdown: below the sub-idle switch, unlit, or without fuel).
+ * - held: above the sub-idle switch the matched solve was lost, and the state holds the last
+ *   converged gas path. Never silent, never the sub-idle model.
+ */
+export const GAS_PATH_SOLVE_STATUSES = ['matched', 'subIdle', 'held'] as const;
+export type GasPathSolveStatus = (typeof GAS_PATH_SOLVE_STATUSES)[number];
+
+export interface GasPathSolve {
+  readonly status: GasPathSolveStatus;
+  /** Matched solves lost since the last reset (D4-13: zero in every transient and scenario test). */
+  readonly lostSolves: number;
+}
+
 export interface CycleFlags {
   readonly surge: boolean;
   readonly flameout: boolean;
@@ -150,6 +167,7 @@ export interface CycleState {
   readonly fadec: FadecStatus;
   readonly startPhase: StartPhase;
   readonly flags: CycleFlags;
+  readonly gasPathSolve: GasPathSolve;
 }
 
 export type CycleFault = 'surge' | 'flameout';

@@ -65,6 +65,7 @@ export function sampleCycleState(): CycleState {
       n2Overspeed: false,
       egtExceedance: false,
     },
+    gasPathSolve: { status: 'matched', lostSolves: 0 },
   };
 }
 
