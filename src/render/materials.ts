@@ -38,6 +38,7 @@ import {
   float,
   floor,
   Fn,
+  If,
   fract,
   fwidth,
   hash,
@@ -84,6 +85,12 @@ export interface LookUniforms {
   readonly fanCopies: UniformNode<'float', number>;
   /** Per-frame offset in [0, 1) of the fan copy each pixel picks (an R2 sequence, the view). */
   readonly fanSeed: UniformNode<'float', number>;
+  /**
+   * The angle each spool turned since the previous frame, rad (signed): the rotor motion
+   * vectors TRAA reprojects with (W1V-I1 fix b, D4-4; src/render/post.ts).
+   */
+  readonly lpStep: UniformNode<'float', number>;
+  readonly hpStep: UniformNode<'float', number>;
 }
 
 /** Time-offset copies of the fan drawn per frame (stochastic blur, src/render/post.ts). */
@@ -98,6 +105,8 @@ export function createLookUniforms(): LookUniforms {
     heat: uniform(1),
     fanCopies: uniform(FAN_TIME_SAMPLES),
     fanSeed: uniform(0),
+    lpStep: uniform(0),
+    hpStep: uniform(0),
   };
 }
 
@@ -161,6 +170,23 @@ const resolved = (coord: Node<'vec2'>, period: number): F => fade(length(fwidth(
 const resolved1 = (coord: F, period: number): F => fade(fwidth(coord), period);
 
 /**
+ * `detail` times its visibility `weight`, with the detail evaluated only where the weight is
+ * non-zero (LOD round 2, D4-5: a fine noise lookup on a surface that fills much of the frame
+ * costs every pixel even where its fade has made it sub-pixel). The weight holds the
+ * derivatives and is computed before the branch, so the branch body (no derivatives) is
+ * legal in non-uniform control flow (WGSL uniformity); at the default view whole warps skip it.
+ */
+const gated = (weight: F, detail: () => F): F =>
+  Fn(() => {
+    const w = weight.toVar();
+    const v = float(0).toVar();
+    If(w.greaterThan(0.002), () => {
+      v.assign(detail().mul(w));
+    });
+    return v;
+  })();
+
+/**
  * A smooth, low-frequency pattern evaluated per vertex and interpolated (LOD round, D4-5: the
  * opaque pass is bound by its fragment shading, and procedural noise is most of it). Only for
  * periods well above the mesh's vertex spacing (192 segments: under 4 cm round the nacelle).
@@ -217,8 +243,11 @@ function heatTint(base: Node<'vec3'>, u: LookUniforms, amount: number): Node<'ve
  * pixel at reduced contrast (energy conserving down to 40 %), so distant seams stay faint
  * lines instead of vanishing.
  */
-const seamLine = (d: F, w: number): F => {
-  const aa = fwidth(d).max(1e-6);
+const seamLine = (d: F, w: number): F => seamLineAA(d, w, fwidth(d));
+
+/** `seamLine` with its filter width given (so it can run in a branch: no derivative in it). */
+const seamLineAA = (d: F, w: number, filter: F): F => {
+  const aa = filter.max(1e-6);
   const width = max(float(w), aa);
   const k = float(2 * w)
     .div(aa.mul(2).max(2 * w))
@@ -253,6 +282,26 @@ function nacellePaint(): MeshPhysicalNodeMaterial {
   const arcTo = (t0: number): F => abs(wrapPi(th.sub(t0))).mul(r);
   const within = (x0: number, x1: number): F =>
     smoothstep(x0 - 0.002, x0, x).mul(smoothstep(x1 + 0.002, x1, x));
+  // the pixel's footprint on the skin (m), taken once where derivatives are legal: the small
+  // features below are evaluated only near them (LOD round 2, D4-5: most of the skin is far
+  // from every latch and door, and whole warps skip them)
+  const foot = max(fwidth(x), length(fwidth(p.yz)));
+  const near = (cx: number, ct: number, hx: number, hs: number) =>
+    abs(x.sub(cx))
+      .lessThan(hx)
+      .and(
+        abs(wrapPi(th.sub(ct)))
+          .mul(r)
+          .lessThan(hs),
+      );
+  const only = (cond: Node<'bool'>, value: () => F): F =>
+    Fn(() => {
+      const v = float(0).toVar();
+      If(cond, () => {
+        v.assign(value());
+      });
+      return v;
+    })();
   // a rounded rectangle's outline at (x, theta) centre, half sizes in metres
   const rectOutline = (cx: number, ct: number, hx: number, hs: number, rr: number, w: number) => {
     const q = vec2(abs(x.sub(cx)), abs(wrapPi(th.sub(ct))).mul(r));
@@ -260,7 +309,7 @@ function nacellePaint(): MeshPhysicalNodeMaterial {
     const d = length(max(e, vec2(0, 0)))
       .add(min(max(e.x, e.y), 0))
       .sub(rr);
-    return seamLine(abs(d), w);
+    return seamLineAA(abs(d), w, foot);
   };
   const J = [-0.55, -0.06, 0.45] as const;
   const joints = max(
@@ -276,33 +325,43 @@ function nacellePaint(): MeshPhysicalNodeMaterial {
       seamLine(arcTo(Math.PI), 0.0016),
     ).mul(max(fanCowl, reverser)),
   );
-  const latches = max(
+  const latches = only(near(0.6, Math.PI, 0.64, 0.05), () =>
     max(
       max(
-        rectOutline(0.04, Math.PI, 0.065, 0.024, 0.006, 0.001),
-        rectOutline(0.2, Math.PI, 0.065, 0.024, 0.006, 0.001),
+        max(
+          rectOutline(0.04, Math.PI, 0.065, 0.024, 0.006, 0.001),
+          rectOutline(0.2, Math.PI, 0.065, 0.024, 0.006, 0.001),
+        ),
+        rectOutline(0.36, Math.PI, 0.065, 0.024, 0.006, 0.001),
       ),
-      rectOutline(0.36, Math.PI, 0.065, 0.024, 0.006, 0.001),
-    ),
-    max(
-      rectOutline(0.75, Math.PI, 0.055, 0.022, 0.006, 0.001),
-      rectOutline(1.15, Math.PI, 0.055, 0.022, 0.006, 0.001),
+      max(
+        rectOutline(0.75, Math.PI, 0.055, 0.022, 0.006, 0.001),
+        rectOutline(1.15, Math.PI, 0.055, 0.022, 0.006, 0.001),
+      ),
     ),
   );
   const doors = max(
-    max(
-      rectOutline(0.2, 1.32, 0.12, 0.1, 0.022, 0.0012),
-      rectOutline(0.3, 1.32, 0.018, 0.03, 0.004, 0.0008),
+    only(near(0.2, 1.32, 0.15, 0.13), () =>
+      max(
+        rectOutline(0.2, 1.32, 0.12, 0.1, 0.022, 0.0012),
+        rectOutline(0.3, 1.32, 0.018, 0.03, 0.004, 0.0008),
+      ),
     ),
-    rectOutline(0.95, 1.92, 0.085, 0.065, 0.012, 0.0012),
+    only(near(0.95, 1.92, 0.11, 0.09), () => rectOutline(0.95, 1.92, 0.085, 0.065, 0.012, 0.0012)),
   );
   // flush fasteners 15 mm aft of each circumferential joint, 45 mm apart
   const rowX = min(
     min(abs(x.sub(J[0] + 0.015)), abs(x.sub(J[1] + 0.015))),
     abs(x.sub(J[2] + 0.015)),
   );
-  const along = fract(th.mul(r).div(0.045)).sub(0.5).abs().mul(0.045);
-  const rivet = aaLine(length(vec2(rowX, along)), 0.0017).mul(resolved(vec2(x, th.mul(r)), 0.045));
+  const rivetFade = resolved(vec2(x, th.mul(r)), 0.045);
+  const rivet = only(rowX.lessThan(0.006).and(rivetFade.greaterThan(0.002)), () => {
+    const along = fract(th.mul(r).div(0.045)).sub(0.5).abs().mul(0.045);
+    const d = length(vec2(rowX, along));
+    return float(1)
+      .sub(smoothstep(float(0.0017).sub(foot), float(0.0017).add(foot), d))
+      .mul(rivetFade);
+  });
   const seam = max(max(max(joints, longi), max(latches, doors)), rivet.mul(0.6));
   // panel-to-panel tone and gloss
   const right = smoothstep(-0.02, 0.02, th);
@@ -334,7 +393,9 @@ function nacellePaint(): MeshPhysicalNodeMaterial {
   const grooveDepth = seam.mul(-6e-4).mul(resolved1(x, 0.02));
   m.normalNode = bumpNormal(grooveDepth, 1, canning);
   const broad = perVertex(mx_fractal_noise_float(p.mul(2.2), 2, 2, 0.5));
-  const wipe = mx_noise_float(vec3(x.mul(1.6), p.y.mul(16), p.z.mul(16)));
+  // wipe streaks per vertex (a 6 cm period round the skin, about 2 vertex spacings: the
+  // interpolation softens them a little, at +-0.035 roughness; LOD round 2)
+  const wipe = perVertex(mx_noise_float(vec3(x.mul(1.6), p.y.mul(16), p.z.mul(16))));
   const low = smoothstep(-0.35, -0.85, p.y);
   const white = vec3(0.78, 0.785, 0.79);
   m.colorNode = white
@@ -370,7 +431,9 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
       const edge = select(outer, float(-0.695), float(-0.665));
       const metal = smoothstep(edge.add(0.001), edge.sub(0.001), lx);
       const seam = seamLine(abs(lx.sub(edge)), 0.0012);
-      const buff = mx_noise_float(vec3(lx.mul(180), pl.y.mul(6), pl.z.mul(6)));
+      const buff = gated(resolved1(lx, 1 / 180), () =>
+        mx_noise_float(vec3(lx.mul(180), pl.y.mul(6), pl.z.mul(6))),
+      );
       const broad = perVertex(mx_fractal_noise_float(pl.mul(3), 2, 2, 0.5));
       const al = vec3(0.8, 0.805, 0.81).mul(float(1).add(broad.mul(0.025)));
       const paint = select(outer, vec3(0.78, 0.785, 0.79), vec3(0.6, 0.605, 0.61)).mul(
@@ -386,9 +449,7 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
         float(0.28).add(broad.mul(0.05)),
         // 0.42, not 0.34: the isotropic lobe stands in for the dropped 0.3 anisotropy, which
         // had widened it (at 0.34 the band read as chrome again in 01)
-        float(0.42)
-          .add(buff.mul(0.035).mul(resolved1(lx, 1 / 180)))
-          .add(broad.mul(0.04)),
+        float(0.42).add(buff.mul(0.035)).add(broad.mul(0.04)),
         metal,
       ).add(seam.mul(0.3));
       break;
@@ -626,7 +687,9 @@ function rowSurface(kind: RowMaterial, u: LookUniforms): MeshPhysicalNodeMateria
       m.anisotropyNode = vec2(0, 0.45);
       // leading-edge erosion: a slightly brighter, rougher band along the first few % of chord
       const le = float(1).sub(smoothstep(0.0, 0.05, chord));
-      const grain = mx_noise_float(positionLocal.mul(vec3(30, 260, 260))).mul(0.03);
+      // the 4 mm grain is sub-pixel in every shot but the closest: faded and gated (D4-5)
+      const pg = positionLocal.mul(vec3(30, 260, 260));
+      const grain = gated(resolved(pg.yz, 1), () => mx_noise_float(pg)).mul(0.03);
       m.colorNode = ti.mul(float(1).add(le.mul(0.08)).add(jit.mul(0.02)));
       m.roughnessNode = float(0.3).add(le.mul(0.1)).add(grain).add(jit.mul(0.025));
       return m;
@@ -740,10 +803,16 @@ export function createMaterials(u: LookUniforms): MaterialSet {
           const pitch = uniform(0).onObjectUpdate(({ object }) =>
             object instanceof InstancedMesh ? TWO_PI / object.count : TWO_PI,
           );
-          // b = 1 marks fan blades: the fan blur march hits only them (src/render/post.ts)
+          // b = 1 marks fan blades: the fan blur march hits only them (src/render/post.ts);
+          // a is the spool (1 LP, 2 HP): TRAA's rotor motion vectors turn it by its own step
           const fanFlag = kind === 'fanBlade' ? 1 : 0;
           m.mrtNode = mrt({
-            blur: vec4(spool === 'lp' ? u.lpBlur : u.hpBlur, pitch, fanFlag, 1),
+            blur: vec4(
+              spool === 'lp' ? u.lpBlur : u.hpBlur,
+              pitch,
+              fanFlag,
+              spool === 'lp' ? 1 : 2,
+            ),
           });
           if (kind === 'fanBlade') {
             // the pick was made in the depth pre-pass: only the picked copy's front fragment

@@ -11,8 +11,12 @@
 // the floor's plus MARGIN in every pose. MARGIN: the probe's unfixed excess was 14-18 tiles in
 // the close-ups and the cutaway preset, 5 in the exploded preset and hotSection; 6 tiles is
 // below the close-ups' excess and above what TRAA's convergence in motion adds elsewhere.
-// Negative control: with `noRotorMotion` (the old zero velocity) the cutaway close-up must
-// exceed the bound, so the test can see the ghosting it guards against.
+// Negative control: the pre-fix pipeline (`legacyTraa`: three r186's own resolve on the scene's
+// depth and zero rotor velocity) must exceed the bound in the cutaway close-up, so the test
+// can see the ghosting it guards against. (First written as `noRotorMotion` alone; with our
+// resolve, src/render/traaResolve.ts, its tighter clip no longer ghosts at zero velocity, 8
+// tiles: it rejects the history instead of accumulating it, so the control had to be the old
+// pipeline. The bound is unchanged.)
 
 import { afterAll, describe, expect, it } from 'vitest';
 import { commands } from 'vitest/browser';
@@ -55,16 +59,19 @@ describe('W1V-I1 (b): TRAA reprojects the turning rotors', () => {
     c.width = W;
     c.height = H;
     document.body.appendChild(c);
-    view = await createEngineView({
-      gpu: navigator.gpu,
-      canvas: c,
-      definition: ENGINE_DEFINITION,
-      width: W,
-      height: H,
-      dpr: 1,
-      quality: 'high',
-    });
-    const v = view;
+    const open = (legacyTraa: boolean) =>
+      createEngineView({
+        gpu: navigator.gpu,
+        canvas: c,
+        definition: ENGINE_DEFINITION,
+        width: W,
+        height: H,
+        dpr: 1,
+        quality: 'high',
+        legacyTraa,
+      });
+    view = await open(false);
+    let v = view;
     const measure = async (name: string, pose: Pose, flags: DebugFlags) => {
       const place = () => {
         v.setPreset(pose.preset);
@@ -103,11 +110,13 @@ describe('W1V-I1 (b): TRAA reprojects the turning rotors', () => {
       rows.push(`${name}: at rest ${String(r.floor)} tiles | moving ${String(r.moving)} tiles`);
       if (r.moving > r.floor + MARGIN) failures.push(name);
     }
-    const control = await measure('control-cutawayFanClose', CUTAWAY_FAN_CLOSE, {
-      noRotorMotion: true,
-    });
+    expect(v.stats().errors).toEqual([]);
+    await v.dispose();
+    view = await open(true);
+    v = view;
+    const control = await measure('control-cutawayFanClose', CUTAWAY_FAN_CLOSE, {});
     rows.push(
-      `control (noRotorMotion) cutawayFanClose: at rest ${String(control.floor)} | moving ${String(control.moving)} tiles`,
+      `control (legacyTraa: three's resolve, zero rotor velocity) cutawayFanClose: at rest ${String(control.floor)} | moving ${String(control.moving)} tiles`,
     );
     await commands.writeFile('test-results/rotorMotion.txt', `${rows.join('\n')}\n`);
     console.warn(`W1V-I1 rotor motion\n${rows.join('\n')}`);

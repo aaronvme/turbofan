@@ -28,7 +28,7 @@ import {
   GEOMETRY_QUALITY,
   type EngineGeometry,
 } from '../geometry/engineGeometry';
-import { cutawayWedge } from '../geometry/cutaway';
+import { cutawayWedge, wrapAngle } from '../geometry/cutaway';
 import { easeInOut, explodeOffsets } from '../geometry/explode';
 import { advanceAngle, shutterBlurAngle, spoolDisplayFactor } from '../geometry/motion';
 import { screenRectOfBox, type Box3Like } from '../geometry/screenRect';
@@ -64,6 +64,11 @@ export interface EngineViewOptions {
   readonly timing?: boolean;
   /** `quality` (full resolution, the default) or `performance` (dynamic resolution, D3-7). */
   readonly profile?: RenderProfileId;
+  /**
+   * Tests only: the pre-W1V-I1 TRAA (three r186's own resolve, the scene's depth and velocity
+   * only), the negative control of tests/browser/rotorMotion.test.ts.
+   */
+  readonly legacyTraa?: boolean;
 }
 
 export interface EngineViewStats {
@@ -155,6 +160,10 @@ export interface DebugFlags {
   readonly flatNames?: string;
   /** The main pass with one trivial unlit material (what its materials cost, D4-5). */
   readonly flat?: boolean;
+  /** Rotor pixels keep the main pass's zero velocity in TRAA (W1V-I1: the old behaviour). */
+  readonly noRotorMotion?: boolean;
+  /** Scales the rotor motion vectors' spool steps (a probe of their sign and size). */
+  readonly rotorMotionScale?: number;
 }
 
 const FPS = 60;
@@ -266,6 +275,9 @@ async function assemble(
     bloomStrength: 0.06,
     bloomThreshold: 1.6,
     debug: o.debug ?? null,
+    ...(o.legacyTraa === true
+      ? { legacyTraa: true }
+      : { rotorMotion: { lpStep: uniforms.lpStep, hpStep: uniforms.hpStep } }),
   });
 
   const cycle = createMockCycle(def);
@@ -429,8 +441,15 @@ async function assemble(
         n1Rpm: cycleSpeeds.n1Rpm * spoolFactor,
         n2Rpm: cycleSpeeds.n2Rpm * spoolFactor,
       };
+      const lpWas = lp;
+      const hpWas = hp;
       lp = advanceAngle(lp, st.n1Rpm, def.rotation.lp, dtS);
       hp = advanceAngle(hp, st.n2Rpm, def.rotation.hp, dtS);
+      // what each spool turned since the last frame (TRAA's rotor motion vectors); a phase
+      // set by a debug flag is a jump, not motion
+      const motionK = flags.noRotorMotion === true ? 0 : (flags.rotorMotionScale ?? 1);
+      uniforms.lpStep.value = motionK * wrapAngle(lp - lpWas);
+      uniforms.hpStep.value = motionK * wrapAngle(hp - hpWas);
       const lpShown = lp + (flags.lpPhase ?? 0);
       for (const g of scene.spoolGroups.lp) g.rotation.x = lpShown;
       for (const g of scene.spoolGroups.hp) g.rotation.x = hp;
