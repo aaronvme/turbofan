@@ -138,6 +138,17 @@ Never quote personal data (emails, keys, tokens) in this file.
   - **The end-to-end checks of record stay P2 (≥ 55 fps) and L13,** with the solver and flow visuals running.
   - **This changes a measurement method, not the threshold, so it applies only after the critic independently confirms the DVFS evidence.** Until then P4 is reported both ways and must pass both.
   - The capture tool gets a back-to-back mode in the next look-dev round. The official vsync run of bad7ad0 runs in this cap pause as the baseline (D3-7 had 10.18 ms).
+- **D4-25 (w2/reference round 3 @ca296ae, question a): the smooth van Albada limiter is adopted.** This is the ε-regularised, differentiable form, standard for steady and implicit solvers. The ab > 0 switch caused L9a's stall and D4-20's stall wherever M_cut ≤ the local Mach.
+  - The ε rule and its scaling are stated in SOLVER.md.
+  - L2/L4's shock rows and the positivity fallback must stay green.
+  - The kernel implements the smooth form.
+- **D4-26 (question b): L7 runs at 96 × 96,** on the same rule as D4-9. The Cp asymmetry falls with refinement (0.35, then 0.043 after D4-20, then 0.013 at 96 × 96), so it is discretisation error. The case is accepted at the finer resolution provided a two-refinement sequence shows that convergence, and the resolution goes into PHYSICS.md "CPU variants" first. The threshold stays at 0.02.
+- **D4-27 (question c): L8 stays FAIL, and an unstable M_cut band blocks the engine value.**
+  - The symptom: a polar mode grows for M_cut in 0.0025-0.004, and that band contains the engine's 0.003 (its ~1 m/s far-field suction).
+  - Picking an M_cut outside the band to pass the case would be tuning. A band of instability around the operating value is a scheme defect that the kernel would inherit.
+  - Next: find the mechanism by a linear (von Neumann / eigenvalue) analysis of the scaled-dissipation scheme on the polar axis cells, with the smooth limiter. Fix it there.
+  - The critic gets an independent read in pass 7. W2/solver may start on the settled scheme, but its M_cut term is not final until this closes.
+- **D4-28 (question d): the D4-23 point-implicit swirl Jacobian is dropped.** It is nilpotent here and had no effect, and the stall came from the limiter (D4-25). The source stays explicit, and SOLVER.md says why.
 
 
 
