@@ -152,10 +152,14 @@ describe('setBlockage validates b in (0, 1]', () => {
     for (const bad of [0, -0.1, 1.0000001, Number.NaN]) {
       const b = Float64Array.from(blocked);
       b[5] = bad;
-      expect(() => s.setBlockage(b)).toThrow(/blockage/);
+      expect(() => {
+        s.setBlockage(b);
+      }).toThrow(/blockage/);
       expect(s.blockage.every((x) => x === 1)).toBe(true);
     }
-    expect(() => s.setBlockage(blocked.subarray(0, duct.nCells - 1))).toThrow(/blockage/);
+    expect(() => {
+      s.setBlockage(blocked.subarray(0, duct.nCells - 1));
+    }).toThrow(/blockage/);
     s.setBlockage(blocked);
     expect(s.blockage).toEqual(blocked);
   });

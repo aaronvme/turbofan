@@ -452,7 +452,9 @@ describe('physical time passes each stage its own time to the sources', () => {
     s.stepPhysical(1e-3);
     const stages = [0, 2e-3, 1e-3, 2e-3, 3e-3, 2.5e-3];
     expect(seen.length).toBe(stages.length);
-    stages.forEach((t, i) => expect(Math.abs((seen[i] ?? NaN) - t)).toBeLessThan(1e-15));
+    stages.forEach((t, i) => {
+      expect(Math.abs((seen[i] ?? NaN) - t)).toBeLessThan(1e-15);
+    });
     // rho Z(t) = k t^2 / 2 at t = 3 ms
     for (let c = 0; c < box.nCells; c++)
       expect(Math.abs((s.U[6 * c + 5] as number) - (k * 3e-3 ** 2) / 2)).toBeLessThan(
