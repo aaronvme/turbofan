@@ -78,8 +78,9 @@ describe('D4-13: a lost gas-path solve is held and flagged', { timeout: TIMEOUT_
     expect(held.n2Percent).toBeGreaterThan(SUBIDLE_N2_PERCENT);
     expect(held.combustorLit).toBe(true);
     expect(held.gasPathSolve.status).toBe('held');
-    expect(ctl.calls).toBeGreaterThan(0);
-    expect(held.gasPathSolve.lostSolves).toBe(ctl.calls);
+    expect(held.gasPathSolve.lostSolves).toBeGreaterThan(0);
+    // each lost solve is the direct try and the continuation's first step, which ends the walk
+    expect(ctl.calls).toBe(2 * held.gasPathSolve.lostSolves);
     // the gas path is the last converged one, exactly: not re-modelled by the similarity model
     expect(held.stations).toEqual(before.stations);
     expect(held.netThrustN).toBe(before.netThrustN);
@@ -105,7 +106,8 @@ describe('D4-13: a lost gas-path solve is held and flagged', { timeout: TIMEOUT_
   it('a converged root that is not physical (bypass ratio below 1) is a lost solve too', () => {
     const { ctl, before, held } = accelerating('nonPhysical');
     expect(held.gasPathSolve.status).toBe('held');
-    expect(held.gasPathSolve.lostSolves).toBe(ctl.calls);
+    expect(held.gasPathSolve.lostSolves).toBeGreaterThan(0);
+    expect(ctl.calls).toBe(2 * held.gasPathSolve.lostSolves);
     expect(held.stations).toEqual(before.stations);
   });
 
