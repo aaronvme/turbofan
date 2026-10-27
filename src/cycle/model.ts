@@ -11,6 +11,11 @@
 //   compressor flow ~ N, PR - 1 ~ N^2, power ~ N^3; turbine power from the actual combustor
 //   energy balance, scaled from the anchor by flow, inlet temperature and expansion. The two
 //   agree exactly at the anchor.
+// - D4-13: the similarity model runs only in a genuine sub-idle state (a start, a windmill, a
+//   shutdown). A matched solve lost above the switch (no convergence, or a non-physical root)
+//   holds the last converged gas path and says so in the state (gasPathSolve: status 'held', the
+//   lost solves counted since the reset); the shafts integrate the held power balance and every
+//   substep retries the solve from the last converged unknowns.
 // - FADEC: throttle -> N1 target; one Wf/P3 ("ratio unit") integrator driven by the selected
 //   loop (max of N1 target and the N2 idle floor, then min of the N1, N2 and EGT limiters), with
 //   rate feedback for damping, clamped between decel and accel schedules built from the steady
@@ -40,6 +45,7 @@ import {
   type CycleState,
   type FadecLimiter,
   type FadecMode,
+  type GasPathSolveStatus,
   type MapOperatingPoint,
   type StartPhase,
   type StationState,
@@ -235,6 +241,8 @@ interface Snapshot {
   readonly grossThrustN: number;
   readonly fan: MapOperatingPoint;
   readonly hpc: MapOperatingPoint;
+  /** Which model gave this gas path (D4-13). */
+  readonly solve: GasPathSolveStatus;
 }
 
 const conditionsOf = (i: CycleInputs): OperatingConditions => ({
@@ -373,6 +381,11 @@ class TurbofanCycleModel implements CycleModel {
   private surgeCap: number | null = null;
   private readonly surgeSystem: CompressionSystem;
   private last!: CycleState;
+  private readonly solveGas: typeof solveGasPath;
+  /** The last converged gas path (matched, or the sub-idle model's), held on a lost solve. */
+  private held!: Snapshot;
+  /** Matched solves lost since the last reset (D4-13). */
+  private lostSolves = 0;
   private inputs: CycleInputs = DEFAULT_CYCLE_INPUTS;
 
   constructor(definition: EngineDefinition, opts: CycleModelOptions) {
@@ -384,6 +397,7 @@ class TurbofanCycleModel implements CycleModel {
       throw new Error(`hpcSurgeMarginLoss ${this.surgeLoss} must be in [0, 1)`);
     }
     this.surgeSystem = compressionSystem(definition);
+    this.solveGas = opts.gasPathSolver ?? solveGasPath;
   }
 
   reset(initial: CycleInitialCondition, ambient: AmbientConditions = ISA_SLS): CycleState {
@@ -435,6 +449,10 @@ class TurbofanCycleModel implements CycleModel {
       this.inputs = { ...DEFAULT_CYCLE_INPUTS, ambient };
     }
     this.n1Target = 0;
+    this.lostSolves = 0;
+    // the steady idle point is a converged gas path at the ambient (a start replaces it with the
+    // sub-idle model's before the matched model is ever tried)
+    this.held = this.fromPoint(idle.point);
     this.last = this.compose(this.snapshot(this.inputs));
     return this.last;
   }
@@ -819,15 +837,22 @@ class TurbofanCycleModel implements CycleModel {
     const c: OperatingConditions = this.recoveryVbvOpen()
       ? { ...conditionsOf(inp), vbvFraction: this.e.calibration.vbv.maxFraction }
       : conditionsOf(inp);
-    if (this.lit && this.pct2() >= SUBIDLE_N2_PERCENT && this.wf > 0) {
-      const s = solveGasPath(this.e, c, this.n1, this.n2, this.wf, this.x);
-      // a converged but non-physical root (BPR near zero) falls back to the similarity model
-      if (s.maxResidual < 1e-6 && at(s.x, 1) > 1) {
-        this.x = [...s.x];
-        return this.fromPoint(s.point);
-      }
+    if (!(this.lit && this.pct2() >= SUBIDLE_N2_PERCENT && this.wf > 0)) {
+      // a genuine sub-idle state: a start, a windmill, a shutdown
+      this.held = this.subIdle(c);
+      return this.held;
     }
-    return this.subIdle(c);
+    const s = this.solveGas(this.e, c, this.n1, this.n2, this.wf, this.x);
+    // converged, and on a physical root (a bypass ratio near zero is not one)
+    if (s.maxResidual < 1e-6 && at(s.x, 1) > 1) {
+      this.x = [...s.x];
+      this.held = this.fromPoint(s.point);
+      return this.held;
+    }
+    // D4-13: lost; never the similarity model above the switch. The next try starts from the
+    // last converged unknowns (this.x is not moved).
+    this.lostSolves++;
+    return { ...this.held, solve: 'held' };
   }
 
   /** The HPC margin against the surge line lowered by hpcSurgeMarginLoss: (1 + m)(1 - loss) - 1. */
@@ -868,6 +893,7 @@ class TurbofanCycleModel implements CycleModel {
         cal.n2ReferenceRpm,
         this.hpcMargin(m.hpc),
       ),
+      solve: 'matched',
     };
   }
 
@@ -976,6 +1002,7 @@ class TurbofanCycleModel implements CycleModel {
       grossThrustN: a.grossThrustN * q * q,
       fan: this.mapPoint(fanPoint, this.n1, t2, cal.n1ReferenceRpm, m.fan),
       hpc: this.mapPoint(hpcPoint, this.n2, s['25'].ttK, cal.n2ReferenceRpm, this.hpcMargin(m.hpc)),
+      solve: 'subIdle',
     };
   }
 
@@ -1062,8 +1089,7 @@ class TurbofanCycleModel implements CycleModel {
       fadec: { mode: this.mode, limiter: this.limiter, n1TargetPercent: this.n1Target },
       startPhase: this.phase,
       flags,
-      // D4-13 stub (TDD)
-      gasPathSolve: { status: 'matched', lostSolves: 0 },
+      gasPathSolve: { status: snap.solve, lostSolves: this.lostSolves },
     };
   }
 }

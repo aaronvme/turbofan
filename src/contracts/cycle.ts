@@ -388,5 +388,19 @@ export function validateCycleState(
   if (!(START_PHASES as readonly string[]).includes(state.startPhase)) {
     problems.push(`startPhase "${describeValue(state.startPhase)}" is not a start phase`);
   }
+  const solve = (state as Partial<CycleState>).gasPathSolve;
+  if (solve === undefined) problems.push('gasPathSolve is missing (D4-13)');
+  else {
+    if (!(GAS_PATH_SOLVE_STATUSES as readonly string[]).includes(solve.status)) {
+      problems.push(
+        `gasPathSolve.status "${describeValue(solve.status)}" is not a gas-path solve status`,
+      );
+    }
+    if (!(Number.isInteger(solve.lostSolves) && solve.lostSolves >= 0)) {
+      problems.push(
+        `gasPathSolve.lostSolves ${String(solve.lostSolves)} must be a whole number >= 0`,
+      );
+    }
+  }
   return problems;
 }
