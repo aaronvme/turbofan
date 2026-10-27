@@ -9,6 +9,7 @@
 
 import {
   AgXToneMapping,
+  Matrix4,
   PCFShadowMap,
   PerspectiveCamera,
   Vector3,
@@ -16,13 +17,24 @@ import {
 } from 'three/webgpu';
 import { DEFAULT_CYCLE_INPUTS, type CycleInputs } from '../contracts/cycle';
 import type { EngineDefinition } from '../contracts/engine';
-import { buildEngineGeometry, GEOMETRY_QUALITY } from '../geometry/engineGeometry';
+import {
+  buildEngineGeometry,
+  GEOMETRY_QUALITY,
+  type EngineGeometry,
+} from '../geometry/engineGeometry';
 import { cutawayWedge } from '../geometry/cutaway';
 import { easeInOut, explodeOffsets } from '../geometry/explode';
 import { advanceAngle, shutterBlurAngle } from '../geometry/motion';
+import { screenRectOfBox, type Box3Like } from '../geometry/screenRect';
 import { closedViewVisibility } from '../geometry/visibility';
 import { requestSimDevice, type GpuErrorReport, type SimDevice } from '../gpu/device';
-import type { PassMedians } from '../gpu/passTimings';
+import type { FrameSample, PassMedians } from '../gpu/passTimings';
+import {
+  initialRenderScale,
+  nextRenderScale,
+  RENDER_PROFILES,
+  type RenderProfileId,
+} from '../gpu/renderScale';
 import { createMockCycle, mockSteadyState, MOCK_LABEL } from '../mocks/mockCycle';
 import { buildEngineScene, type EngineScene } from './engineScene';
 import { createLookUniforms, createMaterials, type LookUniforms } from './materials';
@@ -44,6 +56,8 @@ export interface EngineViewOptions {
   readonly debug?: PostDebug;
   /** Per-pass GPU timestamps (default on when the adapter has timestamp-query). */
   readonly timing?: boolean;
+  /** `quality` (full resolution, the default) or `performance` (dynamic resolution, D3-7). */
+  readonly profile?: RenderProfileId;
 }
 
 export interface EngineViewStats {
@@ -58,6 +72,9 @@ export interface EngineViewStats {
   /** Rolling medians of GPU ms per pass and CPU ms per frame (W1G-I2). */
   readonly timings: PassMedians;
   readonly timestamps: boolean;
+  readonly profile: RenderProfileId;
+  /** The 3D passes' resolution relative to the canvas (1 in `quality`). */
+  readonly renderScale: number;
 }
 
 export interface EngineView {
@@ -72,12 +89,18 @@ export interface EngineView {
   setThrottle(lever: number, settle?: boolean): void;
   setShutter(angleDeg: number): void;
   setCinematic(on: boolean): void;
+  /** The render profile (D3-7): `performance` follows the GPU time with the render scale. */
+  setProfile(id: RenderProfileId): void;
   setCameraPose(position: readonly number[], target: readonly number[]): void;
   /** Look-dev A/B switches (e.g. caps or culling off) for timing comparisons. */
   setDebugFlags(flags: DebugFlags): void;
   /** Advances the simulation clock by dt seconds and renders one frame. */
   frame(dtS: number): void;
   stats(): EngineViewStats;
+  /** Records every frame's pass timings from now on (a D0-1 timing run, W1L-I4). */
+  beginTimingRun(): void;
+  /** The frames since beginTimingRun; stops recording. */
+  endTimingRun(): FrameSample[];
   dispose(): Promise<void>;
 }
 
@@ -91,12 +114,39 @@ export interface DebugFlags {
   readonly noShadow?: boolean;
   /** Skip the post chain: the scene pass straight to the screen. */
   readonly noPost?: boolean;
+  /** The post chain without TRAA (the fan-blur reference test compares un-accumulated frames). */
+  readonly noTraa?: boolean;
+  /** Write half the linear radiance (no tone map, no sRGB): image tests average light. */
+  readonly linear?: boolean;
+  /** Extra LP spool angle, rad (the fan-blur reference renders stills across the exposure). */
+  readonly lpPhase?: number;
+  /** Fewer fan time copies than FAN_TIME_SAMPLES (the rotor pass's cost per copy). */
+  readonly fanCopies?: number;
+  /** No fan at all (what the rest of the rotor pass costs). */
+  readonly noFan?: boolean;
 }
 
 const FPS = 60;
 const CUT_WIDTH = (100 * Math.PI) / 180;
 const EXPLODE_GAP = 0.22;
 const TRANSITION_S = 1.4;
+
+/** The fan blades' axis-aligned box over every angle (a cylinder about x), m. */
+function fanBoxOf(geo: EngineGeometry): Box3Like {
+  const fan = geo.rows.find((r) => r.material === 'fanBlade');
+  if (fan === undefined) throw new Error('engineView: no fan geometry');
+  const p = fan.blade.mesh.positions;
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  let r = 0;
+  for (let i = 0; i < p.length; i += 3) {
+    const x = p[i] ?? 0;
+    x0 = Math.min(x0, x);
+    x1 = Math.max(x1, x);
+    r = Math.max(r, Math.hypot(p[i + 1] ?? 0, p[i + 2] ?? 0));
+  }
+  return { min: [x0, -r, -r], max: [x1, r, r] };
+}
 
 export async function createEngineView(o: EngineViewOptions): Promise<EngineView> {
   const errors: GpuErrorReport[] = [];
@@ -123,8 +173,21 @@ export async function createEngineView(o: EngineViewOptions): Promise<EngineView
     });
     return await assemble(o, device, renderer, errors, timing);
   } catch (e) {
-    if (renderer !== null) await Promise.resolve(renderer.dispose()).catch(() => undefined);
+    // a dispose failure on this path is attached to the init error, not dropped (W1L-N5)
+    let disposeError: unknown = null;
+    if (renderer !== null)
+      await Promise.resolve(renderer.dispose()).catch((d: unknown) => {
+        disposeError = d;
+      });
     device.destroy();
+    if (disposeError !== null) {
+      const what = (x: unknown) => (x instanceof Error ? x.message : 'non-Error value');
+      throw new AggregateError(
+        [e, disposeError],
+        `${what(e)} (and renderer.dispose failed: ${what(disposeError)})`,
+        { cause: e },
+      );
+    }
     throw e;
   }
 }
@@ -149,11 +212,8 @@ async function assemble(
   const def = o.definition;
   const geo = buildEngineGeometry(def, GEOMETRY_QUALITY[o.quality ?? 'high']);
   const uniforms = createLookUniforms();
-  const scene: EngineScene = buildEngineScene(
-    geo,
-    createMaterials(uniforms),
-    closedViewVisibility(def, geo),
-  );
+  const closedSet = closedViewVisibility(def, geo);
+  const scene: EngineScene = buildEngineScene(geo, createMaterials(uniforms), closedSet);
   const studio: Studio = await createStudio(renderer);
   for (const s of [scene.main, scene.rotors]) {
     s.environment = studio.environment;
@@ -164,31 +224,18 @@ async function assemble(
 
   const camera = new PerspectiveCamera(30, o.width / o.height, 0.05, 200);
   const fanRow = def.bladeRows.find((r) => r.id === 'fan');
-  const fanGeo = geo.rows.find((r) => r.row.id === 'fan');
-  if (fanRow === undefined || fanGeo === undefined) throw new Error('engineView: no fan row');
-  const post: LookPipeline = createPipeline(
-    renderer,
-    scene.main,
-    scene.rotors,
-    camera,
-    uniforms,
-    {
-      rHub: fanGeo.blade.rMin,
-      rTip: fanGeo.blade.rMax + 0.002,
-      pitch: (2 * Math.PI) / fanRow.count,
-      xFore: fanGeo.blade.xMin - 0.002,
-      xAft: fanGeo.blade.xMax + 0.002,
-    },
-    {
-      fanSamples: 8,
-      rotorSamples: 8,
-      fanPlanes: 4,
-      aoStrength: 0.9,
-      bloomStrength: 0.06,
-      bloomThreshold: 1.6,
-      debug: o.debug ?? null,
-    },
-  );
+  if (fanRow === undefined) throw new Error('engineView: no fan row');
+  const fanPitch = (2 * Math.PI) / fanRow.count;
+  const fanBox = fanBoxOf(geo);
+  const viewProj = new Matrix4();
+  let heightPx = o.height * o.dpr;
+  const post: LookPipeline = createPipeline(renderer, scene.main, scene.rotors, camera, {
+    rotorSamples: 8,
+    aoStrength: 0.9,
+    bloomStrength: 0.06,
+    bloomThreshold: 1.6,
+    debug: o.debug ?? null,
+  });
 
   const cycle = createMockCycle(def);
   cycle.reset('groundIdle');
@@ -204,6 +251,10 @@ async function assemble(
   let lastCut = -1;
   let lastExplode = -1;
   let flags: DebugFlags = {};
+  let fanFrame = 0;
+  let profile: RenderProfileId = o.profile ?? 'quality';
+  let scaleState = initialRenderScale(RENDER_PROFILES[profile]);
+  post.setRenderScale(scaleState.scale);
   const target = new Vector3(0.5, 0, 0);
 
   const inputs = (): CycleInputs => ({
@@ -229,6 +280,7 @@ async function assemble(
     device,
     uniforms,
     setSize(width, height, dpr) {
+      heightPx = height * dpr;
       renderer.setPixelRatio(dpr);
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
@@ -263,6 +315,11 @@ async function assemble(
     setCinematic(on) {
       post.setCinematic(on);
     },
+    setProfile(id) {
+      profile = id;
+      scaleState = initialRenderScale(RENDER_PROFILES[id]);
+      post.setRenderScale(scaleState.scale);
+    },
     setCameraPose(position, t) {
       camera.position.set(position[0] ?? 0, position[1] ?? 0, position[2] ?? 0);
       target.set(t[0] ?? 0, t[1] ?? 0, t[2] ?? 0);
@@ -274,7 +331,7 @@ async function assemble(
       const cove = studio.stage.getObjectByName('cyclorama');
       if (cove) cove.visible = f.noStage !== true;
       renderer.shadowMap.enabled = f.noShadow !== true;
-      studio.key.shadow.needsUpdate = true;
+      for (const l of studio.shadowLights) l.shadow.needsUpdate = true;
     },
     frame(dtS) {
       const t0 = performance.now();
@@ -283,10 +340,34 @@ async function assemble(
       const st = speeds();
       lp = advanceAngle(lp, st.n1Rpm, def.rotation.lp, dtS);
       hp = advanceAngle(hp, st.n2Rpm, def.rotation.hp, dtS);
-      for (const g of scene.spoolGroups.lp) g.rotation.x = lp;
+      const lpShown = lp + (flags.lpPhase ?? 0);
+      for (const g of scene.spoolGroups.lp) g.rotation.x = lpShown;
       for (const g of scene.spoolGroups.hp) g.rotation.x = hp;
       uniforms.lpBlur.value = shutterBlurAngle(st.n1Rpm, shutterDeg, FPS);
       uniforms.hpBlur.value = shutterBlurAngle(st.n2Rpm, shutterDeg, FPS);
+      // the fan's time copies spread over the exposure, re-jittered every frame, and the copy
+      // each pixel picks offset every frame: the two offsets are the 2-D R2 sequence (plastic
+      // number), so they are jointly well spread and every pixel's instants cover the shutter
+      // interval (W1L-I3). Up to two
+      // pitches the exposure is exact; beyond, one pitch (the image is periodic in it, so
+      // only the per-blade jitter differs) keeps the copies at distinct phases
+      const fanSpan = uniforms.lpBlur.value <= 2 * fanPitch ? uniforms.lpBlur.value : fanPitch;
+      const fanLive = fanSpan > 1e-5;
+      fanFrame = (fanFrame + 1) % 1_000_000;
+      const j = (fanFrame * 0.5698402909980532) % 1;
+      uniforms.fanSeed.value = (fanFrame * 0.7548776662466927) % 1;
+      const nCopies = Math.max(
+        1,
+        Math.min(scene.fanTimeCopies.length, flags.fanCopies ?? scene.fanTimeCopies.length),
+      );
+      uniforms.fanCopies.value = fanLive ? nCopies : 1;
+      scene.fanTimeCopies.forEach((c, k) => {
+        c.depth.visible = c.shaded.visible =
+          flags.noFan !== true && (fanLive ? k < nCopies : k === 0);
+        c.depth.rotation.x = c.shaded.rotation.x = fanLive
+          ? ((k + j) / nCopies - 0.5) * fanSpan
+          : 0;
+      });
 
       const step = dtS / TRANSITION_S;
       cut = Math.max(0, Math.min(1, cut + (mode === 'cutaway' ? step : -step)));
@@ -303,7 +384,8 @@ async function assemble(
         b.rotation.x = wedge.center + wedge.halfWidth;
       }
       // the static shadow map follows the engine only while it moves (mode transitions)
-      if (cut !== lastCut || explode !== lastExplode) studio.key.shadow.needsUpdate = true;
+      if (cut !== lastCut || explode !== lastExplode)
+        for (const l of studio.shadowLights) l.shadow.needsUpdate = true;
       lastCut = cut;
       lastExplode = explode;
       const offsets = explodeOffsets(def, explode, EXPLODE_GAP);
@@ -314,15 +396,37 @@ async function assemble(
       // closed engine (LD-6): draw only what the cowls can show
       const closed = cut === 0 && explode === 0 && flags.noCull !== true;
       for (const obj of scene.closedHidden) obj.visible = !closed;
+      // and what shows only through one opening, only for an eye on that side
+      const eyeX = camera.position.x;
+      for (const obj of scene.frontOnly) obj.visible = !closed || eyeX < closedSet.eye.front;
+      for (const obj of scene.rearOnly) obj.visible = !closed || eyeX > closedSet.eye.rear;
       const skinsVisible = explode < 0.02;
       for (const s of scene.skins) if (!s.name.startsWith('cap:')) s.visible = skinsVisible;
       if (!skinsVisible)
         for (const s of scene.skins) if (s.name.startsWith('cap:')) s.visible = false;
       studio.contact.value = 1 - easeInOut(explode);
+      // the composite's fan region: the fan's box where the exploded view has moved it, 3 px
+      // of margin for the 3 x 3 neighbourhood and TRAA's jitter
+      camera.updateMatrixWorld();
+      viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      const fdx = offsets.fan;
+      const rect = screenRectOfBox(
+        viewProj.elements,
+        {
+          min: [fanBox.min[0] + fdx, fanBox.min[1], fanBox.min[2]],
+          max: [fanBox.max[0] + fdx, fanBox.max[1], fanBox.max[2]],
+        },
+        3 / Math.max(1, heightPx),
+      );
+      post.fanRect.value.set(rect.min[0], rect.min[1], rect.max[0], rect.max[1]);
 
+      // dynamic resolution (D3-7): the median GPU time of the timer's rolling window, at the
+      // current scale (the controller holds for a full window after every change)
+      scaleState = nextRenderScale(scaleState, timer.medians().gpuTotal, RENDER_PROFILES[profile]);
+      post.setRenderScale(scaleState.scale);
       post.focusDistance.value = camera.position.distanceTo(target);
       if (flags.noPost === true) renderer.render(scene.main, camera);
-      else post.render();
+      else post.render(flags.noTraa !== true, flags.linear === true);
       timer.endFrame(performance.now() - t0);
     },
     stats() {
@@ -337,7 +441,15 @@ async function assemble(
         cycleLabel: MOCK_LABEL,
         timings: timer.medians(),
         timestamps: timer.enabled,
+        profile,
+        renderScale: scaleState.scale,
       };
+    },
+    beginTimingRun() {
+      timer.beginRun();
+    },
+    endTimingRun() {
+      return timer.endRun();
     },
     async dispose() {
       post.dispose();

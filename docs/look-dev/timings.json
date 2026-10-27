@@ -1,248 +1,409 @@
 {
-  "date": "2026-10-26T18:04:52.964Z",
+  "date": "2026-10-26T23:07:38.332Z",
   "viewport": "1920x1080 DPR 1",
   "quality": "high",
-  "note": "indicative: other agents may share the CPU/GPU (D0-1 not applied)",
+  "protocol": {
+    "warmupS": 10,
+    "runS": 60,
+    "reps": 3,
+    "seed": 1,
+    "order": [
+      [
+        "default, performance profile",
+        "cutaway",
+        "default (threeQuarterFront)",
+        "hero (cinematic, DoF on)"
+      ],
+      [
+        "cutaway",
+        "default (threeQuarterFront)",
+        "hero (cinematic, DoF on)",
+        "default, performance profile"
+      ],
+      [
+        "default (threeQuarterFront)",
+        "hero (cinematic, DoF on)",
+        "default, performance profile",
+        "cutaway"
+      ]
+    ]
+  },
+  "displayIntervalMs": 16.80000001192093,
+  "note": "official only on AC, nothing else running, Chrome in the foreground (D0-1); otherwise indicative",
+  "conditions": {
+    "start": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "battery": {
+        "charging": true,
+        "level": 1
+      },
+      "adapter": {
+        "vendor": "intel",
+        "architecture": "xe-lpg",
+        "device": "",
+        "description": ""
+      },
+      "timestamps": true,
+      "chrome": "155.0.8059.86",
+      "powerPlan": "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)",
+      "cpuLoadPercent": "18",
+      "at": "2026-10-26T22:53:26.374Z"
+    },
+    "end": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "battery": {
+        "charging": true,
+        "level": 1
+      },
+      "adapter": {
+        "vendor": "intel",
+        "architecture": "xe-lpg",
+        "device": "",
+        "description": ""
+      },
+      "timestamps": true,
+      "chrome": "155.0.8059.86",
+      "powerPlan": "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)",
+      "cpuLoadPercent": "9",
+      "at": "2026-10-26T23:07:38.332Z"
+    }
+  },
   "results": {
     "default (threeQuarterFront)": {
-      "frames": 120,
+      "runs": 3,
       "gpu": {
-        "shadow": 0,
-        "opaque": 6.756442,
-        "rotors": 1.2174665,
-        "gtao": 1.4203815,
-        "composite": 1.7659005,
-        "traa": 1.3552,
-        "dof": 0,
-        "bloom": 0,
-        "output": 0.447471,
-        "other": 0
+        "shadow": {
+          "p10": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "opaque": {
+          "p10": 5.1710776,
+          "p50": 5.585225,
+          "p90": 6.8928009
+        },
+        "rotors": {
+          "p10": 1.2359456,
+          "p50": 1.361814,
+          "p90": 1.6926145000000001
+        },
+        "gtao": {
+          "p10": 0.787818,
+          "p50": 0.888379,
+          "p90": 1.0560922
+        },
+        "composite": {
+          "p10": 0.775516,
+          "p50": 0.795307,
+          "p90": 0.975811600000001
+        },
+        "traa": {
+          "p10": 1.1781853,
+          "p50": 1.202883,
+          "p90": 1.2819242
+        },
+        "dof": {
+          "p10": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "bloom": {
+          "p10": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "output": {
+          "p10": 0.2765141,
+          "p50": 0.3138785,
+          "p90": 0.45182
+        },
+        "other": {
+          "p10": 0,
+          "p50": 0,
+          "p90": 0
+        }
       },
-      "gpuTotal": 13.0177585,
-      "cpu": 1.300000011920929,
-      "drawnTriangles": 746724,
-      "triangles": 1655928,
-      "errors": 0
-    },
-    "threeQuarterFront, no cyclorama": {
-      "frames": 120,
-      "gpu": {
-        "shadow": 0,
-        "opaque": 6.877743,
-        "rotors": 1.4132989999999999,
-        "gtao": 0.7363489999999999,
-        "composite": 1.7613165,
-        "traa": 1.454991,
-        "dof": 0,
-        "bloom": 0,
-        "output": 0.4790855,
-        "other": 0
+      "gpuTotal": {
+        "p10": 9.474019000000002,
+        "p50": 10.177540000000002,
+        "p90": 12.1707248
       },
-      "gpuTotal": 12.754555000000002,
-      "cpu": 1.199999988079071,
-      "drawnTriangles": 742116,
-      "triangles": 1655928,
-      "errors": 0
-    },
-    "threeQuarterFront, no shadows": {
-      "frames": 120,
-      "gpu": {
-        "shadow": 0,
-        "opaque": 5.9866554999999995,
-        "rotors": 1.229784,
-        "gtao": 1.321372,
-        "composite": 1.6030895,
-        "traa": 1.276607,
-        "dof": 0,
-        "bloom": 0,
-        "output": 0.466403,
-        "other": 0
+      "cpu": {
+        "p10": 1.5,
+        "p50": 2.299999952316284,
+        "p90": 2.699999988079071
       },
-      "gpuTotal": 12.1136225,
-      "cpu": 1.5,
-      "drawnTriangles": 746724,
-      "triangles": 1655928,
-      "errors": 0
-    },
-    "threeQuarterFront, no post": {
-      "frames": 120,
-      "gpu": {
-        "shadow": 0,
-        "opaque": 0,
-        "rotors": 0,
-        "gtao": 0,
-        "composite": 0,
-        "traa": 0,
-        "dof": 0,
-        "bloom": 0,
-        "output": 0,
-        "other": 9.242520500000001
-      },
-      "gpuTotal": 9.242520500000001,
-      "cpu": 1.699999988079071,
-      "drawnTriangles": 746724,
-      "triangles": 1655928,
-      "errors": 0
-    },
-    "threeQuarterFront, culling off": {
-      "frames": 120,
-      "gpu": {
-        "shadow": 0,
-        "opaque": 6.0608995,
-        "rotors": 1.2603825,
-        "gtao": 1.1212170000000001,
-        "composite": 1.421528,
-        "traa": 1.1797585000000002,
-        "dof": 0,
-        "bloom": 0,
-        "output": 0.342133,
-        "other": 0
-      },
-      "gpuTotal": 11.3885225,
-      "cpu": 2.5,
-      "drawnTriangles": 1660536,
-      "triangles": 1655928,
-      "errors": 0
-    },
-    "fanTakeoff": {
-      "frames": 120,
-      "gpu": {
-        "shadow": 0,
-        "opaque": 5.401763000000001,
-        "rotors": 1.5022039999999999,
-        "gtao": 0.8043175,
-        "composite": 1.5749115,
-        "traa": 1.014603,
-        "dof": 0,
-        "bloom": 0,
-        "output": 0.280441,
-        "other": 0
-      },
-      "gpuTotal": 10.573633,
-      "cpu": 1.5999999642372131,
-      "drawnTriangles": 746724,
-      "triangles": 1655928,
-      "errors": 0
-    },
-    "hero (cinematic, DoF on)": {
-      "frames": 120,
-      "gpu": {
-        "shadow": 0,
-        "opaque": 4.0294805,
-        "rotors": 0.7048135,
-        "gtao": 0.7309589999999999,
-        "composite": 1.2500445,
-        "traa": 0.966348,
-        "dof": 1.9177225,
-        "bloom": 0.4675255,
-        "output": 0.45721100000000003,
-        "other": 0
-      },
-      "gpuTotal": 10.972617500000002,
-      "cpu": 1.9000000357627869,
-      "drawnTriangles": 746724,
-      "triangles": 1655928,
-      "errors": 0
+      "gpuTotalPerRun": [12.4799495, 9.834964499999998, 10.177540000000002],
+      "valid": true,
+      "validity": [
+        {
+          "valid": true,
+          "reasons": [],
+          "warnings": []
+        },
+        {
+          "valid": true,
+          "reasons": [],
+          "warnings": []
+        },
+        {
+          "valid": true,
+          "reasons": [],
+          "warnings": []
+        }
+      ]
     },
     "cutaway": {
-      "frames": 120,
+      "runs": 3,
       "gpu": {
-        "shadow": 0,
-        "opaque": 9.745486,
-        "rotors": 1.1681175,
-        "gtao": 1.251841,
-        "composite": 1.4001215,
-        "traa": 1.282414,
-        "dof": 0,
-        "bloom": 0,
-        "output": 0.3577585,
-        "other": 0
+        "shadow": {
+          "p10": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "opaque": {
+          "p10": 7.372506,
+          "p50": 8.364427,
+          "p90": 9.2405878
+        },
+        "rotors": {
+          "p10": 0.8000214999999999,
+          "p50": 0.916609,
+          "p90": 0.9757863
+        },
+        "gtao": {
+          "p10": 0.8844995,
+          "p50": 0.968067,
+          "p90": 1.1105399999999999
+        },
+        "composite": {
+          "p10": 0.705256,
+          "p50": 0.725725,
+          "p90": 0.8443278
+        },
+        "traa": {
+          "p10": 1.197987,
+          "p50": 1.25869,
+          "p90": 1.3205432
+        },
+        "dof": {
+          "p10": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "bloom": {
+          "p10": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "output": {
+          "p10": 0.284478,
+          "p50": 0.29854,
+          "p90": 0.4484662
+        },
+        "other": {
+          "p10": 0,
+          "p50": 0,
+          "p90": 0
+        }
       },
-      "gpuTotal": 15.665371500000001,
-      "cpu": 3.1500000059604645,
-      "drawnTriangles": 1665950,
-      "triangles": 1655928,
-      "errors": 0
+      "gpuTotal": {
+        "p10": 11.417037,
+        "p50": 12.666274,
+        "p90": 13.8805692
+      },
+      "cpu": {
+        "p10": 2.300000011920929,
+        "p50": 3,
+        "p90": 5.100000023841858
+      },
+      "gpuTotalPerRun": [12.671013499999999, 12.666274, 12.438255999999999],
+      "valid": true,
+      "validity": [
+        {
+          "valid": true,
+          "reasons": [],
+          "warnings": []
+        },
+        {
+          "valid": true,
+          "reasons": [],
+          "warnings": []
+        },
+        {
+          "valid": true,
+          "reasons": [],
+          "warnings": []
+        }
+      ]
     },
-    "cutaway, caps off": {
-      "frames": 120,
+    "hero (cinematic, DoF on)": {
+      "runs": 3,
       "gpu": {
-        "shadow": 0,
-        "opaque": 8.1642975,
-        "rotors": 1.1567375,
-        "gtao": 1.0292124999999999,
-        "composite": 1.1977004999999998,
-        "traa": 1.149081,
-        "dof": 0,
-        "bloom": 0,
-        "output": 0.346326,
-        "other": 0
+        "shadow": {
+          "p10": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "opaque": {
+          "p10": 6.102306,
+          "p50": 6.236211,
+          "p90": 6.8317384
+        },
+        "rotors": {
+          "p10": 1.577282,
+          "p50": 1.627594,
+          "p90": 1.8208739999999999
+        },
+        "gtao": {
+          "p10": 0.757964,
+          "p50": 0.82338,
+          "p90": 0.8913167999999999
+        },
+        "composite": {
+          "p10": 0.9344418,
+          "p50": 0.956661,
+          "p90": 0.9910142
+        },
+        "traa": {
+          "p10": 1.1395968,
+          "p50": 1.16666,
+          "p90": 1.2014816000000001
+        },
+        "dof": {
+          "p10": 2.0799338,
+          "p50": 2.2008199999999998,
+          "p90": 2.3519026000000003
+        },
+        "bloom": {
+          "p10": 0.5391613,
+          "p50": 0.562862,
+          "p90": 0.6227484
+        },
+        "output": {
+          "p10": 0.463643,
+          "p50": 0.492029,
+          "p90": 0.511507
+        },
+        "other": {
+          "p10": 0,
+          "p50": 0,
+          "p90": 0
+        }
       },
-      "gpuTotal": 13.0517145,
-      "cpu": 2.400000035762787,
-      "drawnTriangles": 1660536,
-      "triangles": 1655928,
-      "errors": 0
+      "gpuTotal": {
+        "p10": 13.684009,
+        "p50": 14.086109000000002,
+        "p90": 14.8702496
+      },
+      "cpu": {
+        "p10": 4,
+        "p50": 4.900000035762787,
+        "p90": 6.099999964237213
+      },
+      "gpuTotalPerRun": [14.687044500000003, 14.086109000000002, 13.995745],
+      "valid": true,
+      "validity": [
+        {
+          "valid": true,
+          "reasons": [],
+          "warnings": []
+        },
+        {
+          "valid": true,
+          "reasons": [],
+          "warnings": []
+        },
+        {
+          "valid": true,
+          "reasons": [],
+          "warnings": []
+        }
+      ]
     },
-    "exploded": {
-      "frames": 120,
+    "default, performance profile": {
+      "runs": 3,
       "gpu": {
-        "shadow": 0,
-        "opaque": 4.5156755,
-        "rotors": 1.1754095,
-        "gtao": 1.6980365,
-        "composite": 1.8449885,
-        "traa": 1.513532,
-        "dof": 0,
-        "bloom": 0,
-        "output": 0.5087984999999999,
-        "other": 0
+        "shadow": {
+          "p10": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "opaque": {
+          "p10": 4.305572,
+          "p50": 5.641345,
+          "p90": 6.2939185
+        },
+        "rotors": {
+          "p10": 1.1349615,
+          "p50": 1.510043,
+          "p90": 1.657906
+        },
+        "gtao": {
+          "p10": 0.549554,
+          "p50": 0.7643965,
+          "p90": 0.8606455
+        },
+        "composite": {
+          "p10": 0.462263,
+          "p50": 0.544372,
+          "p90": 0.6422356
+        },
+        "traa": {
+          "p10": 0.6680945,
+          "p50": 0.7317405,
+          "p90": 0.8026926
+        },
+        "dof": {
+          "p10": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "bloom": {
+          "p10": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "output": {
+          "p10": 0.31979,
+          "p50": 0.363174,
+          "p90": 0.4233976
+        },
+        "other": {
+          "p10": 0,
+          "p50": 0,
+          "p90": 0
+        }
       },
-      "gpuTotal": 11.500631,
-      "cpu": 2.300000011920929,
-      "drawnTriangles": 1342456,
-      "triangles": 1655928,
-      "errors": 0
-    },
-    "hotSection": {
-      "frames": 120,
-      "gpu": {
-        "shadow": 0,
-        "opaque": 7.1783145,
-        "rotors": 0.9930145,
-        "gtao": 0.9328845,
-        "composite": 1.1889509999999999,
-        "traa": 1.0940555,
-        "dof": 0,
-        "bloom": 0,
-        "output": 0.299191,
-        "other": 0
+      "gpuTotal": {
+        "p10": 7.4557605,
+        "p50": 9.572491500000002,
+        "p90": 10.6233705
       },
-      "gpuTotal": 11.6170885,
-      "cpu": 2.5,
-      "drawnTriangles": 1665950,
-      "triangles": 1655928,
-      "errors": 0
-    },
-    "default (threeQuarterFront), repeat": {
-      "frames": 120,
-      "gpu": {
-        "shadow": 0,
-        "opaque": 7.350709500000001,
-        "rotors": 1.394392,
-        "gtao": 1.5936615,
-        "composite": 1.8220455000000002,
-        "traa": 1.4414495,
-        "dof": 0,
-        "bloom": 0,
-        "output": 0.4531225,
-        "other": 0
+      "cpu": {
+        "p10": 1.399999976158142,
+        "p50": 1.9000000357627869,
+        "p90": 2.5
       },
-      "gpuTotal": 14.233765,
-      "cpu": 1.199999988079071,
-      "drawnTriangles": 746724,
-      "triangles": 1655928,
-      "errors": 0
+      "gpuTotalPerRun": [9.572491500000002, 9.296558000000001, 9.6213985],
+      "valid": true,
+      "validity": [
+        {
+          "valid": true,
+          "reasons": [],
+          "warnings": []
+        },
+        {
+          "valid": true,
+          "reasons": [],
+          "warnings": []
+        },
+        {
+          "valid": true,
+          "reasons": [],
+          "warnings": []
+        }
+      ]
     }
   }
 }

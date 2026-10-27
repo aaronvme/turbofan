@@ -15,6 +15,7 @@ import { loopAreaCentroid } from '../../../src/geometry/revolve';
 import { isSimplePolygon } from '../../../src/geometry/airfoil';
 import { explodeOffsets, INTAKE_LEAD } from '../../../src/geometry/explode';
 import {
+  closedViewDraws,
   closedViewLimits,
   closedViewVisibility,
   hiddenWhenClosed,
@@ -50,12 +51,18 @@ const rowTriangles = (g: EngineGeometry['rows'][number]) =>
   (g.blade.mesh.indices.length / 3) * g.row.count;
 
 describe.each(PRESETS)('quality preset %s (W1G-I1)', (id) => {
-  it('every part, row and strut is watertight, manifold, outward and free of slivers', () => {
-    const geo = geoOf(id);
-    for (const p of geo.parts) expectClosed(`${id} part ${p.spec.id}`, p.mesh);
-    for (const r of [...geo.rows, ...geo.struts])
-      expectClosed(`${id} row ${r.row.id}`, r.blade.mesh);
-  });
+  // the first test per preset builds its geometry (cached for the rest): `high` takes ~5 s
+  // under coverage instrumentation on a loaded machine, past vitest's 5 s default
+  it(
+    'every part, row and strut is watertight, manifold, outward and free of slivers',
+    { timeout: 30_000 },
+    () => {
+      const geo = geoOf(id);
+      for (const p of geo.parts) expectClosed(`${id} part ${p.spec.id}`, p.mesh);
+      for (const r of [...geo.rows, ...geo.struts])
+        expectClosed(`${id} row ${r.row.id}`, r.blade.mesh);
+    },
+  );
 
   it('every part loop is a simple counter-clockwise polygon', () => {
     for (const p of geoOf(id).parts) {
@@ -94,8 +101,9 @@ describe.each(PRESETS)('quality preset %s (W1G-I1)', (id) => {
       if (vis.rows.has(r.row.id)) closed += rowTriangles(r);
     expect(total).toBeLessThanOrEqual(TRIANGLE_BUDGET[id].total);
     expect(closed).toBeLessThanOrEqual(TRIANGLE_BUDGET[id].closed);
-    // the culling is worth having: the closed engine draws well under half of the model
-    expect(closed / total).toBeLessThan(0.5);
+    // once every row that shows is kept (W1L-I1), the closed engine culls only the combustor,
+    // the HPT and what the inner body hides: a small saving, but never a visible one
+    expect(closed / total).toBeLessThan(0.95);
   });
 });
 
@@ -130,15 +138,74 @@ describe('closed-engine culling (LD-6)', () => {
       'trf-strut',
     ])
       expect(vis.rows.has(id), id).toBe(true);
+    // W1L-I1: every booster and HPC row shows through the fan and every LPT row up the core
+    // nozzle (the critic's pixel probe saw booster rows 2-4 and LPT stages 1-3 culled; the
+    // pixel test, tests/browser/culling.test.ts, then saw the transition duct, the fan-frame
+    // struts and the HPC through the gaps: the main pass has no rotors, so its depth reaches
+    // past every rotor row)
+    for (const r of def.bladeRows.filter((k) => ['booster', 'hpc', 'lpt'].includes(k.component)))
+      expect(vis.rows.has(r.id), r.id).toBe(true);
+    expect(vis.rows.has('fan-frame-strut')).toBe(true);
+    for (const id of ['case-transition', 'transition-inner', 'case-hpc', 'hpc-drum'])
+      expect(vis.parts.has(id), id).toBe(true);
   });
 
-  it('drops what the cowls and the inner body hide: the core rows, cases, liner, disks and shafts', () => {
+  it('lookdev-3: what shows only through the intake or only up the core nozzle is drawn only from that side', () => {
+    const lim = closedViewLimits(def);
+    const rowsOf = (c: string) => def.bladeRows.filter((r) => r.component === c);
+    // the core inside its cowl ahead of the combustor is reached only through the fan, and
+    // aft of the combustor inlet only through the core nozzle
+    for (const r of [...rowsOf('booster'), ...rowsOf('hpc')]) {
+      expect(vis.frontOnly.has(r.id), r.id).toBe(true);
+      expect(vis.rearOnly.has(r.id), r.id).toBe(false);
+    }
+    for (const r of rowsOf('lpt')) {
+      expect(vis.rearOnly.has(r.id), r.id).toBe(true);
+      expect(vis.frontOnly.has(r.id), r.id).toBe(false);
+    }
+    expect(vis.rearOnly.has('trf-strut')).toBe(true);
+    for (const id of ['case-hpc', 'hpc-drum', 'case-transition'])
+      expect(vis.frontOnly.has(id), id).toBe(true);
+    for (const id of ['case-lpt', 'case-exhaust']) expect(vis.rearOnly.has(id), id).toBe(true);
+    // what the outside or both openings show is drawn from everywhere
     for (const id of [
-      'case-hpc',
-      'case-combustor',
+      'inlet-lip',
+      'nacelle-skin',
+      'core-cowl-skin',
+      'core-lip',
+      'splitter',
+      'spinner',
+      'plug',
+      'fan-case',
+    ])
+      expect(vis.frontOnly.has(id) || vis.rearOnly.has(id), id).toBe(false);
+    for (const id of ['fan', 'fan-ogv'])
+      expect(vis.frontOnly.has(id) || vis.rearOnly.has(id), id).toBe(false);
+    // both are subsets of what the closed engine draws, and disjoint
+    for (const id of vis.frontOnly) {
+      expect(vis.parts.has(id) || vis.rows.has(id), id).toBe(true);
+      expect(vis.rearOnly.has(id), id).toBe(false);
+    }
+    for (const id of vis.rearOnly) expect(vis.parts.has(id) || vis.rows.has(id), id).toBe(true);
+    // the eye limits: in front of the core inlet (the splitter) to see the core through the
+    // fan, aft of the first LPT row to see it up the nozzle (both conservative: the intake
+    // opens at the highlight, ahead of the splitter, and the nozzle at the core lip)
+    const splitterX = Math.min(...geo.walls.coreCowl.path.map((q) => q.x));
+    expect(vis.eye.front).toBeCloseTo(splitterX, 9);
+    expect(vis.eye.rear).toBeCloseTo(lim.xRear, 9);
+    expect(closedViewDraws(vis, 'hpc-r1', -3.7)).toBe(true);
+    expect(closedViewDraws(vis, 'hpc-r1', 1.3)).toBe(false);
+    expect(closedViewDraws(vis, 'lpt-r4', 1.3)).toBe(false);
+    expect(closedViewDraws(vis, 'lpt-r4', 5.4)).toBe(true);
+    expect(closedViewDraws(vis, 'hpc-r1', 5.4)).toBe(false);
+    expect(closedViewDraws(vis, 'fan', 1.3)).toBe(true);
+    expect(closedViewDraws(vis, 'hpt-r1', -3.7)).toBe(false);
+  });
+
+  it('drops what the cowls and the inner body hide: the combustor, the HPT, the disks and shafts', () => {
+    for (const id of [
       'case-hpt',
       'combustor-liner',
-      'hpc-drum',
       'lp-shaft',
       'hp-shaft',
       'disk-hpc-r5',
@@ -146,31 +213,34 @@ describe('closed-engine culling (LD-6)', () => {
       'disk-lpt-r4',
     ])
       expect(vis.parts.has(id), id).toBe(false);
-    for (const id of [
-      'hpc-r1',
-      'hpc-s9',
-      'hpt-n1',
-      'hpt-r1',
-      'lpt-r1',
-      'lpt-r3',
-      'fan-frame-strut',
-    ])
-      expect(vis.rows.has(id), id).toBe(false);
+    for (const id of ['hpt-n1', 'hpt-r1']) expect(vis.rows.has(id), id).toBe(false);
   });
 
   it('hides only what lies fully inside the inner body, or inside the core cowl between the sight limits', () => {
     const lim = closedViewLimits(def);
-    expect(lim.xFront).toBeGreaterThan(
-      def.flowpath.components.find((c) => c.id === 'booster')?.xStart ?? 0,
-    );
-    expect(lim.xRear).toBeLessThan(def.flowpath.components.find((c) => c.id === 'lpt')?.xEnd ?? 0);
+    // W1L-I1: the limits sit at the combustor inlet (aft of every booster and HPC row) and
+    // ahead of the first LPT row
+    const rowsOf = (c: string) => def.bladeRows.filter((r) => r.component === c);
+    for (const r of rowsOf('hpt'))
+      expect(lim.xFront, r.id).toBeLessThanOrEqual(
+        Math.min(r.leadingEdge.hub.x, r.leadingEdge.tip.x),
+      );
+    for (const r of [...rowsOf('booster'), ...rowsOf('hpc')])
+      expect(lim.xFront, r.id).toBeGreaterThanOrEqual(
+        Math.max(r.trailingEdge.hub.x, r.trailingEdge.tip.x),
+      );
+    for (const r of rowsOf('lpt'))
+      expect(lim.xRear, r.id).toBeLessThanOrEqual(
+        Math.min(r.leadingEdge.hub.x, r.leadingEdge.tip.x),
+      );
+    expect(lim.xRear).toBeGreaterThan(lim.xFront);
     const w = geo.walls;
     // a point inside the inner body anywhere along the engine is hidden
     expect(hiddenWhenClosed([{ x: 0.1, r: 0.05 }], w, lim)).toBe(true);
     // on the hub surface itself, ahead of the front sight limit: seen through the fan
     expect(hiddenWhenClosed([{ x: 0.3, r: w.hub.radiusAt(0.3) }], w, lim)).toBe(false);
     // inside the core cowl between the limits: hidden; the same radius ahead of xFront: seen
-    expect(hiddenWhenClosed([{ x: 1.2, r: w.coreOuter.radiusAt(1.2) }], w, lim)).toBe(true);
+    expect(hiddenWhenClosed([{ x: 1.6, r: w.coreOuter.radiusAt(1.6) }], w, lim)).toBe(true);
     expect(
       hiddenWhenClosed(
         [{ x: lim.xFront - 0.01, r: w.coreOuter.radiusAt(lim.xFront - 0.01) }],
@@ -182,8 +252,8 @@ describe('closed-engine culling (LD-6)', () => {
     expect(
       hiddenWhenClosed(
         [
-          { x: 1.2, r: 0.28 },
-          { x: 1.2, r: w.coreCowl.radiusAt(1.2) + 0.01 },
+          { x: 1.6, r: 0.28 },
+          { x: 1.6, r: w.coreCowl.radiusAt(1.6) + 0.01 },
         ],
         w,
         lim,

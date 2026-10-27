@@ -17,6 +17,7 @@ import {
   Matrix4,
   Mesh,
   Scene,
+  type Material,
   type Object3D,
 } from 'three/webgpu';
 import { COMPONENT_IDS, type ComponentId } from '../contracts/engine';
@@ -24,7 +25,8 @@ import type { EngineGeometry } from '../geometry/engineGeometry';
 import type { MeshData } from '../geometry/mesh';
 import { instanceMatrices } from '../geometry/rows';
 import type { ClosedViewSet } from '../geometry/visibility';
-import type { MaterialSet } from './materials';
+import { FAN_TIME_SAMPLES, type MaterialSet } from './materials';
+import { ROTOR_SHADOW_LAYER } from './studio';
 
 export interface EngineScene {
   readonly main: Scene;
@@ -40,11 +42,29 @@ export interface EngineScene {
   readonly skins: readonly Object3D[];
   /** Cap meshes: [start face, end face] per part. */
   readonly caps: readonly (readonly [Mesh, Mesh])[];
+  /**
+   * The fan's time copies (stochastic blur, src/render/post.ts), index = userData.timeSample:
+   * the depth pre-pass draw and the shaded draw of each (they turn together).
+   */
+  readonly fanTimeCopies: readonly FanTimeCopy[];
   /** Objects the closed engine never shows (src/geometry/visibility.ts): culled in realistic mode. */
   readonly closedHidden: readonly Object3D[];
+  /** Drawn by the closed engine only for an eye ahead of / aft of ClosedViewSet.eye. */
+  readonly frontOnly: readonly Object3D[];
+  readonly rearOnly: readonly Object3D[];
   readonly triangles: number;
   dispose(): void;
 }
+
+export interface FanTimeCopy {
+  readonly depth: InstancedMesh;
+  readonly shaded: InstancedMesh;
+}
+
+// the rotor pass draws every fan copy's depth first, the other rotors next (renderOrder 1),
+// then the shaded fan copies, which pass only where their depth is the one stored
+const FAN_DEPTH_ORDER = 0;
+const FAN_SHADED_ORDER = 2;
 
 function toGeometry(m: MeshData, withTangents = false): BufferGeometry {
   const g = new BufferGeometry();
@@ -82,6 +102,13 @@ export function buildEngineScene(
   const skins: Object3D[] = [];
   const caps: [Mesh, Mesh][] = [];
   const closedHidden: Object3D[] = [];
+  const frontOnly: Object3D[] = [];
+  const rearOnly: Object3D[] = [];
+  const sided = (id: string, obj: Object3D) => {
+    if (closed.frontOnly.has(id)) frontOnly.push(obj);
+    if (closed.rearOnly.has(id)) rearOnly.push(obj);
+  };
+  const fanTimeCopies: FanTimeCopy[] = [];
   const disposables: BufferGeometry[] = [];
   let triangles = 0;
 
@@ -94,12 +121,23 @@ export function buildEngineScene(
     const mesh = new Mesh(g, materials.part(p.spec.material));
     mesh.name = p.spec.id;
     mesh.castShadow = true;
-    mesh.receiveShadow = p.spec.material !== 'spinner';
+    mesh.receiveShadow = true;
     // outer skins first: they fill the depth buffer, so the cases and internals behind them
     // fail the early depth test instead of being shaded and overdrawn (the opaque pass is
     // fill-bound, not triangle-bound)
     mesh.renderOrder = p.spec.skin ? 0 : 1;
     if (!closed.parts.has(p.spec.id)) closedHidden.push(mesh);
+    sided(p.spec.id, mesh);
+    // the part as a shadow proxy for the rotor pass's lights (W1L-I2, src/render/studio.ts)
+    if (p.spec.material !== 'spinner') {
+      const proxy = new Mesh(g, materials.part(p.spec.material));
+      proxy.name = `shadowProxy:${p.spec.id}`;
+      proxy.layers.set(ROTOR_SHADOW_LAYER);
+      proxy.castShadow = true;
+      proxy.receiveShadow = false;
+      groupOf(p.spec.module, true).add(proxy);
+      if (!closed.parts.has(p.spec.id)) closedHidden.push(proxy);
+    }
     // only the spinner shows that it turns (its paint); drums and disks are axisymmetric
     if (p.spec.material === 'spinner') {
       const spin = new Group();
@@ -142,12 +180,40 @@ export function buildEngineScene(
     mesh.name = `row:${r.row.id}`;
     mesh.renderOrder = 1;
     mesh.castShadow = r.spool === null;
-    mesh.receiveShadow = r.spool === null;
+    // rotors receive the rotor lights' shadows (W1L-I2); they cast none (static maps)
+    mesh.receiveShadow = true;
     if (!closed.rows.has(r.row.id)) closedHidden.push(mesh);
+    sided(r.row.id, mesh);
     triangles += (r.blade.mesh.indices.length / 3) * r.row.count;
     const rowGroup = new Group();
     rowGroup.name = `rowGroup:${r.row.id}`;
     rowGroup.add(mesh);
+    if (r.material === 'fanBlade' && r.spool !== null) {
+      // the fan's time copies share the geometry, the instances and the material; the view
+      // turns each by its time offset every frame (W1L-I3). Each copy is drawn twice: depth
+      // only with the per-pixel pick first, then shaded where its depth is the stored one
+      // (src/render/materials.ts, fanDepthMaterial), so a pixel is shaded once, not per copy
+      mesh.userData.timeSample = 0;
+      mesh.renderOrder = FAN_SHADED_ORDER;
+      const copyOf = (k: number, material: Material, order: number, tag: string) => {
+        const copy = new InstancedMesh(g, material, r.row.count);
+        copy.instanceMatrix = mesh.instanceMatrix;
+        copy.boundingSphere = mesh.boundingSphere;
+        copy.userData = { ...mesh.userData, timeSample: k };
+        copy.name = `${mesh.name}:${tag}${String(k)}`;
+        copy.renderOrder = order;
+        copy.castShadow = false;
+        copy.receiveShadow = true;
+        rowGroup.add(copy);
+        return copy;
+      };
+      for (let k = 0; k < FAN_TIME_SAMPLES; k++) {
+        const depth = copyOf(k, materials.fanDepth(), FAN_DEPTH_ORDER, 'z');
+        depth.receiveShadow = false;
+        const shaded = k === 0 ? mesh : copyOf(k, mesh.material, FAN_SHADED_ORDER, 't');
+        fanTimeCopies.push({ depth, shaded });
+      }
+    }
     groupOf(r.module, r.spool !== null).add(rowGroup);
     if (r.spool !== null) spoolGroups[r.spool].push(rowGroup);
   }
@@ -160,6 +226,9 @@ export function buildEngineScene(
     skins,
     caps,
     closedHidden,
+    frontOnly,
+    rearOnly,
+    fanTimeCopies,
     triangles,
     dispose: () => {
       for (const g of disposables) g.dispose();

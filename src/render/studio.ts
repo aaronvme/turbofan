@@ -47,13 +47,18 @@ export const FLOOR_Y = -1.32;
 /** Where the engine sits over the floor: the cove is centred here. */
 const CENTRE_X = 1.3;
 
+/** Layer of the rotor pass's shadow proxies: cast into the rotor lights' maps, never drawn. */
+export const ROTOR_SHADOW_LAYER = 2;
+
 export interface Studio {
   readonly environment: Texture;
   /** Cyclorama, lights and shadow catcher for the main scene. */
   readonly stage: Group;
-  /** Lights for the rotor scene (same rig, no shadow). */
+  /** Lights for the rotor scene: the same key and rim, shadowed by the proxies on ROTOR_SHADOW_LAYER. */
   readonly rotorLights: Group;
   readonly key: DirectionalLight;
+  /** Every shadowed light (main key, rotor key, rotor rim): their static maps re-render together. */
+  readonly shadowLights: readonly DirectionalLight[];
   /** 0 hides the analytic contact shadow (exploded view: the engine is split). */
   readonly contact: { value: number };
   dispose(): void;
@@ -207,26 +212,53 @@ export async function createStudio(renderer: WebGPURenderer): Promise<Studio> {
   rim.target.position.set(1, 0, 0);
   stage.add(rim, rim.target);
 
+  // The rotor pass draws only rotating parts, so nothing in its scene could shadow them: the
+  // fan was lit through the nacelle (pass 4, W1L-I2). Its key and rim cast shadows from shadow
+  // proxies, the static parts on ROTOR_SHADOW_LAYER (src/render/engineScene.ts), which the
+  // shadow cameras see and the rotor pass's camera does not. The rotors cast no shadow, so
+  // these maps are static too.
   const rotorLights = new Group();
-  const keyR = new DirectionalLight(key.color, key.intensity);
-  keyR.position.copy(key.position);
-  keyR.target.position.copy(key.target.position);
-  const rimR = new DirectionalLight(rim.color, rim.intensity);
-  rimR.position.copy(rim.position);
-  rimR.target.position.copy(rim.target.position);
-  rotorLights.add(keyR, keyR.target, rimR, rimR.target);
+  const shadowed = (src: DirectionalLight, size: number): DirectionalLight => {
+    const l = new DirectionalLight(src.color, src.intensity);
+    l.position.copy(src.position);
+    l.target.position.copy(src.target.position);
+    l.castShadow = true;
+    l.shadow.autoUpdate = false;
+    l.shadow.needsUpdate = true;
+    l.shadow.mapSize.set(size, size);
+    l.shadow.radius = key.shadow.radius;
+    l.shadow.blurSamples = key.shadow.blurSamples;
+    l.shadow.bias = key.shadow.bias;
+    l.shadow.normalBias = key.shadow.normalBias;
+    const c = l.shadow.camera;
+    c.left = cam.left;
+    c.right = cam.right;
+    c.top = cam.top;
+    c.bottom = cam.bottom;
+    c.near = cam.near;
+    c.far = cam.far;
+    // a mask beyond layer 0 makes three keep the shadow camera's own layers (ShadowNode)
+    c.layers.enable(ROTOR_SHADOW_LAYER);
+    rotorLights.add(l, l.target);
+    return l;
+  };
+  const keyR = shadowed(key, 2048);
+  const rimR = shadowed(rim, 1024);
 
   return {
     environment: target.texture,
     stage,
     rotorLights,
     key,
+    shadowLights: [key, keyR, rimR],
     contact,
     dispose: () => {
       target.dispose();
       cove.geometry.dispose();
       coveMat.dispose();
       key.shadow.dispose();
+      keyR.shadow.dispose();
+      rimR.shadow.dispose();
     },
   };
 }
