@@ -138,6 +138,17 @@ Never quote personal data (emails, keys, tokens) in this file.
   - **The end-to-end checks of record stay P2 (≥ 55 fps) and L13,** with the solver and flow visuals running.
   - **This changes a measurement method, not the threshold, so it applies only after the critic independently confirms the DVFS evidence.** Until then P4 is reported both ways and must pass both.
   - The capture tool gets a back-to-back mode in the next look-dev round. The official vsync run of bad7ad0 runs in this cap pause as the baseline (D3-7 had 10.18 ms).
+- **D4-24 result: official vsync P4 baseline on w2/lookdev-4 @bad7ad0, measured as a FAIL.**
+  - Conditions: 2026-10-27 05:33-05:48, AC, plan Balanced, no agents, CPU 16%, D0-1 protocol (10 s warm-up + 3 × 60 s, seed 1). All 4 configs were VALID, with 0 errors.
+  - **Default 11.68 ms**: opaque 6.29, rotors 1.87, GTAO 1.10, composite 0.87, TRAA 1.18, output 0.39.
+  - **Performance 10.75 ms**: opaque 5.79, rotors 2.00.
+  - **Cutaway 11.80 ms**: opaque 7.49.
+  - **Hero 12.54 ms**: opaque 4.92, DoF 2.10.
+  - P4 FAIL (default ≤ 8 ms).
+  - Compared with D3-7 (10.18 / 9.57 / 12.67 / 14.09 ms), cutaway and hero improved, but default and performance got worse. The default's opaque pass went from 5.59 to 6.29 ms and the rotors from 1.36 to 1.87 ms, against the builder's indicative opaque cut of 6.09 → 4.95 ms.
+  - Within each run the default and cutaway are bimodal: p10 about 7.3 ms against p90 about 16.8 ms, while hero, the heaviest load, is tight at 11.9-13.7 ms. That is consistent with the clock following the load (D4-24), but it does not rule out a regression.
+  - The next look-dev round must settle it: a back-to-back measurement, and an A/B of bad7ad0 against w1/lookdev-3's 23239a1 under the same mode. The critic checks this evidence before D4-24 applies.
+  - JSON: job tmp `lookdev4_official/`.
 - **D4-25 (w2/reference round 3 @ca296ae, question a): the smooth van Albada limiter is adopted.** This is the ε-regularised, differentiable form, standard for steady and implicit solvers. The ab > 0 switch caused L9a's stall and D4-20's stall wherever M_cut ≤ the local Mach.
   - The ε rule and its scaling are stated in SOLVER.md.
   - L2/L4's shock rows and the positivity fallback must stay green.
