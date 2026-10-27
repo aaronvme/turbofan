@@ -83,10 +83,12 @@ const solvedAll = lazy(() => {
 });
 
 /**
- * The checks this model cannot meet with physically justified parameters (W1C-I1; the analysis is
- * in docs/handoffs/w1-cycle-calib.md). They run as it.fails: each must still FAIL, so the suite
- * turns red the moment a change makes one pass and the marker has to come off. The threshold is
- * not loosened; the orchestrator decides what happens to them.
+ * The checks the reference calibration misses: the part-power gap that D3-15 accepts (PHYSICS.md
+ * fidelity ledger). In the reference the D3-11 / D3-14 part-power mechanisms are off. Their bounded
+ * fit (PART_POWER_FIT_CALIBRATION) meets all three of these inside the bounds, but it was rejected
+ * under D3-14's adoption rule because it breaks the transient model (partPower.test.ts pins the
+ * reason). They run as it.fails: each must still FAIL, so the suite turns red the moment a change
+ * makes one pass and the marker has to come off. The threshold is not loosened.
  */
 const KNOWN_LIMIT: ReadonlySet<string> = new Set([
   'MPA N2',
@@ -95,7 +97,9 @@ const KNOWN_LIMIT: ReadonlySet<string> = new Set([
 ]);
 const check = (key: string) => (KNOWN_LIMIT.has(key) ? it.fails : it);
 const label = (key: string, text: string) =>
-  KNOWN_LIMIT.has(key) ? `KNOWN FAIL (W1C-I1 limit, orchestrator decision): ${text}` : text;
+  KNOWN_LIMIT.has(key)
+    ? `KNOWN FAIL (D3-15: accepted part-power gap, PHYSICS.md ledger): ${text}`
+    : text;
 
 describe('C10 (D3-3): the measured ground-run points, WIDURI Table 7', () => {
   it.each(POINTS)('$name: converged at the measured N1', (p) => {

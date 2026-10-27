@@ -70,16 +70,20 @@ const solvedAll = lazy(() => {
 });
 
 /**
- * The C11 checks the D3-11 calibration cannot meet inside its plausible bounds (the fitted
- * mechanisms sit on their bounds; the numbers and the binding bounds are in
- * docs/handoffs/w1-cycle-calib-2.md). They run as it.fails: each must still FAIL, so the suite
- * turns red the moment a change makes one pass and the marker has to come off. The threshold is
- * not loosened; the orchestrator decides what happens to them.
+ * The C11 checks the reference calibration misses: the part-power gap that D3-15 accepts
+ * (PHYSICS.md fidelity ledger). In the reference the D3-11 / D3-14 part-power mechanisms are off.
+ * Their bounded fit (PART_POWER_FIT_CALIBRATION, every mechanism on its bound) meets idle (-4.3 %)
+ * but still misses approach (-6.4 %), and it was rejected under D3-14's adoption rule because it
+ * breaks the transient model (partPower.test.ts pins both). They run as it.fails: each must still
+ * FAIL, so the suite turns red the moment a change makes one pass and the marker has to come off.
+ * The threshold is not loosened.
  */
 const KNOWN_LIMIT: ReadonlySet<string> = new Set(['approach', 'idle']);
 const check = (name: string) => (KNOWN_LIMIT.has(name) ? it.fails : it);
 const label = (name: string, text: string) =>
-  KNOWN_LIMIT.has(name) ? `KNOWN FAIL (D3-11 bounds bind, orchestrator decision): ${text}` : text;
+  KNOWN_LIMIT.has(name)
+    ? `KNOWN FAIL (D3-15: accepted part-power gap, PHYSICS.md ledger): ${text}`
+    : text;
 
 describe('C11 (D3-11): the EEDB LTO fuel flows, ISA SLS test bed', () => {
   it.each(SETTINGS)('$name ($thrustPercent %): converged at the LTO thrust', (p) => {
