@@ -177,6 +177,16 @@ Never quote personal data (emails, keys, tokens) in this file.
   - The 0.8 margin is the standard safety factor on a computed stability limit.
 - **D4-33 (round 4, the smooth limiter): D4-25 is amended.** The smooth limiter stays an option, not the default, until the low-Mach acoustic damping is fixed (p_u plus D4-32's CFL). In the blockage duct its residual stalls at a floor proportional to ε, because the sharp switch's clipping was masking the weak damping. Retest the stall after p_u, then decide the default.
 - **D4-34 (round 4, W2R-6):** the p∇b source is well-balanced (rounding only), and the growth does not depend on the CFL. So W2R-6 is a semi-discrete instability of the spatial operator with blockage. Next, test whether p_u's damping removes it. If not, do a semi-discrete eigenvalue/eigenvector analysis of the blockage duct to find the term.
+- **D4-35 (w2/reference round 5 @4553ce2): the preconditioned-tracking CFL is 0.8, without p_u.** The AUSM+-up p_u trial is rejected: L8 got worse (1.38% / 2.27%), L7's Cd failed (0.0117), and C-pre went to NaN.
+  - The p_u option is **deleted from the oracle**: the oracle must describe exactly one scheme, the kernel's.
+  - The negative result is recorded in SOLVER.md (D4-30/D4-32 trial, the numbers, and the commit where the code lived).
+  - Round 5 now passes L7 at 96 × 96 (asymmetry 0.0131, falling over 24/48/96; Cd 0.0016; iteration ratio 1.05) and L8's velocity row (0.36%). L8's convergence row and L9a/L9b's convergence rows remain open.
+- **D4-36 (round 5, the limiter): W2R-6 is caused by the sharp van Albada switch acting on p′ and u at the throat,** not by the blockage source. The smooth form fixes W2R-6 and the L9 convergence rows but breaks L8 (27-30%) and L1.
+  - The next round runs both variants as trials under one pre-stated selection rule:
+    - (a) a smaller ε, with ε scaled with the cell size in the Venkatakrishnan manner, under plain tracking at CFL 1.0;
+    - (b) the smooth form on p′ and u only.
+  - **The rule:** adopt the first variant that keeps every row the sharp limiter passes (L1-L7, L8 velocity, L9 values) and fixes W2R-6. Otherwise keep the sharp limiter, with W2R-6 open and pinned, and bring the data back.
+  - Write the rule into SOLVER.md before the runs.
 - **Slot plan update:** after W2R-B1 merges, slot A runs the reference round 4 (W2R-I1..I4, D4-29, D4-30). When w2/lookdev-4 finishes, slot B runs **w2/solver**, which starts on the parts the critic cleared and holds back the limiter, the preconditioned CFL/dissipation and the oracle comparisons until round 4 lands. w2/flowviz and w2/app-ui follow.
 
 
