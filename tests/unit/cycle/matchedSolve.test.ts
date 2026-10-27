@@ -12,7 +12,8 @@ import {
 } from '../../../src/cycle/engine';
 import {
   ACCEPTED_RESIDUAL,
-  CONTINUATION_STEPS,
+  MAX_CONTINUATION_SOLVES,
+  MIN_CONTINUATION_STEP,
   solveMatched,
   type GasPathAnchor,
   type GasPathSolver,
@@ -46,6 +47,20 @@ function recording(inner: GasPathSolver = solveGasPath) {
   return { calls, solver };
 }
 
+/** Where a call sits on the path from the idle anchor to START, 0..1 (from its N2). */
+const fractionOf = (k: { n2Rpm: number }) =>
+  (k.n2Rpm - idleAnchor().n2Rpm) / (START.n2Rpm - idleAnchor().n2Rpm);
+/** A solve that did not converge. */
+const lost: GasPathSolver = () => ({ ...converged(), maxResidual: 1, converged: false });
+/** A converged solve (the idle point's, only its acceptance matters here). */
+const converged = (): GasPathSolution => ({
+  point: idle().point,
+  x: idleAnchor().x,
+  iterations: 1,
+  converged: true,
+  maxResidual: 0,
+});
+
 describe('D4-13: the matched solve with a continuation entry', () => {
   it("a start's 57 % N2: Newton from the idle unknowns fails, the continuation converges", () => {
     const direct = solveGasPath(REF, C, START.n1Rpm, START.n2Rpm, START.wf, idleAnchor().x);
@@ -56,19 +71,12 @@ describe('D4-13: the matched solve with a continuation entry', () => {
     expect(s?.maxResidual ?? Infinity).toBeLessThan(ACCEPTED_RESIDUAL);
     // on the engine's branch: the idle bypass ratio is about 6
     expect(at(s?.x ?? [], 1)).toBeGreaterThan(5);
+    // the direct try, then the walk from half the path, which ends on the target exactly
+    expect(calls.length).toBeLessThanOrEqual(1 + MAX_CONTINUATION_SOLVES);
+    expect(fractionOf(at(calls, 1))).toBeCloseTo(0.5, 9);
+    expect(at(calls, calls.length - 1)).toEqual({ n2Rpm: START.n2Rpm, wf: START.wf });
     expect(s?.point.n2Rpm).toBe(START.n2Rpm);
     expect(s?.point.fuelFlowKgPerS).toBe(START.wf);
-    // the direct try, then CONTINUATION_STEPS steps ending on the target
-    expect(calls.length).toBe(1 + CONTINUATION_STEPS);
-    const walk = calls.slice(1);
-    for (let k = 1; k < walk.length; k++) {
-      expect(at(walk, k).n2Rpm).toBeLessThan(at(walk, k - 1).n2Rpm);
-    }
-    expect(at(walk, 0).n2Rpm).toBeCloseTo(
-      idleAnchor().n2Rpm + (START.n2Rpm - idleAnchor().n2Rpm) / CONTINUATION_STEPS,
-      6,
-    );
-    expect(at(walk, walk.length - 1)).toEqual({ n2Rpm: START.n2Rpm, wf: START.wf });
   });
 
   it('a direct solve that converges is used as it is, without a walk', () => {
@@ -79,18 +87,48 @@ describe('D4-13: the matched solve with a continuation entry', () => {
     expect(s?.maxResidual ?? Infinity).toBeLessThan(ACCEPTED_RESIDUAL);
   });
 
-  it('a step that fails ends the walk: the solve is lost (null)', () => {
+  it('a failed step halves the step down to MIN_CONTINUATION_STEP, then the solve is lost', () => {
+    const { calls, solver } = recording(lost);
+    expect(solveMatched(solver, REF, C, idleAnchor(), START.n1Rpm, START.n2Rpm, START.wf)).toBe(
+      null,
+    );
+    // the direct try, then 1/2, 1/4, ... down to 1/256 of the path
+    expect(MIN_CONTINUATION_STEP).toBe(1 / 256);
+    expect(calls.slice(1).map((k) => fractionOf(k))).toEqual(
+      [1 / 2, 1 / 4, 1 / 8, 1 / 16, 1 / 32, 1 / 64, 1 / 128, 1 / 256].map(
+        (f) => expect.closeTo(f, 9) as number,
+      ),
+    );
+  });
+
+  it('a step that converges doubles the next one', () => {
     let n = 0;
-    // converges on the direct try's guess never, and on the third walk step never again
-    const failing: GasPathSolver = (...args) => {
-      n++;
-      const s = solveGasPath(...args);
-      return n === 1 || n >= 4 ? { ...s, maxResidual: 1, converged: false } : s;
+    // the direct try and the half-way step fail, everything after converges
+    const solver = recording((...args) => (++n <= 2 ? lost(...args) : converged()));
+    const s = solveMatched(solver.solver, REF, C, idleAnchor(), START.n1Rpm, START.n2Rpm, START.wf);
+    expect(s).not.toBeNull();
+    expect(solver.calls.map((k) => fractionOf(k))).toEqual(
+      [1, 1 / 2, 1 / 4, 3 / 4, 1].map((f) => expect.closeTo(f, 9) as number),
+    );
+  });
+
+  it('a walk that only creeps runs out of solves: lost after MAX_CONTINUATION_SOLVES', () => {
+    // converges only on steps of at most the minimum, so the step never grows past 2x the minimum
+    let done = 0;
+    const creeping: GasPathSolver = (...args) => {
+      const f = fractionOf({ n2Rpm: args[3] });
+      if (f - done > MIN_CONTINUATION_STEP + 1e-9) return lost(...args);
+      done = f;
+      return converged();
     };
-    const { calls, solver } = recording(failing);
-    const s = solveMatched(solver, REF, C, idleAnchor(), START.n1Rpm, START.n2Rpm, START.wf);
-    expect(s).toBeNull();
-    expect(calls.length).toBe(4);
+    const { calls, solver } = recording(creeping);
+    expect(MAX_CONTINUATION_SOLVES).toBe(64);
+    expect(solveMatched(solver, REF, C, idleAnchor(), START.n1Rpm, START.n2Rpm, START.wf)).toBe(
+      null,
+    );
+    expect(calls.length).toBe(1 + MAX_CONTINUATION_SOLVES);
+    expect(done).toBeGreaterThan(0);
+    expect(done).toBeLessThan(1);
   });
 
   it('a solver that throws (a thermo state out of range) is a lost solve, not an exception', () => {

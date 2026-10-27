@@ -15,7 +15,8 @@
 //   shutdown). A matched solve lost above the switch (no convergence, or a non-physical root)
 //   holds the last converged gas path and says so in the state (gasPathSolve: status 'held', the
 //   lost solves counted since the reset); the shafts integrate the held power balance and every
-//   substep retries the solve from the last converged unknowns.
+//   substep retries the solve from the last converged point. A failed warm-started solve is
+//   retried by continuation from that point before it counts as lost (matchedSolve.ts).
 // - FADEC: throttle -> N1 target; one Wf/P3 ("ratio unit") integrator driven by the selected
 //   loop (max of N1 target and the N2 idle floor, then min of the N1, N2 and EGT limiters), with
 //   rate feedback for damping, clamped between decel and accel schedules built from the steady
@@ -91,6 +92,7 @@ import {
   type CompressionSystem,
 } from './surgeSystem';
 import { P3_DETECTOR_START, feedP3, type P3DecayDetector } from './surgeDetection';
+import { solveMatched, type GasPathAnchor } from './matchedSolve';
 
 /**
  * Spool polar moments of inertia (estimates; no public figure), kg m^2. LP: 24 fan blades of
@@ -334,7 +336,8 @@ class TurbofanCycleModel implements CycleModel {
   private n2 = 0;
   private dn1 = 0;
   private dn2 = 0;
-  private x: number[] = [];
+  /** The last converged matched point, the next solve's warm start (D4-13). */
+  private anchor!: GasPathAnchor;
   private ru = 0;
   private wf = 0;
   private lit = false;
@@ -426,7 +429,12 @@ class TurbofanCycleModel implements CycleModel {
       ...Object.fromEntries(Object.keys(this.flags).map((k) => [k, false])),
     };
     const idle = this.sched.idle;
-    this.x = [...idle.unknowns.slice(0, 6)];
+    this.anchor = {
+      n1Rpm: idle.point.n1Rpm,
+      n2Rpm: idle.point.n2Rpm,
+      wfKgPerS: idle.point.fuelFlowKgPerS,
+      x: idle.unknowns.slice(0, 6),
+    };
     if (initial === 'groundIdle') {
       this.n1 = idle.point.n1Rpm;
       this.n2 = idle.point.n2Rpm;
@@ -842,15 +850,15 @@ class TurbofanCycleModel implements CycleModel {
       this.held = this.subIdle(c);
       return this.held;
     }
-    const s = this.solveGas(this.e, c, this.n1, this.n2, this.wf, this.x);
-    // converged, and on a physical root (a bypass ratio near zero is not one)
-    if (s.maxResidual < 1e-6 && at(s.x, 1) > 1) {
-      this.x = [...s.x];
+    // converged on a physical root, directly or by continuation from the last converged point
+    const s = solveMatched(this.solveGas, this.e, c, this.anchor, this.n1, this.n2, this.wf);
+    if (s !== null) {
+      this.anchor = { n1Rpm: this.n1, n2Rpm: this.n2, wfKgPerS: this.wf, x: s.x };
       this.held = this.fromPoint(s.point);
       return this.held;
     }
     // D4-13: lost; never the similarity model above the switch. The next try starts from the
-    // last converged unknowns (this.x is not moved).
+    // last converged point again (the anchor does not move).
     this.lostSolves++;
     return { ...this.held, solve: 'held' };
   }

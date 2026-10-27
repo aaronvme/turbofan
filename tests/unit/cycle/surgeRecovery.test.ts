@@ -64,11 +64,14 @@ describe('W1K-I2: why the D3-14 part-power fit was rejected', { timeout: TIMEOUT
   it('its 33.73(a) slam surges, then loses the matched gas path: the "hang" is a lost solve (D4-13)', () => {
     // Pins the D3-14 adoption-rule rejection in the repo instead of on a scratch copy (critic pass
     // 5, probe w1k-calib). On the fit the HPC working line crosses the surge line about 1.5 s into
-    // the slam (min margin below zero, the surge flag raised). Then, at N2 about 74 % with the VBV
-    // still fully open (the fit opens it below 75 % N2c), the matched gas path stops converging.
-    // Before D4-13 the model fell back to the sub-idle similarity model there without a word, and
-    // the engine "hung" at N1 about 35 %, 10-11 kN; now the state holds the last converged gas path
-    // and says so. The reference makes 95 % thrust at about 5.8 s without a surge (model.test.ts).
+    // the slam (min margin below zero, the surge flag raised). Then, from about 5.7 s, at N2 about
+    // 74 % with the VBV fully open (the fit opens it below 75 % N2c), the matched gas path has no
+    // solution, not even by continuation, until N2 about 88 % (8.5 s). Before D4-13 the model fell
+    // back to the sub-idle similarity model there without a word, fuel and P3 chattered between the
+    // two models, and the engine "hung" at N1 about 35 %, 10-11 kN. Now the state holds the last
+    // converged gas path and says so (status held, the lost solves counted); the spools run on its
+    // held power balance (not physics), and the slam makes about 94 kN by 10 s. The reference makes
+    // 95 % thrust at about 5.8 s without a surge or a lost solve (model.test.ts).
     const states = slam(
       createCycleModel({ engine: withCalibration(referenceEngine(), PART_POWER_FIT_CALIBRATION) }),
     );
@@ -78,7 +81,9 @@ describe('W1K-I2: why the D3-14 part-power fit was rejected', { timeout: TIMEOUT
     const first = states.find((s) => s.gasPathSolve.lostSolves > 0);
     expect(first, 'a lost solve').toBeDefined();
     expect(first?.combustorLit).toBe(true);
-    expect(first?.n2Percent ?? 0).toBeGreaterThan(SUBIDLE_N2_PERCENT);
+    expect(first?.n2Percent ?? 0).toBeGreaterThan(70);
+    expect(first?.n2Percent ?? Infinity).toBeLessThan(80);
+    expect(first?.vbvOpenFraction ?? 0).toBeGreaterThan(0.95);
     expect(states.some((s) => s.gasPathSolve.status === 'held')).toBe(true);
     // never the silent switch: above the switch, lit and fuelled, a state is matched or held
     for (const s of states) {
