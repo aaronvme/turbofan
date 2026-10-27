@@ -129,9 +129,7 @@ describe('boundary conditions', () => {
     expect(T + (u * u) / (2 * cp)).toBeCloseTo(400, 8);
     expect(p * (400 / T) ** 3.5).toBeCloseTo(1.5e5, 4);
     expect(u).toBeGreaterThan(0);
-    expect(g[2]).toBe(0);
-    expect(g[3]).toBe(0);
-    expect(g[5]).toBe(0);
+    expect(g[2] === 0 && g[3] === 0 && g[5] === 0).toBe(true);
   });
 
   it('inflow at the free-stream totals reproduces the free stream (thermally perfect)', () => {
