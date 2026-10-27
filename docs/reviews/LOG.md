@@ -2403,3 +2403,182 @@ None.
   - L4b convergence, reported (D4-19).
 - W2R-I2 and W2R-I4, which gated w2/solver's oracle comparisons, are done and correct. The acoustic analysis and its CFL are correct for the matched family and pinned. L7's refinement is honest and passes.
 - Before merge, or as the first item of the next round (orchestrator's choice): **W2R-I5**, deleting p_u as D4-35 decided (small). **W2R-I6** and **W2R-I7** go to the next reference round with D4-36's trials. W2R-I6 also goes to w2/solver as a known limit of CFL 0.8.
+
+## Critic pass 8: w2/lookdev-4 @ecf0765
+
+I reviewed `w2/lookdev-4` @ecf0765 against main 00bc99b on 2026-10-27 as the pass-8 critic. The branch is from 30ce54e, so the review diff is `30ce54e..ecf0765`.
+
+In scope:
+- P4's pre-registration;
+- the shading cuts;
+- D4-24's back-to-back mode and `tools/lookdev/ab.ts`;
+- W1V-I1 fix (b) (rotor motion vectors and our TRAA resolve);
+- W1V-I3 (the EqualDepth test);
+- the visual notes (the stand, the dull plug, the spinner spiral);
+- D4-4 (the exploded spools easing to a stop);
+- the official A/B of record `docs/look-dev/ab-bad7ad0-23239a1.json`.
+
+Checklists applied: typescript-reviewer, silent-failure-hunter, pr-test-analyzer, and the three.js/WebGPU pitfalls in GPU_FACTS. I ran no bench, `ab.ts` or official capture.
+
+**Gates at the tip.** I ran them in the builder worktree; its tracked files were unchanged afterwards. The reference ladder and a solver builder's GPU tests shared the machine.
+- `npm test`: 1623 passed, 5 expected fail, 74 files.
+- `npm run typecheck`: clean. `npm run lint`: clean.
+- `npm run coverage`: lines 99.51 %, statements 98.58 %, branches 87.97 %, functions 99.59 %; thresholds pass. `src/geometry`: 99.59 % (branches 90.30 %).
+- `npm run test:mesh`: 29 passed.
+- `npm run test:browser` (own Playwright Chrome, API port 5190): 22 of 23 passed, 7 files: every preset and the performance profile, fanBlur, equalDepth, rotorMotion. No WebGPU error appeared in any test.
+  - `culling.test.ts` timed out at its 120 s while the reference ladder probe and a solver builder's GPU tests ran.
+  - Re-run alone it passed in 58 s (wall).
+  - So it passes, but its timeout margin is about 2× on a quiet machine (W2L-N6).
+
+**P4 pre-registration: in order.** abc9e13 (PHYSICS.md 3.4, TDD) and ffe3335 (`thresholds.ts`, mirrored verbatim, `thresholds.test.ts`) are the first two commits after 30ce54e, before any shading cut or LOD code (87b17ff).
+
+**The shading cuts.**
+- They rest on a measurement: `opaqueCost.ts` runs paired flat/hide/skinsOnly configs with every frame kept. The opaque pass is fragment-bound: unlit about −5 ms, hiding every blade row ≤ 0.6 ms.
+- No geometry LOD followed, which is the right consequence.
+- The cuts:
+  - orange peel dropped;
+  - low-frequency noise per vertex;
+  - oil canning as a per-vertex tilt;
+  - the lip's anisotropy replaced by roughness 0.42;
+  - sub-pixel grain gated, with derivatives taken before the branch (GPU_FACTS M47; WGSL needs uniform control flow for `fwidth`);
+  - nacelle latches and doors evaluated only near them;
+  - TRAA's cross taps;
+  - six fan copies.
+- The paired A/Bs show them working: back to back, opaque −0.9 ms from part 1, −0.47 more in part 2.
+- One LOOKDEV line is stale (W2L-N1).
+
+**D4-24's back-to-back mode and its validity rules.**
+- The loop (`src/lookdev/main.ts`, `backToBack`) keeps up to two frames submitted ahead through `onSubmittedWorkDone`, warm-up included, and records every frame's passes and intervals.
+- A back-to-back run is INVALID on:
+  - a hidden page;
+  - the D3-6 throttle signature on its own intervals (a stall);
+  - the throttle signature on a side rAF watcher (an occluded window, where rAF is throttled but the loop is not).
+- A GPU busy fraction under 60 % is a warning.
+- The pure parts are unit-tested: `withPacings`, `backToBackLoad`, `pacedValidity`, `p4Verdict`, `abOrder`, `abSummary`.
+- `abOrder` is right: adjacent pairs, the leading side alternating, the leading pacing alternating.
+- Three defects in how validity reaches the result: W2L-I2, W2L-I3, W2L-I4.
+
+**D4-24: I confirm the DVFS reading, with two corrections.** From the official JSON, every run:
+
+| run (order) | fps | GPU busy | GPU p50 | opaque | rotors | GTAO | composite | TRAA | output |
+|---|---|---|---|---|---|---|---|---|---|
+| vsync rep 0, bad7ad0 / 23239a1 | 55.9 / 56.7 | 0.65 / 0.68 | 10.43 / 10.65 | 5.39 / 6.07 | 1.63 / 1.50 | 1.03 / 0.92 | 0.90 / 0.83 | 1.23 / 1.16 | 0.32 / 0.30 |
+| back to back rep 0 | 89.6 / 1.5 (INVALID) | 0.73 / 0.01 | 7.86 / 8.75 | 3.64 / 4.54 | 1.07 / 1.05 | 0.72 / 0.72 | 0.74 / 0.74 | 1.11 / 1.11 | 0.27 / 0.27 |
+| back to back rep 1 | 80.0 / 82.2 | 0.74 / 0.76 | 8.28 / 8.87 | 3.80 / 4.60 | 1.15 / 1.10 | 0.80 / 0.73 | 0.88 / 0.81 | 1.31 / 1.23 | 0.31 / 0.29 |
+| vsync rep 1 | 40.7 / 40.0 | 0.66 / 0.65 | 16.39 / 16.44 | 8.25 / 9.13 | 2.59 / 2.19 | 1.60 / 1.41 | 1.43 / 1.34 | 1.98 / 1.85 | 0.44 / 0.39 |
+| vsync rep 2 | 40.6 / 40.6 | 0.66 / 0.65 | 16.37 / 16.34 | 8.11 / 9.02 | 2.59 / 2.10 | 1.63 / 1.38 | 1.52 / 1.32 | 1.94 / 2.02 | 0.46 / 0.40 |
+| back to back rep 2 | 78.7 / 73.1 | 0.74 / 0.75 | 8.55 / 9.77 | 4.05 / 5.21 | 1.18 / 1.27 | 0.83 / 0.83 | 0.93 / 0.77 | 1.30 / 1.27 | 0.30 / 0.37 |
+
+- **Confirmed: the vsync GPU time measures the clock governor, not the work.**
+  - `src/render/post.ts` is identical at 23239a1 and bad7ad0 (`git diff --stat 23239a1 bad7ad0` touches only engineView, materials, cutaway, motion and the lookdev harness). So GTAO, composite, TRAA and output do the same work on both sides, and their ratio is the clock ratio.
+  - In every vsync pair, bad7ad0's unchanged passes run slower: GTAO +12 / +13 / +18 %, composite +8 / +7 / +15 %, output +7 / +13 / +15 %, TRAA +6 / +7 / −4 %. Its opaque pass is 0.68-0.90 ms cheaper. The totals agree within −0.22..+0.03 ms.
+  - The lighter commit got a lower clock that spent its saving. That is what a utilisation-following governor does, and it is not what a regression, thermal drift or a timestamp wait would do:
+    - a timestamp wait would inflate one pass, not all of them;
+    - drift hits adjacent runs alike.
+  - The GPU busy fraction is the invariant. All six vsync runs sit at 0.65-0.68, at two very different operating points: rep 0 at 56 fps and 10.4 ms, reps 1-2 at 40 fps and 16.4 ms.
+  - The three indicative JSONs agree. Their vsync runs are at 0.63-0.74 busy, and the same pattern holds in their pairs.
+- **Correction 1: it does not "fill the frame".** The LOG's reading ("vsync both about 16.3 ms = the governor fills the frame") is not what the runs show.
+  - Rep 0 ran at 56 fps with 10.4 ms frames.
+  - The 16.3 ms median comes from reps 1-2, which ran at 40 fps: frames that miss every other vsync with the GPU idle a third of the time. A deadline-meeting governor would not settle there.
+  - The governor holds utilisation near 0.65, and the frame time follows from that. So a vsync timestamp can sit anywhere between the work's true cost and well over the frame interval.
+- **Correction 2: the summary of record includes the INVALID run, and its conditions are not D0-1-clean.**
+  - The LOG says that the INVALID repetition was "23239a1 rep 1 ... its pair excludes it". In the JSON it is 23239a1 back to back **rep 0** (1.5 fps over a 28-minute stall, the display asleep). `abSummary` keeps it: the back-to-back summary has 3 pairs, its first value is −0.89 ms = 7.86 − 8.75 from that run, and 23239a1's side median 8.87 includes it.
+  - Without it, the valid back-to-back pairs are −0.59 and −1.22 ms (median −0.90). The side medians are 8.28 against 9.32 ms (23239a1 on its two valid runs). Every valid pair is still negative, so the verdict "bad7ad0 did not regress" stands, and the opaque −0.80 / −1.16 confirms it.
+  - The record's own `conditions` show the power source changing. At the start: charging, level 1.00. At the end: **not charging, level 0.98**. The indicative JSONs end at 0.76 and 0.45, not charging, and GPU_FACTS M45 calls that run "AC".
+  - The page's Battery API is the only power record `ab.ts` keeps (W2L-I4). A switch to battery during the run would explain the step from vsync rep 0 (56 fps) to reps 1-2 (40 fps), and the back-to-back drift (7.86 → 8.28 → 8.55 ms for bad7ad0). The pairs are adjacent, so the paired result survives. But the run should be called paired-indicative, not D0-1 official.
+- **Should P4's measure of record become back to back? Yes, as D4-24 decided, on three conditions.**
+  - Back-to-back runs are tighter (p10-p90 spread 1.8-3.8 ms, against 8.1-9.2 ms in vsync rep 0 and 3.9-6.3 ms in reps 1-2). Their unchanged passes match to the hundredth in rep 0, and within ±21 % in reps 1-2 with no consistent sign (rep 1 bad7ad0 slower by 7-10 %, rep 2 mixed). They show the work's saving in the total.
+  - They are not proven to be at the full clock, though: busy 0.73-0.76, and 74-90 fps with 8-10 ms of timed GPU work per frame (M46: the rest unexplained). Either the loop is CPU-bound and the GPU idles a quarter of the time (then the governor still acts, just less), or about 3 ms of each frame is untimed GPU work. Measuring the CPU time per frame in the back-to-back loop settles which.
+  - The conditions:
+    1. Only VALID runs enter the medians and pairs (W2L-I2).
+    2. The OS power source is checked as AC at the start and end of every run, as `capture.ts`'s `conditions()` already records through `spikes/lib/system.ts` (W2L-I4).
+    3. The busy fraction is reported beside the number. The vsync figure stays beside it as D4-24 says, and P2 and L13 stay the end-to-end checks of record.
+  - On those terms the DVFS evidence meets D4-24's condition, and the measurement change may apply.
+
+**W1V-I1 fix (b): rotor motion vectors into TRAA, with its own resolve. The mechanism is right; its test cannot fail on it (W2L-I1).**
+- `post.ts` overrides `sceneVelocity.load` so that a rotor pixel's velocity is the rigid turn of its rotor-depth world point. The point is turned back by the spool step wrapped to half a pitch (pitch and spool from the rotor-blur MRT) and projected with the previous and current unjittered view-projections. The result is an NDC delta, the same convention as three's velocity: our resolve's `offsetUV = v · (0.5, −0.5)`.
+- The rotor depth joins TRAA's current depth (min), and the history depth stays the scene depth (`traaDepth.value`). So a rotor pixel is never judged disoccluded against the scene behind it, and an uncovered pixel is left to the variance clip.
+- `traaResolve.ts` checked:
+  - the 5-tap Catmull-Rom weights (w0..w3 and the merged centre) are Jimenez's;
+  - the normalised sum is clamped at 0;
+  - the cross-tap closest-depth search and variance clip are right;
+  - validity, the motion factor, subpixel correction and flicker reduction are r186's.
+- Both patches assert the TRAANode internals they touch, and throw if they moved (W1V-N3 done).
+- The step uniform is set in `view.frame` from `wrapAngle(lp − lpWas)`. A phase set by a debug flag is excluded. `prevViewProj` advances once per `render()`.
+- The images confirm it: 03's cut fan is no longer ghosted. At 03's framing it still reads as a smooth band, seen edge-on, as the handoff says.
+
+**W1V-I3: the EqualDepth test is sound.**
+- `equalDepth.test.ts` compares the shutter-0 rotor-alpha coverage through the pre-pass and EqualDepth against an ordinary depth test (`plainFanDepth`): 0 differing pixels in 3 presets, more than 1000 fan pixels each.
+- The negative control (`fanDepthNudge` 1e-4 rad) must differ by more than 100 px. It can see a hole, which the fan-blur test could not.
+- GPU_FACTS M43's evidence now points at it.
+
+**D4-4: correct.**
+- `spoolDisplayFactor` eases with smoothstep in a linear progress, inverted in closed form (p = ½ − sin(asin(1 − 2f)/3), which I checked at 0, ½ and 1). So it composes exactly over any frame steps (the test compares dt 1/60 against 1/30). It is monotone, reaches 0 at 1 s, and spins back up.
+- `setMode(m, true)` sets the factor at once for presets only. The live mode change eases.
+- The cutaway keeps the running engine.
+
+**Visual review, 00-07 against before/, by eye: better grounded, but still CG.**
+- Improvements:
+  - the engine now stands on a cradle with contact (00, 01, 02, 03), not floating;
+  - the plug and core nozzle are dull and oxidised (02);
+  - the cut fan in 03 is no longer ghosted;
+  - 05's blades are slightly more defined.
+- What still reads as CG against "premium product render of a real engine":
+  1. **The nacelle** (00, 01, 02) is a uniform matte white solid: no clearcoat response or environment reflection, no tonal variation, doors and latches as drawn outlines. The lip is fine.
+  2. **The moving fan** (00, 05, 06) breaks up:
+     - in 05, torn rectangular slivers on the right half where the booster shows through;
+     - in 00, a stipple across the lower half and speckles at the top right;
+     - **06 is worse than before**: the take-off disc carries a regular dot-screen over the whole disc, more visible than in before/06. That is the cost of 6 time copies instead of 8; LOOKDEV says "a 6-copy frame is still a noisy estimate". A real fan at take-off reads as a smooth translucent disc.
+  3. **The spinner spiral** (W1V-N5): in 01, the default view, the spinner is plain black with no stripe, while before/01 showed it. LOOKDEV says it now "reads at every phase".
+  4. **The stand** is a placeholder: thin flat-black square bars, an H-frame of rails with no pads, bolts, wheels or bracing, and saddles under the cowl skins. A transport stand takes the engine at its mounts; as drawn it reads as a toy for a 2.3 t engine.
+  5. **The cutaway** (03, 07): flat salmon caps (07 shows a fine hatch, 03 does not at that distance); blades and vanes as simple shells with no root or platform detail; the combustor still a lumpy tube. 07's grain still reads as sandpaper speckle on every metal surface. No heat tint reads in the hot section.
+  6. **The exploded view** (04): the parts float with no fixture. With the spools stopped, the fan reads as dark shards. The parts are untextured grey primitives.
+  7. No rotor AO or self-shadow (handoff NOT DONE).
+- Verdict: a clear step toward a grounded product shot, but not yet the bar. The fan in motion is the largest remaining gap, and 06 went backwards.
+
+### Blocking
+None.
+
+### Important
+- **W2L-I1 OPEN: the rotor-motion test passes without the rotor motion vectors.**
+  - `rotorMotion.test.ts:31` (MARGIN 6) and its control. The builder's own note (the test header and LOOKDEV): with our resolve, zero rotor velocity (`noRotorMotion`) gives 8 tiles in the close-up, which is exactly the bound (floor 2 + 6). The resolve rejects the history instead of ghosting, and a TRAA output without history is close to the TRAA-off still the test compares against.
+  - The only control is `legacyTraa`, a different pipeline. So the test pins "no ghosting", not "TRAA accumulates the rotor in motion".
+  - The failure scenario: a sign error in `back`, a wrong pitch channel, or a dropped `velocityNode.load` override would pass. The cut fan would silently fall back to an un-anti-aliased, history-less rotor, which is the W1V-I1 complaint in another form.
+  - The flags for a real control exist and are unused: `noRotorMotion`, `rotorMotionScale` (`engineView.ts`).
+  - Fix: a control on the shipped resolve that must fail. Either:
+    - compare the moving TRAA frame with a converged TRAA frame at rest at the same phase (accumulated anti-aliasing) instead of the TRAA-off still, so that a discarded history counts as a difference; or
+    - assert, through the `velocity` debug view, that rotor pixels carry the analytic rigid-turn velocity at a few known pixels, with `rotorMotionScale: -1` as the negative control.
+- **W2L-I2 OPEN: INVALID runs enter the A/B summary and the P4 verdict.**
+  - `ab.ts:271` calls `abSummary` on every run; `abSummary` (`timing.ts`) has no validity input.
+  - `capture.ts:333-339` computes P4 from `results[...].gpuTotal.p50`, which `combineReps(e.runs)` takes over every run. `p4Verdict` takes no validity either.
+  - The failure scenario: the official A/B of record already includes an INVALID run in its pairs and side medians (above). A P4 run with an occluded or stalled default config would print "PASS" (or "FAIL") as official.
+  - Fix:
+    - `abSummary` drops INVALID runs and their pairs, and records which pairs it used;
+    - `combineReps` is applied to valid runs only, or the result is INVALID;
+    - `p4Verdict` returns INVALID when the default config has an INVALID run;
+    - unit tests for each.
+- **W2L-I3 OPEN: the back-to-back rAF watcher drops the open interval at the end.**
+  - `src/lookdev/main.ts:239-248, 267`: `tick` records a delta only when rAF fires, and `watching = false` ends it. If the window is occluded from some point until after the run ends, the last long interval is never pushed, and `pacedValidity` sees only short deltas.
+  - The failure scenario: the loop keeps running, the run is VALID, and an occluded run counts. That is the case the watcher exists for. The official run was caught only because the loop itself also stalled.
+  - Fix: on stop, push `performance.now() − lastV`. Also require a minimum number of watcher ticks (for example half the run's display intervals), else INVALID.
+- **W2L-I4 OPEN: the A/B tool does not check the power source, and "official" means only the protocol's numbers.**
+  - `ab.ts:206` records only the page's `conditions()` (the Battery API). `ab.ts:291` sets `official` from the warm-up, run length and reps. `capture.ts:333` does the same for P4.
+  - The failure scenario: the official A/B's own record ends "not charging, 0.98", and two indicative JSONs called AC end at 0.76 and 0.45 not charging. A run that changed power source mid-way is labelled D0-1, and the governor behaves differently on battery.
+  - Fix: record the OS power source (`spikes/lib/system.ts`, as `capture.ts`'s `conditions()` does) before and after each run. Mark a run on battery INVALID for an official result, and print "indicative" unless the conditions were AC throughout.
+  - The orchestrator's D4-24 evidence entry should be corrected the same way: the INVALID run is rep 0, and the summary includes it.
+
+### Nits
+- **W2L-N1 OPEN.** LOOKDEV round 4, part 2, "P4 cuts" lists "GTAO 6 samples with the noise rotated every frame ... instead of 8 fixed". The same section ("Still CG-like": "GTAO was not cut"), the handoff ("tried and reverted") and `post.ts` (8 fixed samples, with the reason) say it was reverted. Strike it from the list of cuts.
+- **W2L-N2 OPEN.** The cutaway pose of `rotorMotion.test.ts` sits at its bound's edge (LOOKDEV: 32 → 37, bound 38). The half-pitch wrap assumes the rotor image is periodic in one pitch. The cut (rule 'inside') breaks that at the cut faces, where the next blade along may be hidden. Expected and handled by the clip, but at 1 tile of margin a resolve change will flip it. Name the cut faces as the source in the test header, and consider excluding a band at the cut faces or widening the MARGIN with a reason.
+- **W2L-N3 OPEN.** M46's 72-77 % busy in back-to-back runs: measure the CPU time per frame of the back-to-back loop (`view.frame` plus encode) beside the GPU busy fraction. If the loop is CPU-bound (about 11-13 ms a frame at 74-90 fps), back to back is not "the GPU at its loaded clock" but a higher-utilisation governor state, and GPU_FACTS and `timing.ts`'s `Pacing` comment ("the GPU never idles") should say so.
+- **W2L-N4 OPEN.** The spinner stripe of W1V-N5 is not visible in 01, the default view (above). Either the lift is too faint at that phase, or 01's phase hides it. Check 01 at a few phases before calling it done.
+- **W2L-N5 OPEN.** 06 regressed visibly with 6 fan time copies: a dot-screen over the take-off disc. If P4 needs the copy, consider a per-preset copy count (8 at take-off shutter angles, where the blur is widest) or blue-noise copy offsets that TRAA averages better.
+- **W2L-N6 OPEN.** `tests/browser/culling.test.ts` (from W1, unchanged here) takes about 50-58 s alone and exceeded its 120 s timeout in the full suite under shared GPU load. It now holds the suite's slowest margin. Give it its own timeout with a reason, or fewer settle frames per view, so that a loaded machine does not turn it into a false FAIL at a merge.
+
+**Verdict w2/lookdev-4 @ecf0765: MERGE.**
+- P4 is still unmet both ways, honestly reported: indicative 7.49 ms back to back, 10.71 ms at vsync, not official.
+- The code is correct where checked, the gates are green, and the browser suite runs with 0 WebGPU errors.
+- W2L-I2..I4 are in tooling that decides P4. They must be fixed before the next official P4 capture, and before back to back becomes the measure of record.
+- W2L-I1 goes to the next look-dev round with rotor AO and self-shadow.
+
+**D4-24 for the orchestrator: CONFIRMED** (above), on the three conditions under "Should P4's measure of record become back to back?".
