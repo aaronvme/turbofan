@@ -49,7 +49,15 @@ export interface SolverOptions {
    * 1 / f_a(max(M, machCut)) (section 7, D4-20; machCut defaults to minMach, >= 1 turns it off).
    * Physical time ignores both.
    */
-  readonly lowMachPreconditioning?: { readonly minMach: number; readonly machCut?: number };
+  readonly lowMachPreconditioning?: {
+    readonly minMach: number;
+    readonly machCut?: number;
+    /**
+     * K_u of AUSM+-up's p_u velocity diffusion in SLAU2's pressure flux (section 7, D4-32's trial),
+     * applied with the D4-20 scaling (machCut < 1) only. Default 0: off.
+     */
+    readonly velocityDiffusion?: number;
+  };
   /**
    * The limiter (section 6): 'sharp' van Albada (default) or the 'smooth' eps form, the D4-25
    * trial that is not yet the contract (round 4: below eps the reconstruction is central, and the
@@ -86,6 +94,10 @@ export class ReferenceSolver {
   private readonly machCut: number;
   /** The M_cut of the residual being assembled. */
   private fluxMachCut = 1;
+  /** K_u of the tracking mode's p_u (0: off); physical time and machCut >= 1 always use 0. */
+  private readonly velocityDiffusion: number;
+  /** The K_u of the residual being assembled. */
+  private fluxKu = 0;
   private readonly remap: Uint8Array;
   /** 1 for the ghosts that are slip walls (after the remap), per extended index. */
   private readonly wall: Uint8Array;
@@ -133,6 +145,7 @@ export class ReferenceSolver {
             farFieldBeta2: Math.min(1, Math.max(mInf2, pre.minMach * pre.minMach)),
           });
     this.machCut = pre === undefined ? 1 : (pre.machCut ?? pre.minMach);
+    this.velocityDiffusion = pre?.velocityDiffusion ?? 0;
     // minMach >= 1 is the plain scheme (beta = 1, f_a = 1) and keeps the plain default
     this.cfl =
       opts.cfl ?? (pre !== undefined && pre.minMach < 1 ? DEFAULT_CFL_PRECONDITIONED : DEFAULT_CFL);
@@ -363,6 +376,7 @@ export class ReferenceSolver {
     const f = dir === 'i' ? i : j;
     this.loadLine(b, dir, fixed, L);
     this.fluxMachCut = this.machCut;
+    this.fluxKu = this.machCut < 1 ? this.velocityDiffusion : 0;
     this.faceFromLine(
       f,
       dir === 'i' ? blk.iFaceOffset + j * (blk.ni + 1) + i : blk.jFaceOffset + j * blk.ni + i,
@@ -548,6 +562,7 @@ export class ReferenceSolver {
       (dir === 'i' ? m.iRf[face] : m.jRf[face]) as number,
       this.F,
       this.fluxMachCut,
+      this.fluxKu,
     );
     return area;
   }
@@ -557,6 +572,7 @@ export class ReferenceSolver {
     const m = this.mesh;
     const { R, F, line, bExt } = this;
     this.fluxMachCut = machCut;
+    this.fluxKu = machCut < 1 ? this.velocityDiffusion : 0;
     R.fill(0);
     m.blocks.forEach((b, bi) => {
       for (const dir of ['i', 'j'] as const) {
