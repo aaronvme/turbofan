@@ -235,10 +235,13 @@ export const CYCLE_CALIBRATION: CycleCalibration = {
     openBelowN2cPercent: factValue('vbvOpenBelowN2c'),
     closedAboveN2cPercent: factValue('vbvClosedAboveN2c'),
   },
-  // D3-11: the part-power mechanisms are implemented but off in the reference calibration. Their
-  // bounded fit (PART_POWER_FIT_CALIBRATION below) meets C10 but not C11 and costs the 33.73(a)
-  // ground-idle slam its HPC surge margin (docs/handoffs/w1-cycle-calib-2.md): adopting it is an
-  // orchestrator decision. The VSV flow sensitivity is set so that an offset, once fitted, acts.
+  // D3-11 / D3-14 / D3-15: the part-power mechanisms are implemented but off in the reference
+  // calibration; only the EEDB combustion-efficiency table (data, not a fit) acts here. Their
+  // bounded fit (PART_POWER_FIT_CALIBRATION below) meets C10, C4 and C11 at climb-out and idle,
+  // misses C11 approach (-6.4 %), and was rejected under D3-14's adoption rule because it breaks
+  // the transient model: its 33.73(a) ground-idle slam surges and then hangs at about 11 kN
+  // (partPower.test.ts pins this). D3-15 accepts the remaining gap (PHYSICS.md ledger). The VSV
+  // flow sensitivity is set so that an offset, once fitted, acts.
   partPower: {
     ...W0_CALIBRATION.partPower,
     vsvFlowLossPerRad: vsvFlowSensitivity(ENGINE_DEFINITION),
@@ -247,11 +250,12 @@ export const CYCLE_CALIBRATION: CycleCalibration = {
 };
 
 /**
- * D3-11: CYCLE_CALIBRATION with the bounded least-squares part-power fit of
- * tools/cycle/fit-part-power.ts (src/cycle/partPowerFit.ts): the VBV schedule, the HPC VSV offset
- * from the map's schedule, the fan and booster part-speed losses, the LPT Reynolds lapse, and the
- * EGT probe share re-derived to the measured 855 C (W0C-I6). Not the reference calibration; see
- * the comment in CYCLE_CALIBRATION.
+ * D3-11 / D3-14: CYCLE_CALIBRATION with the bounded least-squares part-power fit of
+ * tools/cycle/fit-part-power.ts (src/cycle/partPowerFit.ts): the VBV schedule and dump, the HPC
+ * VSV offset from the map's schedule, the fan and booster part-speed losses, the LPT and HPC
+ * Reynolds lapses, the HPT tip-clearance loss, and the EGT probe share fitted inside [0.25, 0.45].
+ * REJECTED under D3-14's adoption rule (it breaks the transient model; see the comment in
+ * CYCLE_CALIBRATION), so it is not the reference calibration (D3-15).
  */
 export const PART_POWER_FIT_CALIBRATION: CycleCalibration = {
   ...CYCLE_CALIBRATION,

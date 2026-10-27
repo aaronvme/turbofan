@@ -11,6 +11,12 @@
 //   compressor flow ~ N, PR - 1 ~ N^2, power ~ N^3; turbine power from the actual combustor
 //   energy balance, scaled from the anchor by flow, inlet temperature and expansion. The two
 //   agree exactly at the anchor.
+// - D4-13: the similarity model runs only in a genuine sub-idle state (a start, a windmill, a
+//   shutdown). A matched solve lost above the switch (no convergence, or a non-physical root)
+//   holds the last converged gas path and says so in the state (gasPathSolve: status 'held', the
+//   lost solves counted since the reset); the shafts integrate the held power balance and every
+//   substep retries the solve from the last converged point. A failed warm-started solve is
+//   retried by continuation from that point before it counts as lost (matchedSolve.ts).
 // - FADEC: throttle -> N1 target; one Wf/P3 ("ratio unit") integrator driven by the selected
 //   loop (max of N1 target and the N2 idle floor, then min of the N1, N2 and EGT limiters), with
 //   rate feedback for damping, clamped between decel and accel schedules built from the steady
@@ -22,6 +28,11 @@
 //   once the FADEC's fuel cut moves that point back inside the surge line the equilibrium is
 //   stable again, the oscillation decays and the episode ends. The period is whatever the derived
 //   Helmholtz frequency and B give.
+// - Surge detection and recovery (D3-17, PHYSICS.md C12; ENGINE_FACTS "Surge detection and
+//   recovery"): the FADEC never reads the surge margin. It detects a surge from the decay of the
+//   sensed P3 (surgeDetection.ts), then cuts the fuel back to the decel schedule, opens the VBVs
+//   fully and switches the igniters on, holds that for the confirmation time and restores the
+//   acceleration limit on a timed ramp. A new detection restarts the sequence.
 
 import { ISA_SLS, type AmbientConditions } from '../contracts/ambient';
 import {
@@ -35,6 +46,7 @@ import {
   type CycleState,
   type FadecLimiter,
   type FadecMode,
+  type GasPathSolveStatus,
   type MapOperatingPoint,
   type StartPhase,
   type StationState,
@@ -74,9 +86,34 @@ import {
   engineGreitzerParams,
   greitzerB,
   hpcCubic,
+  stallRlineForLoss,
   systemHelmholtzFrequency,
+  withStallRline,
   type CompressionSystem,
 } from './surgeSystem';
+import { P3_DETECTOR_START, feedP3, type P3DecayDetector } from './surgeDetection';
+import { solveMatched, type GasPathAnchor } from './matchedSolve';
+import {
+  DECEL_FACTOR,
+  EGT_ERROR_SCALE_K,
+  EGT_LIMIT_MARGIN_K,
+  N1_LIMIT_MARGIN_PERCENT,
+  N2_LIMIT_MARGIN_PERCENT,
+  TD_EGT,
+  TD_LIMIT,
+  TF_EGT,
+  accelFactor,
+  accelLimit,
+  clampToSchedules,
+  egtAboveRedlineS,
+  egtLimitK,
+  leverToN1,
+  loopRate,
+  selectLoop,
+  surgeCapOnDetection,
+} from './fadec';
+
+export { N1_LIMIT_MARGIN_PERCENT, N2_LIMIT_MARGIN_PERCENT } from './fadec';
 
 /**
  * Spool polar moments of inertia (estimates; no public figure), kg m^2. LP: 24 fan blades of
@@ -89,53 +126,8 @@ export const SPOOL_INERTIA = { lpKgM2: 60, hpKgM2: 10 } as const;
 const DT_INTERNAL = 0.02;
 /** Light-off delay after fuel and igniters (ENGINE_FACTS lightOffDelay, a model assumption). */
 const LIGHT_OFF_DELAY_S = factValue('lightOffDelay');
-const SUBIDLE_N2_PERCENT = 57;
-/** FADEC gains: integrator rate per unit fractional error (1/s), rate-feedback time (s). */
-const K_LOOP = 2;
-const TD = 0.7;
-/**
- * Rate feedback of the overspeed limiters, s (short, so they act only near the limit). 0.5 (0.3
- * before W1C-N5) holds a slam overshoot to about 0.1 point, which the 0.5-point N1 margin needs.
- */
-const TD_LIMIT = 0.5;
-/**
- * Rate feedback of the EGT limiter, s: the lead that stops the fuel ramp before the 960 C
- * transient limit instead of after it (the EGT rises at several hundred K/s in a slam accel).
- * EGT follows the fuel flow almost algebraically, so the raw derivative would feed the loop's own
- * output back and chatter; it is filtered first-order with TF_EGT = TD_EGT / 3, the usual
- * derivative filter (K. J. Astrom and T. Hagglund, PID Controllers, 2nd ed., ISA 1995, 3.3:
- * TD / N with N = 2-20).
- */
-const TD_EGT = 0.3;
-const TF_EGT = TD_EGT / 3;
-/**
- * EGT error that drives the Wf/P3 rate by K_LOOP x K_LIMIT_FACTOR per second, K. 150 K holds a
- * slam from ground idle under the 960 C transitory limit (33.73(a)); 100 K makes an EGT-limited
- * steady point chatter between the EGT and N1 loops.
- */
-const EGT_ERROR_SCALE_K = 150;
-/**
- * Accel/decel schedules as multiples of the steady Wf/P3 at the same corrected N2. 1.8 (2.2
- * before W1C-I1) keeps a ground-idle slam out of surge (min HPC margin 0.034) now that the idle
- * working line carries the part-power losses: the HP mechanical loss, the clearance penalty and
- * the VBV dump raise the low-speed HPC operating line, so the steady Wf/P3 sits closer to surge.
- */
-const ACCEL_FACTOR = 1.8;
-/** The accel schedule opens up by this much more between 68 and 80 % corrected N2. */
-const ACCEL_FACTOR_HIGH = 0.3;
-/**
- * Overspeed limiter targets sit this many points under the TCDS N1 / N2 limits. N1: 0.5: the
- * 30 C flat-rating corner (rated thrust at 103.5 % N1) is at the limiter target, so the transient
- * model makes rated thrust there (W1C-N5); a corner slam overshoots the target by 0.1 point with
- * TD_LIMIT 0.5 (0.5 with 0.3, which took N1 to 104.02 %).
- */
-export const N1_LIMIT_MARGIN_PERCENT = 0.5;
-export const N2_LIMIT_MARGIN_PERCENT = 1;
-/** The EGT limiter aims this far under the active displayed-EGT limit, K. */
-const EGT_LIMIT_MARGIN_K = 5;
-/** Limiter loops run at this multiple of K_LOOP, so they bite hard near their limits only. */
-const K_LIMIT_FACTOR = 4;
-const DECEL_FACTOR = 0.6;
+/** Below this N2 (or unlit, or without fuel) the gas path is the sub-idle similarity model. */
+export const SUBIDLE_N2_PERCENT = 57;
 /** Start fuel: this multiple of the ground-idle fuel flow times N2 / N2_idle. */
 const START_FUEL_FACTOR = 1.2;
 /** Air turbine starter: stall torque as a fraction of the idle HPC torque; free-run N2 %. */
@@ -148,8 +140,6 @@ const HUNG_RATE = 0.05;
 const HUNG_TIME_S = 10;
 /** No light-off: fuel on for this long beyond the light-off delay without lighting. */
 const NO_LIGHT_WINDOW_S = 10;
-/** The FADEC's fuel cut at surge onset (stall recovery), fraction of the Wf/P3 demand. */
-const SURGE_FUEL_CUT = 0.25;
 /**
  * An injected surge fault holds the throttle this far inside the surge line (equilibrium at
  * (1 - x) of the peak flow) for SURGE_FAULT_S, as a transient blockage or ingestion would.
@@ -176,6 +166,18 @@ export interface CycleModelOptions {
   readonly engine?: SizedEngine;
   /** Test hook: scales the start fuel schedule (hot / hung start cases). */
   readonly startFuelScale?: number;
+  /**
+   * Scenario hook: loss in HPC surge pressure ratio, Delta PRS = 1 - PRS_reduced / PRS (SAE
+   * ARP1420's measure), as a deteriorated or distorted compressor would have. The surge line
+   * (the reported margin and the Greitzer cubic's peak) moves down; the map's working line does
+   * not. 0 by default.
+   */
+  readonly hpcSurgeMarginLoss?: number;
+  /**
+   * Test hook: the matched gas-path solver (engine.ts solveGasPath by default), so that a test
+   * can lose a solve on purpose (D4-13).
+   */
+  readonly gasPathSolver?: typeof solveGasPath;
 }
 
 interface Schedules {
@@ -196,6 +198,8 @@ interface Snapshot {
   readonly grossThrustN: number;
   readonly fan: MapOperatingPoint;
   readonly hpc: MapOperatingPoint;
+  /** Which model gave this gas path (D4-13). */
+  readonly solve: GasPathSolveStatus;
 }
 
 const conditionsOf = (i: CycleInputs): OperatingConditions => ({
@@ -221,11 +225,6 @@ function leverEnds(e: SizedEngine, ambient: AmbientConditions) {
   const n1TakeoffPercent =
     rated.point.n1Percent * Math.sqrt(ambient.temperatureK / ratingAmbient.temperatureK);
   return { c, idle, n1TakeoffPercent };
-}
-
-/** The FADEC's lever schedule: N1 target linear in the lever from ground idle to takeoff. */
-function leverToN1(lever: number, idleN1: number, takeoffN1: number): number {
-  return lever <= 0 ? 0 : idleN1 + lever * (takeoffN1 - idleN1);
 }
 
 /**
@@ -272,18 +271,23 @@ function buildSchedules(e: SizedEngine, ambient: AmbientConditions): Schedules {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
+/** HPC exit pressure during a surge relative to the matched point's: Psi / Psi_eq, at least 0.2. */
+const surgePressureFactor = (g: GreitzerState, eq: GreitzerState) => Math.max(0.2, g.psi / eq.psi);
+
 class TurbofanCycleModel implements CycleModel {
   readonly source = 'model' as const;
   readonly definition: EngineDefinition;
   private readonly e: SizedEngine;
   private readonly startFuelScale: number;
+  private readonly surgeLoss: number;
   private sched!: Schedules;
   private t = 0;
   private n1 = 0;
   private n2 = 0;
   private dn1 = 0;
   private dn2 = 0;
-  private x: number[] = [];
+  /** The last converged matched point, the next solve's warm start (D4-13). */
+  private anchor!: GasPathAnchor;
   private ru = 0;
   private wf = 0;
   private lit = false;
@@ -316,15 +320,37 @@ class TurbofanCycleModel implements CycleModel {
   };
   private pending: CycleFault | null = null;
   private surge: SurgeEpisode | null = null;
+  /** The FADEC's surge detector on the sensed P3 (D3-17). */
+  private p3Detector: P3DecayDetector = P3_DETECTOR_START;
+  /** Simulation time of the last surge detection while the recovery sequence runs, else null. */
+  private recoverySinceS: number | null = null;
+  /** The decel schedule's Wf/P3 at the last fuel computation (the recovery's cut-back level). */
+  private ruDecNow = 0;
+  /** The steady line's Wf/P3 at the last fuel computation. */
+  private ruSsNow = 0;
+  /** Corrected N2 at the last fuel computation, % (the recovery opens the VBVs below closing). */
+  private n2cNow = 0;
+  /** After a surge: the fraction of the accel schedule's excess over the steady line allowed. */
+  private surgeCap: number | null = null;
   private readonly surgeSystem: CompressionSystem;
   private last!: CycleState;
+  private readonly solveGas: typeof solveGasPath;
+  /** The last converged gas path (matched, or the sub-idle model's), held on a lost solve. */
+  private held!: Snapshot;
+  /** Matched solves lost since the last reset (D4-13). */
+  private lostSolves = 0;
   private inputs: CycleInputs = DEFAULT_CYCLE_INPUTS;
 
   constructor(definition: EngineDefinition, opts: CycleModelOptions) {
     this.definition = definition;
     this.e = opts.engine ?? referenceEngine();
     this.startFuelScale = opts.startFuelScale ?? 1;
+    this.surgeLoss = opts.hpcSurgeMarginLoss ?? 0;
+    if (!(this.surgeLoss >= 0 && this.surgeLoss < 1)) {
+      throw new Error(`hpcSurgeMarginLoss ${this.surgeLoss} must be in [0, 1)`);
+    }
     this.surgeSystem = compressionSystem(definition);
+    this.solveGas = opts.gasPathSolver ?? solveGasPath;
   }
 
   reset(initial: CycleInitialCondition, ambient: AmbientConditions = ISA_SLS): CycleState {
@@ -334,6 +360,12 @@ class TurbofanCycleModel implements CycleModel {
     this.dn2 = 0;
     this.surge = null;
     this.pending = null;
+    this.p3Detector = P3_DETECTOR_START;
+    this.recoverySinceS = null;
+    this.ruDecNow = 0;
+    this.ruSsNow = 0;
+    this.n2cNow = 0;
+    this.surgeCap = null;
     this.phase = 'none';
     this.starterOn = false;
     this.starterCutOut = false;
@@ -347,7 +379,12 @@ class TurbofanCycleModel implements CycleModel {
       ...Object.fromEntries(Object.keys(this.flags).map((k) => [k, false])),
     };
     const idle = this.sched.idle;
-    this.x = [...idle.unknowns.slice(0, 6)];
+    this.anchor = {
+      n1Rpm: idle.point.n1Rpm,
+      n2Rpm: idle.point.n2Rpm,
+      wfKgPerS: idle.point.fuelFlowKgPerS,
+      x: idle.unknowns.slice(0, 6),
+    };
     if (initial === 'groundIdle') {
       this.n1 = idle.point.n1Rpm;
       this.n2 = idle.point.n2Rpm;
@@ -370,6 +407,10 @@ class TurbofanCycleModel implements CycleModel {
       this.inputs = { ...DEFAULT_CYCLE_INPUTS, ambient };
     }
     this.n1Target = 0;
+    this.lostSolves = 0;
+    // the steady idle point is a converged gas path at the ambient (a start replaces it with the
+    // sub-idle model's before the matched model is ever tried)
+    this.held = this.fromPoint(idle.point);
     this.last = this.compose(this.snapshot(this.inputs));
     return this.last;
   }
@@ -399,14 +440,6 @@ class TurbofanCycleModel implements CycleModel {
 
   // -------------------------------------------------------------------------------------
 
-  /** The displayed-EGT limit in force: transitory while the 20 s allowance lasts, else the redline. */
-  private egtLimitK(): number {
-    const lim = this.definition.limits;
-    return this.egtAboveRedlineS < lim.egtTransientDurationS
-      ? lim.egtTransientK
-      : Math.min(lim.egtTransientK, lim.egtTakeoffRedlineK);
-  }
-
   private pct1(): number {
     return (100 * this.n1) / this.e.calibration.n1ReferenceRpm;
   }
@@ -433,8 +466,7 @@ class TurbofanCycleModel implements CycleModel {
     const dEgtRaw = this.egtPrev === null ? 0 : (egt - this.egtPrev) / dt;
     this.dEgt += ((dEgtRaw - this.dEgt) * dt) / TF_EGT;
     this.egtPrev = egt;
-    if (egt > lim.egtTakeoffRedlineK) this.egtAboveRedlineS += dt;
-    else if (egt <= lim.egtMaxContinuousK) this.egtAboveRedlineS = 0;
+    this.egtAboveRedlineS = egtAboveRedlineS(this.egtAboveRedlineS, egt, lim, dt);
     const p3 = prev.stations['3'].ptPa;
 
     // starter and start sequence
@@ -464,7 +496,11 @@ class TurbofanCycleModel implements CycleModel {
     if (this.mode === 'start' && this.phase === 'cranking' && !inp.starter) this.phase = 'aborted';
     this.igniters =
       inp.ignition === 'continuous' ||
-      (inp.ignition === 'auto' && this.fuelOnTime !== null && !this.lit && inp.fuelLever === 'run');
+      (inp.ignition === 'auto' &&
+        this.fuelOnTime !== null &&
+        !this.lit &&
+        inp.fuelLever === 'run') ||
+      (inp.ignition === 'auto' && this.recovering());
     if (
       !this.lit &&
       this.igniters &&
@@ -490,9 +526,12 @@ class TurbofanCycleModel implements CycleModel {
       this.sched.ruSteady,
       Math.max(n2c, at(this.sched.ruN2c, 0)),
     );
-    const accel = ACCEL_FACTOR + ACCEL_FACTOR_HIGH * clamp((n2c - 68) / 12, 0, 1);
+    const accel = accelFactor(n2c);
     const ruAcc = (accel * ruSs) / this.sched.ruDesign;
     const ruDec = (DECEL_FACTOR * ruSs) / this.sched.ruDesign;
+    this.ruDecNow = ruDec;
+    this.ruSsNow = ruSs / this.sched.ruDesign;
+    this.n2cNow = n2c;
     if (this.mode === 'start' && this.phase !== 'cranking' && this.phase !== 'aborted') {
       this.wf =
         this.startFuelScale *
@@ -509,16 +548,12 @@ class TurbofanCycleModel implements CycleModel {
       const lever = inp.throttleLever;
       const idleN1 = this.sched.idle.point.n1Percent;
       this.n1Target = leverToN1(lever, idleN1, this.sched.n1TakeoffPercent);
-      const loop = (target: number, value: number, rate: number, scale = 100, td = TD) =>
-        K_LOOP * ((target - value) / scale - (td * rate) / scale);
-      const rN1 = loop(this.n1Target, this.pct1(), this.dn1);
-      const rIdle = loop(idleN2, n2p, this.dn2);
-      let rate = Math.max(rN1, rIdle);
-      let which: FadecLimiter = rN1 >= rIdle ? 'n1Target' : 'idleFloor';
+      const rN1 = loopRate(this.n1Target, this.pct1(), this.dn1);
+      const rIdle = loopRate(idleN2, n2p, this.dn2);
       const caps: [FadecLimiter, number][] = [
         [
           'n1Max',
-          loop(
+          loopRate(
             (100 * lim.n1MaxRpm) / cal.n1ReferenceRpm - N1_LIMIT_MARGIN_PERCENT,
             this.pct1(),
             this.dn1,
@@ -528,7 +563,7 @@ class TurbofanCycleModel implements CycleModel {
         ],
         [
           'n2Max',
-          loop(
+          loopRate(
             (100 * lim.n2MaxRpm) / cal.n2ReferenceRpm - N2_LIMIT_MARGIN_PERCENT,
             n2p,
             this.dn2,
@@ -539,29 +574,45 @@ class TurbofanCycleModel implements CycleModel {
         // TCDS E.004 VI note 4: 960 C transitory at takeoff for up to 20 s, then the redline
         [
           'egtMax',
-          loop(this.egtLimitK() - EGT_LIMIT_MARGIN_K, egt, this.dEgt, EGT_ERROR_SCALE_K, TD_EGT),
+          loopRate(
+            egtLimitK(lim, this.egtAboveRedlineS) - EGT_LIMIT_MARGIN_K,
+            egt,
+            this.dEgt,
+            EGT_ERROR_SCALE_K,
+            TD_EGT,
+          ),
         ],
       ];
-      for (const [name, rLimit] of caps) {
-        const r = K_LIMIT_FACTOR * rLimit;
-        if (r < rate) {
-          rate = r;
-          which = name;
-        }
-      }
-      this.ru += rate * dt;
-      if (this.ru > ruAcc) {
-        this.ru = ruAcc;
-        which = 'accelSchedule';
-      } else if (this.ru < ruDec) {
-        this.ru = ruDec;
-        which = 'decelSchedule';
-      }
+      const selected = selectLoop(rN1, rIdle, caps);
+      const acc = accelLimit(
+        ruAcc,
+        ruDec,
+        this.ruSsNow,
+        this.surgeCap,
+        this.recoverySinceS === null ? null : this.t - this.recoverySinceS,
+      );
+      if (acc.sequenceOver) this.recoverySinceS = null;
+      const clamped = clampToSchedules(
+        this.ru + selected.rate * dt,
+        acc.limit,
+        ruDec,
+        selected.which,
+      );
+      this.ru = clamped.ru;
+      const which = clamped.which;
+      // the acceleration after a surge is over once another loop takes the fuel
+      if (this.recoverySinceS === null && which !== 'accelSchedule') this.surgeCap = null;
       this.limiter = which;
       this.wf = this.lit ? this.ru * this.sched.ruDesign * p3 : 0;
     } else {
       this.wf = 0;
       this.limiter = 'none';
+    }
+    if (this.mode !== 'run' || !this.lit) {
+      // the recovery belongs to a running engine; a start, a flameout or a shutdown ends it
+      this.recoverySinceS = null;
+      this.surgeCap = null;
+      this.p3Detector = P3_DETECTOR_START;
     }
     if (this.mode !== 'run' && this.mode !== 'start') this.wf = 0;
     if (!fuelAllowed) this.wf = 0;
@@ -602,14 +653,28 @@ class TurbofanCycleModel implements CycleModel {
     ) {
       this.startSurge(snap, false);
     }
+    const sensing = this.mode === 'run' && this.lit;
+    /** Feeds the FADEC's P3 sensor; true on a detection. */
+    const sense = (p3Pa: number, dtS: number): boolean => {
+      if (!sensing) return false;
+      const r = feedP3(this.p3Detector, p3Pa, dtS);
+      this.p3Detector = r.detector;
+      return r.surge;
+    };
+    let detected = this.surge === null && sense(snap.stations['3'].ptPa, dt);
     if (this.surge !== null) {
       const ep = this.surge;
       const sys = this.surgeAt(snap, this.t < ep.forcedUntilS);
       const steps = Math.ceil((sys.omegaH * dt) / SURGE_DXI);
-      let g = ep.g;
-      for (let k = 0; k < steps; k++) g = greitzerStep(sys.params, g, (sys.omegaH * dt) / steps);
-      const elapsedS = ep.elapsedS + dt;
       const eq = equilibrium(sys.params);
+      let g = ep.g;
+      for (let k = 0; k < steps; k++) {
+        g = greitzerStep(sys.params, g, (sys.omegaH * dt) / steps);
+        // the P3 sensor follows the plenum pressure through the surge cycle (compose's P3)
+        detected =
+          sense(snap.stations['3'].ptPa * surgePressureFactor(g, eq), dt / steps) || detected;
+      }
+      const elapsedS = ep.elapsedS + dt;
       const settled =
         Math.abs(g.phi - eq.phi) <= SURGE_RECOVERED * Math.abs(eq.phi) &&
         Math.abs(g.psi - eq.psi) <= SURGE_RECOVERED * Math.abs(eq.psi);
@@ -619,8 +684,40 @@ class TurbofanCycleModel implements CycleModel {
         (this.t >= ep.forcedUntilS && elapsedS >= (2 * Math.PI) / sys.omegaH && stable && settled);
       this.surge = done ? null : { ...ep, g, params: sys.params, omegaH: sys.omegaH, elapsedS };
     }
+    if (detected) this.startRecovery(prev.stations['3'].ptPa, inp);
     this.flags = { ...this.flags, surge: this.surge !== null };
     return snap;
+  }
+
+  private recovering(): boolean {
+    return this.recoverySinceS !== null;
+  }
+
+  /**
+   * The recovery commands the VBVs fully open (D3-17, [UTC77]'s bleed opening) wherever their
+   * schedule has them open at all, i.e. below its closing corrected speed. Above it they stay
+   * shut: the booster has no stall to guard there, and dumping a quarter of its flow at high
+   * power pushes it past its map's choke edge (the D3-14 fit's failure, ENGINE_FACTS).
+   */
+  private recoveryVbvOpen(): boolean {
+    return this.recovering() && this.n2cNow < this.e.calibration.vbv.closedAboveN2cPercent;
+  }
+
+  /**
+   * D3-17 recovery on a detection: the fuel demand drops to the decel schedule at once (the
+   * minimum while running, [UTC93], so the flame stays lit), the VBVs open and the igniters come
+   * on ([UTC77], [RR06]); the sequence (re)starts now, and the re-acceleration is biased below the
+   * schedule that surged (SURGE_ACCEL_RESET).
+   */
+  private startRecovery(p3Pa: number, inp: CycleInputs): void {
+    this.surgeCap = surgeCapOnDetection(
+      this.surgeCap,
+      this.recoverySinceS === null ? null : this.t - this.recoverySinceS,
+    );
+    this.recoverySinceS = this.t;
+    this.ru = Math.min(this.ru, this.ruDecNow);
+    this.wf = this.ru * this.sched.ruDesign * p3Pa;
+    if (inp.ignition === 'auto') this.igniters = true;
   }
 
   /**
@@ -635,7 +732,11 @@ class TurbofanCycleModel implements CycleModel {
     const a3 = Math.sqrt(gamma(t3, 0) * r * t3);
     const inlet = { pt25Pa: st['25'].ptPa, tt25K: st['25'].ttK, n2Rpm: this.n2, rJPerKgK: r };
     const speed = this.n2 / Math.sqrt(inlet.tt25K / 288.15) / this.e.design.corrSpeed.hpc;
-    const fit = hpcCubic(this.e.maps.hpc, speed, this.surgeSystem, inlet);
+    const map = withStallRline(
+      this.e.maps.hpc,
+      stallRlineForLoss(this.e.maps.hpc, speed, this.surgeLoss),
+    );
+    const fit = hpcCubic(map, speed, this.surgeSystem, inlet);
     const op = ductVariables(
       this.surgeSystem,
       inlet,
@@ -664,20 +765,33 @@ class TurbofanCycleModel implements CycleModel {
       elapsedS: 0,
       forcedUntilS,
     };
-    this.ru *= 1 - SURGE_FUEL_CUT;
   }
 
   private snapshot(inp: CycleInputs): Snapshot {
-    const c = conditionsOf(inp);
-    if (this.lit && this.pct2() >= SUBIDLE_N2_PERCENT && this.wf > 0) {
-      const s = solveGasPath(this.e, c, this.n1, this.n2, this.wf, this.x);
-      // a converged but non-physical root (BPR near zero) falls back to the similarity model
-      if (s.maxResidual < 1e-6 && at(s.x, 1) > 1) {
-        this.x = [...s.x];
-        return this.fromPoint(s.point);
-      }
+    const c: OperatingConditions = this.recoveryVbvOpen()
+      ? { ...conditionsOf(inp), vbvFraction: this.e.calibration.vbv.maxFraction }
+      : conditionsOf(inp);
+    if (!(this.lit && this.pct2() >= SUBIDLE_N2_PERCENT && this.wf > 0)) {
+      // a genuine sub-idle state: a start, a windmill, a shutdown
+      this.held = this.subIdle(c);
+      return this.held;
     }
-    return this.subIdle(c);
+    // converged on a physical root, directly or by continuation from the last converged point
+    const s = solveMatched(this.solveGas, this.e, c, this.anchor, this.n1, this.n2, this.wf);
+    if (s !== null) {
+      this.anchor = { n1Rpm: this.n1, n2Rpm: this.n2, wfKgPerS: this.wf, x: s.x };
+      this.held = this.fromPoint(s.point);
+      return this.held;
+    }
+    // D4-13: lost; never the similarity model above the switch. The next try starts from the
+    // last converged point again (the anchor does not move).
+    this.lostSolves++;
+    return { ...this.held, solve: 'held' };
+  }
+
+  /** The HPC margin against the surge line lowered by hpcSurgeMarginLoss: (1 + m)(1 - loss) - 1. */
+  private hpcMargin(margin: number): number {
+    return (1 + margin) * (1 - this.surgeLoss) - 1;
   }
 
   private mapPoint(
@@ -706,7 +820,14 @@ class TurbofanCycleModel implements CycleModel {
       netThrustN: p.netThrustN,
       grossThrustN: p.grossThrustN,
       fan: this.mapPoint(p.fan.point, p.n1Rpm, p.stations['2'].ttK, cal.n1ReferenceRpm, m.fan),
-      hpc: this.mapPoint(p.hpc.point, p.n2Rpm, p.stations['25'].ttK, cal.n2ReferenceRpm, m.hpc),
+      hpc: this.mapPoint(
+        p.hpc.point,
+        p.n2Rpm,
+        p.stations['25'].ttK,
+        cal.n2ReferenceRpm,
+        this.hpcMargin(m.hpc),
+      ),
+      solve: 'matched',
     };
   }
 
@@ -814,7 +935,8 @@ class TurbofanCycleModel implements CycleModel {
       netThrustN: a.netThrustN * q * q,
       grossThrustN: a.grossThrustN * q * q,
       fan: this.mapPoint(fanPoint, this.n1, t2, cal.n1ReferenceRpm, m.fan),
-      hpc: this.mapPoint(hpcPoint, this.n2, s['25'].ttK, cal.n2ReferenceRpm, m.hpc),
+      hpc: this.mapPoint(hpcPoint, this.n2, s['25'].ttK, cal.n2ReferenceRpm, this.hpcMargin(m.hpc)),
+      solve: 'subIdle',
     };
   }
 
@@ -828,7 +950,7 @@ class TurbofanCycleModel implements CycleModel {
       // the HPC exit follows the Greitzer state; reverse flow shows as zero (StationState.w >= 0)
       const eq = equilibrium(this.surge.params);
       const fr = this.surge.g.phi / eq.phi;
-      const pr = Math.max(0.2, this.surge.g.psi / eq.psi);
+      const pr = surgePressureFactor(this.surge.g, eq);
       const s3 = stations['3'];
       stations = {
         ...stations,
@@ -890,14 +1012,18 @@ class TurbofanCycleModel implements CycleModel {
       fan: snap.fan,
       hpc,
       vsvClosureRad: Math.max(0, vsvClosure),
-      vbvOpenFraction:
-        cal.vbv.maxFraction > 0 ? vbvScheduleFraction(cal, n2c) / cal.vbv.maxFraction : 0,
+      vbvOpenFraction: this.recoveryVbvOpen()
+        ? 1
+        : cal.vbv.maxFraction > 0
+          ? vbvScheduleFraction(cal, n2c) / cal.vbv.maxFraction
+          : 0,
       starterEngaged: this.starterOn,
       ignitersOn: this.igniters,
       combustorLit: this.lit,
       fadec: { mode: this.mode, limiter: this.limiter, n1TargetPercent: this.n1Target },
       startPhase: this.phase,
       flags,
+      gasPathSolve: { status: snap.solve, lostSolves: this.lostSolves },
     };
   }
 }

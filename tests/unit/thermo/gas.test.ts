@@ -332,3 +332,31 @@ describe('coefficient tables for WGSL code generation', () => {
     expect(R_UNIVERSAL).toBeCloseTo(8.314462618, 9);
   });
 });
+
+describe('inversions out of the polynomial range (D3-13 mutation survivors)', () => {
+  it('temperatureFromEnthalpy: accepts the range ends, names itself beyond either end', () => {
+    expect(temperatureFromEnthalpy(enthalpy(T_MAX_K, 0), 0)).toBeCloseTo(T_MAX_K, 6);
+    expect(temperatureFromEnthalpy(enthalpy(T_MIN_K, 0), 0)).toBeCloseTo(T_MIN_K, 6);
+    expect(() => temperatureFromEnthalpy(enthalpy(T_MAX_K, 0) + 1, 0)).toThrow(
+      /^enthalpy .* is outside the range of \[200, 3500\] K$/,
+    );
+    expect(() => temperatureFromEnthalpy(enthalpy(T_MIN_K, 0) - 1, 0)).toThrow(
+      /^enthalpy .* is outside the range/,
+    );
+  });
+
+  it('temperatureFromEntropy and isentropicTemperature name the entropy inversion', () => {
+    const sMax = entropyFunction(T_MAX_K, 0.02);
+    expect(() => temperatureFromEntropy(sMax + 1, 101325, 0.02)).toThrow(
+      /^entropy .* is outside the range/,
+    );
+    // a pressure ratio of 1e6 from 300 K would need far more than 3500 K
+    expect(() => isentropicTemperature(300, 1e6, 0)).toThrow(/^entropy .* is outside the range/);
+    expect(() => isentropicTemperature(300, 1e-6, 0)).toThrow(/^entropy .* is outside the range/);
+  });
+
+  it('productsMassFraction accepts FAR up to the stoichiometric value plus its 1e-12 tolerance', () => {
+    expect(productsMassFraction(STOICH_FAR * (1 + 1e-12))).toBeCloseTo(1, 9);
+    expect(() => productsMassFraction(STOICH_FAR * (1 + 1e-9))).toThrow(/FAR .* must be in/);
+  });
+});

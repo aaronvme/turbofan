@@ -9,63 +9,11 @@ import {
   type CycleState,
 } from '../../../src/contracts/cycle';
 import { factValue } from '../../../src/engine/facts';
-import {
-  characteristic,
-  criticalB,
-  equilibrium,
-  helmholtzFrequency,
-  simulateSurge,
-  throttleFlow,
-  type GreitzerParams,
-} from '../../../src/cycle/greitzer';
 import { createCycleModel, leverForNetThrust, SPOOL_INERTIA } from '../../../src/cycle/model';
+import { expectNoLostSolves } from './fixtures';
 
-const C9 = THRESHOLDS.C9.values;
-const SURGE: GreitzerParams = { psi0: 0.3, h: 0.18, w: 0.25, gammaT: 0.5, b: 1 };
-
-describe('C9: Greitzer lumped compression system', () => {
-  it('B above critical: a deep-surge limit cycle (flow reversal) near the Helmholtz period', () => {
-    expect(SURGE.b).toBeGreaterThan(criticalB(SURGE));
-    const r = simulateSurge(SURGE, 0.05, 400);
-    expect(r.minPhi).toBeLessThan(0);
-    expect(r.periodXi).not.toBeNull();
-    // in xi = omega_H t units the Helmholtz period is 2 pi
-    expect(Math.abs((r.periodXi ?? 0) / (2 * Math.PI) - 1)).toBeLessThan(
-      C9.maxPeriodRelativeError.value,
-    );
-  });
-  it('B below critical: the perturbation dies out (recovery, no limit cycle)', () => {
-    const p = { ...SURGE, b: 0.5 };
-    expect(p.b).toBeLessThan(criticalB(p));
-    const r = simulateSurge(p, 0.05, 400);
-    expect(r.maxPhi - r.minPhi).toBeLessThan(1e-3);
-  });
-  it('started at its equilibrium the system stays there and reports no period', () => {
-    const r = simulateSurge({ ...SURGE, b: 0.5 }, 0, 100);
-    expect(r.maxPhi - r.minPhi).toBeLessThan(1e-9);
-    expect(r.periodXi).toBeNull();
-  });
-  it('a wide-open throttle puts the equilibrium on the falling branch: stable at any B', () => {
-    // the characteristic peaks at Phi = 2W; past it the slope is negative
-    const p = { ...SURGE, gammaT: 5, b: 5 };
-    const eq = equilibrium(p);
-    expect(eq.phi).toBeGreaterThan(2 * p.w + 0.01);
-    expect(throttleFlow(p, characteristic(p, eq.phi))).toBeCloseTo(eq.phi, 9);
-    expect(eq.psi).toBeCloseTo(characteristic(p, eq.phi), 12);
-    expect(criticalB(p)).toBe(Infinity);
-    const r = simulateSurge(p, 0.05, 400);
-    expect(r.minPhi).toBeGreaterThan(0);
-    expect(r.maxPhi - r.minPhi).toBeLessThan(1e-3);
-  });
-  it('the throttle passes reverse flow when the plenum pressure goes negative (odd in Psi)', () => {
-    expect(throttleFlow(SURGE, 0.04)).toBeCloseTo(SURGE.gammaT * 0.2, 12);
-    expect(throttleFlow(SURGE, -0.04)).toBeCloseTo(-SURGE.gammaT * 0.2, 12);
-    expect(throttleFlow(SURGE, 0)).toBe(0);
-  });
-  it('the Helmholtz frequency is a sqrt(A / (V L))', () => {
-    expect(helmholtzFrequency(340, 0.1, 0.4, 1)).toBeCloseTo(170, 9);
-  });
-});
+// The pure C9 Greitzer tests are in greitzer.test.ts; this file holds the slow whole-engine
+// transients, which the mutation config (vitest.mutation.config.ts, D3-13) leaves out.
 
 /** Simulation tests take 1-10 s each; Stryker's instrumented runs are several times slower. */
 const TIMEOUT_MS = 600_000;
@@ -91,6 +39,8 @@ function run(
     out.push(s);
     if (stop?.(s) === true) break;
   }
+  // D4-13: no lost gas-path solve since the model's reset, in every run of this file
+  expectNoLostSolves(m.state());
   return out;
 }
 
@@ -230,7 +180,7 @@ describe('start sequence', { timeout: TIMEOUT_MS }, () => {
   }
 
   it('cranks, lights off, cuts the starter out and stabilises at ground idle inside C4', () => {
-    const { states } = start();
+    const { m, states } = start();
     const last = states[states.length - 1];
     expect(last?.fadec.mode).toBe('run');
     expect(last?.combustorLit).toBe(true);
@@ -244,10 +194,30 @@ describe('start sequence', { timeout: TIMEOUT_MS }, () => {
       if (s.combustorLit && !(states[0]?.combustorLit ?? false))
         expect(s.n2Percent).toBeGreaterThanOrEqual(factValue('minFuelOnN2'));
     }
+    // the start hands over to the run loops at its completion speed, the idle N2 band
     expect(last?.n2Percent ?? 0).toBeGreaterThanOrEqual(factValue('idleN2Min'));
-    expect(last?.n1Percent ?? 0).toBeGreaterThanOrEqual(factValue('idleN1Min'));
-    expect(last?.n1Percent ?? 0).toBeLessThanOrEqual(factValue('idleN1Max'));
-    expect(last?.egtDisplayedK ?? Infinity).toBeLessThan(factValue('idleEgtMax'));
+    // C4 is the stabilised ground idle: the hand-over is not that yet (N1 still lags; the idle
+    // floor loop then swings N2 by about 1.5 points for a minute or two, D4-15's slow settling).
+    // Stabilised: N1 within SETTLED_N1 points over the last SETTLE_WINDOW_S seconds, which spans
+    // that swing's period (about 18 s).
+    const SETTLE_WINDOW_S = 20;
+    const SETTLED_N1 = 0.1;
+    const n1s: number[] = [];
+    let settled: CycleState | undefined;
+    for (let k = 0; k < 200 && settled === undefined; k++) {
+      const s = run(m, 1, 0.05, () => inputs({ throttleLever: 0 }));
+      n1s.push(s[s.length - 1]?.n1Percent ?? Number.NaN);
+      const w = n1s.slice(-SETTLE_WINDOW_S);
+      if (w.length === SETTLE_WINDOW_S && Math.max(...w) - Math.min(...w) < SETTLED_N1) {
+        settled = s[s.length - 1];
+      }
+    }
+    expect(settled, 'settled at idle within 200 s').toBeDefined();
+    expect(settled?.n2Percent ?? 0).toBeGreaterThanOrEqual(factValue('idleN2Min'));
+    expect(settled?.n2Percent ?? Infinity).toBeLessThanOrEqual(factValue('idleN2Max'));
+    expect(settled?.n1Percent ?? 0).toBeGreaterThanOrEqual(factValue('idleN1Min'));
+    expect(settled?.n1Percent ?? 0).toBeLessThanOrEqual(factValue('idleN1Max'));
+    expect(settled?.egtDisplayedK ?? Infinity).toBeLessThan(factValue('idleEgtMax'));
   });
   it('flags a hot start when the start fuel is far too rich', () => {
     const { states } = start(3);

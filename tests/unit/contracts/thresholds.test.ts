@@ -50,8 +50,8 @@ const physics = readPhysicsThresholds();
 
 describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
   it('finds the full pre-registered set in PHYSICS.md', () => {
-    // T1-T4, C1-C11 (C10 by D3-3, C11 by D3-11), L1-L13, P1-P3
-    expect(physics.length).toBe(4 + 11 + 13 + 3);
+    // T1-T4, C1-C12 (C10 by D3-3, C11 by D3-11, C12 by D3-17), L1-L13, P1-P3
+    expect(physics.length).toBe(4 + 12 + 13 + 3);
   });
 
   it('has exactly the same IDs, in the same order', () => {
@@ -92,6 +92,10 @@ describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
     expect(THRESHOLDS.C11.values.idleThrustPercent.value).toBe(7);
     expect(THRESHOLDS.C11.values.approachThrustPercent.value).toBe(30);
     expect(THRESHOLDS.C11.values.climbOutThrustPercent.value).toBe(85);
+    expect(THRESHOLDS.C12.values.surgePressureRatioLoss.value).toBe(0.06);
+    expect(THRESHOLDS.C12.values.maxDetectionDelayS.value).toBe(0.1);
+    expect(THRESHOLDS.C12.values.maxSurges.value).toBe(2);
+    expect(THRESHOLDS.C12.values.maxTimeToThrustS.value).toBe(10);
     expect(THRESHOLDS.L1.values.iterations.value).toBe(20_000);
     expect(THRESHOLDS.L12.values.t4ErrorK.value).toBe(10);
     expect(THRESHOLDS.P1.values.minIterationsPerS.value).toBe(150);

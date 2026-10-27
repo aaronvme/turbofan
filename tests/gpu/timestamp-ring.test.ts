@@ -34,7 +34,15 @@ describe('TimestampRing (per-frame pass timing without stalling the queue)', () 
   it('times two passes per frame, delivers each frame once, and hands back the slot', async () => {
     const { device } = sim;
     const ring = new TimestampRing(device, { slots: 3, pairs: 2 });
-    const data = device.createBuffer({ size: 4 * 65536, usage: GPUBufferUsage.STORAGE });
+    // W0G-N7: the second pass does WORK_RATIO times the first's work, so the order of the two
+    // pass times survives an integrated GPU's clock moving between them under CPU load (seen:
+    // 0.97 then 0.38 ms at 2x the work)
+    const WORK_RATIO = 8;
+    const groups = (p: number) => 1024 * (p === 0 ? 1 : WORK_RATIO);
+    const data = device.createBuffer({
+      size: 4 * 64 * groups(1),
+      usage: GPUBufferUsage.STORAGE,
+    });
     const pipeline = device.createComputePipeline({
       layout: 'auto',
       compute: { module: device.createShaderModule({ code: BUSY }) },
@@ -57,7 +65,7 @@ describe('TimestampRing (per-frame pass timing without stalling the queue)', () 
         const pass = encoder.beginComputePass({ timestampWrites: slot.writes(p) });
         pass.setPipeline(pipeline);
         pass.setBindGroup(0, bind);
-        pass.dispatchWorkgroups(1024 * (p + 1));
+        pass.dispatchWorkgroups(groups(p));
         pass.end();
       }
       slot.resolve(encoder);
@@ -69,14 +77,20 @@ describe('TimestampRing (per-frame pass timing without stalling the queue)', () 
     expect(delivered.length + skipped).toBe(12);
     expect(delivered.length).toBeGreaterThanOrEqual(3);
     expect(new Set(delivered.map((d) => d.frame)).size).toBe(delivered.length);
+    const timed: { first: number; second: number }[] = [];
     for (const d of delivered) {
       expect(d.ms).toHaveLength(2);
       // The first timestamp on a fresh D3D12 device can be stale (measured): frame 0 may be NaN.
       if (d.frame === 0 && d.ms.some(Number.isNaN)) continue;
-      expect(d.ms[0]).toBeGreaterThan(0);
-      // The second pass does twice the work.
-      expect(d.ms[1]).toBeGreaterThan(d.ms[0] ?? Infinity);
+      const [first = NaN, second = NaN] = d.ms;
+      expect(Number.isFinite(first) && first > 0).toBe(true);
+      expect(Number.isFinite(second) && second > 0).toBe(true);
+      timed.push({ first, second });
     }
+    // the ratio over the delivered frames' medians, not frame by frame (W0G-N7)
+    const med = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? NaN;
+    expect(timed.length).toBeGreaterThanOrEqual(2);
+    expect(med(timed.map((t) => t.second))).toBeGreaterThan(med(timed.map((t) => t.first)));
     expect(ring.rawTimestamps().length).toBe(4 * delivered.length);
     ring.destroy();
     data.destroy();

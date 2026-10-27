@@ -7,9 +7,11 @@
 // normalised by its threshold's tolerance (thresholds.ts), so a residual of 1 sits on the edge.
 //
 // tools/cycle/fit-part-power.ts runs the bounded least-squares fit (boundedLeastSquares.ts) and
-// writes src/cycle/partPowerFit.ts, which CYCLE_CALIBRATION reads; partPower.test.ts checks
-// that the written values are the fit's bounded optimum. None of the mechanisms acts at the
-// design point, so the sizing (C1-C3) does not depend on them.
+// writes src/cycle/partPowerFit.ts. Only PART_POWER_FIT_CALIBRATION reads it: the fit was
+// rejected under D3-14's adoption rule and the reference CYCLE_CALIBRATION keeps the mechanisms
+// off (D3-15). partPower.test.ts checks that the written values are the fit's bounded optimum and
+// pins why it was rejected. None of the mechanisms acts at the design point, so the sizing
+// (C1-C3) does not depend on them.
 
 import { ISA_SLS } from '../contracts/ambient';
 import { THRESHOLDS } from '../contracts/thresholds';

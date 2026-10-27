@@ -169,6 +169,41 @@ export function hpcCubic(
   return { psi0, h, w, rms: Math.sqrt(sq / Math.max(1, line.length)) };
 }
 
+/**
+ * The stall R-line of a compressor whose surge pressure ratio is lowered by Delta PRS = 1 -
+ * PRS_reduced / PRS (SAE ARP1420's measure of the stability margin that inlet distortion, and in a
+ * stability audit deterioration, uses up), on the speed line at speedFraction: the R-line whose
+ * pressure ratio is (1 - Delta PRS) times the clean stall point's (bisection, 1e-10 in R). The
+ * stall point moves down the speed line to a higher flow, as a worn or distorted compressor
+ * stalls earlier. Throws if the lowered stall point leaves the map's last R-line.
+ */
+export function stallRlineForLoss(
+  map: ScaledCompressorMap,
+  speedFraction: number,
+  surgePressureRatioLoss: number,
+): number {
+  const r0 = map.map.rlineStall;
+  if (surgePressureRatioLoss === 0) return r0;
+  const target =
+    compressorPoint(map, speedFraction, r0).pressureRatio * (1 - surgePressureRatioLoss);
+  let lo = r0;
+  let hi = map.map.rline[map.map.rline.length - 1] ?? r0;
+  if (!(compressorPoint(map, speedFraction, hi).pressureRatio <= target)) {
+    throw new Error(`a ${surgePressureRatioLoss} surge pressure ratio loss leaves the map`);
+  }
+  while (hi - lo > 1e-10) {
+    const mid = 0.5 * (lo + hi);
+    if (compressorPoint(map, speedFraction, mid).pressureRatio > target) lo = mid;
+    else hi = mid;
+  }
+  return 0.5 * (lo + hi);
+}
+
+/** The map with its stall line on another R-line (the post-surge cubic peaks there). */
+export function withStallRline(map: ScaledCompressorMap, rlineStall: number): ScaledCompressorMap {
+  return rlineStall === map.map.rlineStall ? map : { ...map, map: { ...map.map, rlineStall } };
+}
+
 /** Throttle coefficient whose line Phi_T = gammaT sqrt(Psi) passes through (phi, psi). */
 export function throttleThrough(phi: number, psi: number): number {
   if (!(psi > 0)) throw new Error(`plenum pressure coefficient ${psi} must be > 0`);

@@ -195,6 +195,28 @@ export const THRESHOLDS = {
     },
   },
 
+  // D3-17: surge detection and recovery on a reduced-margin HPC (the EGT limit and the C4 idle
+  // ranges are ENGINE_FACTS rows)
+  C12: {
+    id: 'C12',
+    section: '3.2',
+    checkText:
+      'Surge recovery (D3-17): the 33.73(a) ground-idle slam (ISA SLS, lever to maximum in 1 s and held 30 s, then to minimum in 1 s and held 45 s) on an HPC whose surge pressure ratio is lowered by 6% (ΔPRS, SAE ARP1420), so that the slam surges',
+    passText:
+      'the slam surges; the FADEC detects each surge from the sensed P3 within 0.1 s of its onset and cuts fuel flow below its pre-surge value, with the VBVs fully open and the igniters on; at most 2 surges, no flameout, displayed EGT below the 960 °C transitory limit; ≥ 95% rated takeoff thrust within 10 s of the lever movement, then surge-free to the end of the hold; at minimum lever, N1 and N2 inside the C4 ground-idle ranges at the end of the 45 s (no hang)',
+    targetsFrom: 'PHYSICS',
+    values: {
+      surgePressureRatioLoss: check(0.06, '1', '6%'),
+      leverMoveS: check(1, 's', 'in 1 s'),
+      maximumLeverHoldS: check(30, 's', 'held 30 s'),
+      minimumLeverHoldS: check(45, 's', 'held 45 s'),
+      maxDetectionDelayS: pass(0.1, 's', '0.1 s'),
+      maxSurges: pass(2, 'surges', 'at most 2'),
+      thrustFraction: pass(0.95, '1', '95%'),
+      maxTimeToThrustS: pass(10, 's', 'within 10 s'),
+    },
+  },
+
   // 3.3 Flow solver validation ladder
   L1: {
     id: 'L1',

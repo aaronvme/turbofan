@@ -24,3 +24,4 @@ Both were written by the harness before the W0G-I1/I2 fixes. Files written since
 | `worker-2026-10-24-2141-quick.json` | the M29 table and the COOP/COEP probe | M13, M27-M29 |
 | `worker-2026-10-24-2152-quick.json` | a rerun at lower CPU load (13% before) | M29 |
 | `dawn-adapter-2026-10-24.json` | `npm run gpu:info` output | M1 |
+| `throughput-2026-10-27-0002-quick.json` | the D3-6 harness smoke run (`--quick --only=130k-16x8`) by the orchestrator in the 2026-10-27 usage pause, no agents running, w2/followups 5a0cf72: valid (no reasons, no warnings), 240 it/s, 1.48 ms/it (p10 1.36), frame p99 16.8 ms, 0 long frames; CPU 24-43 % during the runs. It checks the harness, not the kernel | - |

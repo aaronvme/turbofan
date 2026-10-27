@@ -4,6 +4,8 @@ import {
   LONG_FRAME_FACTOR,
   BELOW_RATE_MEDIAN_FACTOR,
   MAX_THROTTLED_STRETCH_MS,
+  OCCLUSION_DELTA_MS,
+  OCCLUSION_MIN_STRETCH_MS,
   THROTTLE_FACTOR,
   combineValidity,
   displayIntervalMs,
@@ -55,6 +57,13 @@ describe('frameHealth (against the display interval, not the run median)', () =>
   it('rejects a non-positive display interval', () => {
     expect(() => frameHealth([16], 0)).toThrow(/display interval/);
   });
+
+  it('D3-6: the longest occlusion stretch counts consecutive intervals of 500 ms or more', () => {
+    const h = frameHealth([P60, 600, P60, 520, 530, P60, 499.9, 499.9, 499.9], P60);
+    expect(h.longestOcclusionMs).toBeCloseTo(1050, 9);
+    expect(frameHealth(steady(P60, 2), P60).longestOcclusionMs).toBe(0);
+    expect(frameHealth(steady(1016, 5), P60).longestOcclusionMs).toBeCloseTo(1016 * 5, 6);
+  });
 });
 
 describe('displayIntervalMs (idle rAF probe before the sweep)', () => {
@@ -77,6 +86,7 @@ describe('runValidity (D0-1 gate, W0G-I1)', () => {
   const ok = {
     frameTime: { p50: 16.7 },
     longestThrottledMs: 0,
+    longestOcclusionMs: 0,
     displayIntervalMs: P60,
   };
 
@@ -84,12 +94,35 @@ describe('runValidity (D0-1 gate, W0G-I1)', () => {
     expect(runValidity(ok, 0)).toEqual({ valid: true, reasons: [], warnings: [] });
   });
 
-  it('a run with a throttled stretch longer than the limit is invalid', () => {
+  it('D3-6: a throttled stretch longer than the limit is a WARNING with its numbers kept', () => {
+    // D2-11 made it INVALID; D3-6 keeps INVALID for the occlusion signature and a hidden or
+    // blurred page only (pass-3 N5: below 30 fps every frame is over 2.5 intervals)
     expect(MAX_THROTTLED_STRETCH_MS).toBe(500);
     const v = runValidity({ ...ok, longestThrottledMs: 1016 }, 0);
+    expect(v.valid).toBe(true);
+    expect(v.reasons).toEqual([]);
+    expect(v.warnings.join()).toMatch(/1016 ms in a row/);
+    expect(runValidity({ ...ok, longestThrottledMs: 500 }, 0).warnings).toEqual([]);
+  });
+
+  it('D3-6: the occlusion signature (rAF intervals of 500 ms or more, sustained) is INVALID', () => {
+    expect([OCCLUSION_DELTA_MS, OCCLUSION_MIN_STRETCH_MS]).toEqual([500, 1000]);
+    const v = runValidity({ ...ok, longestThrottledMs: 2032, longestOcclusionMs: 2032 }, 0);
     expect(v.valid).toBe(false);
-    expect(v.reasons.join()).toMatch(/1016 ms in a row/);
-    expect(runValidity({ ...ok, longestThrottledMs: 500 }, 0).valid).toBe(true);
+    expect(v.reasons.join()).toMatch(/occlusion signature.*2032 ms/);
+    // one stall of 500+ ms is not sustained: a warning
+    const stall = runValidity({ ...ok, longestThrottledMs: 700, longestOcclusionMs: 700 }, 0);
+    expect(stall.valid).toBe(true);
+    expect(stall.warnings.join()).toMatch(/700 ms/);
+    expect(runValidity({ ...ok, longestOcclusionMs: 1000 }, 0).valid).toBe(false);
+    expect(runValidity({ ...ok, longestOcclusionMs: 999.9 }, 0).valid).toBe(true);
+  });
+
+  it('D3-6: a page that lost focus (blur) during the run is INVALID', () => {
+    const v = runValidity(ok, 0, 2);
+    expect(v.valid).toBe(false);
+    expect(v.reasons.join()).toMatch(/lost focus 2 times/);
+    expect(runValidity(ok, 0, 0).valid).toBe(true);
   });
 
   it('D2-13: a run whose median frame misses vsync stays valid, with a below-display-rate warning', () => {
@@ -123,6 +156,21 @@ describe('runValidity (D0-1 gate, W0G-I1)', () => {
     expect(verdicts.map((v) => v.valid)).toEqual([false, false, false]);
     expect(runs[0]?.frameTime.p50).toBeCloseTo(P60, 6); // run 0 still looks fine by its median
     expect(combineValidity(verdicts).valid).toBe(false);
+  });
+
+  it('D3-6 / N5: a load below 30 fps (3 intervals a frame) is valid, with warnings and its numbers', () => {
+    const protocol = { warmupMs: 1_000, runMs: 10_000, runs: 1 };
+    const rec = new RunRecorder(protocol, 0, P60);
+    let t = 0;
+    while (rec.frame(t, 2) !== 'done') t += 3 * P60;
+    const [run] = rec.results();
+    expect(run?.longestThrottledMs ?? 0).toBeGreaterThan(MAX_THROTTLED_STRETCH_MS);
+    expect(run?.longestOcclusionMs).toBe(0);
+    const v = runValidity(run ?? ok, 0);
+    expect(v.valid).toBe(true);
+    expect(v.warnings.join()).toMatch(/below display rate/);
+    expect(v.warnings.join()).toMatch(/missed vsyncs/);
+    expect(run?.itPerSec ?? 0).toBeGreaterThan(0);
   });
 
   it('end to end: the official main-react60 shape (scattered 2-4 interval frames) stays valid', () => {

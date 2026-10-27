@@ -4,6 +4,7 @@ import {
   DEFAULT_CYCLE_INPUTS,
   FADEC_LIMITERS,
   FADEC_MODES,
+  GAS_PATH_SOLVE_STATUSES,
   MAX_CUSTOMER_BLEED_FRACTION,
   START_PHASES,
   STOICHIOMETRIC_FAR,
@@ -105,6 +106,14 @@ describe('cycle state', () => {
     expect(validateCycleState(sampleCycleState(), SAMPLE_REFERENCE_SPEEDS)).toEqual([]);
   });
 
+  it('D4-13: accepts every gas-path solve status and a held state that counts its lost solves', () => {
+    for (const status of GAS_PATH_SOLVE_STATUSES) {
+      const s = { ...sampleCycleState(), gasPathSolve: { status, lostSolves: 3 } };
+      expect(validateCycleState(s, SAMPLE_REFERENCE_SPEEDS)).toEqual([]);
+    }
+    expect(GAS_PATH_SOLVE_STATUSES).toEqual(['matched', 'subIdle', 'held']);
+  });
+
   const mutate = (fn: (s: CycleState) => CycleState) => fn(sampleCycleState());
 
   it.each<[string, CycleState, RegExp]>([
@@ -151,6 +160,27 @@ describe('cycle state', () => {
       'unknown start phase',
       mutate((s) => ({ ...s, startPhase: 'warp' }) as unknown as CycleState),
       /startPhase/,
+    ],
+    [
+      'D4-13: unknown gas-path solve status',
+      mutate(
+        (s) =>
+          ({
+            ...s,
+            gasPathSolve: { ...s.gasPathSolve, status: 'guessed' },
+          }) as unknown as CycleState,
+      ),
+      /gasPathSolve\.status "guessed" is not a gas-path solve status/,
+    ],
+    [
+      'D4-13: negative lost-solve count',
+      mutate((s) => ({ ...s, gasPathSolve: { ...s.gasPathSolve, lostSolves: -1 } })),
+      /gasPathSolve\.lostSolves -1 must be a whole number >= 0/,
+    ],
+    [
+      'D4-13: fractional lost-solve count',
+      mutate((s) => ({ ...s, gasPathSolve: { ...s.gasPathSolve, lostSolves: 0.5 } })),
+      /gasPathSolve\.lostSolves 0\.5 must be a whole number >= 0/,
     ],
   ])('flags %s', (_name, state, pattern) => {
     const problems = validateCycleState(state, SAMPLE_REFERENCE_SPEEDS);

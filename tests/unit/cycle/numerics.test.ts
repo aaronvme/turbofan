@@ -122,5 +122,49 @@ describe('newton: exits without convergence', () => {
     expect(r.converged).toBe(false);
     expect(Number.isFinite(r.x[0])).toBe(true);
     expect(r.maxResidual).toBeGreaterThanOrEqual(1);
+    // from x = 0 on no step lowers |r|: it takes the smallest one each time instead of giving up,
+    // so it runs its whole budget and leaves 0
+    expect(r.iterations).toBe(8);
+    expect(r.x[0]).not.toBe(0);
+  });
+});
+
+describe('newton and solveLinear: the remaining boundaries (D3-13 mutation survivors)', () => {
+  it('solveLinear rejects a matrix with a single short row', () => {
+    expect(() => solveLinear([[1, 2], [3]], [1, 2])).toThrow(/must be 2 x 2/);
+  });
+
+  it('the line search backtracks: atan(x) from 2, where the full Newton step diverges', () => {
+    // undamped Newton from |x0| > 1.39 overshoots further each step (x1 = 2 - 5 atan 2 = -3.5)
+    const r = newton((x) => [Math.atan(at(x, 0))], [2], {
+      tolerance: 1e-12,
+      maxIterations: 30,
+      maxStep: [10],
+    });
+    expect(r.converged).toBe(true);
+    expect(Math.abs(at(r.x, 0))).toBeLessThan(1e-12);
+  });
+
+  it('a step under its cap is taken as it is; over it, scaled so the largest component fits', () => {
+    const one = { tolerance: 1e-12, maxIterations: 1 };
+    // |dx| = 0.5 under the cap of 0.6: exactly the Newton step
+    const under = newton((x) => [at(x, 0) - 0.5], [0], { ...one, maxStep: [0.6] });
+    expect(at(under.x, 0)).toBeCloseTo(0.5, 9);
+    // dx = (100, 0.5) with caps (1, 1): the whole step scaled by 1/100
+    const r = newton((x) => [at(x, 0) - 100, at(x, 1) - 0.5], [0, 0], { ...one, maxStep: [1, 1] });
+    expect(at(r.x, 0)).toBeCloseTo(1, 9);
+    expect(at(r.x, 1)).toBeCloseTo(0.005, 9);
+  });
+
+  it('a trial residual with any non-finite component is rejected, not only an all-NaN one', () => {
+    // the first residual is NaN away from x0 = 2 (as in the test above), the second is finite
+    const f = (x: number[]) => {
+      const v = at(x, 0);
+      return [Math.abs(v - 2) > 1e-3 ? Number.NaN : v - 1, at(x, 1)];
+    };
+    const r = newton(f, [2, 0], { tolerance: 1e-12, maxIterations: 20, maxStep: [10, 10] });
+    expect(r.x).toEqual([2, 0]);
+    expect(r.maxResidual).toBe(1);
+    expect(r.converged).toBe(false);
   });
 });

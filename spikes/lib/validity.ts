@@ -1,6 +1,11 @@
-// Validity of a benchmark run (D0-1, W0G-I1). Frame deltas are judged against the display's
-// refresh interval, never against the run's own median: a run that is entirely at 1 Hz has a
-// median of ~1016 ms and would otherwise look steady.
+// Validity of a benchmark run (D0-1, W0G-I1; D2-11 as amended by D3-6). Frame deltas are judged
+// against the display's refresh interval, never against the run's own median: a run that is
+// entirely at 1 Hz has a median of ~1016 ms and would otherwise look steady.
+//
+// D3-6: a run is INVALID only on the occlusion signature (rAF intervals of 500 ms or more,
+// sustained: Chrome's ~1 Hz background throttle) or when the page was hidden or lost focus. A
+// genuinely slow load that cannot hold the display rate is a WARNING with its numbers kept (pass-3
+// N5: below 30 fps every frame is over 2.5 intervals, which D2-11's rule called "occluded").
 //
 // Why rAF rate and not page visibility: Playwright launches Chrome with
 // --disable-backgrounding-occluded-windows and --disable-renderer-backgrounding, so an occluded
@@ -18,9 +23,9 @@ export const LONG_FRAME_FACTOR = 1.5;
  */
 export const THROTTLE_FACTOR = 2.5;
 /**
- * A run is invalid once consecutive throttled deltas span more than this. The official
- * main-react60 run (heavy main-thread load) has single 50-67 ms frames, far below it; a 1 Hz
- * throttle exceeds it with one frame.
+ * Consecutive throttled deltas spanning more than this get a "sustained missed vsyncs" WARNING
+ * (D3-6; D2-11 made it INVALID). The official main-react60 run (heavy main-thread load) has single
+ * 50-67 ms frames, far below it.
  */
 export const MAX_THROTTLED_STRETCH_MS = 500;
 /**
@@ -30,6 +35,17 @@ export const MAX_THROTTLED_STRETCH_MS = 500;
  * 30 Hz throttle (e.g. Chrome's energy saver, 2-interval deltas) shows up only as this warning.
  */
 export const BELOW_RATE_MEDIAN_FACTOR = 1.5;
+/**
+ * D3-6: an rAF interval of at least this is the occlusion signature. Chrome throttles an occluded
+ * or background window to about 1 Hz (about 1016 ms, the official 80k-16x8 row); no load the
+ * harness measures delivers frames this far apart one after another.
+ */
+export const OCCLUSION_DELTA_MS = 500;
+/**
+ * The signature must be sustained: consecutive such intervals spanning at least this, i.e. two of
+ * them. One 500+ ms frame is a stall (a pipeline compile, a GC pause): a warning, not occlusion.
+ */
+export const OCCLUSION_MIN_STRETCH_MS = 1000;
 
 /** Plausible display refresh rates; outside them the probe did not see the display's rate. */
 const MIN_HZ = 24;
@@ -43,6 +59,8 @@ export interface FrameHealth {
   readonly throttledMs: number;
   /** The longest span of consecutive throttled deltas. */
   readonly longestThrottledMs: number;
+  /** The longest span of consecutive deltas of OCCLUSION_DELTA_MS or more (D3-6). */
+  readonly longestOcclusionMs: number;
 }
 
 export function frameHealth(deltas: readonly number[], displayIntervalMs: number): FrameHealth {
@@ -53,6 +71,8 @@ export function frameHealth(deltas: readonly number[], displayIntervalMs: number
   let throttledMs = 0;
   let stretch = 0;
   let longestThrottledMs = 0;
+  let occluded = 0;
+  let longestOcclusionMs = 0;
   for (const d of deltas) {
     if (d > longAbove) longFrames++;
     if (d > throttledAbove) {
@@ -62,8 +82,14 @@ export function frameHealth(deltas: readonly number[], displayIntervalMs: number
     } else {
       stretch = 0;
     }
+    if (d >= OCCLUSION_DELTA_MS) {
+      occluded += d;
+      longestOcclusionMs = Math.max(longestOcclusionMs, occluded);
+    } else {
+      occluded = 0;
+    }
   }
-  return { longFrames, throttledMs, longestThrottledMs };
+  return { longFrames, throttledMs, longestThrottledMs, longestOcclusionMs };
 }
 
 /**
@@ -97,19 +123,31 @@ export interface Validity {
 export interface RunFrames {
   readonly frameTime: { readonly p50: number };
   readonly longestThrottledMs: number;
+  readonly longestOcclusionMs: number;
   readonly displayIntervalMs: number;
 }
 
-export function runValidity(run: RunFrames, pageHiddenMs: number): Validity {
+/**
+ * D3-6: INVALID on the occlusion signature, a hidden page or a blur (the page lost focus) during
+ * the run; everything a slow load does is a warning next to its numbers.
+ */
+export function runValidity(run: RunFrames, pageHiddenMs: number, pageBlurs = 0): Validity {
   const reasons: string[] = [];
   const p = run.displayIntervalMs;
-  if (run.longestThrottledMs > MAX_THROTTLED_STRETCH_MS) {
+  const occluded = run.longestOcclusionMs >= OCCLUSION_MIN_STRETCH_MS;
+  if (occluded) {
     reasons.push(
-      `rAF interval over ${THROTTLE_FACTOR} display intervals (${(THROTTLE_FACTOR * p).toFixed(1)} ms) ` +
-        `for ${run.longestThrottledMs.toFixed(0)} ms in a row: window occluded or unfocused, or a stall`,
+      `occlusion signature: rAF intervals of ${OCCLUSION_DELTA_MS} ms or more for ` +
+        `${run.longestOcclusionMs.toFixed(0)} ms in a row (Chrome's ~1 Hz throttle of an occluded or background window)`,
     );
   }
   const warnings: string[] = [];
+  if (!occluded && run.longestThrottledMs > MAX_THROTTLED_STRETCH_MS) {
+    warnings.push(
+      `sustained missed vsyncs: rAF intervals over ${THROTTLE_FACTOR} display intervals (${(THROTTLE_FACTOR * p).toFixed(1)} ms) ` +
+        `for ${run.longestThrottledMs.toFixed(0)} ms in a row: a load that cannot hold the display rate, or a stall`,
+    );
+  }
   if (run.frameTime.p50 > BELOW_RATE_MEDIAN_FACTOR * p) {
     warnings.push(
       `below display rate: median frame ${run.frameTime.p50.toFixed(1)} ms over ` +
@@ -117,6 +155,7 @@ export function runValidity(run: RunFrames, pageHiddenMs: number): Validity {
     );
   }
   if (pageHiddenMs > 0) reasons.push(`page hidden ${pageHiddenMs.toFixed(0)} ms`);
+  if (pageBlurs > 0) reasons.push(`page lost focus ${pageBlurs} times (blur) during the run`);
   return { valid: reasons.length === 0, reasons, warnings };
 }
 

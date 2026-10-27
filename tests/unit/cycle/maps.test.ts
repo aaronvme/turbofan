@@ -7,6 +7,7 @@ import { HPT_MAP } from '../../../src/cycle/maps/hpt';
 import { LPT_MAP } from '../../../src/cycle/maps/lpt';
 import {
   compressorPoint,
+  hermite1,
   hermite2,
   scaleCompressorMap,
   scaleTurbineMap,
@@ -186,5 +187,77 @@ describe('turbine maps', () => {
     expect(() => scaleTurbineMap(HPT_MAP, { ...design, pressureRatio: 0.9 })).toThrow(/pressure/);
     expect(() => scaleTurbineMap(HPT_MAP, { ...design, efficiency: 0 })).toThrow(/efficiency/);
     expect(() => scaleTurbineMap(HPT_MAP, { ...design, flowParameter: -1 })).toThrow(/flow/);
+  });
+});
+
+describe('interpolation and margins: the remaining boundaries (D3-13 mutation survivors)', () => {
+  // x^3 on uneven nodes; the values are computed by hand from the three-point node slopes
+  // (5.25, 13.5, 19: the end chords and (hl dr + hr dl) / (hl + hr) inside)
+  const XS = [0.5, 2, 3];
+  const VS = XS.map((x) => x ** 3);
+  it('hermite1: the cubic inside, the end slopes linearly beyond either end', () => {
+    expect(hermite1(XS, VS, 1.25)).toBeCloseTo(2.515625, 12);
+    expect(hermite1(XS, VS, 2.5)).toBeCloseTo(16.8125, 12);
+    expect(hermite1(XS, VS, 0)).toBeCloseTo(0.125 - 5.25 * 0.5, 12);
+    expect(hermite1(XS, VS, 4)).toBeCloseTo(27 + 19, 12);
+  });
+
+  it('hermite2 uses the rows around the x interval, also in the last interval of a long table', () => {
+    const xs = [0, 1, 2, 3, 4];
+    const ys = [0, 1];
+    // linear in y, so the y interpolation is exact and the x direction is hermite1 of x^3 + y
+    const table = xs.map((x) => ys.map((y) => x ** 3 + y));
+    for (const x of [0.5, 2.5, 3.5]) {
+      expect(hermite2(xs, ys, table, x, 0.5)).toBeCloseTo(
+        hermite1(
+          xs,
+          xs.map((v) => v ** 3 + 0.5),
+          x,
+        ),
+        12,
+      );
+    }
+  });
+
+  it('surgeMargin: zero on the stall line above design speed too (the speed bracket grows)', () => {
+    const s = scaleCompressorMap(HPC_MAP, {
+      correctedFlow: 20,
+      pressureRatio: 11,
+      efficiency: 0.87,
+    });
+    const p = compressorPoint(s, 1.05, s.map.rlineStall);
+    expect(p.correctedFlow).toBeGreaterThan(compressorPoint(s, 1, s.map.rlineStall).correctedFlow);
+    expect(Math.abs(surgeMargin(s, p))).toBeLessThan(1e-9);
+  });
+
+  it('surgeMargin is (PR_surge - PR) / PR: (1 + margin) PR is the same at one flow', () => {
+    const s = scaleCompressorMap(HPC_MAP, {
+      correctedFlow: 20,
+      pressureRatio: 11,
+      efficiency: 0.87,
+    });
+    const q = compressorPoint(s, 0.9, 2);
+    const a = surgeMargin(s, q);
+    const b = surgeMargin(s, { ...q, pressureRatio: 0.7 * q.pressureRatio });
+    expect((1 + a) * q.pressureRatio).toBeCloseTo((1 + b) * 0.7 * q.pressureRatio, 9);
+  });
+
+  it('turbinePoint below the lowest speed line: efficiency times x (2 - x), x = N / N_min', () => {
+    const s = scaleTurbineMap(HPT_MAP, {
+      flowParameter: 1.2e-3,
+      pressureRatio: 4,
+      efficiency: 0.9,
+    });
+    const nMin = (HPT_MAP.np[0] ?? NaN) / HPT_MAP.design.np;
+    const atMin = turbinePoint(s, nMin, 3);
+    const half = turbinePoint(s, nMin / 2, 3);
+    expect(half.efficiency / atMin.efficiency).toBeCloseTo(0.5 * 1.5, 12);
+    expect(half.flowParameter).toBeCloseTo(atMin.flowParameter, 12);
+  });
+
+  it('a design efficiency of exactly 1 is allowed', () => {
+    expect(() =>
+      scaleCompressorMap(FAN_MAP, { correctedFlow: 60, pressureRatio: 1.6, efficiency: 1 }),
+    ).not.toThrow();
   });
 });

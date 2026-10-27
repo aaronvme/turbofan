@@ -25,7 +25,7 @@ The mesh-topology spike (c) lived on `w0/mesh-spike`; its successor is `tools/me
 | `npm run bench:throughput -- --quick` | same sweep, 2 s warm-up + 1 s per run | ~2 min; "indicative, contaminated" |
 | `npm run bench:worker -- --quick` | same sweep, 2 s warm-up + 1 s per run | ~2 min; "indicative, contaminated" |
 
-Options: `--only=130k-16x8,130k-8x8` (a subset, still rotated), `--port=N` (default 5181; the worker run also uses N+1 for the COOP/COEP server), `--seed=N` (replay a recorded run order). The harness serves Vite on 127.0.0.1 and launches the installed Chrome headed and maximized through Playwright.
+Options: `--only=130k-16x8,130k-8x8` (a subset, still rotated), `--port=N` (default 5181; the worker run also uses N+1 for the COOP/COEP server), `--seed=N` (replay a recorded run order). A smoke run of the harness itself, for a quiet window before the next official run, is `npm run bench:throughput -- --quick --only=130k-16x8` (about 15 s of runs: 3 repetitions of a 2 s warm-up and a 1 s run; each run times out after 33 s). The harness serves Vite on 127.0.0.1 and launches the installed Chrome headed and maximized through Playwright.
 
 The official runs before the W0G fixes took 29 min (throughput, 2026-10-25 22:18) and 19.5 min (worker, 22:47), with a fixed order and one warm-up per configuration.
 
@@ -35,13 +35,14 @@ The official runs before the W0G fixes took 29 min (throughput, 2026-10-25 22:18
 2. Measures the display interval with an idle rAF probe on a blank page. It **refuses to start** if the probe is throttled (Chrome not in the foreground) or sees fewer than 10 frames.
 3. Runs **3 repetitions** of the sweep (`spikes/lib/order.ts`). Configurations that are compared (the tiles of one grid; main vs worker at one load) stay together and rotate between repetitions, a Latin square for groups of 3. A seeded shuffle picks the base order. Each configuration gets its own warm-up, then one run. This answers W0G-I2: the fixed order confounded the tile ranking.
 4. Brings Chrome to the front (CDP `Page.bringToFront`) before every run.
-5. Judges every run against the display interval (`spikes/lib/validity.ts`). A run is INVALID when:
-   - frames longer than 2.5 display intervals last more than 500 ms in a row (an occluded or unfocused window at ~1 Hz, or a stall);
-   - or the page was hidden.
+5. Judges every run against the display interval (`spikes/lib/validity.ts`, D2-11 as amended by D3-6). A run is INVALID only when:
+   - it shows the occlusion signature: rAF intervals of 500 ms or more, sustained (consecutive ones spanning at least 1 s), which is Chrome's ~1 Hz throttle of an occluded or background window;
+   - or the page was hidden, or lost focus (a window `blur` event) during the run;
+   - or it stalled: no result within its warm-up + run + 30 s (`spikes/lib/timeout.ts`, W0G-N6). The page is then reloaded before the sweep goes on.
 
-   A run whose median frame is longer than 1.5 intervals stays valid and gets a "below display rate" WARNING (D2-13): a load that cannot hold the display rate is a real result. A 30 Hz throttle shows up only as this warning. Warnings are printed next to the numbers and stored in `validity.warnings`.
+   A slow load is a WARNING printed next to its numbers, which are kept (D3-6, pass-3 N5): frames over 2.5 display intervals for more than 500 ms in a row ("sustained missed vsyncs"), a single stall of 500 ms or more, or a median frame over 1.5 intervals ("below display rate", D2-13; a 30 Hz throttle shows up only as this). Warnings are stored in `validity.warnings`.
 
-   An invalid run is rerun once. A configuration with a run that is still invalid is printed and stored as INVALID, with `aggregate: null`. Long frames are counted against the display interval (over 1.5 intervals), never against the run's own median.
+   An invalid run is rerun once. A configuration with a run that is still invalid is printed and stored as INVALID, with `aggregate: null`. Long frames are counted against the display interval (over 1.5 intervals), never against the run's own median. Without a probe interval (the in-page `?demo` path) the warm-up's median frame time is used, under the same 24-500 Hz check as the probe (W0G-N6).
 6. Writes `docs/bench/<kind>-<local date>-<HHMM>-<official|quick>.json` and prints a per-run line, a summary (the median of the 3 repetitions per configuration) and the order effect on ms/it (% per slot and over the sweep).
 
 JSON layout:

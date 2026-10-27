@@ -9,9 +9,10 @@
 // stays "visible" while its rAF drops to ~1 Hz), measures the display's refresh interval with
 // an idle rAF probe, then runs 3 repetitions of the sweep in a seeded, rotated order
 // (spikes/lib/order.ts), each configuration a warm-up then one run, with Chrome brought to the
-// front (CDP Page.bringToFront) before each. A run whose rAF rate shows a throttle (spikes/lib/
-// validity.ts) is rerun once; a configuration with a run still invalid is reported INVALID,
-// without numbers. Records the conditions (D0-1/D0-3: power source, power plan and Windows power
+// front (CDP Page.bringToFront) before each. A run that shows the occlusion signature or a
+// hidden or blurred page (spikes/lib/validity.ts, D3-6), or that stalls past its timeout
+// (spikes/lib/timeout.ts, W0G-N6), is rerun once; a configuration with a run still invalid is
+// reported INVALID, without numbers. A slow load is a warning next to its numbers. Records the conditions (D0-1/D0-3: power source, power plan and Windows power
 // mode, CPU load before, during and after, other processes using the GPU before and after, GPU
 // name, driver and refresh rate, adapter features/limits, Chrome version and command line,
 // window size, git HEAD) and writes docs/bench/<kind>-<local date>-<HHMM>-<protocol>.json. Only
@@ -33,12 +34,15 @@ import {
   LONG_FRAME_FACTOR,
   BELOW_RATE_MEDIAN_FACTOR,
   MAX_THROTTLED_STRETCH_MS,
+  OCCLUSION_DELTA_MS,
+  OCCLUSION_MIN_STRETCH_MS,
   THROTTLE_FACTOR,
   combineValidity,
   displayIntervalMs,
   runValidity,
   type Validity,
 } from '../lib/validity.ts';
+import { runTimeoutMs, stalledValidity, withTimeout } from '../lib/timeout.ts';
 import {
   cpuBusyFraction,
   gpuBusyByProcess,
@@ -330,8 +334,9 @@ interface Attempt {
   readonly attempt: 1 | 2;
   readonly validity: Validity;
   readonly cpuLoadDuring: number;
-  readonly run: RunResult;
-  readonly result: ThroughputResult | WorkerBenchResult;
+  /** Null for a run that stalled past its timeout (W0G-N6). */
+  readonly run: RunResult | null;
+  readonly result: ThroughputResult | WorkerBenchResult | null;
 }
 
 type PageRun = (config: PageConfig) => Promise<Omit<Attempt, 'rep' | 'seq' | 'attempt'>>;
@@ -349,8 +354,8 @@ const warningNote = (v: Validity) =>
   v.warnings.length > 0 ? ` WARNING: ${v.warnings.join('; ')}` : '';
 
 function attemptLine(kind: Kind, a: Attempt): string {
-  if (!a.validity.valid) return `INVALID: ${a.validity.reasons.join('; ')}`;
   const r = a.run;
+  if (!a.validity.valid || r === null) return `INVALID: ${a.validity.reasons.join('; ')}`;
   const cpu = `CPU ${(100 * a.cpuLoadDuring).toFixed(0)}%`;
   if (kind === 'throughput') {
     return (
@@ -477,7 +482,12 @@ async function main(): Promise<void> {
       )) as ThroughputResult;
       const cpuLoadDuring = cpuBusyFraction(before, cpus());
       const run = onlyRun(r.runs);
-      return { validity: runValidity(run, r.pageHiddenMs), cpuLoadDuring, run, result: r };
+      return {
+        validity: runValidity(run, r.pageHiddenMs, r.pageBlurs),
+        cpuLoadDuring,
+        run,
+        result: r,
+      };
     };
     const runWorker: PageRun = async (config) => {
       await page.goto(
@@ -495,7 +505,12 @@ async function main(): Promise<void> {
       workerProbe ??= await page.evaluate(() => window.__workerBench?.probe());
       await page.evaluate(() => window.__workerBench?.dispose());
       const run = onlyRun(w.frame.runs);
-      return { validity: runValidity(run, w.pageHiddenMs), cpuLoadDuring, run, result: w };
+      return {
+        validity: runValidity(run, w.pageHiddenMs, w.pageBlurs),
+        cpuLoadDuring,
+        run,
+        result: w,
+      };
     };
 
     if (kind === 'throughput') {
@@ -504,6 +519,20 @@ async function main(): Promise<void> {
       pageInfo = await page.evaluate(() => window.__bench?.ready);
     }
     const pageRun = kind === 'throughput' ? runThroughput : runWorker;
+    // W0G-N6: a stalled run is abandoned after this; the page is then reloaded before going on
+    const timeoutMs = runTimeoutMs(single);
+    const reloadPage = async () => {
+      const target = kind === 'throughput' ? `${base}/spikes/throughput/index.html` : 'about:blank';
+      const reloaded = await withTimeout(
+        (async () => {
+          await page.goto(target);
+          if (kind === 'throughput') await page.evaluate(() => window.__bench?.ready);
+        })(),
+        timeoutMs,
+      );
+      if (!reloaded.ok)
+        throw new Error(`the page did not come back within ${timeoutMs} ms after a stall`);
+    };
 
     const attempts: Attempt[] = [];
     const final = new Map<string, Attempt[]>(configs.map((c) => [c.id, []]));
@@ -519,8 +548,20 @@ async function main(): Promise<void> {
         for (const attempt of [1, 2] as const) {
           process.stdout.write(`  ${id}${attempt === 2 ? ' (rerun)' : ''} ... `);
           await refocus();
-          last = { rep, seq: seq++, attempt, ...(await pageRun(pageConfig)) };
+          const timed = await withTimeout(pageRun(pageConfig), timeoutMs);
+          last = timed.ok
+            ? { rep, seq: seq++, attempt, ...timed.value }
+            : {
+                rep,
+                seq: seq++,
+                attempt,
+                validity: stalledValidity(timed.afterMs),
+                cpuLoadDuring: Number.NaN,
+                run: null,
+                result: null,
+              };
           attempts.push(last);
+          if (!timed.ok) await reloadPage();
           process.stdout.write(`${attemptLine(kind, last)}${warningNote(last.validity)}\n`);
           if (last.validity.valid) break;
         }
@@ -564,14 +605,16 @@ async function main(): Promise<void> {
         validity,
         // D0-1: the median over the repetitions of each metric; none for an invalid
         // configuration, so an invalid row cannot be quoted as a number (W0G-I1).
-        aggregate: validity.valid ? aggregateRuns(reps.map((a) => a.run)) : null,
+        aggregate: validity.valid
+          ? aggregateRuns(reps.flatMap((a) => (a.run === null ? [] : [a.run])))
+          : null,
         repetitions: reps.map(serialize),
       };
     });
     // W0G-I2: how much later runs drift, on ms/it, from the kept valid runs.
     const effect = orderEffect(
       [...idOf].flatMap(([a, id]) =>
-        a.validity.valid && a.run.solverMsPerIt !== null
+        a.validity.valid && a.run !== null && a.run.solverMsPerIt !== null
           ? [{ id, seq: a.seq, value: a.run.solverMsPerIt }]
           : [],
       ),
@@ -592,7 +635,7 @@ async function main(): Promise<void> {
         );
       } else {
         const commits = (final.get(r.id) ?? []).flatMap((x) => {
-          const p95 = (x.result as WorkerBenchResult).reactCommitMs?.p95;
+          const p95 = (x.result as WorkerBenchResult | null)?.reactCommitMs?.p95;
           return p95 === undefined ? [] : [p95];
         });
         process.stdout.write(
@@ -628,7 +671,13 @@ async function main(): Promise<void> {
         displayIntervalMs: intervalMs,
         longFrameFactor: LONG_FRAME_FACTOR,
         throttleFactor: THROTTLE_FACTOR,
+        // D3-6: INVALID only on the occlusion signature or a hidden or blurred page; a throttled
+        // stretch over maxThrottledStretchMs and a slow median are warnings
+        rule: 'D2-11 as amended by D3-6',
+        occlusionDeltaMs: OCCLUSION_DELTA_MS,
+        occlusionMinStretchMs: OCCLUSION_MIN_STRETCH_MS,
         maxThrottledStretchMs: MAX_THROTTLED_STRETCH_MS,
+        runTimeoutMs: timeoutMs,
         // D2-13: a median frame over this many intervals is a warning, not INVALID.
         belowRateMedianFactor: BELOW_RATE_MEDIAN_FACTOR,
         rerun: 'once, after Page.bringToFront',
