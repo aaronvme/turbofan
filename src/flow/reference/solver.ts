@@ -68,6 +68,8 @@ export class ReferenceSolver {
   private readonly cellFace: Int32Array;
   private readonly cellNbr: Int32Array;
   private readonly line: Int32Array;
+  /** Per block, the extended indices of every i-line (positions -2..ni+1) and j-line. */
+  private readonly lines: { readonly i: Int32Array; readonly j: Int32Array }[];
   private readonly slope: Float64Array;
   private readonly qL = new Float64Array(NP);
   private readonly qR = new Float64Array(NP);
@@ -121,6 +123,15 @@ export class ReferenceSolver {
       }
     });
     this.line = new Int32Array(maxLine);
+    this.lines = mesh.blocks.map((b, bi) => {
+      const li = new Int32Array((b.ni + 4) * b.nj);
+      const lj = new Int32Array((b.nj + 4) * b.ni);
+      for (let j = 0; j < b.nj; j++)
+        for (let p = 0; p < b.ni + 4; p++) li[j * (b.ni + 4) + p] = extIndex(mesh, bi, p - 2, j);
+      for (let i = 0; i < b.ni; i++)
+        for (let p = 0; p < b.nj + 4; p++) lj[i * (b.nj + 4) + p] = extIndex(mesh, bi, i, p - 2);
+      return { i: li, j: lj };
+    });
     this.slope = new Float64Array(NU * maxLine);
     this.setBlockage(this.blockage);
   }
@@ -379,10 +390,9 @@ export class ReferenceSolver {
   /** Extended indices of grid line `fixed` of block b in direction dir, positions -2..n+1. */
   private loadLine(b: number, dir: 'i' | 'j', fixed: number, L: number): void {
     const { line, slope, P, ref } = this;
-    for (let p = 0; p < L; p++) {
-      line[p] =
-        dir === 'i' ? extIndex(this.mesh, b, p - 2, fixed) : extIndex(this.mesh, b, fixed, p - 2);
-    }
+    const pre = this.lines[b];
+    if (pre === undefined) throw new Error(`no block ${b}`);
+    line.set((dir === 'i' ? pre.i : pre.j).subarray(fixed * L, fixed * L + L));
     for (let p = 1; p < L - 1; p++) {
       limitedSlopes(
         ref,
