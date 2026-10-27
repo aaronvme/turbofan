@@ -17,6 +17,54 @@ Regenerate with `node tools/lookdev/capture.ts` (own headed Chrome through Playw
 | `06-fan-takeoff.jpg` | `fanTakeoff`, 1/1000 s | 30 degrees per exposure: the fan reads as a disc, no blade-edge teeth at the hub |
 | `07-hot-section.jpg` | `hotSection` (cutaway close-up) | Combustor liner and dome, HPT and LPT disks and blades (10 span sections), heat tint graded along x, TRF struts, plug |
 
+## Look-dev round 4 + LOD (w2/lookdev-4, D4-2, D4-4, D4-5)
+
+PARTIAL: the measurement, the first shading cuts, the fan's cut rule and the exploded spool stop. P4 is not reached by the indicative numbers; W1V-I1 fix (b), W1V-I3 and the visual notes are not done (see the handoff). All eight shots (00-07) were regenerated; the round-3 set is in `docs/look-dev/before/`.
+
+### P4 (pre-registered first, PHYSICS 3.4 and thresholds.ts)
+
+P4: the render GPU time (engine plus post, excluding the solver and flow visuals) at the default preset, 1080p, default three-quarter front view, at most 8.0 ms median under D0-1; the cutaway and hero are reported against 10 ms, not gated. The official measure is the D0-1 set, and `capture.ts` now prints and records the verdict (`results.P4` in `timings.json`; marked indicative unless the run used at least 10 s warm-up, 60 s runs and 3 reps):
+
+```
+npx vite --port 5184 --strictPort
+node tools/lookdev/capture.ts --only none --warmup-s 10 --run-s 60 --reps 3 --seed 1
+npx prettier --write docs/look-dev/timings.json
+```
+
+### Drawn triangles per view (W1V-I2, D4-5)
+
+`stats()` now counts only what the camera draws (the layer-2 shadow proxies are skipped) and reports the main pass, the rotor pass and the fan's depth pre-pass apart, plus draw calls; `node tools/lookdev/capture.ts --counts --no-timing` writes `docs/look-dev/triangles.json`. At `high` (unchanged by this round: no geometry changed):
+
+| view | drawn (M) | main | rotors (incl. the 8 shaded fan copies, 0.219) | + fan depth pre-pass | draws |
+|---|---|---|---|---|---|
+| threeQuarterFront, hero, fanIdle, fanTakeoff | 1.259 | 0.822 | 0.438 | 0.219 | 63 |
+| side | 0.679 | 0.442 | 0.237 | 0.219 | 31 |
+| cutaway, hotSection | 1.588 | 1.139 | 0.449 | 0.027 (shutter 0: copy 0 only) | 186 |
+| exploded | 1.264 | 0.815 | 0.449 | 0.027 | 84 |
+
+This restates the pass-6 probe: front 1.06 M with one fan copy (1.259 - 7 x 0.027) plus 0.41 M of fan-copy vertex work (the pre-pass and the 7 extra shaded copies), side 0.48 M plus the fan, cutaway 1.58 M.
+
+### What the opaque pass pays for (measured, not assumed)
+
+`node tools/lookdev/opaqueCost.ts --saturate` (new): A/B configs on one page, each timed right after the default (paired, every frame of a 0.6 s run kept, the median of 5-10 rounds), with the debug flags `flat` (one unlit material for the whole main pass), `flatNames` (that material on matching meshes), `skinsOnly`, `hide` (a regex on `main:`/`rotors:` names). Indicative: another builder was using the GPU throughout (identical configs varied by up to 2x between runs; the paired differences are the reliable part).
+
+- **The opaque pass is bound by its fragment shading, not by triangles.** With every main material replaced by an unlit one it falls from about 6 ms to about 1 ms (saturated: -4.9 to -6.3 ms). Hiding every main-pass blade row (0.33 M triangles) saves 0.6 ms or less, culling off is within the noise, and drawing only the nacelle and core-cowl skins costs as much as the whole engine. At 960 x 540 the pass falls by half or more.
+- By part (saturated, paired): the nacelle skin about 2.5 ms, the inlet lip (the solid includes the whole inner barrel) about 1.4 ms, the cyclorama about 0.8 ms, the key's shadow lookups about 0.5 ms, the core cowl about 0.1 ms, everything that is not a skin about 1.8 ms.
+- **Why the D3-7 run saw a geometry-bound pass: the GPU clock follows the load at vsync pacing.** One frame per animation frame leaves the Arc iGPU idle for most of each 16.7 ms, and its clock drops with the work: at vsync the performance profile changed the opaque pass by +0.4 ms (the official run: 5.59 -> 5.64), saturated (frames back to back, `timeRun(ms, true)`) by -1.6 ms; the flat main pass saved 5.1 ms of opaque but only 3.1 ms of total at vsync (the other passes slowed), 8.1 ms saturated. So the GPU ms of a vsync-paced run understate any saving, which matters for P4 (orchestrator: see the handoff).
+
+### What changed
+
+- **Shading cuts (the measured lever):** the nacelle's orange peel is gone (two noise lookups per pixel; no shot resolved it, pass 6); the low-frequency noise (nacelle tone and gloss, the lip, the fan case, the core-cowl stain, the heat tint, the plug soot) is evaluated per vertex and interpolated (`perVertex`, periods well above the vertex spacing); the nacelle's oil canning is a per-vertex tilt of the normal (central differences in the object frame, smooth across triangles) instead of a per-pixel derivative bump; the lip has no anisotropic lobe (roughness 0.42 instead of 0.34 stands in for it; at 0.34 without it the band read as chrome again). Saturated, paired against the round-3 materials (3 alternating pairs): **default opaque 6.09 -> 4.95 ms** (median; 5.80-6.53 -> 4.82-5.04), the main materials' cost (default minus flat) 4.9-5.4 -> 3.7-4.0 ms. Estimated against the official run: about 10.2 -> 9.1 ms, so **P4 is probably not met yet**.
+- **No geometry LOD:** the measurements say triangles are not what the default view pays for, so per-row blade LOD and row culling would not move P4; they stay available (the culling pixel test is the acceptance harness) if a later measurement says otherwise.
+- **The fan's cut rule (W1V-I1, part):** in the cutaway only a fan blade wholly inside the wedge is hidden (`bladeHidden(..., 'inside')`, mirrored in `bladeHide`; the pre-pass and the shaded copies share it, as EqualDepth needs), so the blades at the cut faces keep their profile instead of the 8 nearest vanishing.
+- **The exploded engine stops (D4-4):** `spoolDisplayFactor` eases the displayed spool speeds to a stop over `SPOOL_STOP_S` = 1 s (smoothstep in a linear progress, exact over any frame step) and back up when the view closes. The cutaway keeps the running engine (D4-4).
+
+### Still CG-like / not done
+
+- **The cutaway fan still does not read (03):** the spools turn and the rotor pixels still enter TRAA with zero velocity, so the blades are ghosted; fix (b) of W1V-I1 (rotor motion vectors) is the next step, then rotor AO and self-shadow.
+- The visual notes are untouched: the moving fan's torn far side, the spinner spiral in shadow (it shows in 01 only at some phases), the floating engine, the plug as a uniform bright ogive.
+- The lip is slightly smoother than round 3's brushed band (isotropic lobe).
+
 ## Look-dev round 3 (w1/lookdev-3)
 
 All eight shots (00-07) were regenerated at the end of the round; the round-2 set is in `docs/look-dev/before/` (00-07, same names).
