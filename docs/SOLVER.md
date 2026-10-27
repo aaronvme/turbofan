@@ -113,13 +113,19 @@ Each stage first converts every cell to primitives, then fills every ghost from 
 
 **Why the wall ghost is extrapolated, not mirrored.** The W0 mirror ghost copies p, which imposes dp/dn = 0 at the wall. Wherever swirl or wall curvature sets a pressure gradient normal to the wall (ρw²/r behind every rotor, ρu²/R on every curved duct wall) that makes the wall pressure first order and leaves an odd-even wall mode: ladder L6 failed with it (radial-equilibrium error 1.3 % of q for the free vortex, 72 Pa at the inner wall), and the extrapolated ghost brings it to 3 Pa. Mirroring the Cartesian (u, v) also let mass leak through walls not aligned with x or r, because MUSCL limits u and v separately; the pressure-only wall flux makes the wall impermeable in any orientation.
 
-Blockage of a ghost: b of its source cell. Both ghost layers are filled the same way, each from its own source cell.
+Blockage of a ghost: b of its source cell. Both ghost layers are filled the same way, each from its own source cell. **A ghost's T′ and c (record entries 6 and 7) are don't-care (W2R-N2):** the oracle copies them from the source cell, but nothing reads them, because SLAU2 recomputes T′ and c from each face state (§7) and the local step reads only real cells. The kernel need not fill them.
 
 ## 6. Reconstruction (`src/flow/reference/muscl.ts`)
 
 Dimension-split MUSCL on the primitive vector q = (ρ′, u, v, rw, p′, Z), in index space (no distance weighting; stretching is ≤ 1.15):
 
-- **van Albada limited slope** of cell i along a grid line: σ_i = φ(q_i − q_{i−1}, q_{i+1} − q_i) per component, φ(a, b) = ab(a + b)/(a² + b² + 1e-30) if ab > 0, else 0. φ is symmetric and odd, so the two sides of an interface compute bitwise-equal face states whatever the blocks' index orientation.
+- **van Albada limited slope (the contract)** of cell i along a grid line: σ_i = φ(q_i − q_{i−1}, q_{i+1} − q_i) per component, φ(a, b) = ab(a + b)/(a² + b² + 1e-30) if ab > 0, else 0. φ is symmetric and odd, so the two sides of an interface compute bitwise-equal face states whatever the blocks' index orientation.
+- **The smooth form (decision D4-25), a trial in the oracle, NOT yet the contract** (option `limiter: 'smooth'`, `smoothVanAlbada`): φ_ε(a, b) = (a + b)(ab + ε_k²)/(a² + b² + 2ε_k²), code order `e2 = eps * eps`, then `((a + b) * (a * b + e2)) / (a * a + b * b + 2 * e2)` (symmetric and odd bitwise; the denominator is ≥ 2ε² > 0, so no guard and no branch). **The ε rule:** ε_k = K_ε S_k, K_ε = 1e-3 (`LIMITER_EPS`), S = (ρ∞, c∞, c∞, c∞ r_c, ρ∞c∞², f_st) for (ρ′, u, v, rw, p′, Z), r_c the radius of the cell whose slope it is (a ghost: its source cell's, so an interface ghost's slope is bitwise the neighbour-block cell's own). **Its scaling:** φ_ε is homogeneous of degree 1 in (a, b, ε); for |a|, |b| ≫ ε it is ab(a + b)/(a² + b²), the classic formula without the switch (so at an extremum it is not 0 but bounded by min(|a|, |b|): a face value can overshoot an extremum by up to half the smaller jump), and for |a|, |b| ≪ ε it is the central slope (a + b)/2. Next to a flat region (a = 0) the slope is bε²/(b² + 2ε²) ≤ ε/(2√2). ε is a fraction of the reference scales, not of the mesh size. **Why it is not the contract yet (round 4, 2026-10-27):** it does what D4-25 wanted on the far-field duct (the D4-20 duct at M_cut = minMach converges, `precondition.test.ts`), but on the inflow/outflow blockage duct of `blockage.test.ts` (preconditioned, M 0.06) the residual stalls at a floor proportional to ε at every CFL from 0.8 to 1.5 (machCut 1: 9-12 × the first residual at K_ε 1e-3, 0.7 at 1e-4, 5e-2 at 1e-5, 5e-3 at 1e-6; machCut 0.01: 0.15 / 1e-2 / 9e-4 / 6e-4), and the plain low-Mach inflow/outflow duct of `solver.test.ts` leaves its steady state. Below ε the reconstruction is central, and the low-Mach acoustic pair of the tracking scheme then has only the scheme's own acoustic damping, which is weak or absent (the fully discrete 1D analysis, `tests/unit/flow/acoustic.ts`, round-4 WIP not yet pinned by a test: plain at rest stable only to CFL 1.24; preconditioned with matched D4-20 dissipation 0.97; preconditioned with machCut 1 no pressure damping at small β). The sharp switch clips every noise extremum to first order, a hidden dissipation that kept those cases converging. So the smooth form needs the acoustic stability of §10 (D4-30) first; until a decision, the kernel implements the sharp form.
+- **Round-5 retest (decision D4-33, 2026-10-27, after D4-32: preconditioned CFL 0.8, p_u not adopted).** The smooth form was made the default of every case (an uncommitted experiment, the full ladder and the flow unit suites):
+  - *It fixes:* L9a converges to 1e-6 of the peak in 3428 iterations and L9b to 1e-5 in 6169 (neither converged with the sharp form); W2R-6 goes away (§8: the blockage duct at 24 × 6 cells, and at throat M 0.35 when v keeps the sharp form).
+  - *It keeps:* L2 (0.29 %, shock offset 0.23 cells), L3 (0.22 %), L4a (0.26 % / 0.12 %), L4b (1.66 %, steadiness 0.035 %; its convergence row stays at 0.15 of the first), L5, L6, L9's Euler-work and Rankine-Froude rows, and every f32-storage row.
+  - *It breaks:* L8 (velocity error 27-30 % at CFL 0.4, 0.6 and 0.8, residual 5e-2 of the first: independent of the CFL, so a semi-discrete mode of the field at rest once every slope there is central); L1's uniform M 0.5 check (round-off grows between 25 and 50 iterations at the plain CFL 1.5, above the central-slope acoustic limit 1.236 of §10); four unit tests (the 24 × 3 annulus of `blockage.test.ts` does not converge even preconditioned, because the noise-level radial velocity is reconstructed centrally; the plain low-Mach duct of `solver.test.ts` leaves its steady state).
+  - *So the contract stays the sharp form.* The handoff gives the proposal.
 - **Face states**: the face between cells i and i+1 gets q_L = q_i + ½σ_i and q_R = q_{i+1} − ½σ_{i+1}.
 - **Positivity fallback, per cell and per direction**: if either of the cell's two face values in this direction (q_i ± ½σ_i) has ρ∞ + ρ′ ≤ 0 or p∞ + p′ ≤ 0, all six slopes of that cell in that direction are set to 0 (first order). It is per cell, not per face side, so a cell never sends different states to its two faces. It is not shared across directions on purpose: a cell's j-slope at a block boundary would need corner ghosts, which the neighbour block (computing the same face through its ghost copy of the cell) does not have, and the two sides of an interface would then compute different fluxes.
 - **Stencil**: the i-face between i−1 and i uses cells i−2..i+1 (ghosts outside the block); the j-faces likewise. Corner ghosts are never read (W0M-N4).
@@ -156,11 +162,31 @@ M_ref = min(1, max(q̄/c̄, M_cut)) ;  f_a = M_ref (2 − M_ref)
 
 **M_cut** (option `lowMachPreconditioning.machCut`, default = `minMach`): below M_cut the diffusion is held at 1/f_a(M_cut), so a stagnation point or dead air does not get an unbounded pressure diffusion. The default ties it to the preconditioner's cutoff: the scaled diffusion has a pseudo-time rate of about β²c/(8 M_ref Δx) against the step Δx/(βc), i.e. β/(8 M_ref) per step, which stays O(1/8) only while M_ref is not far below β. The same argument is why the scaling is **off without preconditioning** (β = 1: 1/(8 M_cut)) and **off in physical time** (the acoustics are wanted there). The engine (W3, static engine, free stream at rest) runs with **minMach = M_cut = 0.003**: the slowest part of the engine's flow that must be coupled is the far-field suction of the static engine, about 1 m/s (§13), M 0.003 at c∞ = 340 m/s; every faster region (inlet, ducts, jets, entrainment) gets M_ref = its own Mach number. The ladder uses the case's own reference Mach: L7 M_cut = minMach = M∞; L8 (at rest, 0.07-1.9 m/s at the measured radii) the engine's 0.003. The steady state depends on M_cut through a term of the order of the reconstructed jump Δp (second order in smooth flow); the handoff reports the sensitivity (M_cut × ½ and × 2) on L7 and L8. **Open (2026-10-27):** with the sharp van Albada switch of §6, the scaled scheme stops converging where M_ref follows the local Mach (a far-field duct at M 0.01 cycles at 3e-3 of its first residual with M_cut ≤ 0.01 and converges with M_cut ≥ 0.02, or with the smooth van Albada form at any M_cut), and the L8 sink grows a large-scale polar mode for M_cut 0.0025-0.004 (stable at 0.0015 and 0.006). Both wait for a decision; see the handoff.
 
+**Velocity diffusion of the pressure flux (AUSM+-up p_u; decisions D4-30 (2) and D4-32): tried, NOT adopted, NOT in the contract.** The kernel does not implement it. The oracle keeps it as an option for the record (`lowMachPreconditioning.velocityDiffusion`, default 0: off): in preconditioned tracking with the D4-20 scaling on (machCut < 1) and K_u > 0, p̃ loses the term
+
+```
+p_u = K_u β⁺(M_L) β⁻(M_R) (ρ_L + ρ_R) f_a c̄ (vn_R − vn_L)        p̃ ← p̃ − p_u
+```
+
+with f_a and M_ref as above (Liou, J. Comput. Phys. 214 (2006) 137-170: the AUSM+-up pressure flux, whose P±₍₅₎ are SLAU2's β±). Code order: `pu = ku * (bp * bm) * (l.rho + r.rho) * fa * cbar * (r.vn - l.vn)`, then `pt = pt - pu`. Every factor is symmetric under F(L, R, S) → F(R, L, −S) (β⁺(−M_R) is β⁻(M_R) bitwise, and (−vn_L) − (−vn_R) is vn_R − vn_L bitwise), so the antisymmetry stays bitwise; with K_u = 0 the term is not evaluated, so the flux is bitwise the D4-20 one, and physical time and machCut ≥ 1 never use it. *Why:* linearised at rest, SLAU2's own velocity dissipation q̄(β⁺ + β⁻ − 1)ρ̄c̄ ≈ −¾ ρ̄ q̄ (vn_R − vn_L) vanishes with q̄, so the pseudo-acoustic pair has only the mass-flux pressure diffusion; p_u is the matching velocity diffusion, ½ K_u ρ̄ f_a c̄ Δvn ≈ K_u ρ̄ M_ref c̄ Δvn at rest, at the preconditioned acoustic speed. The fully discrete analysis of §10 gives the 1D limits 1.231 / 1.413 / 1.254 at K_u 0.25 / 0.5 / 0.75 (0.972 without), so K_u = 0.5. It changes the steady state by a term of the order of the reconstructed velocity jump (second order in smooth flow), like D4-20's. On transonic faces (f_a = 1) it is AUSM+-up's own term; both-supersonic faces have β⁺β⁻ = 0.
+
+*The trial (2026-10-27, K_u = 0.5; sharp limiter; against the same cases without p_u at CFL 0.8):*
+
+| case | without p_u, CFL 0.8 | p_u, CFL 1.15 | p_u, CFL 0.8 | p_u, CFL 1.5 |
+|---|---|---|---|---|
+| L8 velocity error (< 1 %); residual at 20000 | 0.36 %; 3.9e-4 of the first | **1.38 %**; 3.5e-3 | **2.27 %**; 1.3e-4 | NaN at 24 |
+| L7 M 0.01 asymmetry (< 0.02); Cd (< 0.01); iterations | 0.0437; 0.0096; 3901 | 0.0374; **0.0117**; 2707 | | |
+| L7 iteration ratio M 0.01 / M 0.3 (≤ 3) | 0.89 | 0.95 (2707 / 2860) | | |
+| C-pre (the 12.2 closed box) | bounded, 36 at 2000 (from 567) | NaN at 758 | | NaN at 8 |
+| L2, L4 (plain, p_u off by construction) | unchanged | unchanged | | |
+
+p_u worsens L8 (the velocity row fails at both CFLs) and L7's Cd (fails), and it destabilises C-pre, where the pulse's Δp term holds β well above M_ref: the at-rest analysis assumes β = M_ref, and its higher limit does not carry over. By D4-32 the preconditioned CFL is therefore **0.8 without p_u** (§10).
+
 **Slip-wall faces** do not use SLAU2: F = |S| (0, p′_w n_x, p′_w n_r, 0, 0, 0), with p′_w the wall cell's reconstructed face value of p′ at the wall (q₀ ± ½σ₀, its slope taken with the extrapolated ghost). Mass, angular momentum, energy and fuel fluxes through a wall are exact zeros. Written this way, F(L, R, S) = −F(R, L, −S) **bitwise**, which makes the max/max interfaces (bitwise-negated face vectors) exactly conservative too. For equal states F reduces to the physical flux (ρ vn, ρu vn + p′n_x, ...), which the tests check.
 
 ## 8. Blockage and volume sources (`src/flow/reference/sources.ts`): the W3 interface
 
-**Blockage.** A per-cell field b_c ∈ (0, 1] (default 1). Face blockage b_f = ½(b_L + b_R) of the two cells (a ghost has its source cell's b, so a boundary face gets b_c). Every face flux is multiplied by b_f, the cell's gas volume is b_c V_c, and the local time step uses b-weighted face vectors (§10).
+**Blockage.** A per-cell field b_c ∈ (0, 1] (default 1; `setBlockage` throws on a value outside it, W2R-N1). Face blockage b_f = ½(b_L + b_R) of the two cells (a ghost has its source cell's b, so a boundary face gets b_c). Every face flux is multiplied by b_f, the cell's gas volume is b_c V_c, and the local time step uses b-weighted face vectors (§10).
 
 **Pressure and swirl source** (the geometric term, `geometricSource`): for cell c with primitives q_c,
 
@@ -173,7 +199,29 @@ with S_f the cell's **outward** face vectors. For b ≡ 1 this is (0, p′A + ρ
 
 **Open: W2R-6, the plain scheme is unstable with blockage (decision D4-29: investigated and fixed before W3).** About its own steady state in a blockage duct (24 × 3 cells, b_min 0.85, throat M 0.06 or 0.35), the plain scheme grows a mode in both the tracking mode and the physical-time mode: from the converged state (relative 1e-12) the drift reaches 8e-3 in 1000 tracking iterations and 1e-2 in 1000 SSP-RK3 steps at the default dt at M 0.06; at M 0.35 the physical-time growth is slower (4e-9 at 1000 steps, 8e-3 at 2000). It saturates near 1 % of the state. The same duct with b ≡ 1 stays at 1e-12 in both modes, and the preconditioned tracking mode converges the blockage duct to 1e-11. Physical time is the mode of the surge and light-off events and every W3 blade row carries blockage, so this is a defect of the scheme, not a limitation to live with. Pinned as KNOWN-FAIL (`it.fails`) in `tests/unit/flow/blockage.test.ts`, with the b ≡ 1 control passing. The kernel implements this section as written; the fix may change it.
 
-**Volume sources.** A source model (`SourceModel`) is called once per RK stage with the stage's primitives. Per cell it writes:
+**W2R-6 located (decision D4-34, round 5, 2026-10-27): it is the sharp limiter's switch, not a blockage term.**
+- *p_u does not remove it.* p_u lives in preconditioned tracking, where this duct is stable anyway. Put into the plain scheme (f_a = 1) it moves the M 0.06 duct's steady state by 16 % of the state, so it is not a candidate.
+- *The mode* (a power iteration of the plain scheme about its steady state, physical time, read at a drift of 1e-7 where it is linear): growth × 20 per 80 SSP-RK3 steps at the default dt, σ ≈ 590 1/s, of the order of c/L of the duct. It is acoustic (δρ = δp/c², δ(ρu) ≈ δp/c): a smooth standing wave between the inflow and the outflow plus a grid-scale pressure/axial-velocity oscillation in the blockage cells.
+- *Term switches* (a scratch copy of the oracle, `reports/scratch/r5/w2r6.ts` on `reports/scratch/ref5`, the duct of `blockage.test.ts`, physical time, 1000 steps from the converged state):
+
+| variant | M 0.06 | M 0.35 |
+|---|---|---|
+| as specified | grows to 1e-2 | grows to 6e-3 at 2000 |
+| first-order reconstruction | stable | |
+| p′ slopes zero, the others limited | stable | stable |
+| u slopes zero | stable | |
+| p′ slopes central (unlimited) | stable | |
+| ρ′ slopes zero; v slopes zero | grows | |
+| the pressure force as b_c ∇p (each side's b on the face pressure, the p∇b source not used) | grows | |
+| b_f = min(b_L, b_R) instead of the average | stable | stable |
+| smooth van Albada (§6), 24 × 6 cells | stable (2e-13) | |
+| smooth van Albada for all but v, 24 × 3 | stable | stable |
+| as specified, 24 × 12 cells | grows (slower) | |
+
+- *Reading.* The plain scheme's steady state carries a grid-scale pressure sawtooth at the throat (±50 Pa on a 200 Pa dynamic pressure; plain SLAU2's O(M) pressure coupling at M 0.06, the L7 sawtooth that D4-20 removes only in preconditioned tracking). So p′ and u have an extremum in nearly every blockage cell, where the sharp van Albada switches (φ = 0 for ab ≤ 0, and next to it a one-sided slope with ∂φ/∂b → 1). The linearisation of that switch is what grows. The p∇b source is well-balanced (D4-29), and replacing it does not help. The smooth limiter, which linearises to the central slope where |a|, |b| ≪ ε, removes the mode. With 3 radial cells it cannot be shown: its central reconstruction of the noise-level radial velocity (|v| ~ 1e-13 ≪ ε_v = 0.34 m/s) keeps this narrow annulus from converging even preconditioned. Central v slopes alone do that at 24 × 3, and 24 × 6 does not show it.
+- *Fix proposed:* the smooth limiter as the default (D4-33). Until a decision this section, §6 and the KNOWN-FAIL pins stand.
+
+**Volume sources.** A source model (`SourceModel`) is called once per RK stage with the stage's primitives and the stage's time (physical time: t, t + dt and t + dt/2 for the three SSP-RK3 stages, so a time-dependent schedule keeps third order, W2R-N3; tracking: the iteration's time, unchanged). Per cell it writes:
 - `rate` s_c (6 values): conserved-gauge component rates per unit **gas** volume (kg/(m³ s), N/m³, N/m³, N m/m³, W/m³, kg/(m³ s)), for U = (ρ′, ρu, ρv, ρrw, η, ρZ). Since η = ρE − ρh0∞ + p∞, an energy source s_E and a mass source s_m give **s_η = s_E − h0∞ s_m**. A mass source at the local state carrying its stagnation enthalpy h0 (bleed, cooling flow) therefore has s_η = s_m (h0 − h0∞); helper `massSourceRates`.
 - `damping` d_c (6 values, ≥ 0, 1/s): the diagonal of −∂s/∂U, for the point-implicit update. 0 means explicit.
 
@@ -207,6 +255,19 @@ U^(k) = Uⁿ − α_k τ_c (R_c(U^(k−1)) ) / (1 + α_k dt_c d_c)        k = 1,
 ```
 
 **The coefficients are not the W0 spike's** (0.1918, 0.4929, 1.0; van Leer, Tai & Powell 1989). A linear (von Neumann) analysis of the 3-stage scheme G(z) = 1 + z + α₂z² + α₁α₂z³ with this MUSCL (κ = 0 in smooth regions, whose dissipation is O(θ⁴)) shows that α₂ < ½ leaves |G| > 1 near the origin of the imaginary axis: the spike's set is unstable for long waves at any CFL (growth 1.3e-4 per iteration at CFL 1, 1.5e-3 at CFL 1.5). With α₂ = ½, α₁ = 0.2 the stability limit is **CFL 1.54** for the second-order scheme and 1.86 for first order (`tests/unit/flow/rk.test.ts` repeats the analysis and pins both sets, decision D4-8). The default tracking CFL is **1.5**; the brief's range 1.5-1.8 is stable only where the limiter goes first order.
+
+**The preconditioned tracking CFL (decision D4-32).** D4-8's analysis covers advection only. The pseudo-acoustic pair of the preconditioned scheme is a different family: linearised at rest, SLAU2's velocity dissipation q̄(β⁺ + β⁻ − 1)ρ̄c̄ is second order and vanishes, so the pair is damped only by the (D4-20-scaled) mass-flux pressure diffusion, and the 3-stage set's |G(iy)|² = 1 + 0.05y⁴ + 0.01y⁶ is anti-dissipative on the imaginary axis. `tests/unit/flow/acoustic.ts` is the fully discrete von Neumann analysis of the actual scheme on that family: MUSCL with central slopes (van Albada in smooth data), face states q ± σ/2, dimension-split fluxes, the pressure increment times β², the local step CFL/λ with λ the preconditioned spectral radius summed over the two directions, and G(z) of the three stages on each eigenvalue of the step's symbol, over every wave number (θ_x, θ_r). The cell shape enters as the aspect a = (r-face area)/(x-face area) of the cell; a = 0 is the 1D limit (a cell much longer in r than in x, or the axis cells' effective width). Stability limits (`tests/unit/flow/rk.test.ts` pins them):
+
+| family (at rest) | a = 0 (1D) | 0.25 | 0.5 | 1 (square) |
+|---|---|---|---|---|
+| plain tracking (β = 1, f_a = 1) | 1.236 | 1.539 | 1.791 | 1.878 |
+| preconditioned, D4-20 matched (β = M_ref, any β ≤ 0.006) | **0.972** | 1.210 | 1.408 | **1.550** |
+| the same + AUSM+-up p_u, K_u = 0.25 | 1.231 | 1.517 | 1.691 | 1.777 |
+| the same + p_u, K_u = 0.5 | **1.413** | 1.726 | 1.885 | **1.958** |
+| the same + p_u, K_u = 0.75 | 1.254 | 1.567 | 1.880 | 2.107 |
+| preconditioned without D4-20 (machCut ≥ 1), β = 0.06 | 0.475 | 0.591 | 0.687 | |
+
+The worst cell shape is the 1D one, so the preconditioned tracking default is **`DEFAULT_CFL_PRECONDITIONED` = 0.8** (0.82 × 0.972; the 0.8 margin is the standard safety factor on a computed limit). It applies whenever `lowMachPreconditioning` is set and the caller gives no `cfl`; the plain tracking default stays 1.5. The closed-box case C-pre of §12.2 shows the limit is real: at CFL 1.5 the preconditioned pulse (engine settings, minMach = M_cut = 0.003) goes to NaN at iteration 79 (48 at a hundredth of the amplitude), while at 1.15 and 0.8 it stays bounded for 400 iterations; ladder L8's polar mode (D4-27) grows at 1.5 and 1.2, is neutral at 0.9 and decays at 0.75 (critic pass 7). Preconditioning with machCut ≥ 1 (no D4-20 scaling) has a far lower limit at small β and is a test configuration only (D4-22's measurement, the steady-state check of `precondition.test.ts`). D4-32's p_u trial (§7) worsened L7 and L8 and destabilised C-pre, so the default stays **0.8 without p_u** (decision D4-32's second branch).
 
 **Low-Mach preconditioning (tracking mode only; decision D4-10).** Without it the pseudo-time step is set by the acoustic speed |u| + c while the flow converges at the convective speed |u|, so the iterations to converge grow like 1/M (ladder L7: the M 0.01 sphere did not converge in 20000 iterations, the M 0.3 sphere took 3096). The option `lowMachPreconditioning: { minMach }` multiplies the pseudo-time derivative of the pressure by 1/β² (Turkel's preconditioner with α = 0 in the variables (p, u, v, rw, s, Z), equivalent for this gas to Weiss & Smith 1995). Per cell, from the stage-1 primitives and frozen for the three stages like τ:
 
@@ -259,19 +320,30 @@ The default dt is CFL_phys · min_c(b_c V_c/λ_c) with CFL_phys = 0.9 (the RK3 l
 
 ### 12.2 Tolerances for the GPU kernel against the oracle (W0G-N4)
 
-Protocol: the same mesh asset (130k, f32 metrics) and the same f32-representable initial state on both, the same options; compare after N iterations. For each primitive field q ∈ (ρ′, u, v, rw, p′, Z) and T′, the **relative error** is e_q = max_c |q_GPU − q_ref| / S_q with the perturbation scale S_q = max_c |q_ref − q∞| (velocity components share S = max |(u − u∞, v, w)|).
+Protocol: the same mesh (the row's, below; always with f32 metrics, the numbers the GPU reads) and the same f32-representable initial state on both, the same options (the oracle's defaults unless the row names one); compare after N iterations. The set-ups, the perturbation and the error metric are exported by `tests/ladder/oracle.ts` (`closedBoxMesh`, `closedBoxOptions`, `smoothPerturbation`, `sinkCase`, `relativeError`); the f32-storage experiment (`tests/ladder/cases/f32.ts`) and the GPU tests import the same module. A field the oracle leaves exactly unperturbed (S_q = 0, such as Z in the sink) must stay exactly so. For each primitive field q ∈ (ρ′, u, v, rw, p′, Z) and T′, the **relative error** is e_q = max_c |q_GPU − q_ref| / S_q with the perturbation scale S_q = max_c |q_ref − q∞| (velocity components share S = max |(u − u∞, v, w)|).
 
 | case | N | must hold |
 |---|---|---|
-| A. quiescent ambient, real mesh | 1, 100 | every state value bitwise 0 |
+| A. quiescent ambient, real mesh (the 130k asset, f32 metrics); plain and preconditioned tracking and physical time | 1, 100 | every state value bitwise 0 |
 | B. uniform M 0.5, real mesh, walls remapped to far field | 100 | max |u − u∞| ≤ 10 × the oracle's (the oracle's is a property of the f32 metrics, 12.3) |
-| C. smooth field on the real mesh (acoustic pulse + swirl + a hot fuel-air spot; `tests/ladder/oracle.ts` `smoothPerturbation`), tracking | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
+| C. smooth field (acoustic pulse + swirl + a hot fuel-air spot, `smoothPerturbation`) in the closed box (`closedBoxMesh`: three wiggled 20 × 12 blocks over 0.6 × 0.15 m with a max/max and a min/min interface, slip walls and the axis, D4-12), plain tracking (`closedBoxOptions('tracking')`, CFL 1.5) | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
+| C-pre. the same, **preconditioned tracking at the engine's settings** (`closedBoxOptions('preconditioned')`: minMach = M_cut = 0.003, so β², the δU update, the D4-20 scaling and the default CFL of §10 are all exercised) | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
 | C, physical time (SSP-RK3, the oracle's dt) | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
 | D. Sod tube (ladder L2 set-up), physical time | 100 | L1 relative error of ρ′ and p′ ≤ 1e-3 (limiter switches, 12.1) |
 | E. a blockage + source cell set (ladder L5/L8/L9 set-ups) | 10 | e_q ≤ 1e-4 |
+| S. ladder L8's sink (`sinkCase({ minMach: 0.003 }, 'f32')`: 64 × 24 polar mesh, slip wall inside, the preconditioned far field outside, the point-implicit sink source), preconditioned tracking from the ambient at rest | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
 | any | any | the residual L2 within 1e-3 relative of the oracle's |
 
-Basis: f32 has a relative step of 6e-8; one iteration rounds each face flux and cell update a few dozen times, and the gauges keep that relative to the perturbation, so one iteration lands near 1e-6 and growth is at most linear over N for a stable smooth run. The f32-storage experiment in `tests/ladder/f32.test.ts` (the oracle with its state rounded to f32 after every stage) measures the storage part of this on case C, and the table sits ≥ 10× above it. Measured (2026-10-27, closed box per D4-12: slip walls and the axis, so the pulse stays in the domain): tracking 1.9e-7 / 4.4e-7 / 1.4e-6 after 1 / 10 / 100 iterations, physical time 8.4e-8 / 2.4e-7 / 1.3e-5, so every row, the N = 100 rows included, sits 54-720× above the storage error. A tolerance changes only through an orchestrator decision.
+Basis: f32 has a relative step of 6e-8; one iteration rounds each face flux and cell update a few dozen times, and the gauges keep that relative to the perturbation, so one iteration lands near 1e-6 and growth is at most linear over N for a stable smooth run. The f32-storage experiment in `tests/ladder/f32.test.ts` (the oracle with its state rounded to f32 after every stage) measures the storage part of this on the rows' own set-ups, and the table must sit ≥ 10× above it. Measured (2026-10-27, `tests/ladder/oracle.ts` set-ups, f32 metrics, after 1 / 10 / 100 iterations):
+
+| row | storage error | margin to the tolerance |
+|---|---|---|
+| C, plain tracking (CFL 1.5) | 1.7e-7 / 1.1e-6 / 7.8e-7 | 59 / 90 / 1300 × |
+| C-pre, preconditioned tracking (engine settings, CFL 0.8) | 1.1e-7 / 1.7e-7 / 5.1e-7 | 93 / 590 / 2000 × |
+| C, physical time | 8.0e-8 / 2.4e-7 / 4.2e-6 | 125 / 410 / 240 × |
+| S, the L8 sink, preconditioned (CFL 0.8) | 7.3e-8 / 1.8e-7 / 6.3e-7 | 140 / 570 / 1600 × |
+
+(Before W2R-I2 the box ran with f64 metrics: 1.9e-7 / 4.4e-7 / 1.4e-6 tracking, 8.4e-8 / 2.4e-7 / 1.3e-5 physical time.) At the plain CFL 1.5 the C-pre set-up diverges (NaN at iteration 79, §10), so these rows also check that the kernel takes the preconditioned default CFL. If the p_u trial changes the preconditioned scheme (§10, D4-32), the C-pre and S rows are re-measured with it. A tolerance changes only through an orchestrator decision.
 
 ### 12.3 The f32 metrics and ladder L1
 The f32 asset rounds the face vectors, so a cell's Σ S_x is not zero but of order 6e-8 |S|. In uniform flow that is a residual F∞ Σ S_x in every cell, and the steady state carries a perturbation that grows along streamlines. `tests/ladder/l1.test.ts` reports the asset's worst Σ S_x defect and the spurious velocity the oracle develops with the f32 asset. If it exceeds L1's 1e-4 m/s, the remedy belongs to the mesh asset (f64 metrics, about 5 MB more at 130k, or face vectors computed so that their f32 sums telescope exactly), not to the kernel.

@@ -20,6 +20,12 @@ import { NP, NU, consToPrim, primToCons, physicalToPrim, type PhysicalState } fr
 /** Tracking-mode stage coefficients (section 10: alpha_2 = 1/2 is needed for stability). */
 export const RK3_ALPHA = [0.2, 0.5, 1.0] as const;
 export const DEFAULT_CFL = 1.5;
+/**
+ * The tracking CFL with low-Mach preconditioning (minMach < 1), decision D4-32: 0.82 x the fully
+ * discrete limit 0.972 of the 3-stage scheme on the pseudo-acoustic pair at rest, whose worst cell
+ * shape is the 1D one (section 10; tests/unit/flow/acoustic.ts, pinned in rk.test.ts).
+ */
+export const DEFAULT_CFL_PRECONDITIONED = 0.8;
 export const DEFAULT_CFL_PHYSICAL = 0.9;
 
 export interface SolverOptions {
@@ -43,7 +49,22 @@ export interface SolverOptions {
    * 1 / f_a(max(M, machCut)) (section 7, D4-20; machCut defaults to minMach, >= 1 turns it off).
    * Physical time ignores both.
    */
-  readonly lowMachPreconditioning?: { readonly minMach: number; readonly machCut?: number };
+  readonly lowMachPreconditioning?: {
+    readonly minMach: number;
+    readonly machCut?: number;
+    /**
+     * K_u of AUSM+-up's p_u velocity diffusion in SLAU2's pressure flux, applied with the D4-20
+     * scaling (machCut < 1) only. Default 0: off. D4-32's trial: NOT adopted (it worsened L7 and
+     * L8, section 7), so it is not in the contract; kept for the record.
+     */
+    readonly velocityDiffusion?: number;
+  };
+  /**
+   * The limiter (section 6): 'sharp' van Albada (default) or the 'smooth' eps form, the D4-25
+   * trial that is not yet the contract (round 4: below eps the reconstruction is central, and the
+   * low-Mach acoustic pair then lacks the damping the sharp switch's clipping gave).
+   */
+  readonly limiter?: 'sharp' | 'smooth';
   /** 'f32': round the state to f32 after every stage (the f32-storage tolerance experiment). */
   readonly storage?: 'f64' | 'f32';
 }
@@ -74,6 +95,10 @@ export class ReferenceSolver {
   private readonly machCut: number;
   /** The M_cut of the residual being assembled. */
   private fluxMachCut = 1;
+  /** K_u of the tracking mode's p_u (0: off); physical time and machCut >= 1 always use 0. */
+  private readonly velocityDiffusion: number;
+  /** The K_u of the residual being assembled. */
+  private fluxKu = 0;
   private readonly remap: Uint8Array;
   /** 1 for the ghosts that are slip walls (after the remap), per extended index. */
   private readonly wall: Uint8Array;
@@ -81,6 +106,8 @@ export class ReferenceSolver {
   private readonly U0: Float64Array;
   private readonly R: Float64Array;
   private readonly bExt: Float64Array;
+  /** Radius per extended index (a ghost: its source cell's), for the limiter's rw scale. */
+  private readonly rExt: Float64Array;
   private readonly bSx: Float64Array;
   private readonly bSr: Float64Array;
   private readonly tau: Float64Array;
@@ -119,7 +146,10 @@ export class ReferenceSolver {
             farFieldBeta2: Math.min(1, Math.max(mInf2, pre.minMach * pre.minMach)),
           });
     this.machCut = pre === undefined ? 1 : (pre.machCut ?? pre.minMach);
-    this.cfl = opts.cfl ?? DEFAULT_CFL;
+    this.velocityDiffusion = pre?.velocityDiffusion ?? 0;
+    // minMach >= 1 is the plain scheme (beta = 1, f_a = 1) and keeps the plain default
+    this.cfl =
+      opts.cfl ?? (pre !== undefined && pre.minMach < 1 ? DEFAULT_CFL_PRECONDITIONED : DEFAULT_CFL);
     this.cflPhysical = opts.cflPhysical ?? DEFAULT_CFL_PHYSICAL;
     this.remap = new Uint8Array(256).map((_, k) => opts.bcRemap?.[k] ?? k);
     this.wall = new Uint8Array(mesh.nCells + mesh.nGhosts);
@@ -135,6 +165,10 @@ export class ReferenceSolver {
     this.P = new Float64Array(NP * nx);
     this.blockage = new Float64Array(n).fill(1);
     this.bExt = new Float64Array(nx);
+    this.rExt = new Float64Array(nx);
+    for (let c = 0; c < n; c++) this.rExt[c] = mesh.cellR[c] as number;
+    for (let g = 0; g < mesh.nGhosts; g++)
+      this.rExt[n + g] = mesh.cellR[mesh.ghostSrc[g] ?? 0] as number;
     this.bSx = new Float64Array(n);
     this.bSr = new Float64Array(n);
     this.tau = new Float64Array(n);
@@ -182,6 +216,12 @@ export class ReferenceSolver {
   setBlockage(b: ArrayLike<number>): void {
     const m = this.mesh;
     const n = m.nCells;
+    // W2R-N1: b = 0 would make tau = CFL / lambda / (b V) infinite and surface only as a later NaN
+    if (b.length < n) throw new Error(`blockage: ${b.length} values for ${n} cells`);
+    for (let c = 0; c < n; c++) {
+      const v = b[c] as number;
+      if (!(v > 0 && v <= 1)) throw new Error(`blockage of cell ${c} is ${v}, not in (0, 1]`);
+    }
     for (let c = 0; c < n; c++) this.blockage[c] = b[c] as number;
     for (let c = 0; c < n; c++) this.bExt[c] = this.blockage[c] as number;
     for (let g = 0; g < m.nGhosts; g++)
@@ -298,9 +338,11 @@ export class ReferenceSolver {
       [3 / 4, 1 / 4],
       [1 / 3, 2 / 3],
     ];
+    // each stage's time (W2R-N3): Shu-Osher's stages sit at t, t + dt and t + dt / 2
+    const stageTime = [0, 1, 0.5];
     for (let k = 0; k < 3; k++) {
       this.updatePrimitives(true);
-      this.evaluateSources();
+      this.evaluateSources(this.time + (stageTime[k] as number) * dtStep);
       this.assembleResidual(1);
       if (k === 0) this.recordResidual();
       const [w0, w1] = weights[k] ?? [NaN, NaN];
@@ -343,6 +385,7 @@ export class ReferenceSolver {
     const f = dir === 'i' ? i : j;
     this.loadLine(b, dir, fixed, L);
     this.fluxMachCut = this.machCut;
+    this.fluxKu = this.machCut < 1 ? this.velocityDiffusion : 0;
     this.faceFromLine(
       f,
       dir === 'i' ? blk.iFaceOffset + j * (blk.ni + 1) + i : blk.jFaceOffset + j * blk.ni + i,
@@ -411,7 +454,7 @@ export class ReferenceSolver {
     }
   }
 
-  private evaluateSources(): void {
+  private evaluateSources(time = this.time): void {
     const model = this.opts.sources;
     this.src.rate.fill(0);
     this.src.damping.fill(0);
@@ -423,7 +466,7 @@ export class ReferenceSolver {
         prim: this.P,
         U: this.U,
         blockage: this.blockage,
-        time: this.time,
+        time,
       },
       this.src,
     );
@@ -470,7 +513,7 @@ export class ReferenceSolver {
 
   /** Extended indices of grid line `fixed` of block b in direction dir, positions -2..n+1. */
   private loadLine(b: number, dir: 'i' | 'j', fixed: number, L: number): void {
-    const { line, slope, P, ref } = this;
+    const { line, slope, P, ref, rExt } = this;
     const pre = this.lines[b];
     if (pre === undefined) throw new Error(`no block ${b}`);
     line.set((dir === 'i' ? pre.i : pre.j).subarray(fixed * L, fixed * L + L));
@@ -481,8 +524,10 @@ export class ReferenceSolver {
         NP * (line[p - 1] ?? 0),
         NP * (line[p] ?? 0),
         NP * (line[p + 1] ?? 0),
+        rExt[line[p] ?? 0] as number,
         slope,
         NU * p,
+        this.opts.limiter === 'smooth',
       );
     }
   }
@@ -526,6 +571,7 @@ export class ReferenceSolver {
       (dir === 'i' ? m.iRf[face] : m.jRf[face]) as number,
       this.F,
       this.fluxMachCut,
+      this.fluxKu,
     );
     return area;
   }
@@ -535,6 +581,7 @@ export class ReferenceSolver {
     const m = this.mesh;
     const { R, F, line, bExt } = this;
     this.fluxMachCut = machCut;
+    this.fluxKu = machCut < 1 ? this.velocityDiffusion : 0;
     R.fill(0);
     m.blocks.forEach((b, bi) => {
       for (const dir of ['i', 'j'] as const) {

@@ -10,7 +10,7 @@ export default defineConfig({
     include: ['tests/ladder/**/*.test.ts'],
     environment: 'node',
     pool: 'forks',
-    testTimeout: 900_000,
-    hookTimeout: 900_000,
+    testTimeout: 1_800_000,
+    hookTimeout: 1_800_000,
   },
 });

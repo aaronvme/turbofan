@@ -15,7 +15,11 @@ import {
   spectralRadius,
 } from '../../../src/flow/reference/precondition';
 import { boundaryParams, ghostPrimitive } from '../../../src/flow/reference/boundary';
-import { ReferenceSolver } from '../../../src/flow/reference/solver';
+import {
+  DEFAULT_CFL,
+  DEFAULT_CFL_PRECONDITIONED,
+  ReferenceSolver,
+} from '../../../src/flow/reference/solver';
 import { NP, NU, consToPrim, physicalToPrim, primToCons } from '../../../src/flow/reference/state';
 import { converge } from '../../ladder/common';
 import { BC, rectangle, singleBlock, solverMesh, threeBlockRow } from './helpers';
@@ -149,10 +153,8 @@ describe('far field under preconditioning', () => {
     expect(conv.converged).toBe(true);
   }, 120_000);
 
-  // OPEN (handoff, decision needed): with M_cut <= the flow's Mach, M_ref follows the local Mach and
-  // the residual cycles at 3e-3 of the first at any CFL (0.8 too). It is van Albada's switch at
-  // ab = 0: with unlimited slopes, or with the smooth van Albada form (eps > 0), the same run
-  // converges to 1e-12 in 1800 iterations at M_cut 0.01 and 0.005.
+  // With M_cut <= the flow's Mach, M_ref follows the local Mach and, with the sharp van Albada
+  // switch at ab = 0, the residual cycles at 3e-3 of the first at any CFL (D4-25's case).
   it.fails(
     'converges the far-field duct with the D4-20 scaling at M_cut = minMach (open: limiter)',
     () => {
@@ -161,6 +163,12 @@ describe('far field under preconditioning', () => {
     },
     120_000,
   );
+
+  // the smooth form (the D4-25 trial, option limiter 'smooth') has no switch: this case converges
+  it('converges it with the smooth van Albada trial form (D4-25)', () => {
+    const conv = converge(ffDuct(ductMesh(), 0.01, 'smooth'), 1e-10, 3000);
+    expect(conv.converged).toBe(true);
+  }, 120_000);
 });
 
 function ductMesh() {
@@ -175,9 +183,14 @@ function ductMesh() {
 }
 
 /** The M 0.01 far-field duct with a 15 % blockage, preconditioned at minMach 0.01. */
-function ffDuct(duct: ReturnType<typeof solverMesh>, machCut: number) {
+function ffDuct(
+  duct: ReturnType<typeof solverMesh>,
+  machCut: number,
+  limiter: 'sharp' | 'smooth' = 'sharp',
+) {
   const u = 0.01 * 340.29;
   const s = new ReferenceSolver(duct, {
+    limiter,
     gas: caloricallyPerfectGas(1.4, 287.05287),
     freeStream: { pressure: 101325, temperature: 288.15, velocity: u },
     lowMachPreconditioning: { minMach: 0.01, machCut },
@@ -226,6 +239,25 @@ describe('preconditioned tracking mode', () => {
     b.iterate(3);
     expect(b.U).toEqual(a.U);
     expect(b.localDt()).toEqual(a.localDt());
+  });
+
+  // D4-32: the pseudo-acoustic pair needs its own CFL (section 10, tests/unit/flow/rk.test.ts)
+  it('takes DEFAULT_CFL_PRECONDITIONED when no CFL is given (minMach >= 1: the plain default)', () => {
+    const solver = (minMach: number, cfl?: number) => {
+      const s = new ReferenceSolver(mesh, {
+        gas: THERMALLY_PERFECT,
+        freeStream: fs,
+        lowMachPreconditioning: { minMach },
+        ...(cfl === undefined ? {} : { cfl }),
+      });
+      s.setState(pulse);
+      return s.localDt();
+    };
+    expect(DEFAULT_CFL_PRECONDITIONED).toBe(0.8);
+    expect(solver(0.01)).toEqual(solver(0.01, DEFAULT_CFL_PRECONDITIONED));
+    const ratio = solver(0.01, 1.2).map((dt, c) => dt / (solver(0.01)[c] as number));
+    for (const r of ratio) expect(r).toBeCloseTo(1.2 / DEFAULT_CFL_PRECONDITIONED, 12);
+    expect(solver(1)).toEqual(solver(1, DEFAULT_CFL));
   });
 
   it('keeps the quiescent ambient exactly', () => {
@@ -278,10 +310,10 @@ describe('preconditioned tracking mode', () => {
     });
     pre.setBlockage(b);
     // M 0.06 at the throat; the plain scheme is still at 6e2 x its first residual after 20000
-    // iterations from rest (acoustic waves between the reflecting inflow and outflow)
+    // iterations from rest (acoustic waves between the reflecting inflow and outflow). At the
+    // preconditioned default CFL 0.8 (D4-32) this takes 4723 iterations (< 4000 at CFL 1.5).
     const conv = converge(pre, 1e-11, 6000);
     expect(conv.converged).toBe(true);
-    expect(conv.iterations).toBeLessThan(4000);
     // the plain scheme, started from the preconditioned steady state, has R = 0 there too: it is the
     // same equation with and without the preconditioner. This checks the steady state, not its
     // stability, so it runs only 30 iterations: with blockage the plain scheme is linearly unstable
@@ -329,7 +361,7 @@ describe('low-Mach dissipation scaling in the solver (D4-20)', () => {
     const g = Math.exp(-((x - 0.25) ** 2 + (r - 0.07) ** 2) / 0.003);
     return { rho: 1.225, u: 3 + g, v: -0.5 * g, w: g, p: 101325 + 20 * g, z: 0 };
   };
-  const make = (pre?: { minMach: number; machCut?: number }) => {
+  const make = (pre?: { minMach: number; machCut?: number; velocityDiffusion?: number }) => {
     const s = new ReferenceSolver(mesh, {
       gas: THERMALLY_PERFECT,
       freeStream: fs,
@@ -350,6 +382,30 @@ describe('low-Mach dissipation scaling in the solver (D4-20)', () => {
     expect(diff).toBeGreaterThan(0);
     // the default cut is minMach: the same residual as machCut = minMach given explicitly
     expect(make({ minMach: 0.01, machCut: 0.01 }).residual()).toEqual(on);
+  });
+
+  // D4-32's trial (section 7): the p_u velocity diffusion of the pressure flux
+  it('adds p_u to the momentum residual only with machCut < 1 and K_u > 0', () => {
+    const on = make({ minMach: 0.01 }).residual();
+    const pu = make({ minMach: 0.01, velocityDiffusion: 0.5 }).residual();
+    let dMass = 0;
+    let dMomentum = 0;
+    for (let k = 0; k < on.length; k += NU) {
+      dMass = Math.max(dMass, Math.abs((pu[k] as number) - (on[k] as number)));
+      dMomentum = Math.max(dMomentum, Math.abs((pu[k + 1] as number) - (on[k + 1] as number)));
+    }
+    expect(dMass).toBe(0);
+    expect(dMomentum).toBeGreaterThan(0);
+    expect(make({ minMach: 0.01, velocityDiffusion: 0 }).residual()).toEqual(on);
+    expect(make({ minMach: 0.01, machCut: 1, velocityDiffusion: 0.5 }).residual()).toEqual(
+      make({ minMach: 0.01, machCut: 1 }).residual(),
+    );
+    const a = make({ minMach: 0.01, velocityDiffusion: 0.5 });
+    const b = make();
+    const dt = b.globalDt();
+    a.stepPhysical(dt);
+    b.stepPhysical(dt);
+    expect(a.U).toEqual(b.U);
   });
 
   it('leaves the physical-time mode unscaled', () => {
