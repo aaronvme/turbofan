@@ -132,6 +132,12 @@ Never quote personal data (emails, keys, tokens) in this file.
 - **D4-23 (questions d and e):**
   - (d) is confirmed: L9 normalises its residual by the peak over the first iterations, because the first residual is zero.
   - (e) the default CFL is not lowered for L9a's swirl stall. First, give the swirl/centrifugal source (ρu_θ²/r, and the u_r·u_θ coupling) a point-implicit treatment with its Jacobian, the standard remedy for a stiff geometric source. Fall back only if that fails: a local source-term time-step limit (Δt ≤ C·r/|u_θ|) where swirl dominates, not a global CFL cut.
+- **D4-24 (w2/lookdev-4, PARTIAL at bad7ad0): how P4 is measured.**
+  - **The builder's finding:** the opaque pass is bound by fragment shading, not by triangles. Unlit materials take it from about 6 to about 1 ms, while hiding every main-pass blade row saves at most 0.6 ms. Also, at vsync the iGPU clock follows the load (DVFS). A vsync-paced, render-only timestamp therefore overstates the cost when there is headroom and understates savings. In paired runs, the performance profile changes the opaque pass by +0.4 ms at vsync but by −1.6 ms back to back. This also explains D3-7's "lower resolution barely helps".
+  - **Decision:** P4 keeps 8.0 ms and the D0-1 protocol. Its measure of record becomes the render GPU time with frames rendered back to back, the GPU at its loaded clock. In the app the solver and flow visuals share the frame and keep the GPU there. The vsync figure is always reported beside it.
+  - **The end-to-end checks of record stay P2 (≥ 55 fps) and L13,** with the solver and flow visuals running.
+  - **This changes a measurement method, not the threshold, so it applies only after the critic independently confirms the DVFS evidence.** Until then P4 is reported both ways and must pass both.
+  - The capture tool gets a back-to-back mode in the next look-dev round. The official vsync run of bad7ad0 runs in this cap pause as the baseline (D3-7 had 10.18 ms).
 
 
 
