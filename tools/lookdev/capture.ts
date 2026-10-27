@@ -21,6 +21,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium, type Page } from '@playwright/test';
 import { displayIntervalMs, type Validity } from '../../spikes/lib/validity.ts';
+import { THRESHOLDS } from '../../src/contracts/thresholds.ts';
 import { summarizeRun, type FrameSample, type RunSummary } from '../../src/gpu/passTimings.ts';
 import {
   combineReps,
@@ -256,6 +257,32 @@ async function main(): Promise<void> {
           .join(', ');
         log(
           `${c.id}: GPU ${combined.gpuTotal.p50.toFixed(2)} ms median of ${combined.runs} runs (${passes}); CPU ${combined.cpu.p50.toFixed(2)} ms; ${valid ? 'VALID' : 'INVALID'}`,
+        );
+      }
+      // P4 (D4-2, PHYSICS 3.4): the default view's median render GPU time, gated at <= 8.0 ms
+      // only under D0-1 (the official set: 10 s warm-up, 3 x 60 s, AC, nothing else running);
+      // the cutaway and hero are reported against the 10 ms target, not gated
+      const p4 = THRESHOLDS.P4.values;
+      const gpuOf = (id: string): number | null => {
+        const r = results[id] as { gpuTotal?: { p50: number } } | undefined;
+        return r?.gpuTotal?.p50 ?? null;
+      };
+      const p4Default = gpuOf('default (threeQuarterFront)');
+      const official = !t.diagnostics && t.warmupS >= 10 && t.runS >= 60 && t.reps >= 3;
+      if (p4Default !== null) {
+        const verdict = p4Default <= p4.maxRenderGpuMs.value ? 'PASS' : 'FAIL';
+        results.P4 = {
+          defaultGpuMs: p4Default,
+          maxMs: p4.maxRenderGpuMs.value,
+          verdict: official ? verdict : `${verdict} (indicative: not the D0-1 protocol)`,
+          reported: {
+            cutaway: gpuOf('cutaway'),
+            hero: gpuOf('hero (cinematic, DoF on)'),
+            targetMs: p4.reportedTargetMs.value,
+          },
+        };
+        log(
+          `P4: default ${p4Default.toFixed(2)} ms vs <= ${String(p4.maxRenderGpuMs.value)} ms: ${official ? verdict : `${verdict}, indicative only`}; cutaway ${gpuOf('cutaway')?.toFixed(2) ?? '-'}, hero ${gpuOf('hero (cinematic, DoF on)')?.toFixed(2) ?? '-'} (target <= ${String(p4.reportedTargetMs.value)} ms, not gated)`,
         );
       }
       const file = join(out, 'timings.json');

@@ -379,12 +379,14 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
       // no anisotropy (LOD round, D4-5): the lip solid includes the whole inner barrel, which
       // fills much of the front view, and the anisotropic lobe was ~1 ms of the opaque pass
       // for a 0.3 stretch the buffing grain in the roughness already carries
-      m = phys({ color: c3(0.8, 0.805, 0.81), metalness: 1, roughness: 0.34 });
+      m = phys({ color: c3(0.8, 0.805, 0.81), metalness: 1, roughness: 0.42 });
       m.colorNode = mix(paint, al, metal).mul(float(1).sub(seam.mul(0.5)));
       m.metalnessNode = metal;
       m.roughnessNode = mix(
         float(0.28).add(broad.mul(0.05)),
-        float(0.34)
+        // 0.42, not 0.34: the isotropic lobe stands in for the dropped 0.3 anisotropy, which
+        // had widened it (at 0.34 the band read as chrome again in 01)
+        float(0.42)
           .add(buff.mul(0.035).mul(resolved1(lx, 1 / 180)))
           .add(broad.mul(0.04)),
         metal,
