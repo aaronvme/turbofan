@@ -149,18 +149,13 @@ describe('far field under preconditioning', () => {
     expect(conv.converged).toBe(true);
   }, 120_000);
 
-  // OPEN (handoff, decision needed): with M_cut <= the flow's Mach, M_ref follows the local Mach and
-  // the residual cycles at 3e-3 of the first at any CFL (0.8 too). It is van Albada's switch at
-  // ab = 0: with unlimited slopes, or with the smooth van Albada form (eps > 0), the same run
-  // converges to 1e-12 in 1800 iterations at M_cut 0.01 and 0.005.
-  it.fails(
-    'converges the far-field duct with the D4-20 scaling at M_cut = minMach (open: limiter)',
-    () => {
-      const conv = converge(ffDuct(ductMesh(), 0.01), 1e-10, 3000);
-      expect(conv.converged).toBe(true);
-    },
-    120_000,
-  );
+  // With M_cut <= the flow's Mach, M_ref follows the local Mach; with the sharp van Albada switch
+  // at ab = 0 the residual cycled at 3e-3 of the first at any CFL. The smooth form (D4-25) has no
+  // switch, and the same run converges.
+  it('converges the far-field duct with the D4-20 scaling at M_cut = minMach (D4-25)', () => {
+    const conv = converge(ffDuct(ductMesh(), 0.01), 1e-10, 3000);
+    expect(conv.converged).toBe(true);
+  }, 120_000);
 });
 
 function ductMesh() {
