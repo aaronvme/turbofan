@@ -1,0 +1,636 @@
+// The GPU solver's WGSL modules (docs/SOLVER.md), generated per solver from its layout (buffer
+// section offsets and the tile are compile-time constants) and its gas model.
+//
+// Per RK stage, in one compute pass:
+//   1. prim:  conserved -> primitive record per cell (section 4)
+//   2. ghost: every ghost's primitives from its source cell(s) and BC (section 5)
+//   3. (sources, if the solver has a source model: rates and damping per cell, section 8)
+//   4. stage: the fused per-tile kernel: tile + 2-cell halo of primitives in workgroup memory,
+//      MUSCL slopes (section 6), SLAU2 or wall face fluxes x b_f (section 7), the residual with
+//      the pressure/swirl source and the volume sources (sections 8-9), the local time step and
+//      beta^2 at stage 1 (section 10), the RK update (tracking or SSP-RK3), and the stage-1
+//      density-residual partial sums (section 11).
+// Physical time adds a global-dt reduction before the step (lambda, dtFinal) and a clock update
+// after it (advanceTime).
+//
+// Bitwise symmetry: every face flux is computed by one call site (one loop over the tile's i- and
+// j-faces) and every slope by one call site, from primitives that are computed once per cell and
+// copied (not recomputed) into interface ghosts.
+import { GHOST_LAYERS } from '../../reference/solverMesh';
+import type { GasModel } from '../../reference/gas';
+import type { GpuLayout, Tile } from '../layout';
+import { paramsStructWgsl } from '../params';
+import { BOUNDARY_WGSL } from './boundary';
+import { fluxWgsl, type LimiterKind } from './flux';
+import { gasWgsl } from './gas';
+
+export interface KernelOptions {
+  readonly gas: GasModel;
+  readonly layout: GpuLayout;
+  readonly limiter?: LimiterKind;
+  /** The stage kernel reads per-cell source rates and damping (4 vec4 per cell). */
+  readonly sources?: boolean;
+  /** Test only: the stage kernel writes every face flux it computes (2 vec4 per tile face). */
+  readonly faceDump?: boolean;
+}
+
+/** Workgroup memory of the stage kernel, bytes (WebGPU's default limit is 16384). */
+export function stageWorkgroupBytes(t: Tile): number {
+  const nt = (t.x + 4) * (t.y + 4);
+  const ns = (t.x + 2) * t.y + t.x * (t.y + 2);
+  return nt * (16 + 8 + 4) + ns * (16 + 8) + 4 * t.x * t.y;
+}
+
+/** Face slots of one tile (i-faces then j-faces): the face-dump stride. */
+export function tileFaceSlots(t: Tile): number {
+  return (t.x + 1) * t.y + t.x * (t.y + 1);
+}
+
+/** The scalar slots after the 2 x nWorkgroups partials of the reduction buffer. */
+export const SCALAR = { dt: 0, timeHi: 1, timeLo: 2, count: 4 } as const;
+
+export function reductionLength(layout: GpuLayout): number {
+  return 2 * layout.workgroups + SCALAR.count;
+}
+
+/** The density-residual L2 of section 11 from the stage kernel's per-tile sums of squares. */
+export function residualFromPartials(red: ArrayLike<number>, layout: GpuLayout): number {
+  let sum = 0;
+  for (let w = 0; w < layout.workgroups; w++) sum += red[w] ?? NaN;
+  return Math.sqrt(sum / layout.nCells);
+}
+
+/** The physical-mode clock: the compensated sum hi - lo of advanceTime. */
+export function timeFromReduction(red: ArrayLike<number>, layout: GpuLayout): number {
+  const base = 2 * layout.workgroups;
+  return (red[base + SCALAR.timeHi] ?? NaN) - (red[base + SCALAR.timeLo] ?? NaN);
+}
+
+function header(o: KernelOptions): string {
+  const L = o.layout;
+  const r = 2 * L.workgroups;
+  return `${paramsStructWgsl()}
+@group(0) @binding(0) var<uniform> P: Params;
+const CELL_GEO: u32 = ${L.geo.cellGeo}u;
+const CELL_B: u32 = ${L.geo.cellB}u;
+const FACE: u32 = ${L.geo.face}u;
+const EXT_B: u32 = ${L.geo.extB}u;
+const BLOCKS: u32 = ${L.topo.blocks}u;
+const TILES: u32 = ${L.topo.tiles}u;
+const GHOSTS: u32 = ${L.topo.ghosts}u;
+const GHOST_LAYERS: i32 = ${GHOST_LAYERS};
+const RED_LAMBDA: u32 = ${L.workgroups}u;
+const SCALAR_DT: u32 = ${r + SCALAR.dt}u;
+const SCALAR_TIME_HI: u32 = ${r + SCALAR.timeHi}u;
+const SCALAR_TIME_LO: u32 = ${r + SCALAR.timeLo}u;
+${gasWgsl(o.gas)}`;
+}
+
+const TILE_WGSL = (t: Tile) => /* wgsl */ `
+const TX: u32 = ${t.x}u;
+const TY: u32 = ${t.y}u;
+const HX: u32 = TX + 4u;
+const HY: u32 = TY + 4u;
+const NT: u32 = HX * HY;
+const NTH: u32 = TX * TY;
+const NSI: u32 = (TX + 2u) * TY;
+const NS: u32 = NSI + TX * (TY + 2u);
+const NFI: u32 = (TX + 1u) * TY;
+const NF: u32 = NFI + TX * (TY + 1u);
+const FPT: u32 = (NF + NTH - 1u) / NTH;
+
+// extended index of block-local (gi, gj): the cell, or the ghost there (section 2's table)
+fn extIndex(gi: i32, gj: i32, d0: vec4u) -> u32 {
+  let ni = i32(d0.y);
+  let nj = i32(d0.z);
+  if (gi >= 0 && gi < ni && gj >= 0 && gj < nj) { return d0.x + u32(gj * ni + gi); }
+  var base: i32;
+  var layer: i32;
+  var c: i32;
+  var n: i32;
+  if (gi < 0) { base = 0; layer = -gi; c = gj; n = nj; }
+  else if (gi >= ni) { base = GHOST_LAYERS * nj; layer = gi - ni + 1; c = gj; n = nj; }
+  else if (gj < 0) { base = 2 * GHOST_LAYERS * nj; layer = -gj; c = gi; n = ni; }
+  else { base = 2 * GHOST_LAYERS * nj + GHOST_LAYERS * ni; layer = gj - nj + 1; c = gi; n = ni; }
+  return P.nCells + d0.w + u32(base + (layer - 1) * n + c);
+}
+
+fn extB(e: u32) -> f32 { return geo[EXT_B + e / 4u][e % 4u]; }
+
+fn spectralRadius(vn: f32, c: f32, beta2: f32) -> f32 {
+  let a = abs(vn);
+  if (beta2 >= 1.0) { return a + c; }
+  let d = 1.0 - beta2;
+  return 0.5 * ((1.0 + beta2) * a + sqrt(d * d * a * a + 4.0 * beta2 * c * c));
+}
+
+// the cell's lambda of section 10 (face vectors as stored, b-weighted, max per direction)
+fn cellLambda(fw: vec4f, fe: vec4f, fs: vec4f, fn_: vec4f, b: vec4f, u: f32, v: f32, c: f32,
+              beta2: f32) -> f32 {
+  let li = max(b.x * fw.z * spectralRadius(u * fw.x + v * fw.y, c, beta2),
+               b.y * fe.z * spectralRadius(u * fe.x + v * fe.y, c, beta2));
+  let lj = max(b.z * fs.z * spectralRadius(u * fs.x + v * fs.y, c, beta2),
+               b.w * fn_.z * spectralRadius(u * fn_.x + v * fn_.y, c, beta2));
+  return li + lj;
+}
+`;
+
+/** Pass 1: primitives of every cell. Bindings: 1 U (read), 2 prim (rw), 3 geo. */
+export function primKernelWgsl(o: KernelOptions): string {
+  return `${header(o)}
+@group(0) @binding(1) var<storage, read> U: array<vec4f>;
+@group(0) @binding(2) var<storage, read_write> prim: array<vec4f>;
+@group(0) @binding(3) var<storage, read> geo: array<vec4f>;
+
+@compute @workgroup_size(64)
+fn primMain(@builtin(global_invocation_id) gid: vec3u) {
+  let c = gid.x;
+  if (c >= P.nCells) { return; }
+  let pr = consToPrim(U[2u * c], U[2u * c + 1u].xy, geo[CELL_GEO + c].x);
+  prim[2u * c] = pr.a;
+  prim[2u * c + 1u] = pr.b;
+}
+`;
+}
+
+/** Pass 2: ghosts. Bindings: 1 prim (rw), 2 topo. */
+export function ghostKernelWgsl(o: KernelOptions): string {
+  return `${header(o)}
+@group(0) @binding(1) var<storage, read_write> prim: array<vec4f>;
+@group(0) @binding(2) var<storage, read> topo: array<vec4u>;
+${BOUNDARY_WGSL}`;
+}
+
+/**
+ * Pass 4: the fused stage kernel. Bindings: 1 U_in, 2 U^n, 3 U_out (rw), 4 prim, 5 geo, 6 topo,
+ * 7 reduction (rw), 8 sources (optional), 9 face dump (optional, rw).
+ */
+export function stageKernelWgsl(o: KernelOptions): string {
+  const t = o.layout.tile;
+  const src = o.sources === true;
+  const dump = o.faceDump === true;
+  return `${header(o)}
+${fluxWgsl(o.limiter)}
+${TILE_WGSL(t)}
+@group(0) @binding(1) var<storage, read> Uin: array<vec4f>;
+@group(0) @binding(2) var<storage, read> U0: array<vec4f>;
+@group(0) @binding(3) var<storage, read_write> Uout: array<vec4f>;
+@group(0) @binding(4) var<storage, read> prim: array<vec4f>;
+@group(0) @binding(5) var<storage, read> geo: array<vec4f>;
+@group(0) @binding(6) var<storage, read> topo: array<vec4u>;
+@group(0) @binding(7) var<storage, read_write> red: array<f32>;
+${src ? '@group(0) @binding(8) var<storage, read> src: array<vec4f>;' : ''}
+${dump ? '@group(0) @binding(9) var<storage, read_write> dump: array<vec4f>;' : ''}
+
+var<workgroup> wqa: array<vec4f, NT>;  // rho', u, v, rw
+var<workgroup> wqb: array<vec2f, NT>;  // p', Z
+var<workgroup> wb: array<f32, NT>;     // b; negative: a slip-wall ghost
+var<workgroup> wsa: array<vec4f, NS>;  // slopes, then face fluxes (mass, x-mom, r-mom, ang-mom)
+var<workgroup> wsb: array<vec2f, NS>;  // slopes, then face fluxes (eta, rho Z)
+var<workgroup> wred: array<f32, NTH>;
+
+// the face states and flux of tile face f (i-faces first): the one call site of SLAU2
+fn tileFace(f: u32, i0: i32, j0: i32, d0: vec4u, d1: vec4u) -> Flux {
+  let ni = i32(d0.y);
+  let nj = i32(d0.z);
+  var gi: i32;
+  var gj: i32;
+  var valid: bool;
+  var l: u32;
+  var r: u32;
+  var sl: u32;
+  var sr: u32;
+  var face: u32;
+  if (f < NFI) {
+    let fx = f % (TX + 1u);
+    let fy = f / (TX + 1u);
+    gi = i0 + i32(fx);
+    gj = j0 + i32(fy);
+    valid = gi <= ni && gj < nj;
+    l = (fy + 2u) * HX + fx + 1u;
+    r = l + 1u;
+    sl = fy * (TX + 2u) + fx;
+    sr = sl + 1u;
+    face = d1.x + u32(gj * (ni + 1) + gi);
+  } else {
+    let k = f - NFI;
+    let fx = k % TX;
+    let fy = k / TX;
+    gi = i0 + i32(fx);
+    gj = j0 + i32(fy);
+    valid = gi < ni && gj <= nj;
+    l = (fy + 1u) * HX + fx + 2u;
+    r = l + HX;
+    sl = NSI + fy * TX + fx;
+    sr = sl + TX;
+    face = d1.y + u32(gj * ni + gi);
+  }
+  if (!valid) { return Flux(vec4f(0.0), vec2f(0.0)); }
+  let fd = geo[FACE + face];
+  let area = fd.z;
+  if (!(area > 0.0)) { return Flux(vec4f(0.0), vec2f(0.0)); }
+  let qLa = wqa[l] + 0.5 * wsa[sl];
+  let qLb = wqb[l] + 0.5 * wsb[sl];
+  let qRa = wqa[r] - 0.5 * wsa[sr];
+  let qRb = wqb[r] - 0.5 * wsb[sr];
+  let n = fd.xy;
+  let bl = wb[l];
+  let br = wb[r];
+  let bf = 0.5 * (abs(bl) + abs(br));
+  var F: Flux;
+  if (bl < 0.0 || br < 0.0) {
+    // slip wall: only the wall pressure, the interior cell's face value (section 7)
+    let pw = select(qLb.x, qRb.x, bl < 0.0);
+    F = Flux(area * vec4f(0.0, pw * n.x, pw * n.y, 0.0), vec2f(0.0));
+  } else {
+    F = slau2(qLa, qLb, qRa, qRb, n, area, fd.w, P.machCut);
+  }
+  return Flux(bf * F.a, bf * F.b);
+}
+
+fn preconditionIncrement(da: vec4f, db: vec2f, q: vec4f, z: f32, tP: f32, c: f32, rc: f32,
+                         beta2: f32) -> Flux {
+  let u = q.y;
+  let v = q.z;
+  let rw = q.w;
+  let w = rw / rc;
+  let phi = productsFraction(z);
+  let t = P.tInf + tP;
+  let r = gasR(phi);
+  let cv = cpMix(t, phi) - r;
+  let q2 = u * u + v * v + w * w;
+  let dRho = da.x;
+  let bracket = db.x + (P.rInf * P.tInf + 0.5 * (P.uInf * P.uInf + q2) - deltaE(tP, phi)) * dRho
+    - u * da.y - v * da.z - (w * da.w) / rc;
+  let dp = r * t * dRho + (r / cv) * bracket;
+  let k = ((1.0 - beta2) * dp) / (c * c);
+  let dh0 = deltaH(tP, phi) + 0.5 * dq2(u, v, w);
+  return Flux(da - k * vec4f(1.0, u, v, rw), db - k * vec2f(dh0, z));
+}
+
+@compute @workgroup_size(TX, TY)
+fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index) lid: u32) {
+  let info = topo[TILES + wid.x];
+  let d0 = topo[BLOCKS + 2u * info.x];      // cell offset, ni, nj, ghost offset
+  let d1 = topo[BLOCKS + 2u * info.x + 1u]; // i-face base, j-face base (in FACE units)
+  let ni = i32(d0.y);
+  let nj = i32(d0.z);
+  let i0 = i32(info.y * TX);
+  let j0 = i32(info.z * TY);
+
+  // 1. the tile and its 2-cell halo (no corners): cells, or ghosts after their BCs
+  for (var t = lid; t < NT; t += NTH) {
+    let gi = i0 + i32(t % HX) - 2;
+    let gj = j0 + i32(t / HX) - 2;
+    let inI = gi >= 0 && gi < ni;
+    let inJ = gj >= 0 && gj < nj;
+    let ok = (inI && inJ) || (inJ && gi >= -2 && gi <= ni + 1) || (inI && gj >= -2 && gj <= nj + 1);
+    if (ok) {
+      let e = extIndex(gi, gj, d0);
+      wqa[t] = prim[2u * e];
+      wqb[t] = prim[2u * e + 1u].xy;
+      wb[t] = extB(e);
+    } else {
+      wqa[t] = vec4f(0.0);
+      wqb[t] = vec2f(0.0);
+      wb[t] = 1.0;
+    }
+  }
+  workgroupBarrier();
+
+  // 2. limited slopes: i-direction at positions -1..TX of each row, j-direction likewise
+  for (var k = lid; k < NS; k += NTH) {
+    var c: u32;
+    var st: u32;
+    var valid: bool;
+    if (k < NSI) {
+      let sx = k % (TX + 2u);
+      let sy = k / (TX + 2u);
+      c = (sy + 2u) * HX + sx + 1u;
+      st = 1u;
+      valid = i0 + i32(sx) - 1 <= ni && j0 + i32(sy) < nj;
+    } else {
+      let m = k - NSI;
+      let sx = m % TX;
+      let sy = m / TX;
+      c = (sy + 1u) * HX + sx + 2u;
+      st = HX;
+      valid = i0 + i32(sx) < ni && j0 + i32(sy) - 1 <= nj;
+    }
+    var s = Slope(vec4f(0.0), vec2f(0.0));
+    if (valid) {
+      s = limitedSlopes(wqa[c - st], wqb[c - st], wqa[c], wqb[c], wqa[c + st], wqb[c + st]);
+    }
+    wsa[k] = s.a;
+    wsb[k] = s.b;
+  }
+  workgroupBarrier();
+
+  // 3. face fluxes (x b_f), kept in registers until every slope has been read
+  var fa: array<vec4f, FPT>;
+  var fb: array<vec2f, FPT>;
+  for (var m = 0u; m < FPT; m++) {
+    let f = lid + m * NTH;
+    if (f < NF) {
+      let F = tileFace(f, i0, j0, d0, d1);
+      fa[m] = F.a;
+      fb[m] = F.b;
+    }
+  }
+  workgroupBarrier();
+  for (var m = 0u; m < FPT; m++) {
+    let f = lid + m * NTH;
+    if (f < NF) {
+      wsa[f] = fa[m];
+      wsb[f] = fb[m];
+      ${dump ? 'dump[2u * (wid.x * NF + f)] = fa[m]; dump[2u * (wid.x * NF + f) + 1u] = vec4f(fb[m], 0.0, 0.0);' : ''}
+    }
+  }
+  workgroupBarrier();
+
+  // 4. residual, sources, local time step, update
+  let tx = lid % TX;
+  let ty = lid / TX;
+  let gi = i0 + i32(tx);
+  let gj = j0 + i32(ty);
+  let inside = gi < ni && gj < nj;
+  var res0 = 0.0;
+  if (inside) {
+    let c = d0.x + u32(gj * ni + gi);
+    let h = (ty + 2u) * HX + tx + 2u;
+    let fw = ty * (TX + 1u) + tx;
+    let fs = NFI + ty * TX + tx;
+    var ra = -wsa[fw];
+    var rb = -wsb[fw];
+    ra += wsa[fw + 1u];
+    rb += wsb[fw + 1u];
+    ra -= wsa[fs];
+    rb -= wsb[fs];
+    ra += wsa[fs + TX];
+    rb += wsb[fs + TX];
+    let q = wqa[h];
+    let pz = prim[2u * c + 1u];       // p', Z, T', c
+    let cg = geo[CELL_GEO + c];       // r_c, A, V
+    let cb = geo[CELL_B + c];         // b, b S_x, b S_r, b V
+    let rho = P.rhoInf + q.x;
+    let w = q.w / cg.x;
+    ra.y -= pz.x * cb.y;
+    ra.z -= pz.x * cb.z + cb.x * rho * w * w * cg.y;
+    var da = vec4f(0.0);
+    var db = vec2f(0.0);
+    ${
+      src
+        ? `ra -= cb.w * src[4u * c];
+    rb -= cb.w * src[4u * c + 1u].xy;
+    da = src[4u * c + 2u];
+    db = src[4u * c + 3u].xy;`
+        : ''
+    }
+    res0 = ra.x / cb.w;
+    let ua = Uin[2u * c];
+    let ub = Uin[2u * c + 1u];
+    var outA: vec4f;
+    var outB: vec4f;
+    if (P.mode == 0u) {
+      var tau: f32;
+      var beta2: f32;
+      if (P.stage == 0u) {
+        beta2 = 1.0;
+        if (P.precondition == 1u) {
+          let dpMax = max(max(abs(wqb[h - 1u].x - pz.x), abs(wqb[h + 1u].x - pz.x)),
+                          max(abs(wqb[h - HX].x - pz.x), abs(wqb[h + HX].x - pz.x)));
+          let c2 = pz.w * pz.w;
+          beta2 = min(1.0, max(max((q.y * q.y + q.z * q.z + w * w) / c2, P.minMach2),
+                               dpMax / (rho * c2)));
+        }
+        let bc = abs(wb[h]);
+        let bfs = 0.5 * vec4f(bc + abs(wb[h - 1u]), bc + abs(wb[h + 1u]),
+                              bc + abs(wb[h - HX]), bc + abs(wb[h + HX]));
+        let iw = d1.x + u32(gj * (ni + 1) + gi);
+        let js = d1.y + u32(gj * ni + gi);
+        let lam = cellLambda(geo[FACE + iw], geo[FACE + iw + 1u], geo[FACE + js],
+                             geo[FACE + js + u32(ni)], bfs, q.y, q.z, pz.w, beta2);
+        tau = P.cfl / lam;
+      } else {
+        tau = ub.z;
+        beta2 = ub.w;
+      }
+      let at = P.alpha * tau;
+      let adt = P.alpha * (tau * cb.w);
+      var d = Flux(-(at * ra) / (1.0 + adt * da), -(at * rb) / (1.0 + adt * db));
+      if (beta2 < 1.0) {
+        d = preconditionIncrement(d.a, d.b, q, pz.y, pz.z, pz.w, cg.x, beta2);
+      }
+      let ba = U0[2u * c];
+      let bb = U0[2u * c + 1u];
+      outA = ba + d.a;
+      outB = vec4f(bb.xy + d.b, tau, beta2);
+    } else {
+      let dt = red[SCALAR_DT];
+      let tau = dt / cb.w;
+      let ea = ua - (tau * ra) / (1.0 + dt * da);
+      let eb = ub.xy - (tau * rb) / (1.0 + dt * db);
+      if (P.stage == 0u) {
+        outA = ea;
+        outB = vec4f(eb, 0.0, 1.0);
+      } else {
+        let ba = U0[2u * c];
+        let bb = U0[2u * c + 1u];
+        outA = P.w0 * ba + P.w1 * ea;
+        outB = vec4f(P.w0 * bb.xy + P.w1 * eb, 0.0, 1.0);
+      }
+    }
+    Uout[2u * c] = outA;
+    Uout[2u * c + 1u] = outB;
+  }
+
+  // 5. the stage-1 density residual: sum over the tile of (R_rho / (b V))^2 (section 11)
+  if (P.stage == 0u) {
+    wred[lid] = res0 * res0;
+    workgroupBarrier();
+    for (var s = ${nextPow2(t.x * t.y) / 2}u; s > 0u; s >>= 1u) {
+      if (lid < s && lid + s < NTH) { wred[lid] += wred[lid + s]; }
+      workgroupBarrier();
+    }
+    if (lid == 0u) { red[wid.x] = wred[0]; }
+  }
+}
+`;
+}
+
+function nextPow2(n: number): number {
+  let p = 1;
+  while (p < n) p *= 2;
+  return p;
+}
+
+/**
+ * Physical time, before a step: min_c (b V / lambda_c) per tile (lambda unpreconditioned, section
+ * 10) into red[RED_LAMBDA + wg]. Bindings: 4 prim, 5 geo, 6 topo, 7 reduction (rw).
+ */
+export function lambdaKernelWgsl(o: KernelOptions): string {
+  const t = o.layout.tile;
+  return `${header(o)}
+${TILE_WGSL(t)}
+@group(0) @binding(4) var<storage, read> prim: array<vec4f>;
+@group(0) @binding(5) var<storage, read> geo: array<vec4f>;
+@group(0) @binding(6) var<storage, read> topo: array<vec4u>;
+@group(0) @binding(7) var<storage, read_write> red: array<f32>;
+
+var<workgroup> wmin: array<f32, NTH>;
+
+@compute @workgroup_size(TX, TY)
+fn lambdaMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index) lid: u32) {
+  let info = topo[TILES + wid.x];
+  let d0 = topo[BLOCKS + 2u * info.x];
+  let d1 = topo[BLOCKS + 2u * info.x + 1u];
+  let ni = i32(d0.y);
+  let nj = i32(d0.z);
+  let gi = i32(info.y * TX + lid % TX);
+  let gj = i32(info.z * TY + lid / TX);
+  var v = 3.0e38;
+  if (gi < ni && gj < nj) {
+    let c = d0.x + u32(gj * ni + gi);
+    let qa = prim[2u * c];
+    let qb = prim[2u * c + 1u];
+    let bc = abs(extB(c));
+    let bfs = 0.5 * vec4f(bc + abs(extB(extIndex(gi - 1, gj, d0))),
+                          bc + abs(extB(extIndex(gi + 1, gj, d0))),
+                          bc + abs(extB(extIndex(gi, gj - 1, d0))),
+                          bc + abs(extB(extIndex(gi, gj + 1, d0))));
+    let iw = d1.x + u32(gj * (ni + 1) + gi);
+    let js = d1.y + u32(gj * ni + gi);
+    let lam = cellLambda(geo[FACE + iw], geo[FACE + iw + 1u], geo[FACE + js],
+                         geo[FACE + js + u32(ni)], bfs, qa.y, qa.z, qb.w, 1.0);
+    v = geo[CELL_B + c].w / lam;
+  }
+  wmin[lid] = v;
+  workgroupBarrier();
+  for (var s = ${nextPow2(t.x * t.y) / 2}u; s > 0u; s >>= 1u) {
+    if (lid < s && lid + s < NTH) { wmin[lid] = min(wmin[lid], wmin[lid + s]); }
+    workgroupBarrier();
+  }
+  if (lid == 0u) { red[RED_LAMBDA + wid.x] = wmin[0]; }
+}
+`;
+}
+
+/** Physical time: dt = CFL_phys min over the tile minima (one workgroup). Binding 7. */
+export function dtKernelWgsl(o: KernelOptions): string {
+  return `${header(o)}
+@group(0) @binding(7) var<storage, read_write> red: array<f32>;
+var<workgroup> wmin: array<f32, 256>;
+
+@compute @workgroup_size(256)
+fn dtMain(@builtin(local_invocation_index) lid: u32) {
+  var v = 3.0e38;
+  for (var k = lid; k < P.nWorkgroups; k += 256u) { v = min(v, red[RED_LAMBDA + k]); }
+  wmin[lid] = v;
+  workgroupBarrier();
+  for (var s = 128u; s > 0u; s >>= 1u) {
+    if (lid < s) { wmin[lid] = min(wmin[lid], wmin[lid + s]); }
+    workgroupBarrier();
+  }
+  if (lid == 0u) { red[SCALAR_DT] = P.cflPhysical * wmin[0]; }
+}
+
+// after a step: time += dt, compensated (Kahan) so a long run keeps the f32 dt's precision
+@compute @workgroup_size(1)
+fn advanceTime() {
+  let y = red[SCALAR_DT] - red[SCALAR_TIME_LO];
+  let hi = red[SCALAR_TIME_HI];
+  let t = hi + y;
+  red[SCALAR_TIME_LO] = (t - hi) - y;
+  red[SCALAR_TIME_HI] = t;
+}
+`;
+}
+
+/**
+ * The built-in linear source model (section 8): rate = rate0 - k U_stage, damping = k, per cell
+ * and component (coefficients: 4 vec4 per cell: rate0 (4 + 2), k (4 + 2)). Bindings: 1 U_stage,
+ * 2 coefficients, 3 sources (rw). A constant source is k = 0; a point-implicit sink rate0 = 0.
+ */
+export function linearSourceKernelWgsl(o: KernelOptions): string {
+  return `${header(o)}
+@group(0) @binding(1) var<storage, read> U: array<vec4f>;
+@group(0) @binding(2) var<storage, read> coef: array<vec4f>;
+@group(0) @binding(3) var<storage, read_write> src: array<vec4f>;
+
+@compute @workgroup_size(64)
+fn sourceMain(@builtin(global_invocation_id) gid: vec3u) {
+  let c = gid.x;
+  if (c >= P.nCells) { return; }
+  let ka = coef[4u * c + 2u];
+  let kb = coef[4u * c + 3u];
+  src[4u * c] = coef[4u * c] - ka * U[2u * c];
+  src[4u * c + 1u] = vec4f(coef[4u * c + 1u].xy - kb.xy * U[2u * c + 1u].xy, 0.0, 0.0);
+  src[4u * c + 2u] = ka;
+  src[4u * c + 3u] = vec4f(kb.xy, 0.0, 0.0);
+}
+`;
+}
+
+/**
+ * Test probes of the device functions (no solver state), 4 vec4 in and 4 vec4 out per record:
+ * - probeFlux: in (L.a), (L.p', L.Z, n_x, n_r), (R.a), (R.p', R.Z, area, r_f); out SLAU2 (a), (b).
+ * - probeGas: in (U.a), (eta, rho Z, r_c, T'), (Z, 0, 0, 0), (x, y, tau, 0); out the primitive
+ *   record (a), (b); (temperatureGauge(deltaE(T')), deltaE(T'), deltaH(T'), cp(T_inf + T'));
+ *   (log1p x, expm1 y, entropyDelta(T_inf, tau), enthalpyDelta(T_inf, tau)).
+ * - probeSlope: in m.a, c.a, p.a, (m.p', c.p', p.p', 0) (Z = 0); out the slopes (a), (b), and
+ *   vanAlbada(m.a, c.a), vanAlbada(-c.a, -m.a) (odd and symmetric: the negation of the first).
+ * Bindings: 1 in, 2 out (rw).
+ */
+export function probeKernelWgsl(o: KernelOptions): string {
+  return `${header(o)}
+${fluxWgsl(o.limiter)}
+@group(0) @binding(1) var<storage, read> pin: array<vec4f>;
+@group(0) @binding(2) var<storage, read_write> pout: array<vec4f>;
+
+@compute @workgroup_size(64)
+fn probeFlux(@builtin(global_invocation_id) gid: vec3u) {
+  let k = gid.x;
+  if (k >= arrayLength(&pin) / 4u) { return; }
+  let la = pin[4u * k];
+  let lb = pin[4u * k + 1u];
+  let ra = pin[4u * k + 2u];
+  let rb = pin[4u * k + 3u];
+  let F = slau2(la, lb.xy, ra, rb.xy, lb.zw, rb.z, rb.w, P.machCut);
+  pout[4u * k] = F.a;
+  pout[4u * k + 1u] = vec4f(F.b, 0.0, 0.0);
+}
+
+@compute @workgroup_size(64)
+fn probeGas(@builtin(global_invocation_id) gid: vec3u) {
+  let k = gid.x;
+  if (k >= arrayLength(&pin) / 4u) { return; }
+  let ua = pin[4u * k];
+  let ub = pin[4u * k + 1u];
+  let pr = consToPrim(ua, ub.xy, ub.z);
+  let phi = productsFraction(pin[4u * k + 2u].x);
+  let de = deltaE(ub.w, phi);
+  pout[4u * k] = pr.a;
+  pout[4u * k + 1u] = pr.b;
+  pout[4u * k + 2u] = vec4f(temperatureGauge(de, phi), de, deltaH(ub.w, phi),
+                            cpMix(P.tInf + ub.w, phi));
+  let x = pin[4u * k + 3u];
+  pout[4u * k + 3u] = vec4f(log1pf(x.x), expm1f(x.y), entropyDelta(P.tInf, x.z, phi),
+                            enthalpyDelta(P.tInf, x.z, phi));
+}
+
+@compute @workgroup_size(64)
+fn probeSlope(@builtin(global_invocation_id) gid: vec3u) {
+  let k = gid.x;
+  if (k >= arrayLength(&pin) / 4u) { return; }
+  let ma = pin[4u * k];
+  let ca = pin[4u * k + 1u];
+  let pa = pin[4u * k + 2u];
+  let pp = pin[4u * k + 3u];
+  let s = limitedSlopes(ma, vec2f(pp.x, 0.0), ca, vec2f(pp.y, 0.0), pa, vec2f(pp.z, 0.0));
+  pout[4u * k] = s.a;
+  pout[4u * k + 1u] = vec4f(s.b, 0.0, 0.0);
+  pout[4u * k + 2u] = vanAlbada4(ma, ca);
+  pout[4u * k + 3u] = vanAlbada4(-ca, -ma);
+}
+`;
+}

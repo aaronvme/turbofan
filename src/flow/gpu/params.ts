@@ -1,0 +1,200 @@
+// The per-dispatch uniform block of the GPU solver: one struct shared by every kernel of a stage
+// (docs/SOLVER.md sections 3-10). The WGSL struct and the packer are generated from one field
+// list, so the two cannot drift. Values are computed in f64 on the host (the reference state and
+// the BC constants come from src/flow/reference, the shared gas code) and rounded to f32 once.
+import { boundaryParams, type BoundaryParams } from '../reference/boundary';
+import { cpMix, referenceState, type GasModel, type ReferenceState } from '../reference/gas';
+import { DEFAULT_CFL, DEFAULT_CFL_PHYSICAL, RK3_ALPHA } from '../reference/solver';
+
+type FieldType = 'f32' | 'u32';
+
+/** Field order of the WGSL struct `Params`. Every field is 4 bytes. */
+export const PARAM_FIELDS = [
+  // the reference state the gauges are measured from (section 4)
+  ['rhoInf', 'f32'],
+  ['pInf', 'f32'],
+  ['tInf', 'f32'],
+  ['uInf', 'f32'],
+  ['rInf', 'f32'],
+  ['cInf', 'f32'],
+  /** cp of air and of products at T_inf: the linearised start of the T' Newton (section 3). */
+  ['cpaInf', 'f32'],
+  ['cppInf', 'f32'],
+  /** h_products(T_inf) - h_air(T_inf). */
+  ['dInf', 'f32'],
+  // boundary conditions (section 5)
+  ['p0', 'f32'],
+  ['t0', 'f32'],
+  /** p0 - p_inf and t0 - T_inf, in f64 before rounding: exact zeros for a free stream at rest. */
+  ['dp0', 'f32'],
+  ['dT0', 'f32'],
+  /** cp of air at t0: the start of the stagnation-offset Newton. */
+  ['cpaT0', 'f32'],
+  /** p_out - p_inf. */
+  ['pOutGauge', 'f32'],
+  /** beta_inf^2 of the far field (1: the physical characteristics). */
+  ['farBeta2', 'f32'],
+  /** 1 if the free stream is supersonic (u_inf >= c_inf): the inflow ghost is the free stream. */
+  ['supersonicInflow', 'u32'],
+  // the scheme (sections 7, 10)
+  ['cfl', 'f32'],
+  ['cflPhysical', 'f32'],
+  /** M_cut of SLAU2's low-Mach dissipation scaling (1: off, the plain flux bitwise). */
+  ['machCut', 'f32'],
+  ['minMach2', 'f32'],
+  /** 1: low-Mach preconditioning of the tracking mode (beta^2 and the increment update). */
+  ['precondition', 'u32'],
+  /** 0 tracking (3-stage RK, local dt), 1 physical (SSP-RK3, global dt). */
+  ['mode', 'u32'],
+  /** 0, 1, 2. */
+  ['stage', 'u32'],
+  /** Tracking: alpha_k. */
+  ['alpha', 'f32'],
+  /** Physical: U = w0 U^n + w1 E(U^(k-1)) (stage 0 takes E alone). */
+  ['w0', 'f32'],
+  ['w1', 'f32'],
+  // sizes
+  ['nCells', 'u32'],
+  ['nGhosts', 'u32'],
+  ['nWorkgroups', 'u32'],
+] as const satisfies readonly (readonly [string, FieldType])[];
+
+export type ParamName = (typeof PARAM_FIELDS)[number][0];
+export type ParamValues = Readonly<Record<ParamName, number>>;
+
+/** Struct size in bytes, padded to 16 (uniform layout). */
+export const PARAMS_BYTES = Math.ceil((4 * PARAM_FIELDS.length) / 16) * 16;
+/** Offset between the per-stage blocks in one uniform buffer (minUniformBufferOffsetAlignment). */
+export const PARAMS_STRIDE = 256;
+
+export function paramsStructWgsl(): string {
+  const pad = PARAMS_BYTES / 4 - PARAM_FIELDS.length;
+  const fields = PARAM_FIELDS.map(([n, t]) => `  ${n}: ${t},`);
+  for (let k = 0; k < pad; k++) fields.push(`  pad${k}: u32,`);
+  return `struct Params {\n${fields.join('\n')}\n}\n`;
+}
+
+export function packParams(v: ParamValues): ArrayBuffer {
+  const buf = new ArrayBuffer(PARAMS_BYTES);
+  const f = new Float32Array(buf);
+  const u = new Uint32Array(buf);
+  PARAM_FIELDS.forEach(([name, type], k) => {
+    const x = v[name];
+    if (!Number.isFinite(x)) throw new Error(`param ${name} is ${x}`);
+    if (type === 'u32') {
+      if (!(Number.isInteger(x) && x >= 0 && x <= 0xffffffff)) {
+        throw new Error(`param ${name} = ${x} is not a u32`);
+      }
+      u[k] = x;
+    } else {
+      f[k] = x;
+    }
+  });
+  return buf;
+}
+
+/** The scheme options the GPU solver takes (docs/SOLVER.md; the oracle's SolverOptions). */
+export interface GpuSchemeOptions {
+  readonly gas: GasModel;
+  readonly freeStream: {
+    readonly pressure: number;
+    readonly temperature: number;
+    readonly velocity: number;
+  };
+  readonly cfl?: number;
+  readonly cflPhysical?: number;
+  readonly inflowTotal?: { readonly p0: number; readonly t0: number };
+  readonly outflowPressure?: number;
+  /**
+   * Low-Mach preconditioning of the tracking mode (section 10, D4-10, D4-20, D4-22). Implemented
+   * as SOLVER.md states it; its CFL, minMach and dissipation are not final (critic pass 7, D4-30,
+   * D4-32): the caller chooses them.
+   */
+  readonly lowMachPreconditioning?: { readonly minMach: number; readonly machCut?: number };
+}
+
+export interface StageParamSet {
+  readonly ref: ReferenceState;
+  /** The tracking mode's BC parameters (preconditioned far field if preconditioning is on). */
+  readonly bcTracking: BoundaryParams;
+  readonly bcPhysical: BoundaryParams;
+  /** Three blocks per mode: tracking stages 1-3, then physical stages 1-3. */
+  readonly tracking: readonly ParamValues[];
+  readonly physical: readonly ParamValues[];
+}
+
+/** SSP-RK3 (Shu & Osher 1988): U = w0 U^n + w1 E(U^(k-1)); stage 1 takes E(U^n) alone. */
+export const SSP_RK3_WEIGHTS: readonly (readonly [number, number])[] = [
+  [0, 1],
+  [3 / 4, 1 / 4],
+  [1 / 3, 2 / 3],
+];
+
+/** The six uniform blocks of a solver (3 tracking stages, 3 physical stages). */
+export function stageParams(
+  opts: GpuSchemeOptions,
+  sizes: { readonly nCells: number; readonly nGhosts: number; readonly nWorkgroups: number },
+): StageParamSet {
+  const ref = referenceState(opts.gas, opts.freeStream);
+  const bcOpts = {
+    ...(opts.inflowTotal === undefined ? {} : { inflowTotal: opts.inflowTotal }),
+    ...(opts.outflowPressure === undefined ? {} : { outflowPressure: opts.outflowPressure }),
+  };
+  const bcPhysical = boundaryParams(ref, bcOpts);
+  const pre = opts.lowMachPreconditioning;
+  const mInf2 = (ref.u * ref.u) / (ref.c * ref.c);
+  const bcTracking =
+    pre === undefined
+      ? bcPhysical
+      : boundaryParams(ref, {
+          ...bcOpts,
+          farFieldBeta2: Math.min(1, Math.max(mInf2, pre.minMach * pre.minMach)),
+        });
+  const g = opts.gas;
+  const base = (bc: BoundaryParams) => ({
+    rhoInf: ref.rho,
+    pInf: ref.p,
+    tInf: ref.t,
+    uInf: ref.u,
+    rInf: ref.r,
+    cInf: ref.c,
+    cpaInf: cpMix(g, ref.t, 0),
+    cppInf: cpMix(g, ref.t, 1),
+    dInf: ref.dInf,
+    p0: bc.p0,
+    t0: bc.t0,
+    dp0: bc.p0 - ref.p,
+    dT0: bc.t0 - ref.t,
+    cpaT0: cpMix(g, bc.t0, 0),
+    pOutGauge: bc.pOut - ref.p,
+    farBeta2: bc.farFieldBeta2,
+    supersonicInflow: ref.u >= ref.c ? 1 : 0,
+    cfl: opts.cfl ?? DEFAULT_CFL,
+    cflPhysical: opts.cflPhysical ?? DEFAULT_CFL_PHYSICAL,
+    minMach2: pre === undefined ? 0 : pre.minMach * pre.minMach,
+    nCells: sizes.nCells,
+    nGhosts: sizes.nGhosts,
+    nWorkgroups: sizes.nWorkgroups,
+  });
+  const tracking = RK3_ALPHA.map((alpha, stage) => ({
+    ...base(bcTracking),
+    machCut: pre === undefined ? 1 : Math.min(1, pre.machCut ?? pre.minMach),
+    precondition: pre === undefined ? 0 : 1,
+    mode: 0,
+    stage,
+    alpha,
+    w0: 0,
+    w1: 1,
+  }));
+  const physical = SSP_RK3_WEIGHTS.map(([w0, w1], stage) => ({
+    ...base(bcPhysical),
+    machCut: 1,
+    precondition: 0,
+    mode: 1,
+    stage,
+    alpha: 1,
+    w0,
+    w1,
+  }));
+  return { ref, bcTracking, bcPhysical, tracking, physical };
+}
