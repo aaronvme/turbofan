@@ -2,7 +2,7 @@
 // quasi-1D theory gives for a shock at x = 0.2 m.
 import { THRESHOLDS } from '../../../src/contracts/thresholds';
 import { converge } from '../common';
-import { GAMMA, LN, NI, NJ, P0, areaRatioAt, columns, nozzleSolver, quasi1d } from '../nozzle';
+import { GAMMA, LN, P0, areaRatioAt, columns, nozzleSolver, quasi1d } from '../nozzle';
 import { machFromArea, normalShock, pOverP0 } from '../theory';
 
 const XS = 0.2;
@@ -40,23 +40,34 @@ export function shockCase(ni: number, nj: number, maxIterations: number) {
   return { conv, xs, frac, pExit };
 }
 
+/**
+ * The case's resolution, from the D4-9 grid study (l4bgrid.ts, PHYSICS.md 3.3): the error is 2.38 %
+ * at 120 x 12, 1.64 % at 170 x 17 and 1.19 % at 240 x 24 (observed order 1.46, Richardson limit
+ * 0.51 %), so it converges below 2 % and the case runs at the first resolution that meets it.
+ */
+export const SHOCK_GRID = { ni: 170, nj: 17, maxIterations: 17000 } as const;
+
 export function run() {
   const L4 = THRESHOLDS.L4.values;
-  const { conv, xs, frac, pExit } = shockCase(NI, NJ, 12000);
+  const { conv, xs, frac, pExit } = shockCase(
+    SHOCK_GRID.ni,
+    SHOCK_GRID.nj,
+    SHOCK_GRID.maxIterations,
+  );
   return {
     id: 'L4b',
     rows: [
       {
         id: 'L4',
-        metric: 'normal-shock position error / nozzle length',
+        metric: 'normal-shock position error / nozzle length (170 x 17)',
         threshold: `< ${L4.maxShockPositionFractionOfLength.value}`,
         value: frac,
         pass: frac < L4.maxShockPositionFractionOfLength.value,
       },
       {
         id: 'L4',
-        metric: 'shock case: iterations to converge to 1e-5',
-        threshold: '<= 12000',
+        metric: 'shock case (170 x 17): iterations to converge to 1e-5',
+        threshold: '<= 17000',
         value: conv.iterations,
         pass: conv.converged,
       },
