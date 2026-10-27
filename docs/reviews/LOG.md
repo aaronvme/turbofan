@@ -171,6 +171,12 @@ Never quote personal data (emails, keys, tokens) in this file.
 - **D4-31 (question x): C12's recovery bias is accepted for now.** C12 passes as pre-registered, but the bias is tuned to the 6% ΔPRS case: at 7-8% it gives two surges and 95% thrust only at 11.5 s.
   - Now: add a second pin at 4%, and state the headroom (the 7-8% failure) in the fidelity ledger.
   - Next: the D4-18 settling round makes the recovery robust over 4-8% ΔPRS, with no case-specific bias. That acceptance range is pre-registered there.
+- **D4-32 (w2/reference round 4 @28fb768, WIP at the cap): the preconditioned-tracking CFL is 0.8 × the fully discrete limit of the worst cell shape.** The analysis gives the limits at rest: 1D 0.972 and square cells 1.550 without p_u; 1.413 / 1.958 with p_u at K_u = 0.5.
+  - The order: first implement and pin the analysis in a test (`tests/unit/flow/acoustic.ts`), then run the p_u trial (D4-30).
+  - If p_u keeps L2/L4 green and does not worsen L7/L8, the CFL is **1.15 with p_u**. Otherwise it is **0.8 without**.
+  - The 0.8 margin is the standard safety factor on a computed stability limit.
+- **D4-33 (round 4, the smooth limiter): D4-25 is amended.** The smooth limiter stays an option, not the default, until the low-Mach acoustic damping is fixed (p_u plus D4-32's CFL). In the blockage duct its residual stalls at a floor proportional to ε, because the sharp switch's clipping was masking the weak damping. Retest the stall after p_u, then decide the default.
+- **D4-34 (round 4, W2R-6):** the p∇b source is well-balanced (rounding only), and the growth does not depend on the CFL. So W2R-6 is a semi-discrete instability of the spatial operator with blockage. Next, test whether p_u's damping removes it. If not, do a semi-discrete eigenvalue/eigenvector analysis of the blockage duct to find the term.
 - **Slot plan update:** after W2R-B1 merges, slot A runs the reference round 4 (W2R-I1..I4, D4-29, D4-30). When w2/lookdev-4 finishes, slot B runs **w2/solver**, which starts on the parts the critic cleared and holds back the limiter, the preconditioned CFL/dissipation and the oracle comparisons until round 4 lands. w2/flowviz and w2/app-ui follow.
 
 
