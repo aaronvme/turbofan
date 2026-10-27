@@ -74,7 +74,9 @@ import {
   engineGreitzerParams,
   greitzerB,
   hpcCubic,
+  stallRlineForLoss,
   systemHelmholtzFrequency,
+  withStallRline,
   type CompressionSystem,
 } from './surgeSystem';
 
@@ -176,6 +178,13 @@ export interface CycleModelOptions {
   readonly engine?: SizedEngine;
   /** Test hook: scales the start fuel schedule (hot / hung start cases). */
   readonly startFuelScale?: number;
+  /**
+   * Scenario hook: loss in HPC surge pressure ratio, Delta PRS = 1 - PRS_reduced / PRS (SAE
+   * ARP1420's measure), as a deteriorated or distorted compressor would have. The surge line
+   * (the reported margin and the Greitzer cubic's peak) moves down; the map's working line does
+   * not. 0 by default.
+   */
+  readonly hpcSurgeMarginLoss?: number;
 }
 
 interface Schedules {
@@ -277,6 +286,7 @@ class TurbofanCycleModel implements CycleModel {
   readonly definition: EngineDefinition;
   private readonly e: SizedEngine;
   private readonly startFuelScale: number;
+  private readonly surgeLoss: number;
   private sched!: Schedules;
   private t = 0;
   private n1 = 0;
@@ -324,6 +334,10 @@ class TurbofanCycleModel implements CycleModel {
     this.definition = definition;
     this.e = opts.engine ?? referenceEngine();
     this.startFuelScale = opts.startFuelScale ?? 1;
+    this.surgeLoss = opts.hpcSurgeMarginLoss ?? 0;
+    if (!(this.surgeLoss >= 0 && this.surgeLoss < 1)) {
+      throw new Error(`hpcSurgeMarginLoss ${this.surgeLoss} must be in [0, 1)`);
+    }
     this.surgeSystem = compressionSystem(definition);
   }
 
@@ -635,7 +649,11 @@ class TurbofanCycleModel implements CycleModel {
     const a3 = Math.sqrt(gamma(t3, 0) * r * t3);
     const inlet = { pt25Pa: st['25'].ptPa, tt25K: st['25'].ttK, n2Rpm: this.n2, rJPerKgK: r };
     const speed = this.n2 / Math.sqrt(inlet.tt25K / 288.15) / this.e.design.corrSpeed.hpc;
-    const fit = hpcCubic(this.e.maps.hpc, speed, this.surgeSystem, inlet);
+    const map = withStallRline(
+      this.e.maps.hpc,
+      stallRlineForLoss(this.e.maps.hpc, speed, this.surgeLoss),
+    );
+    const fit = hpcCubic(map, speed, this.surgeSystem, inlet);
     const op = ductVariables(
       this.surgeSystem,
       inlet,
@@ -680,6 +698,11 @@ class TurbofanCycleModel implements CycleModel {
     return this.subIdle(c);
   }
 
+  /** The HPC margin against the surge line lowered by hpcSurgeMarginLoss: (1 + m)(1 - loss) - 1. */
+  private hpcMargin(margin: number): number {
+    return (1 + margin) * (1 - this.surgeLoss) - 1;
+  }
+
   private mapPoint(
     p: { correctedFlow: number; pressureRatio: number; efficiency: number },
     rpm: number,
@@ -706,7 +729,13 @@ class TurbofanCycleModel implements CycleModel {
       netThrustN: p.netThrustN,
       grossThrustN: p.grossThrustN,
       fan: this.mapPoint(p.fan.point, p.n1Rpm, p.stations['2'].ttK, cal.n1ReferenceRpm, m.fan),
-      hpc: this.mapPoint(p.hpc.point, p.n2Rpm, p.stations['25'].ttK, cal.n2ReferenceRpm, m.hpc),
+      hpc: this.mapPoint(
+        p.hpc.point,
+        p.n2Rpm,
+        p.stations['25'].ttK,
+        cal.n2ReferenceRpm,
+        this.hpcMargin(m.hpc),
+      ),
     };
   }
 
@@ -814,7 +843,7 @@ class TurbofanCycleModel implements CycleModel {
       netThrustN: a.netThrustN * q * q,
       grossThrustN: a.grossThrustN * q * q,
       fan: this.mapPoint(fanPoint, this.n1, t2, cal.n1ReferenceRpm, m.fan),
-      hpc: this.mapPoint(hpcPoint, this.n2, s['25'].ttK, cal.n2ReferenceRpm, m.hpc),
+      hpc: this.mapPoint(hpcPoint, this.n2, s['25'].ttK, cal.n2ReferenceRpm, this.hpcMargin(m.hpc)),
     };
   }
 

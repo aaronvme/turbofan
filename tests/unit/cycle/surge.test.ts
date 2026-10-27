@@ -21,9 +21,13 @@ import {
   engineGreitzerParams,
   greitzerB,
   hpcCubic,
+  stallRlineForLoss,
   systemHelmholtzFrequency,
   throttleThrough,
+  withStallRline,
 } from '../../../src/cycle/surgeSystem';
+import { ISA_SLS } from '../../../src/contracts/ambient';
+import { THRESHOLDS } from '../../../src/contracts/thresholds';
 import { createCycleModel } from '../../../src/cycle/model';
 
 const def = ENGINE_DEFINITION;
@@ -123,6 +127,59 @@ describe('W1C-I2 / D3-4: the post-surge cubic extends the scaled HPC map', () =>
     // B < 1: a relaxation oscillation, slower than the Helmholtz period (2 pi in xi)
     expect(r.periodXi ?? 0).toBeGreaterThan(2 * Math.PI);
     expect(r.periodXi ?? Infinity).toBeLessThan(4 * 2 * Math.PI);
+  });
+});
+
+describe('D3-17 / C12: a lowered HPC surge line (Delta PRS, SAE ARP1420)', () => {
+  const sys = compressionSystem(def);
+  const loss = THRESHOLDS.C12.values.surgePressureRatioLoss.value;
+
+  it.each([1, 0.8, 0.65])(
+    'speed %f: the stall point moves down the speed line by Delta PRS',
+    (n) => {
+      const map = REF.maps.hpc;
+      expect(stallRlineForLoss(map, n, 0)).toBe(map.map.rlineStall);
+      const r = stallRlineForLoss(map, n, loss);
+      expect(r).toBeGreaterThan(map.map.rlineStall);
+      const clean = compressorPoint(map, n, map.map.rlineStall);
+      const lowered = compressorPoint(map, n, r);
+      expect(lowered.pressureRatio / clean.pressureRatio).toBeCloseTo(1 - loss, 9);
+      // a worn or distorted compressor stalls earlier: at a higher flow on the same speed line
+      expect(lowered.correctedFlow).toBeGreaterThan(clean.correctedFlow);
+      expect(stallRlineForLoss(map, n, 2 * loss)).toBeGreaterThan(r);
+    },
+  );
+
+  it('the cubic peaks on the lowered stall point; a loss off the map throws', () => {
+    const map = REF.maps.hpc;
+    const st = REF.design.point.stations;
+    const inlet = {
+      pt25Pa: st['25'].ptPa,
+      tt25K: st['25'].ttK,
+      n2Rpm: REF.design.point.n2Rpm,
+      rJPerKgK: gasConstant(0),
+    };
+    const r = stallRlineForLoss(map, 0.8, loss);
+    const moved = withStallRline(map, r);
+    expect(withStallRline(map, map.map.rlineStall)).toBe(map);
+    expect(moved.map.rlineStall).toBe(r);
+    expect(map.map.rlineStall).toBe(1);
+    const q = compressorPoint(map, 0.8, r);
+    const peak = ductVariables(sys, inlet, q.correctedFlow, q.pressureRatio);
+    const fit = hpcCubic(moved, 0.8, sys, inlet);
+    expect(2 * fit.w).toBeCloseTo(peak.phi, 12);
+    const params: GreitzerParams = { ...SURGE, psi0: fit.psi0, h: fit.h, w: fit.w };
+    expect(characteristic(params, 2 * fit.w)).toBeCloseTo(peak.psi, 9);
+    expect(() => stallRlineForLoss(map, 0.8, 0.9)).toThrow(/leaves the map/);
+  });
+
+  it('the model reports the margin to the lowered line, (1 + m)(1 - Delta PRS) - 1', () => {
+    const clean = createCycleModel().reset('groundIdle', ISA_SLS).hpc.surgeMarginFraction;
+    const worn = createCycleModel({ hpcSurgeMarginLoss: loss }).reset('groundIdle', ISA_SLS).hpc
+      .surgeMarginFraction;
+    expect(worn).toBeCloseTo((1 + clean) * (1 - loss) - 1, 12);
+    expect(() => createCycleModel({ hpcSurgeMarginLoss: -0.01 })).toThrow();
+    expect(() => createCycleModel({ hpcSurgeMarginLoss: 1 })).toThrow();
   });
 });
 

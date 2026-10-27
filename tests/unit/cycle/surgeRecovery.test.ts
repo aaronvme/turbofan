@@ -11,6 +11,7 @@ import { factValue } from '../../../src/engine/facts';
 import { PART_POWER_FIT_CALIBRATION, referenceEngine } from '../../../src/cycle/engine';
 import { createCycleModel } from '../../../src/cycle/model';
 import { withCalibration } from '../../../src/cycle/partPower';
+import { lazy } from './fixtures';
 
 // Transient surge scenarios (slow: whole-engine simulations of 10-40 s). The mutation config
 // (vitest.mutation.config.ts, D3-13) leaves this file out; mutants that only these tests reach are
@@ -61,5 +62,110 @@ describe('W1K-I2: why the D3-14 part-power fit was rejected', { timeout: TIMEOUT
     const end = states[states.length - 1];
     expect(end?.n1Percent ?? Infinity).toBeLessThan(40);
     expect(end?.netThrustN ?? Infinity).toBeLessThan(0.15 * takeoff);
+  });
+});
+
+describe(
+  'C12 (D3-17): surge detection and recovery on a reduced-margin HPC',
+  { timeout: TIMEOUT_MS },
+  () => {
+    const C12 = THRESHOLDS.C12.values;
+    const dt = 0.02;
+    const hold = C12.maximumLeverHoldS.value;
+    const move = C12.leverMoveS.value;
+    const lever = (t: number) =>
+      t < hold ? Math.min(1, t / move) : Math.max(0, 1 - (t - hold) / move);
+    // the whole case, once: 30 s at maximum, 1 s back, 45 s at minimum
+    const states = lazy(() => {
+      const m = createCycleModel({ hpcSurgeMarginLoss: C12.surgePressureRatioLoss.value });
+      m.reset('groundIdle', ISA_SLS);
+      return run(m, hold + move + C12.minimumLeverHoldS.value, dt, (t) =>
+        inputs({ throttleLever: lever(t) }),
+      );
+    });
+    /** Indices of the steps where a surge episode starts (the flag rises). */
+    const onsets = () =>
+      states().flatMap((s, i) =>
+        s.flags.surge && !(states()[i - 1]?.flags.surge ?? false) ? [i] : [],
+      );
+
+    it('the slam surges (the case is not void)', () => {
+      expect(onsets().length).toBeGreaterThan(0);
+    });
+
+    it('every surge is detected from the sensed P3 within 0.1 s: fuel cut, VBVs open, igniters on', () => {
+      const window = Math.round(C12.maxDetectionDelayS.value / dt);
+      for (const i of onsets()) {
+        const before = states()[i - 1];
+        expect(before).toBeDefined();
+        const preFuel = before?.fuelFlowKgPerS ?? 0;
+        const acted = states()
+          .slice(i, i + window + 1)
+          .some((s) => s.ignitersOn && s.vbvOpenFraction === 1 && s.fuelFlowKgPerS < preFuel);
+        expect(acted, `surge at ${states()[i]?.timeS.toFixed(2)} s`).toBe(true);
+      }
+    });
+
+    it('at most 2 surges, no flameout, displayed EGT below the transitory limit', () => {
+      expect(onsets().length).toBeLessThanOrEqual(C12.maxSurges.value);
+      for (const s of states()) {
+        expect(s.flags.flameout).toBe(false);
+        expect(s.combustorLit).toBe(true);
+        expect(s.egtDisplayedK).toBeLessThan(factValue('egtTransientLimit'));
+      }
+    });
+
+    it('95 % rated takeoff thrust within 10 s of the lever movement, then surge-free to the end of the hold', () => {
+      const target = C12.thrustFraction.value * takeoff;
+      const k = states().findIndex((s) => s.netThrustN >= target);
+      expect(k).toBeGreaterThanOrEqual(0);
+      expect(states()[k]?.timeS ?? Infinity).toBeLessThanOrEqual(C12.maxTimeToThrustS.value);
+      for (const s of states().filter((x, j) => j >= k && x.timeS <= hold)) {
+        expect(s.flags.surge).toBe(false);
+        expect(s.netThrustN).toBeGreaterThanOrEqual(target);
+      }
+    });
+
+    it('back at minimum lever, N1 and N2 inside the C4 ground-idle ranges at the end of the 45 s', () => {
+      const end = states()[states().length - 1];
+      expect(end?.timeS ?? 0).toBeCloseTo(hold + move + C12.minimumLeverHoldS.value, 6);
+      expect(end?.n1Percent ?? 0).toBeGreaterThanOrEqual(factValue('idleN1Min'));
+      expect(end?.n1Percent ?? Infinity).toBeLessThanOrEqual(factValue('idleN1Max'));
+      expect(end?.n2Percent ?? 0).toBeGreaterThanOrEqual(factValue('idleN2Min'));
+      expect(end?.n2Percent ?? Infinity).toBeLessThanOrEqual(factValue('idleN2Max'));
+      for (const s of states().filter((x) => x.timeS > hold)) expect(s.flags.surge).toBe(false);
+    });
+  },
+);
+
+describe('D3-17: the surge detector on the clean engine', { timeout: TIMEOUT_MS }, () => {
+  it('a slam deceleration from takeoff never trips it (no recovery: igniters stay off in auto)', () => {
+    const m = createCycleModel();
+    m.reset('groundIdle', ISA_SLS);
+    run(m, 15, 0.05, () => inputs({ throttleLever: 1 }));
+    const states = run(m, 20, 0.02, () => inputs({ throttleLever: 0 }));
+    for (const s of states) {
+      expect(s.ignitersOn).toBe(false);
+      expect(s.flags.surge).toBe(false);
+    }
+  });
+
+  it('an injected surge at takeoff is detected at once and recovered: igniters on, fuel cut, then back', () => {
+    const m = createCycleModel();
+    m.reset('groundIdle', ISA_SLS);
+    const steady = run(m, 15, 0.05, () => inputs({ throttleLever: 1 }));
+    const before = steady[steady.length - 1];
+    m.injectFault('surge');
+    const after = run(m, 10, 0.02, () => inputs({ throttleLever: 1 }));
+    const onset = after[0];
+    expect(onset?.flags.surge).toBe(true);
+    expect(onset?.ignitersOn).toBe(true);
+    expect(onset?.vbvOpenFraction).toBe(1);
+    expect(onset?.fuelFlowKgPerS ?? Infinity).toBeLessThan(before?.fuelFlowKgPerS ?? 0);
+    const end = after[after.length - 1];
+    expect(end?.flags.surge).toBe(false);
+    expect(end?.ignitersOn).toBe(false);
+    expect(end?.vbvOpenFraction).toBe(0);
+    expect((end?.netThrustN ?? 0) / takeoff).toBeGreaterThan(0.98);
   });
 });
