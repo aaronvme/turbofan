@@ -27,6 +27,11 @@ export interface BoundaryParams {
   readonly t0: number;
   /** Outflow static pressure (default p_inf). */
   readonly pOut: number;
+  /**
+   * beta^2 of the low-Mach preconditioner at the free stream (1: off). The far field then uses the
+   * characteristics of the preconditioned pseudo-time system (section 5); tracking mode only.
+   */
+  readonly farFieldBeta2: number;
 }
 
 /** Total temperature and pressure of the free stream (thermally perfect: h and phi_s exact). */
@@ -44,19 +49,31 @@ export function boundaryParams(
   opts: {
     readonly inflowTotal?: { readonly p0: number; readonly t0: number };
     readonly outflowPressure?: number;
+    readonly farFieldBeta2?: number;
   } = {},
 ): BoundaryParams {
   const totals = opts.inflowTotal ?? freeStreamTotals(ref);
-  return { p0: totals.p0, t0: totals.t0, pOut: opts.outflowPressure ?? ref.p };
+  return {
+    p0: totals.p0,
+    t0: totals.t0,
+    pOut: opts.outflowPressure ?? ref.p,
+    farFieldBeta2: opts.farFieldBeta2 ?? 1,
+  };
 }
 
 function copy(P: ArrayLike<number>, s: number, out: Float64Array, o: number): void {
   for (let k = 0; k < NP; k++) out[o + k] = P[s + k] as number;
 }
 
-/** Linearised characteristic far field about the free stream (section 5). */
+/**
+ * Linearised characteristic far field about the free stream (section 5). With beta2 < 1 (the
+ * preconditioned tracking mode) the characteristics are those of the preconditioned pseudo-time
+ * system, dp + rho (lambda -+ beta2 vn) dvn with lambda its two acoustic speeds: the physical ones
+ * reflect its waves, and the preconditioned iteration diverged against them (ladder L7 at M 0.01).
+ */
 function farField(
   ref: ReferenceState,
+  beta2: number,
   P: ArrayLike<number>,
   s: number,
   nx: number,
@@ -71,10 +88,25 @@ function farField(
   const dun = du * nx + dv * nr;
   const dut = -du * nr + dv * nx;
   const vnInf = ref.u * nx;
-  const wPlus = vnInf + ref.c > 0 ? pP + rhoC * dun : 0;
-  const wMinus = vnInf - ref.c > 0 ? pP - rhoC * dun : 0;
-  const pb = 0.5 * (wPlus + wMinus);
-  const unb = (wPlus - wMinus) / (2 * rhoC);
+  let pb: number;
+  let unb: number;
+  if (beta2 < 1) {
+    const d = 1 - beta2;
+    const root = Math.sqrt(d * d * vnInf * vnInf + 4 * beta2 * ref.c * ref.c);
+    const lPlus = 0.5 * ((1 + beta2) * vnInf + root);
+    const lMinus = 0.5 * ((1 + beta2) * vnInf - root);
+    const aPlus = ref.rho * (lPlus - beta2 * vnInf);
+    const aMinus = ref.rho * (lMinus - beta2 * vnInf);
+    const wPlus = lPlus > 0 ? pP + aPlus * dun : 0;
+    const wMinus = lMinus > 0 ? pP + aMinus * dun : 0;
+    unb = (wPlus - wMinus) / (aPlus - aMinus);
+    pb = wPlus - aPlus * unb;
+  } else {
+    const wPlus = vnInf + ref.c > 0 ? pP + rhoC * dun : 0;
+    const wMinus = vnInf - ref.c > 0 ? pP - rhoC * dun : 0;
+    pb = 0.5 * (wPlus + wMinus);
+    unb = (wPlus - wMinus) / (2 * rhoC);
+  }
   const outflow = vnInf + unb >= 0;
   const ws = outflow ? pP - ref.c * ref.c * (P[s] as number) : 0;
   const utb = outflow ? dut : 0;
@@ -210,7 +242,7 @@ export function ghostPrimitive(
       out[o + 2] = -(P[s + 2] as number);
       return;
     case BC_CODE.FARFIELD:
-      farField(ref, P, s, nx, nr, out, o);
+      farField(ref, bp.farFieldBeta2, P, s, nx, nr, out, o);
       return;
     case BC_CODE.INFLOW:
       inflow(ref, bp, P, s, nx, nr, out, o);

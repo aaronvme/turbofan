@@ -55,6 +55,8 @@ export class ReferenceSolver {
   readonly mesh: SolverMesh;
   readonly ref: ReferenceState;
   readonly bc: BoundaryParams;
+  /** The BC parameters of the physical-time mode (never preconditioned). */
+  private readonly bcPhysical: BoundaryParams;
   /** Conserved gauge state, 6 per cell. */
   readonly U: Float64Array;
   /** Blockage per cell (set with setBlockage). */
@@ -96,10 +98,20 @@ export class ReferenceSolver {
     this.mesh = mesh;
     this.opts = opts;
     this.ref = referenceState(opts.gas, opts.freeStream);
-    this.bc = boundaryParams(this.ref, {
+    const bcOpts = {
       ...(opts.inflowTotal === undefined ? {} : { inflowTotal: opts.inflowTotal }),
       ...(opts.outflowPressure === undefined ? {} : { outflowPressure: opts.outflowPressure }),
-    });
+    };
+    this.bcPhysical = boundaryParams(this.ref, bcOpts);
+    const pre = opts.lowMachPreconditioning;
+    const mInf2 = (this.ref.u * this.ref.u) / (this.ref.c * this.ref.c);
+    this.bc =
+      pre === undefined
+        ? this.bcPhysical
+        : boundaryParams(this.ref, {
+            ...bcOpts,
+            farFieldBeta2: Math.min(1, Math.max(mInf2, pre.minMach * pre.minMach)),
+          });
     this.cfl = opts.cfl ?? DEFAULT_CFL;
     this.cflPhysical = opts.cflPhysical ?? DEFAULT_CFL_PHYSICAL;
     this.remap = new Uint8Array(256).map((_, k) => opts.bcRemap?.[k] ?? k);
@@ -225,7 +237,7 @@ export class ReferenceSolver {
 
   /** The physical-time step CFL_phys min_c (b V / lambda) of the current state. */
   globalDt(): number {
-    this.updatePrimitives();
+    this.updatePrimitives(true);
     this.computeLocalDt(false);
     let dt = Infinity;
     for (let c = 0; c < this.mesh.nCells; c++) {
@@ -280,7 +292,7 @@ export class ReferenceSolver {
       [1 / 3, 2 / 3],
     ];
     for (let k = 0; k < 3; k++) {
-      this.updatePrimitives();
+      this.updatePrimitives(true);
       this.evaluateSources();
       this.assembleResidual();
       if (k === 0) this.recordResidual();
@@ -351,10 +363,12 @@ export class ReferenceSolver {
     for (let k = 0; k < U.length; k++) U[k] = Math.fround(U[k] as number);
   }
 
-  private updatePrimitives(): void {
+  /** Cell then ghost primitives; `physical` fills the ghosts with the physical-time BCs. */
+  private updatePrimitives(physical = false): void {
     const m = this.mesh;
     const n = m.nCells;
-    const { P, ref, bc } = this;
+    const { P, ref } = this;
+    const bc = physical ? this.bcPhysical : this.bc;
     for (let c = 0; c < n; c++) consToPrim(ref, this.U, NU * c, m.cellR[c] as number, P, NP * c);
     for (let g = 0; g < m.nGhosts; g++) {
       const code = m.ghostBc[g] ?? 0;
