@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CYCLE_INPUTS, type CycleInputs } from '../../../src/contracts/cycle';
 import { casingRadiusAt, hubRadiusAt } from '../../../src/contracts/engine';
 import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 import { gamma, gasConstant } from '../../../src/thermo/gas';
@@ -183,7 +182,7 @@ describe('D3-17 / C12: a lowered HPC surge line (Delta PRS, SAE ARP1420)', () =>
   });
 });
 
-/** The C9 test system (model.test.ts). */
+/** The C9 test system (greitzer.test.ts). */
 const SURGE: GreitzerParams = { psi0: 0.3, h: 0.18, w: 0.25, gammaT: 0.5, b: 1 };
 
 describe('Greitzer numerics (critic pass 3 survivors)', () => {
@@ -207,54 +206,5 @@ describe('Greitzer numerics (critic pass 3 survivors)', () => {
     const e2 = Math.hypot(run(20, 0.05).phi - ref.phi, run(20, 0.05).psi - ref.psi);
     expect(e1 / e2).toBeGreaterThan(12);
     expect(e1 / e2).toBeLessThan(20);
-  });
-});
-
-const TIMEOUT_MS = 600_000;
-const inputs = (lever: number): CycleInputs => ({
-  ...DEFAULT_CYCLE_INPUTS,
-  fuelLever: 'run',
-  ignition: 'auto',
-  throttleLever: lever,
-});
-
-describe('W1C-I2: the model surges on its own compression system', { timeout: TIMEOUT_MS }, () => {
-  it('an injected surge at takeoff: reverse flow at the derived period, then recovery', () => {
-    const m = createCycleModel();
-    m.reset('groundIdle');
-    for (let i = 0; i < 300; i++) m.step(0.05, inputs(1));
-    const before = m.state();
-    m.injectFault('surge');
-    const p3: number[] = [];
-    const ts: number[] = [];
-    let reverse = 0;
-    for (let i = 0; i < 1000; i++) {
-      const s = m.step(0.001, inputs(1));
-      if (!s.flags.surge) continue;
-      p3.push(s.stations['3'].ptPa);
-      ts.push(s.timeS);
-      if (s.stations['3'].wKgPerS === 0) reverse++;
-    }
-    expect(p3.length).toBeGreaterThan(0);
-    expect(reverse).toBeGreaterThan(0);
-    expect(m.state().flags.surge).toBe(false);
-    // period of the P3 oscillation vs the derived Helmholtz period at the onset state
-    const mean = p3.reduce((a, b) => a + b, 0) / p3.length;
-    const ups: number[] = [];
-    for (let k = 1; k < p3.length; k++) {
-      if ((p3[k - 1] ?? 0) < mean && (p3[k] ?? 0) >= mean) ups.push(ts[k] ?? 0);
-    }
-    expect(ups.length).toBeGreaterThanOrEqual(3);
-    const period = ((ups[ups.length - 1] ?? 0) - (ups[0] ?? 0)) / (ups.length - 1);
-    const t3 = before.stations['3'].ttK;
-    const tH =
-      (2 * Math.PI) /
-      systemHelmholtzFrequency(
-        compressionSystem(def),
-        Math.sqrt(gamma(t3, 0) * gasConstant(0) * t3),
-      );
-    expect(period).toBeGreaterThan(tH);
-    // B < 1 makes it a relaxation oscillation, longer than the Helmholtz period
-    expect(period).toBeLessThan(4 * tH);
   });
 });

@@ -3,7 +3,9 @@
 /** @type {import('@stryker-mutator/api/core').PartialStrykerOptions} */
 export default {
   testRunner: 'vitest',
-  vitest: { configFile: 'vitest.stryker.config.ts' },
+  // D3-13: the fast core suites only; the slow whole-engine transients are left out and the
+  // mutants only they reach are reported as "no fast coverage" (docs/MUTATION.md)
+  vitest: { configFile: 'vitest.mutation.config.ts' },
   mutate: [
     'src/thermo/**/*.ts',
     'src/cycle/**/*.ts',
@@ -20,7 +22,8 @@ export default {
   incremental: true,
   // the instrumented dry run of the unit suite takes minutes, not the default 5
   dryRunTimeoutMinutes: 60,
-  reporters: ['clear-text', 'progress', 'html'],
+  reporters: ['clear-text', 'progress', 'html', 'json'],
+  jsonReporter: { fileName: 'reports/mutation/mutation.json' },
   htmlReporter: { fileName: 'reports/mutation/index.html' },
   thresholds: { high: 90, low: 80, break: null },
 };

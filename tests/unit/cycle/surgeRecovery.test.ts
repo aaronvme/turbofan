@@ -10,6 +10,9 @@ import { THRESHOLDS } from '../../../src/contracts/thresholds';
 import { factValue } from '../../../src/engine/facts';
 import { PART_POWER_FIT_CALIBRATION, referenceEngine } from '../../../src/cycle/engine';
 import { createCycleModel } from '../../../src/cycle/model';
+import { compressionSystem, systemHelmholtzFrequency } from '../../../src/cycle/surgeSystem';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
+import { gamma, gasConstant } from '../../../src/thermo/gas';
 import { withCalibration } from '../../../src/cycle/partPower';
 import { lazy } from './fixtures';
 
@@ -169,5 +172,47 @@ describe('D3-17: the surge detector on the clean engine', { timeout: TIMEOUT_MS 
     expect(end?.ignitersOn).toBe(false);
     expect(end?.vbvOpenFraction).toBe(0);
     expect((end?.netThrustN ?? 0) / takeoff).toBeGreaterThan(0.98);
+  });
+});
+
+// moved from surge.test.ts (D3-13: a whole-engine transient)
+describe('W1C-I2: the model surges on its own compression system', { timeout: TIMEOUT_MS }, () => {
+  it('an injected surge at takeoff: reverse flow at the derived period, then recovery', () => {
+    const m = createCycleModel();
+    m.reset('groundIdle');
+    for (let i = 0; i < 300; i++) m.step(0.05, inputs({ throttleLever: 1 }));
+    const before = m.state();
+    m.injectFault('surge');
+    const p3: number[] = [];
+    const ts: number[] = [];
+    let reverse = 0;
+    for (let i = 0; i < 1000; i++) {
+      const s = m.step(0.001, inputs({ throttleLever: 1 }));
+      if (!s.flags.surge) continue;
+      p3.push(s.stations['3'].ptPa);
+      ts.push(s.timeS);
+      if (s.stations['3'].wKgPerS === 0) reverse++;
+    }
+    expect(p3.length).toBeGreaterThan(0);
+    expect(reverse).toBeGreaterThan(0);
+    expect(m.state().flags.surge).toBe(false);
+    // period of the P3 oscillation vs the derived Helmholtz period at the onset state
+    const mean = p3.reduce((a, b) => a + b, 0) / p3.length;
+    const ups: number[] = [];
+    for (let k = 1; k < p3.length; k++) {
+      if ((p3[k - 1] ?? 0) < mean && (p3[k] ?? 0) >= mean) ups.push(ts[k] ?? 0);
+    }
+    expect(ups.length).toBeGreaterThanOrEqual(3);
+    const period = ((ups[ups.length - 1] ?? 0) - (ups[0] ?? 0)) / (ups.length - 1);
+    const t3 = before.stations['3'].ttK;
+    const tH =
+      (2 * Math.PI) /
+      systemHelmholtzFrequency(
+        compressionSystem(ENGINE_DEFINITION),
+        Math.sqrt(gamma(t3, 0) * gasConstant(0) * t3),
+      );
+    expect(period).toBeGreaterThan(tH);
+    // B < 1 makes it a relaxation oscillation, longer than the Helmholtz period
+    expect(period).toBeLessThan(4 * tH);
   });
 });
