@@ -1,0 +1,96 @@
+// Critic pass 6 probe (W1V-I1): does TRAA ghost the spinning rotors in the shutter-0 display
+// modes (cutaway, exploded)? Copy to tests/browser/w1v-rotor-traa.test.ts and run
+// `npx vitest run -c vitest.browser.config.ts tests/browser/w1v-rotor-traa.test.ts`.
+//
+// For each pose, at quality `high`, shutter 0 (the cutaway and exploded presets' own shutter):
+// - floor: TRAA converged on a fan that holds still (48 frames at dt 0), against a still with
+//   TRAA off at the same phase. This is what the tests (dt 0) see.
+// - moving: TRAA after 48 frames at dt 1/60 (the spools at their MOCK idle speed, what the app
+//   and the capture show), against a still with TRAA off at the phase of the last frame.
+// A pixel differs at a displayed-luminance change > 0.04; a 16 px tile when > 25 % of it does
+// (the culling test's rule). Ghosting shows as many more differing tiles moving than at rest.
+
+import { afterAll, describe, expect, it } from 'vitest';
+import { commands } from 'vitest/browser';
+import { ENGINE_DEFINITION } from '../../src/engine/definition';
+import { createEngineView, type EngineView } from '../../src/render/engineView';
+import type { LookPresetId } from '../../src/render/presets';
+import { diff, diffImage, grab, nextFrame, settle } from './lib/frames';
+
+const W = 960;
+const H = 540;
+const THRESHOLD = 0.04;
+
+type Pose = {
+  preset: LookPresetId;
+  camera?: [number, number, number];
+  target?: [number, number, number];
+};
+const POSES: Record<string, Pose> = {
+  cutaway: { preset: 'cutaway' },
+  cutawayFanClose: { preset: 'cutaway', camera: [-0.9, 1.0, 2.2], target: [0.1, 0.15, 0] },
+  exploded: { preset: 'exploded' },
+  explodedFanClose: { preset: 'exploded', camera: [-0.6, 1.2, 2.6], target: [0, 0, 0] },
+  hotSection: { preset: 'hotSection' },
+};
+
+describe('W1V-I1 probe: TRAA on shutter-0 rotors at rest and in motion', () => {
+  let view: EngineView | null = null;
+  afterAll(async () => {
+    if (view !== null) await view.dispose();
+  });
+
+  it('reports differing tiles against a still at the same phase', async () => {
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    document.body.appendChild(c);
+    view = await createEngineView({
+      gpu: navigator.gpu,
+      canvas: c,
+      definition: ENGINE_DEFINITION,
+      width: W,
+      height: H,
+      dpr: 1,
+      quality: 'high',
+    });
+    const v = view;
+    const rows: string[] = [];
+    for (const [name, pose] of Object.entries(POSES)) {
+      const place = () => {
+        v.setPreset(pose.preset);
+        if (pose.camera && pose.target) v.setCameraPose(pose.camera, pose.target);
+      };
+      // at rest
+      v.setDebugFlags({});
+      place();
+      await settle(v, 48);
+      const restTraa = grab(v, c);
+      v.setDebugFlags({ noTraa: true });
+      const restStill = grab(v, c);
+      // in motion
+      v.setDebugFlags({});
+      place();
+      for (let i = 0; i < 48; i++) {
+        v.frame(1 / 60);
+        await nextFrame();
+      }
+      const movingTraa = grab(v, c);
+      v.setDebugFlags({ noTraa: true });
+      const movingStill = grab(v, c);
+      const floor = diff(restTraa, restStill, THRESHOLD);
+      const moving = diff(movingTraa, movingStill, THRESHOLD);
+      rows.push(
+        `${name}: at rest ${(100 * floor.changed).toFixed(2)} % px, ${floor.tilesOver25} tiles | moving ${(100 * moving.changed).toFixed(2)} % px, ${moving.tilesOver25} tiles, worst tile ${(100 * moving.worstTile).toFixed(0)} %`,
+      );
+      await commands.writeFile(
+        `test-results/w1v/${name}-moving.png`,
+        diffImage(movingStill, movingTraa, THRESHOLD),
+        'base64',
+      );
+    }
+    await commands.writeFile('test-results/w1v/rotor-traa.txt', `${rows.join('\n')}\n`);
+    console.warn(`W1V-I1 rotor TRAA\n${rows.join('\n')}`);
+    expect(v.stats().errors).toEqual([]);
+  });
+});
