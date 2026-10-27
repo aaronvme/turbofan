@@ -4,6 +4,7 @@ import {
   characteristic,
   criticalB,
   equilibrium,
+  greitzerStep,
   helmholtzFrequency,
   simulateSurge,
   throttleFlow,
@@ -57,5 +58,44 @@ describe('C9: Greitzer lumped compression system', () => {
   });
   it('the Helmholtz frequency is a sqrt(A / (V L))', () => {
     expect(helmholtzFrequency(340, 0.1, 0.4, 1)).toBeCloseTo(170, 9);
+  });
+});
+
+describe('simulateSurge reporting (D3-13 mutation survivors)', () => {
+  it('the deep surge reaches above and below the equilibrium flow: maxPhi and minPhi bracket it', () => {
+    const r = simulateSurge(SURGE, 0.05, 400);
+    const eq = equilibrium(SURGE);
+    expect(r.maxPhi).toBeGreaterThan(eq.phi);
+    expect(r.minPhi).toBeLessThan(eq.phi);
+    expect(Number.isFinite(r.maxPhi)).toBe(true);
+  });
+
+  it('the period is the mean spacing of the upward crossings of the second half', () => {
+    // the same integration, counted here: crossings of Phi_eq upwards after the first half
+    const dxi = 0.01;
+    const duration = 400;
+    const eq = equilibrium(SURGE);
+    let s = { phi: eq.phi * 0.95, psi: eq.psi };
+    const n = Math.round(duration / dxi);
+    const ups: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const next = greitzerStep(SURGE, s, dxi);
+      if (i > n / 2 && s.phi < eq.phi && next.phi >= eq.phi) ups.push((i + 1) * dxi);
+      s = next;
+    }
+    expect(ups.length).toBeGreaterThan(3);
+    const first = ups[0] ?? 0;
+    const last = ups[ups.length - 1] ?? 0;
+    const r = simulateSurge(SURGE, 0.05, duration, dxi);
+    expect(r.periodXi).toBeCloseTo((last - first) / (ups.length - 1), 9);
+    expect(r.final).toEqual(s);
+  });
+
+  it('the perturbation starts the flow below the equilibrium (1 - perturbation)', () => {
+    // four steps are too short to move it far: it is still about 5 % below
+    const eq = equilibrium(SURGE);
+    const r = simulateSurge(SURGE, 0.05, 0.04, 0.01);
+    expect(r.final.phi).toBeLessThan(eq.phi);
+    expect(r.final.phi / eq.phi).toBeCloseTo(0.95, 2);
   });
 });

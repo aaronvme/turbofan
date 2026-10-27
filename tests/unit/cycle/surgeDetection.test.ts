@@ -90,3 +90,25 @@ describe('D3-17 surge detector: the sensed P3 decay', () => {
     expect(() => feedP3(P3_DETECTOR_START, Number.NaN, 1e-3)).toThrow();
   });
 });
+
+describe('D3-17 surge detector: the boundaries (D3-13 mutation survivors)', () => {
+  it('rejects a non-positive P3 or time step, saying which', () => {
+    expect(() => feedP3(P3_DETECTOR_START, 0, 1e-3)).toThrow(/P3 0 Pa and dt 0.001 s must be > 0/);
+    expect(() => feedP3(P3_DETECTOR_START, 1e6, 0)).toThrow(/must be > 0/);
+  });
+
+  it('a decay at exactly the threshold rate is not integrated (strictly faster only)', () => {
+    // 8 -> 3 Pa in 1/16 s: a relative drop of 5/8, i.e. exactly 10/s (both exact in binary)
+    const d = feedP3({ lastPa: 8, dropFraction: 0 }, 3, 0.0625);
+    expect((5 / 8 / 0.0625) * 1).toBe(SURGE_DETECT_DECAY_RATE_PER_S);
+    expect(d.detector.dropFraction).toBe(0);
+    expect(d.surge).toBe(false);
+  });
+
+  it('an integrated drop of exactly the confirming drop is a surge', () => {
+    // 10 -> 9 Pa: a relative drop of exactly 0.1, at 100/s
+    const d = feedP3({ lastPa: 10, dropFraction: 0 }, 9, 1e-3);
+    expect(d.detector.dropFraction).toBe(SURGE_DETECT_DROP);
+    expect(d.surge).toBe(true);
+  });
+});

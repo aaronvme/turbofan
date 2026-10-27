@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { casingRadiusAt, hubRadiusAt } from '../../../src/contracts/engine';
 import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 import { gamma, gasConstant } from '../../../src/thermo/gas';
-import { REF } from './fixtures';
+import { REF, lazy } from './fixtures';
 import { compressorPoint } from '../../../src/cycle/componentMaps';
 import {
   characteristic,
@@ -49,23 +49,24 @@ const trapezoid = (f: (t: number) => number, a: number, b: number, n = 4000) => 
 };
 
 describe('W1C-I2 / D3-4: the compression system comes from the definition', () => {
-  const sys = compressionSystem(def);
+  // lazy (D2-15): built inside each test, so Stryker maps its mutants to the tests that use it
+  const sys = lazy(() => compressionSystem(def));
   it('duct area is the HPC inlet annulus (station 25)', () => {
-    expect(sys.ductAreaM2).toBeCloseTo(coreArea(x('25')), 12);
+    expect(sys().ductAreaM2).toBeCloseTo(coreArea(x('25')), 12);
   });
   it('effective duct length is A_c * integral dx / A over the HPC (25 -> 3)', () => {
-    const ref = sys.ductAreaM2 * trapezoid((t) => 1 / coreArea(t), x('25'), x('3'));
-    expect(Math.abs(sys.ductLengthM / ref - 1)).toBeLessThan(1e-4);
+    const ref = sys().ductAreaM2 * trapezoid((t) => 1 / coreArea(t), x('25'), x('3'));
+    expect(Math.abs(sys().ductLengthM / ref - 1)).toBeLessThan(1e-4);
     // the annulus converges, so the inertance length exceeds the geometric length
-    expect(sys.ductLengthM).toBeGreaterThan(x('3') - x('25'));
+    expect(sys().ductLengthM).toBeGreaterThan(x('3') - x('25'));
   });
   it('plenum is the HPC exit diffuser plus the combustor (3 -> 4)', () => {
     const ref = trapezoid(coreArea, x('3'), x('4'));
-    expect(Math.abs(sys.plenumVolumeM3 / ref - 1)).toBeLessThan(1e-4);
+    expect(Math.abs(sys().plenumVolumeM3 / ref - 1)).toBeLessThan(1e-4);
   });
   it('the tip radius is the first HPC rotor leading-edge tip', () => {
     const rotor = def.bladeRows.find((r) => r.component === 'hpc' && r.kind === 'rotor');
-    expect(sys.tipRadiusM).toBe(rotor?.leadingEdge.tip.r);
+    expect(sys().tipRadiusM).toBe(rotor?.leadingEdge.tip.r);
   });
   it('omega_H = a sqrt(A / (V L)) and B = U / (2 omega_H L), with L != 1', () => {
     const s = { ductAreaM2: 0.2, ductLengthM: 2, plenumVolumeM3: 0.5, tipRadiusM: 0.3 };
@@ -81,7 +82,8 @@ describe('W1C-I2 / D3-4: the compression system comes from the definition', () =
 });
 
 describe('W1C-I2 / D3-4: the post-surge cubic extends the scaled HPC map', () => {
-  const sys = compressionSystem(def);
+  // lazy (D2-15): built inside each test, so Stryker maps its mutants to the tests that use it
+  const sys = lazy(() => compressionSystem(def));
   // read inside the tests (D2-15: nothing sized at collection)
   const design = () => {
     const p = REF.design.point;
@@ -98,9 +100,9 @@ describe('W1C-I2 / D3-4: the post-surge cubic extends the scaled HPC map', () =>
     it(`speed ${String(speed)}: peak on the map's stall point, shut-off head bounded`, () => {
       const { p, inlet, maps } = design();
       const nc = speed === 'design' ? p.hpc.speedFraction : speed;
-      const fit = hpcCubic(maps.hpc, nc, sys, inlet);
+      const fit = hpcCubic(maps.hpc, nc, sys(), inlet);
       const q = compressorPoint(maps.hpc, nc, maps.hpc.map.rlineStall);
-      const stallPoint = ductVariables(sys, inlet, q.correctedFlow, q.pressureRatio);
+      const stallPoint = ductVariables(sys(), inlet, q.correctedFlow, q.pressureRatio);
       const params: GreitzerParams = { ...SURGE, psi0: fit.psi0, h: fit.h, w: fit.w };
       expect(2 * fit.w).toBeCloseTo(stallPoint.phi, 12);
       expect(characteristic(params, 2 * fit.w)).toBeCloseTo(stallPoint.psi, 9);
@@ -113,12 +115,12 @@ describe('W1C-I2 / D3-4: the post-surge cubic extends the scaled HPC map', () =>
     const { p, st, inlet, maps } = design();
     const t3 = st['3'].ttK;
     const a3 = Math.sqrt(gamma(t3, 0) * gasConstant(0) * t3);
-    const omegaH = systemHelmholtzFrequency(sys, a3);
-    const b = greitzerB(sys, p.n2Rpm, a3);
+    const omegaH = systemHelmholtzFrequency(sys(), a3);
+    const b = greitzerB(sys(), p.n2Rpm, a3);
     // independent: U from the design N2 and the rotor tip, omega_H from its definition
-    const u = (p.n2Rpm * 2 * Math.PI * sys.tipRadiusM) / 60;
-    expect(b).toBeCloseTo(u / (2 * omegaH * sys.ductLengthM), 12);
-    const fit = hpcCubic(maps.hpc, p.hpc.speedFraction, sys, inlet);
+    const u = (p.n2Rpm * 2 * Math.PI * sys().tipRadiusM) / 60;
+    expect(b).toBeCloseTo(u / (2 * omegaH * sys().ductLengthM), 12);
+    const fit = hpcCubic(maps.hpc, p.hpc.speedFraction, sys(), inlet);
     const params = engineGreitzerParams(fit, b, 0.9 * 2 * fit.w);
     expect(params.b).toBeGreaterThan(criticalB(params));
     const r = simulateSurge(params, 0.05, 400);
@@ -130,7 +132,8 @@ describe('W1C-I2 / D3-4: the post-surge cubic extends the scaled HPC map', () =>
 });
 
 describe('D3-17 / C12: a lowered HPC surge line (Delta PRS, SAE ARP1420)', () => {
-  const sys = compressionSystem(def);
+  // lazy (D2-15): built inside each test, so Stryker maps its mutants to the tests that use it
+  const sys = lazy(() => compressionSystem(def));
   const loss = THRESHOLDS.C12.values.surgePressureRatioLoss.value;
 
   it.each([1, 0.8, 0.65])(
@@ -164,8 +167,8 @@ describe('D3-17 / C12: a lowered HPC surge line (Delta PRS, SAE ARP1420)', () =>
     expect(moved.map.rlineStall).toBe(r);
     expect(map.map.rlineStall).toBe(1);
     const q = compressorPoint(map, 0.8, r);
-    const peak = ductVariables(sys, inlet, q.correctedFlow, q.pressureRatio);
-    const fit = hpcCubic(moved, 0.8, sys, inlet);
+    const peak = ductVariables(sys(), inlet, q.correctedFlow, q.pressureRatio);
+    const fit = hpcCubic(moved, 0.8, sys(), inlet);
     expect(2 * fit.w).toBeCloseTo(peak.phi, 12);
     const params: GreitzerParams = { ...SURGE, psi0: fit.psi0, h: fit.h, w: fit.w };
     expect(characteristic(params, 2 * fit.w)).toBeCloseTo(peak.psi, 9);
@@ -206,5 +209,73 @@ describe('Greitzer numerics (critic pass 3 survivors)', () => {
     const e2 = Math.hypot(run(20, 0.05).phi - ref.phi, run(20, 0.05).psi - ref.psi);
     expect(e1 / e2).toBeGreaterThan(12);
     expect(e1 / e2).toBeLessThan(20);
+  });
+});
+
+describe('the compression-system pieces, checked independently (D3-13 mutation survivors)', () => {
+  const SYS = { ductAreaM2: 0.2, ductLengthM: 2, plenumVolumeM3: 0.5, tipRadiusM: 0.3 };
+  const INLET = { pt25Pa: 2e5, tt25K: 400, n2Rpm: 12000, rJPerKgK: 287 };
+
+  it('ductVariables: Phi = W / (rho A U), Psi = pt25 (PR - 1) / (rho U^2 / 2)', () => {
+    const rho = 2e5 / (287 * 400);
+    const u = (12000 * 2 * Math.PI * 0.3) / 60;
+    // corrected flow 30 kg/s at 2e5 Pa, 400 K (P_STD 101325 Pa, T_STD 288.15 K)
+    const w = (30 * (2e5 / 101325)) / Math.sqrt(400 / 288.15);
+    const d = ductVariables(SYS, INLET, 30, 10);
+    expect(d.phi).toBeCloseTo(w / (rho * 0.2 * u), 12);
+    expect(d.psi).toBeCloseTo((2e5 * 9) / (0.5 * rho * u * u), 9);
+  });
+
+  it("hpcCubic: H from the peak, the shut-off head from the speed line's least squares or its bound, rms of the residuals", () => {
+    const sys = compressionSystem(def);
+    const p = REF.design.point;
+    const inlet = {
+      pt25Pa: p.stations['25'].ptPa,
+      tt25K: p.stations['25'].ttK,
+      n2Rpm: p.n2Rpm,
+      rJPerKgK: gasConstant(0),
+    };
+    const map = REF.maps.hpc;
+    for (const nc of [0.7, 0.8, p.hpc.speedFraction]) {
+      const fit = hpcCubic(map, nc, sys, inlet);
+      const pt = (r: number) => {
+        const q = compressorPoint(map, nc, r);
+        return ductVariables(sys, inlet, q.correctedFlow, q.pressureRatio);
+      };
+      const stall = pt(map.map.rlineStall);
+      const g = (phi: number) => {
+        const x = phi / fit.w - 1;
+        return 1.5 * x - 0.5 * x ** 3 - 1;
+      };
+      const line = map.map.rline.filter((r) => r > map.map.rlineStall).map(pt);
+      expect(line.length).toBeGreaterThan(2);
+      expect(fit.w).toBeCloseTo(stall.phi / 2, 12);
+      expect(fit.h).toBeCloseTo((stall.psi - fit.psi0) / 2, 12);
+      const bound = SHUTOFF_TO_PEAK_MIN * stall.psi;
+      if (fit.psi0 > bound + 1e-9) {
+        // unbounded: the normal equation of Psi_i - Psi_s = H g_i holds
+        const normal = line.reduce(
+          (a, q) => a + g(q.phi) * (q.psi - stall.psi - fit.h * g(q.phi)),
+          0,
+        );
+        expect(Math.abs(normal)).toBeLessThan(1e-9 * stall.psi);
+      } else {
+        expect(fit.psi0).toBeCloseTo(bound, 12);
+      }
+      const sq = line.reduce((a, q) => a + (fit.psi0 + fit.h * (2 + g(q.phi)) - q.psi) ** 2, 0);
+      expect(fit.rms).toBeCloseTo(Math.sqrt(sq / line.length), 12);
+      expect(fit.rms).toBeGreaterThan(0);
+    }
+  });
+
+  it('engineGreitzerParams: the equilibrium is at the requested flow, with B passed through', () => {
+    const fit = { psi0: 0.3, h: 0.18, w: 0.25, rms: 0 };
+    for (const phiEq of [0.3, 0.5, 0.7]) {
+      const params = engineGreitzerParams(fit, 0.8, phiEq);
+      expect(params.b).toBe(0.8);
+      expect(params).toMatchObject({ psi0: 0.3, h: 0.18, w: 0.25 });
+      expect(equilibrium(params).phi).toBeCloseTo(phiEq, 9);
+      expect(equilibrium(params).psi).toBeCloseTo(characteristic(params, phiEq), 9);
+    }
   });
 });
