@@ -1,0 +1,63 @@
+// Critic pass 7, w2/reference @ca296ae: W2R-6 (round 2, "blockage destabilises the plain scheme")
+// is still open at the tip. The duct of precondition.test.ts ("converges a low-Mach blockage duct
+// from rest"): 24 x 3 cells, b_min 0.85, inflow p0 = p_inf, outflow 0.998 p_inf (M 0.06 at the
+// throat), plus the same duct at a lower outflow pressure (OUT, e.g. 0.94: M about 0.3). Converged
+// with the preconditioner (machCut 1), then iterated with the PLAIN scheme: the tracking mode
+// (RK3, CFL 1.5) and the physical-time mode (SSP-RK3 at its own dt, what surge bangs use).
+//   ROOT=<checkout> OUT=0.998 node --import file:///<checkout>/tools/mesh/ts-resolve.mjs w2r-blockage.ts
+import { pathToFileURL } from 'node:url';
+
+const ROOT = process.env.ROOT ?? '.';
+const imp = (p: string) => import(pathToFileURL(`${ROOT}/${p}`).href);
+const { caloricallyPerfectGas } = await imp('src/flow/reference/gas.ts');
+const { ReferenceSolver } = await imp('src/flow/reference/solver.ts');
+const { converge } = await imp('tests/ladder/common.ts');
+const { BC, rectangle, singleBlock, solverMesh } = await imp('tests/unit/flow/helpers.ts');
+
+const OUT = Number(process.env.OUT ?? 0.998);
+const BMIN = Number(process.env.BMIN ?? 0.85);
+const duct = solverMesh(
+  singleBlock(rectangle('duct', -0.3, 0.3, 0.5, 0.6, 24, 3), {
+    imin: BC.INFLOW,
+    imax: BC.OUTFLOW,
+    jmin: BC.SLIP_WALL,
+    jmax: BC.SLIP_WALL,
+  }),
+);
+const gas = caloricallyPerfectGas(1.4, 287.05287);
+const b = Float64Array.from(duct.cellX as Float64Array, (x: number) =>
+  Math.abs(x) < 0.1 ? 1 - (1 - BMIN) * Math.cos((Math.PI * x) / 0.2) ** 2 : 1,
+);
+const opts = {
+  gas,
+  freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
+  inflowTotal: { p0: 101325, t0: 288.15 },
+  outflowPressure: 101325 * OUT,
+};
+const pre = new ReferenceSolver(duct, { ...opts, lowMachPreconditioning: { minMach: 0.01, machCut: 1 } });
+pre.setBlockage(b);
+const conv = converge(pre, 1e-11, 20000);
+const P = pre.primitives();
+let mmax = 0;
+for (let c = 0; c < duct.nCells; c++) mmax = Math.max(mmax, Math.hypot(P[8 * c + 1], P[8 * c + 2]) / P[8 * c + 7]);
+console.log(`OUT ${OUT} BMIN ${BMIN}: preconditioned converged ${conv.converged} in ${conv.iterations} its, max M ${mmax.toFixed(3)}, residual ${conv.last.toExponential(2)}`);
+for (const mode of ['tracking', 'physical'] as const) {
+  const s = new ReferenceSolver(duct, opts);
+  s.setBlockage(b);
+  s.U.set(pre.U);
+  const r0 = s.residual();
+  let n0 = 0;
+  for (let c = 0; c < duct.nCells; c++) n0 = Math.max(n0, Math.abs(r0[6 * c]));
+  const line: string[] = [];
+  const dt = s.globalDt();
+  for (let it = 1; it <= 1000; it++) {
+    if (mode === 'tracking') s.iterate(1);
+    else s.stepPhysical(dt);
+    if (it === 10 || it === 100 || it === 300 || it === 1000) {
+      let d = 0;
+      for (let k = 0; k < s.U.length; k++) d = Math.max(d, Math.abs(s.U[k] - pre.U[k]));
+      line.push(`${it}: max|dU| ${d.toExponential(2)} res ${s.stats.residualDensityL2.toExponential(2)}`);
+    }
+  }
+  console.log(`  plain ${mode}${mode === 'physical' ? ` (dt ${dt.toExponential(2)} s)` : ''}: start res ${n0.toExponential(2)}; ${line.join('; ')}`);
+}

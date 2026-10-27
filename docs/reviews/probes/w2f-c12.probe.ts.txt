@@ -1,0 +1,86 @@
+// Critic pass 7, w2/followups @ef2bb19. A plain-Node probe (not vitest): it imports the branch
+// under review from ROOT, so it runs against any checkout without copying files into it.
+//   cp docs/reviews/probes/w2f-c12.probe.ts.txt /tmp/w2f-c12.ts
+//   ROOT=<checkout> CASE=<c12|fit> LOSS=0.06 node --import <checkout>/tools/mesh/ts-resolve.mjs /tmp/w2f-c12.ts
+// c12: the C12 case at hpcSurgeMarginLoss = LOSS (C12 is 0.06): surge onsets, the detection
+//   action delay, the time to 95 % thrust, the end state, the max EGT and the solver calls.
+// fit: the W1K-I2 fit's 33.73(a) slam: matched-solver calls per lost solve (the app's cost on a
+//   held state; a call count, not a timing).
+import { pathToFileURL } from 'node:url';
+
+const ROOT = process.env.ROOT ?? '.';
+const imp = (p: string) => import(pathToFileURL(`${ROOT}/${p}`).href);
+const { ISA_SLS } = await imp('src/contracts/ambient.ts');
+const { DEFAULT_CYCLE_INPUTS } = await imp('src/contracts/cycle.ts');
+const { THRESHOLDS } = await imp('src/contracts/thresholds.ts');
+const { factValue } = await imp('src/engine/facts.ts');
+const { createCycleModel } = await imp('src/cycle/model.ts');
+const engineMod = await imp('src/cycle/engine.ts');
+const { withCalibration } = await imp('src/cycle/partPower.ts');
+
+let calls = 0;
+const counting = (...a: unknown[]) => {
+  calls++;
+  return engineMod.solveGasPath(...a);
+};
+const inputs = (lever: number) => ({ ...DEFAULT_CYCLE_INPUTS, fuelLever: 'run', ignition: 'auto', throttleLever: lever });
+const takeoff = factValue('takeoffThrust');
+const CASE = process.env.CASE ?? 'c12';
+
+if (CASE === 'c12') {
+  const loss = Number(process.env.LOSS ?? '0.06');
+  const C12 = THRESHOLDS.C12.values;
+  const hold = C12.maximumLeverHoldS.value;
+  const move = C12.leverMoveS.value;
+  const dt = 0.02;
+  const lever = (t: number) => (t < hold ? Math.min(1, t / move) : Math.max(0, 1 - (t - hold) / move));
+  const m = createCycleModel({ hpcSurgeMarginLoss: loss, gasPathSolver: counting });
+  m.reset('groundIdle', ISA_SLS);
+  const n = Math.round((hold + move + C12.minimumLeverHoldS.value) / dt);
+  const st = [];
+  for (let i = 0; i < n; i++) st.push(m.step(dt, inputs(lever(m.state().timeS))));
+  const onsets = st.flatMap((s, i) => (s.flags.surge && !(st[i - 1]?.flags.surge ?? false) ? [i] : []));
+  const lines = [`LOSS ${loss} surges ${onsets.length}`];
+  for (const i of onsets) {
+    const pre = st[i - 1]?.fuelFlowKgPerS ?? 0;
+    const j = st.findIndex((s, k) => k >= i && s.ignitersOn && s.vbvOpenFraction === 1 && s.fuelFlowKgPerS < pre);
+    const end = st.findIndex((s, k) => k > i && !s.flags.surge);
+    lines.push(
+      `  onset t ${st[i].timeS.toFixed(2)} N2 ${st[i].n2Percent.toFixed(1)} act ${j < 0 ? 'never' : ((j - i) * dt).toFixed(2) + ' s'} episode ${end < 0 ? 'open' : ((end - i) * dt).toFixed(2) + ' s'}`,
+    );
+  }
+  const k = st.findIndex((s) => s.netThrustN >= C12.thrustFraction.value * takeoff);
+  const dips = st.filter((s, j) => j >= k && s.timeS <= hold && s.netThrustN < C12.thrustFraction.value * takeoff).length;
+  const last = st[st.length - 1];
+  const egt = Math.max(...st.map((s) => s.egtDisplayedK)) - 273.15;
+  const flame = st.some((s) => s.flags.flameout || !s.combustorLit);
+  lines.push(
+    `  95% at ${k < 0 ? 'never' : st[k].timeS.toFixed(2)} s, dips after ${dips}; end N1 ${last.n1Percent.toFixed(2)} N2 ${last.n2Percent.toFixed(2)}; max EGT ${egt.toFixed(0)} C; flameout ${flame}; lost ${last.gasPathSolve.lostSolves}; solver calls ${calls} over ${n} steps`,
+  );
+  console.log(lines.join('\n'));
+} else {
+  const m = createCycleModel({ engine: withCalibration(engineMod.referenceEngine(), engineMod.PART_POWER_FIT_CALIBRATION), gasPathSolver: counting });
+  m.reset('groundIdle', ISA_SLS);
+  let prevLost = 0;
+  let prevCalls = 0;
+  let heldSteps = 0;
+  let heldCalls = 0;
+  let okCalls = 0;
+  let okSteps = 0;
+  for (let i = 0; i < 500; i++) {
+    const s = m.step(0.02, inputs(Math.min(1, m.state().timeS)));
+    const dc = calls - prevCalls;
+    if (s.gasPathSolve.lostSolves > prevLost) {
+      heldSteps++;
+      heldCalls += dc;
+    } else {
+      okSteps++;
+      okCalls += dc;
+    }
+    prevLost = s.gasPathSolve.lostSolves;
+    prevCalls = calls;
+  }
+  console.log(
+    `FIT lost ${prevLost}; steps with a lost solve ${heldSteps}, solver calls on them ${heldCalls} (${(heldCalls / Math.max(1, heldSteps)).toFixed(1)}/step); other steps ${okSteps}, calls ${okCalls} (${(okCalls / Math.max(1, okSteps)).toFixed(1)}/step)`,
+  );
+}

@@ -1645,3 +1645,514 @@ What still reads as CG, worst first:
 **Orchestrator decisions needed (pass 6):**
 - (t) **The display modes' spools (W1V-I1):** should the cutaway and the exploded view show a running engine (then rotor velocity into TRAA, fix b), or a display engine with the spools eased to a stop or a slow turn (fix a, simpler, and the product-shot convention)?
 - (u) **The W1 report's triangle figure (W1V-I2):** restate "about 1.5 M" from the probe (front 1.06 M + 0.41 M of fan copies, side 0.48 M, cutaway 1.58 M) before the LOD-or-solver choice goes to Aaron.
+
+## Critic pass 7: w2/followups @ef2bb19
+
+Reviewed 2026-10-27 by the pass-7 critic: `w2/followups` @ef2bb19 against main 4afb9d4. The branch is from e1ca8a2, and main has only LOG commits since, so the review diff is `e1ca8a2...ef2bb19` (54 files). Scope: W1K-I1/I2; D3-17/C12 (FADEC surge detection and recovery); D4-13 (the lost-solve flag, with the `src/contracts` field `CycleState.gasPathSolve` and `src/cycle/matchedSolve.ts`); D4-16/D4-17; the D3-13 mutation config and scores, with `src/cycle/fadec.ts`; and the bench harness D3-6 / W0G-N5..N7. Checklists applied: typescript-reviewer, silent-failure-hunter (the lost-solve and sub-idle paths), pr-test-analyzer.
+
+New probes (plain Node; they import the checkout named by `ROOT`, and each header says how to run it):
+- `docs/reviews/probes/w2f-c12.probe.ts.txt`:
+  - the C12 case at any ΔPRS: the onsets, the action delay, the time to 95 %, the end state, max EGT and the solver calls;
+  - the solver calls per lost solve on the W1K-I2 fit's slam.
+- `docs/reviews/probes/w2f-fingerprint.probe.ts.txt`: an independent behaviour fingerprint (SHA-256 over the JSON of every state) of five transients:
+  - a slam and chop;
+  - the C12 case;
+  - a start;
+  - a hot day with an injected surge and a flameout;
+  - a part-lever chop and re-slam.
+
+**Gates at the tip.** I reran them in the builder worktree, and its tracked files were unchanged afterwards. A ladder run on the other branch shared the CPU, so the durations are long.
+- `npm test`: 1700 passed, 5 expected fail (C10 ×3, C11 ×2), 80 files.
+- `npm run typecheck`: clean.
+- `npm run lint`: clean.
+- `npm run coverage`: lines 99.53 %, statements 98.62 %, branches 88.31 %, functions 99.60 %; thresholds pass.
+  - `src/cycle`: lines 99.58 % (branches 91.76 %).
+  - `src/thermo`: 100 %.
+  - `src/contracts`: 99.67 %.
+- `npm run test:mesh`: 29 passed.
+- `npm run test:gpu`: 15 passed (4 files), with the W0G-N7 order check passing under that load.
+
+**W1K-I1 / W1K-I2.**
+- **W1K-I2 FIXED** (2a2f145, then 1105b36). `surgeRecovery.test.ts` "W1K-I2" pins the fit's slam: a surge, then lost and held matched solves while lit, at N2 70-80 % with the VBV open. The state is never `subIdle` above the switch, and there is no 95 % thrust in 10 s. The pin names the real cause, as D4-13 asked.
+- **W1K-I1 mostly FIXED** (2a2f145). The KNOWN FAIL labels cite D3-15, and the fit comments and facts rows are right. Three pointers are still wrong (W2F-N1).
+
+**C12 (D3-17).**
+- **Pre-registered and sourced.**
+  - fe2e294 comes before the TDD commit 98683d9 and the code 8998462. It adds the PHYSICS.md §3.2 row, `thresholds.ts`, and the ENGINE_FACTS sources [GE74], [GE91], [UTC77], [UTC93], [RR06] and [ARP1420].
+  - The `checkText` and `passText` in `thresholds.ts` repeat the PHYSICS.md row word for word.
+  - PHYSICS.md gives the rationale for each part, and the constants are labelled model assumptions.
+- **Honest.** Probe `w2f-c12` at ΔPRS 6 % gives:
+  - one surge, at 0.74 s and N2 61.8 %;
+  - the fuel cut, the VBVs fully open and the igniters on in the same 20 ms step;
+  - an episode of 0.04 s;
+  - 95 % thrust at 8.44 s, with no dip below it until the end of the hold;
+  - an end state of N1 20.26 %, N2 60.99 %;
+  - max EGT 955 °C, no flameout and zero lost solves.
+
+  This matches the handoff and ENGINE_FACTS. The VBV clause holds because the surge is below `vbvClosedAboveN2c`. D4-14's limitation (no VBV opening above it) is in the ledger, and the injected takeoff-surge test pins the VBVs at 0 there.
+- **The headroom is narrow (W2F-I2).** The sweep:
+
+  | ΔPRS | Surges | 95 % thrust at | C12's 10 s row |
+  |---|---|---|---|
+  | 3 % | 0 | 5.82 s | pass |
+  | 4 %, 5 % | 1 | 8.42 s | pass |
+  | 7 % | 2 | 11.54 s | fail |
+  | 8 % | 2 | 11.56 s | fail |
+  | 10 % | 3 | 15.46 s | fail |
+
+  Every case recovers to idle with zero lost solves. The max EGT comes from the slam itself: 958 °C at 3 %, with no surge.
+
+**The FADEC surge logic** (`surgeDetection.ts`, `model.ts:646-722`):
+- **Detection uses only the model's P3.** That is the matched P3, or during an episode the plenum P3 at every Greitzer substep (`model.ts:664-676`). It never reads `flags.surge` or the margin: `startRecovery` runs only on `detected`.
+- **No false trips.** The clean-engine slam deceleration never trips the detector.
+- **The recovery sequence:**
+  - the fuel drops to the decel schedule, and never below it ([UTC93]);
+  - the igniters switch on (auto ignition);
+  - the VBVs open only below their closing speed (D4-14);
+  - then a 0.5 s hold, and a 1 s ramp to the biased schedule.
+- **The test is tight.** The C12 test checks each action within 0.1 s of each onset, so dropping any of the three fails it.
+
+**D4-13: the lost-solve flag.**
+- **No silent fallback is left.**
+  - The old `snapshot()` fell back to the sub-idle model on any root that did not converge or was not physical (e1ca8a2 `model.ts`).
+  - The new code calls the sub-idle model only when the engine is unlit, unfuelled or below 57 % N2 (`model.ts:772-790`).
+  - A lost solve returns `{ ...held, solve: 'held' }`, bumps `lostSolves` and leaves the anchor where it was.
+  - The only other `catch` blocks in `src/cycle` predate this branch: Newton's `safe()`, the `solveLinear` break, and the sizing wrapper, which re-throws with a cause.
+  - `matchedSolve.ts` swallows every exception as a lost solve. That is flagged, but its cause is lost (W2F-I1).
+- **The continuation is correct.**
+  - It walks a straight line in (N1, N2, Wf) from the last converged point, and warm-starts each step on the one before.
+  - The step halves on a failure, down to 1/256, and doubles after a success. A walk makes at most 64 solves, and the last step lands exactly on the target.
+  - A failing solver costs 9 calls per lost snapshot. `gasPathHold.test.ts` pins that count.
+  - A converged root with BPR ≤ 1 counts as lost.
+  - Only (N1, N2, Wf) are walked. The operating conditions take their target value at the first step (W2F-N2).
+- **The zero-lost assertions are real.**
+  - `expectNoLostSolves` runs at the end of every run helper in `model.test.ts`, `modelPaths.test.ts` and `surgeRecovery.test.ts`. The W1K-I2 pin is excepted on purpose.
+  - It also runs after every 1 s chunk of the start's settling loop, and in each direct-step test of `modelPaths.test.ts`.
+  - `lostSolves` counts since the reset, and no test resets mid-run.
+  - With a stub solver, the hold tests cover the edge cases:
+    - the held state equals the last converged one;
+    - the matched solve resumes;
+    - the count survives until a reset;
+    - a root that is not physical counts as lost;
+    - a reset whose first solve is lost;
+    - the dry crank, the cutoff and the flameout run as `subIdle`, with zero solver calls.
+- **The contract field is minimal and validated.**
+  - The field is `CycleState.gasPathSolve = { status: 'matched' | 'subIdle' | 'held'; lostSolves }` (`src/contracts/cycle.ts:112-127`).
+  - `validateCycleState` rejects a missing field, an unknown status, and a `lostSolves` that is not a whole number ≥ 0 (`cycle.ts:391-404`).
+  - The mock and the contract fixture fill it.
+  - One cross-check is missing: `held` should imply `lostSolves ≥ 1` (W2F-N3).
+  - I approve it as the D4-13 / D4-17 field.
+- **D4-16 and D4-17.**
+  - The start test's C4 check now uses a stated settling rule: N1 within 0.1 points over a 20 s window, waiting at most 200 s (`model.test.ts:199-221`). The thresholds are unchanged.
+  - While held, the spools run on the held power balance, as D4-17 accepted.
+
+**The fadec.ts extraction is bit-identical.** I ran probe `w2f-fingerprint` on `git archive` copies of three commits:
+- 5794941, the TDD stub before the move;
+- 7bb37c7, the move;
+- ef2bb19, the tip.
+
+All five scenarios (5,900 states) give the same hash on all three:
+
+| Scenario | Hash |
+|---|---|
+| slam-chop | 677bc456986a5a05 |
+| c12 | c34d477cd5c496da |
+| start | dd082a71bf4f71e5 |
+| hot-surge-flameout | 63915b7e9bdc421b |
+| part-lever | 0b0723fc0d3f481e |
+
+So the move is a pure refactor, and the later kill-only commits did not change behaviour either.
+
+**The mutation table (docs/MUTATION.md).**
+- **The scores are real.** I ran Stryker with `--mutate src/cycle/fadec.ts,src/cycle/surgeDetection.ts`, `MUTATION_TESTS` set to their two suites, a private incremental file and concurrency 4. It reproduced both rows exactly:
+  - fadec.ts: 98.20 % (109 killed, 2 survived);
+  - surgeDetection.ts: 97.14 % (34 killed, 1 survived).
+
+  The survivors are the ones MUTATION.md names.
+- **The orchestrator's correction of the pause runs is right.** A shared incremental file makes Stryker's "All files" line a running total, so the per-file rows are the true scores.
+- **model.ts at 43.6 % is acceptable as a labelled lower bound under D3-13, but it hides the newest logic (W2F-I3).**
+  - Only 269 of 950 mutants are killed (28 %). The 145 timeouts count as detected.
+  - By region (survived / no fast coverage): the recovery 2 / 16, the surge episode 31 / 66, `surgeAt` 0 / 22.
+  - The fast set reaches these regions only through the few seconds that `gasPathHold.test.ts` runs the model.
+  - So D3-17's wiring from detection to recovery has no mutation evidence. The C12 transient covers it only behaviourally.
+- **`vitest.mutation.config.ts` is sound.**
+  - It excludes the three slow files, and `mutationConfig.test.ts` pins that list.
+  - `MUTATION_TESTS` narrows a targeted run.
+  - Stryker reads the config.
+
+**The harness (D3-6, W0G-N5..N7).** All of this matches D3-6.
+- **INVALID** only for:
+  - two or more consecutive rAF intervals of at least 500 ms (at least 1000 ms in a row);
+  - a hidden page;
+  - a blur.
+- **WARNING** for:
+  - a stretch of frames over 2.5 display intervals that lasts more than 500 ms;
+  - a median frame over 1.5 intervals.
+- **The timeout (`timeout.ts`).**
+  - Each run is raced against warm-up + runs + 30 s.
+  - A stall is INVALID "stalled", with no numbers, and the page is reloaded under the same timeout.
+  - A rejection after the timeout is absorbed, and one before it propagates.
+  - If the reload fails, the sweep aborts loudly.
+- **W0G-N6:** the warm-up interval fallback is now held to the probe's 24-500 Hz check.
+- **W0G-N7:** `timestamp-ring.test.ts` compares medians at 8× the work.
+- **The smoke run:** the orchestrator's run (`docs/bench/throughput-2026-10-27-0002-quick.json`) is committed exactly as written.
+
+### Blocking
+None.
+
+### Important
+- **W2F-I1 OPEN: a lost solve keeps no cause.**
+  - `attempt` in `src/cycle/matchedSolve.ts:41-48` catches every exception and treats it as "no solution there".
+  - The only expected throw is a thermo range error. A programming error therefore reaches the app as `held`, with nothing to tell it apart from a physical loss. Examples: a TypeError, an index guard or a NaN guard in `solveGasPath` or `engine.ts`.
+  - The tests catch both kinds only because they assert zero losses. In the app, where D4-17 shows `status` and `lostSolves`, the cause is gone.
+  - Fix, either:
+    - keep the last failure's message (for a root that is not physical, its BPR) as a model diagnostic, logged once per held episode; or
+    - re-throw anything that is not a thermo range or convergence error. gas.ts throws plain `Error`s, so that needs a typed error first.
+
+    The contract field can stay as it is.
+- **W2F-I2 OPEN: C12 passes at 6 % with about one point of ΔPRS to spare, on a bias tuned to the case.**
+  - ENGINE_FACTS says the recovery's 0.8 bias is "the largest round value that keeps the C12 slam to one surge with margin inside C12's 10 s".
+  - The sweep above shows the cliff: from 7 %, two surges and 11.5 s.
+  - This is disclosed, not hidden: the 8 %, 10 % and 12 % runs are in ENGINE_FACTS, and the threshold was registered before the code. But W3's surge scenarios (other ambients, other deteriorations) will land on both sides of the cliff.
+  - Fix:
+    - say in the PHYSICS.md ledger row that above about 6.5 % the recovery needs 2 surges and more than 10 s;
+    - pin a second ΔPRS (4 %: one surge, 95 % within 10 s), so that a loss of headroom shows;
+    - revisit the bias with the D4-18 settling round.
+- **W2F-I3 OPEN: the D3-17 wiring in model.ts has no mutation evidence.** In MUTATION.md (survived / no fast coverage), the recovery region is 2 / 16 and the surge episode 31 / 66.
+  - Fix, either:
+    - (a) factor the state from detection to recovery (`startRecovery`, `recoveryVbvOpen`, the episode bookkeeping) into a pure step function with fast tests, as was done for `fadec.ts`; or
+    - (b) run one targeted Stryker run of those line ranges against `surgeRecovery.test.ts` in a cap pause.
+  - Until then, read 43.6 % as "28 % killed".
+
+### Nits
+- **W2F-N1 OPEN: a W1K-I1 leftover.**
+  - `src/cycle/engine.ts:243`, `tests/unit/cycle/c10.test.ts:89` and `c11.test.ts:77` say that `partPower.test.ts` pins the fit's rejection. The pin is in `surgeRecovery.test.ts` ("W1K-I2"), and `partPower.test.ts` has no slam.
+  - `engine.ts:242` still says the fit "hangs at about 11 kN". Since D4-13 it loses the gas path, holds it, and makes about 94 kN by 10 s.
+- **W2F-N2 OPEN: the continuation walks only (N1, N2, Wf).**
+  - The operating conditions take their target value at the first step. Examples: the recovery's VBV jump to `maxFraction` (`model.ts:772-775`), or an ambient change.
+  - The W1K-I2 fit's losses happen with the VBV fully open.
+  - If losses appear at a VBV switch, walk the VBV fraction too. Say so in the `matchedSolve.ts` header.
+- **W2F-N3 OPEN: a missing contract invariant.** `validateCycleState` (`src/contracts/cycle.ts:391-404`) does not check that `status === 'held'` implies `lostSolves ≥ 1`. This is a cheap invariant for the UI annunciator.
+- **W2F-N4 OPEN: the "sensed P3" has no sensor lag or noise** (`model.ts:664-676`). A detection in 0.02 s is therefore the best case. Before W3's surge scenarios, add a ledger note, or a first-order lag with a stated time constant.
+- **W2F-N5 OPEN: a held step costs about 12× a normal step.**
+  - Measured on the W1K-I2 fit's slam (probe `w2f-c12`, `CASE=fit`): steps with a lost solve make 24.2 matched-solver calls, against 2.0 on the other steps.
+  - The cause: every snapshot retries the direct solve plus the whole halving walk.
+  - Fix: w2/app-ui's worker budget should allow for this, or the retry should back off while held, for example to once per 0.1 s of simulation.
+- **W2F-N6 OPEN: a constant-dependent survivor.**
+  - The `fadec.ts` survivor `/ SURGE_RESTORE_S` → `*` (`fadec.ts:153`) is equivalent only while the constant is 1. A ramp test with another restore time would kill it.
+  - MUTATION.md should say "equivalent at the current constant".
+
+**Verdict w2/followups @ef2bb19: MERGE.**
+- Every gate is green.
+- C12 is pre-registered, sourced, mirrored in `thresholds.ts`, and honestly met.
+- D4-13 removes the silent sub-idle fallback and flags every lost solve. Every transient test backs this with a real zero-lost assertion.
+- The contract field is minimal and validated.
+- The FADEC extraction is bit-identical (independent fingerprint), and the mutation scores reproduce.
+- The Important items are follow-ups:
+  - W2F-I1, before w2/app-ui shows the annunciator;
+  - W2F-I2, with the D4-18 settling round;
+  - W2F-I3, in the next cycle round.
+
+## Critic pass 7: w2/reference @ca296ae
+
+I reviewed `w2/reference` @ca296ae against main 4afb9d4 on 2026-10-27 as the pass-7 critic. The branch is from e1ca8a2, so the review diff is `e1ca8a2...ca296ae`. In scope:
+- the f64 oracle in `src/flow/reference/`;
+- the mesh loader in `src/flow/mesh/`;
+- `docs/SOLVER.md`;
+- the CPU ladder L1-L9 in `tests/ladder/`;
+- decisions D4-8..D4-12 and D4-19..D4-28.
+
+D4-25..D4-28 were decided on this tip, after its code was written, so their implementation is the next round's work. Checklists applied: typescript-reviewer, silent-failure-hunter, pr-test-analyzer.
+
+New probes:
+- `docs/reviews/probes/w2r-blockage.probe.ts.txt` (plain Node, `ROOT` = a checkout): the W2R-6 duct from its converged state, run in the plain tracking and physical-time modes.
+- `docs/reviews/probes/w2r-l8-vonneumann.py.txt` (Python, no dependencies): the 1D fully discrete stability limit of the 3-stage scheme, on scalar advection and on the preconditioned acoustic pair.
+- The L8 experiments (§ L8 below) used a scratch copy of `src/flow/reference` at ca296ae with environment switches. The driver and the patch are described there; they are not committed, because they edit the solver.
+
+**Gates at the tip.** I reran them in the builder worktree; its tracked files were unchanged afterwards. The other branch's gates shared the CPU.
+- `npm test`: 1704 passed, 6 expected fail, 83 files.
+- `npm run typecheck`: clean. `npm run lint`: clean.
+- `npm run coverage`: lines 99.57 %, statements 98.69 %, branches 88.05 %, functions 99.62 %; thresholds pass.
+  - `src/flow/reference`: lines 100 %, branches 88.45 % (gate 85 %).
+  - `src/flow/mesh`: 98.60 % / 89.16 %.
+- `npm run test:mesh`: 29 passed.
+- `npm run test:ladder`: 9 files passed, 4 failed, 720 s.
+
+**Ladder at ca296ae (my run).** Every value matches the handoff table.
+
+| case | metric | threshold | value | |
+|---|---|---|---|---|
+| L1 | quiescent, 130k f32 asset, 2 its (residual and state bitwise 0) | < 1e-4 m/s | 0 | PASS |
+| L1 | uniform M 0.5, 130k f64 metrics, 50 its | < 1e-4 m/s, growth ≤ 2× | 2.03e-13 | PASS |
+| L1 | the same on the shipped f32-metric asset; asset GCL defect | reported | 1.42e-5 m/s; 1.31e-7 | reported |
+| L2 | L1(ρ) / shock offset | < 1 % / ≤ 1 cell | 0.277 % / 0.228 | PASS |
+| L3 | L1(ρ) vs the 1D HLLC reference | < 2 % | 0.211 % | PASS |
+| L4a | Mach / choked ṁ (915 its) | < 1 % / < 0.5 % | 0.278 % / 0.0997 % | PASS |
+| L4b | shock position at 170 × 17; D4-19 steadiness | < 2 %; ≤ 0.1 % | 1.640 %; 0.0258 % | PASS |
+| L4b | convergence | reported | 0.146 of the first at 15000 | reported (open) |
+| L5 | ṁ (948 its) | < 1 % | 0.0843 % | PASS |
+| L6 | radial equilibrium free / solid; drift | < 0.1 % q; < 1e-4 | 0.0300 % / 0.0029 %; 4.7e-15 / 5.4e-8 | PASS |
+| L7 | M 0.01 Cp asymmetry (48 × 48) | < 0.02 | 0.0434 | **FAIL** (D4-26) |
+| L7 | M 0.01 Cd / iteration ratio | < 0.01 / ≤ 3 | 0.00924 / 0.893 | PASS |
+| L7 | plain M 0.01 asymmetry, Cd; M 0.3 Cp shift from the D4-20 scaling | reported | 0.347, 0.0043 (not converged); 5.9e-3 | reported |
+| L8 | velocity error at M_cut 0.003; convergence | < 1 %; 1e-5 | 0.406; not converged | **FAIL** (D4-27) |
+| L8 | plain tracking | reported | 0.190 | reported |
+| L9a | Euler work; convergence | < 1e-4; 1e-6 of the peak | 7.79e-6; not converged | PASS; **FAIL** (D4-25) |
+| L9b | Rankine-Froude; convergence | < 2 %; 1e-5 of the peak | 0.799 %; not converged | PASS; **FAIL** (D4-25) |
+| f32 | closed-box storage error, tracking 1 / 10 / 100 its | ≤ tol / 10 | 1.85e-7 / 4.42e-7 / 1.39e-6 | PASS |
+| f32 | the same, physical time | ≤ tol / 10 | 8.35e-8 / 2.40e-7 / 1.32e-5 | PASS |
+
+**Is the code SOLVER.md term for term?** Yes, for the scheme at this tip. Checked line by line:
+- **§3 gas (`gas.ts`).**
+  - The divided-difference enthalpy and entropy, with the secant cp and the 1000 K break handled both ways.
+  - Δh, Δe and D∞.
+  - `temperatureGauge`: exactly 3 Newton steps from the stated linear start.
+  - `temperatureFromPressure`, `pressureGauge` and c².
+  - I re-derived T′ from (p′, ρ′) and the p′ gauge: both are exact.
+- **§4 state (`state.ts`).**
+  - `consToPrim` and `primToCons` as written, with `dq2` without cancellation.
+  - The primitive record is (ρ′, u, v, rw, p′, Z, T′, c).
+- **§5 BCs (`boundary.ts`).**
+  - The far field, physical and preconditioned (λ±, a±, w±, the outflow/inflow switch for w_s, δu_t, rw and Z).
+  - The inflow: the σ Newton with its derivative −(ρ_b σ + ρ_s c_s), τ in 3 steps, p′_b through `expm1`, and the ghost's ρ′. I checked each of these.
+  - The outflow, the axis (v → −v, rw even, which holds: rw = Ωr² for solid-body rotation), and the wall ghost (extrapolated scalars, rw and tangential velocity; mirrored normal velocity per layer).
+  - The remap applies to physical ghosts only.
+- **§6 MUSCL (`muscl.ts`).**
+  - The sharp van Albada, the face states, and the per-cell, per-direction positivity fallback on q − |σ|/2, written so that NaN falls back.
+  - Slopes on ghost layer 1 come from layer 2.
+  - No corner ghosts.
+  - D4-25's smooth form is not here yet (W2R-I1).
+- **§7 SLAU2 (`slau2.ts`)** against Kitamura & Shima: g, V̄±, M̂ and χ (q̄ includes the swirl, as the 3D |V| should), β±, p̃, and the upwinded transported quantities.
+  - The D4-20 term is in the stated code order. `machCut = 1` gives f_a = 1, the plain flux bitwise.
+  - I checked the antisymmetry F(L, R, S) = −F(R, L, −S) term by term. Every swap is an exact negation or a commutative product or sum, so it is bitwise.
+  - The wall face carries only p′_w, the interior cell's face value.
+- **§8 and §9 (`sources.ts`, `solver.ts`).**
+  - The face blockage is b_f = ½(b_L + b_R), with a ghost carrying its source cell's b.
+  - The pressure/swirl source is p′Σ b_f S_f plus b ρ w² A on the outward b-weighted vectors.
+  - Source rates are per gas volume, with diagonal damping, and `massSourceRates` gives s_η = s_m Δh0.
+  - The residual signs (+ for the −side cell) are right, and both sides of an interface compute the face.
+- **§10 time stepping (`solver.ts`, `precondition.ts`).**
+  - The local step uses the b-weighted max over each direction's two faces, plus the preconditioned spectral radius.
+  - RK (0.2, 0.5, 1) with the point-implicit divisor. β² (with the Δp term) is frozen at stage 1, like τ.
+  - The δU update: δp contracts with (1, u, v, rw, Δh0, Z)/c² to exactly 1, which I re-derived. So the pressure increment is scaled by β², and nothing else changes.
+  - SSP-RK3 uses (1; ¾, ¼; ⅓, ⅔) with τ = dt/(bV), and the default dt is CFL_phys · min(bV/λ).
+  - Physical time uses the physical far field and machCut 1.
+  - The centrifugal source is explicit (D4-28).
+- **§11:** the residual is recorded from stage 1.
+- **The W3 interface** (`SourceModel`, `setBlockage`) is adequate for the Hall-Thollet body forces, the combustor and the bleeds. The stage primitives, the mesh and the blockage are all available. Two small gaps: W2R-N1 and W2R-N3.
+
+**Are the ladder cases honest?**
+- **Pre-registration.** The git history shows every CPU variant written before its run:
+  - a1aa697 and d237f69 (L8 at 64 × 24) come before the first ladder commit, bd927f3;
+  - the L4b grid study (0c7cc4d) comes before 882333d;
+  - D4-19's steadiness check and L8 at M_cut 0.003 (27b6bff) come before 66164a5 and ffbf367;
+  - the L9 peak-residual reference (0c7cc4d) was confirmed by D4-23 (d).
+
+  The L7 line "both Mach numbers run preconditioned with minMach = M_cut = M∞" entered with 27b6bff. That was after the first preconditioned L7 runs, but preconditioning there is D4-10's method, not a resolution choice, and M_cut = M∞ was set before the D4-20 runs.
+- **D4-19.**
+  - The position row passes only with max − min of 20 samples over the last 2000 iterations ≤ 0.1 % of the length (0.0258 % measured).
+  - The residual stall is reported, not hidden.
+  - The run starts from the exact quasi-1D answer, so the samples should be kept (W2R-N4). The grid trend (2.38 / 1.64 / 1.19 %) shows the shock left its initial position for a grid-dependent equilibrium.
+- **D4-26 (L7 at 96 × 96)** is not done at this tip. The scratch study (0.134 / 0.043 / 0.013 at 24 / 48 / 96) is the evidence D4-26 accepted. The two-refinement sequence and the PHYSICS.md "CPU variants" amendment must come first in the next round. The case still fails at 48 × 48, visibly.
+- **L1** is bitwise where it claims to be (`every(v => v === 0)` on the residual and the state).
+- **L9's peak-residual convergence** is per D4-23 (d).
+
+**Is the §12.2 tolerance table adequate for w2/solver?**
+- The f32-storage margins are real: 54-720× the tolerance.
+- It is incomplete. It has no row for the preconditioned tracking mode, which is the engine's mode, and row C names a helper that does not exist (W2R-I2).
+- It is otherwise sound:
+  - bitwise rows where the gauges make exact zeros possible;
+  - relative errors against the perturbation scale;
+  - a Sod row that allows for limiter switches.
+
+**The targeted Stryker spot check.** Main has no `vitest.mutation.config.ts` and no `MUTATION_TESTS`; both come with w2/followups. So I ran it on the trial-merged tree, with Stryker 10.1.1, each module against its direct suite only, a private incremental file, concurrency 6, in the foreground.
+- **`src/flow/reference/muscl.ts` with `muscl.test.ts`: 88.64 %** (38 killed, 1 timeout, 5 survived).
+  - Equivalent: `ab > 0` → `>= 0` (the formula gives 0 at ab = 0), and `+ 1e-30` → `- 1e-30` (never reached at a² + b² ≈ 1e-30).
+  - Killable (W2R-N5):
+    - `k < 6` → `<= 6` (`muscl.ts:27`): it writes a seventh slope into the next cell's slot;
+    - the positivity tests at exactly zero, `> 0` → `>= 0` for both ρ and p (`muscl.ts:36`).
+- **`src/flow/reference/slau2.ts` with `slau2.test.ts`: 90.96 %** (151 killed, 15 survived).
+  - Equivalent: β± `>= 1` → `> 1` (both branches give the same value at |M| = 1).
+  - Not equivalent, and none is caught. These are wrong fluxes (W2R-I4):
+    - the face swirl `rw / rf` → `rw * rf` (`slau2.ts:38`);
+    - the face density `ρ∞ + ρ′` → `ρ∞ − ρ′` (`:44`);
+    - the kinetic part of dh0, `+` → `−` (`:48`);
+    - the zero-area `out.fill` removed (`:81`);
+    - χ = (1 − M̂)² → (1 ± M̂)(1 ∓ M̂) (`:95`, two mutants);
+    - g's sign (`:96`);
+    - V̄'s `/` → `*` (`:97`);
+    - p̃'s split term and the `ρ̄ c̄` factor of its dissipation term (`:107`, `:109` ×3);
+    - `physicalFlux` without its `side()` call (`:132`). It then reads the module-level `sideL` that the previous `slau2Flux` call left behind.
+
+### L8: the unstable M_cut band (D4-27), the critic's independent read
+
+**Method.** A scratch copy of `src/flow/reference` at ca296ae with environment switches:
+- M_ref of the D4-20 term set to local, `max(M, M_cut)` (the shipped form), `sqrt(M² + M_cut²)`, or M_cut;
+- β² with or without its Δp term, and with a `max` or a smooth floor;
+- M_ref per face and β² per cell frozen at an iteration;
+- separate minMach and M_cut;
+- the sink strength K, the CFL, NR, the far-field β∞, and the RK stage sets;
+- an AUSM+-up-style velocity-diffusion floor (`max(q̄, M_cut c̄)` in SLAU2's p̃ term).
+
+Each run is L8's own set-up for 6000-16000 iterations, printing the residual, the L8 error, and the polar (P1, P2) content of p′ at five radii. The baseline reproduces the handoff: at M_cut 0.003 the residual grows to 0.26 of the first and the error to 55 % by 6000 iterations, while 0.0015 stays near 1e-4 at 0.4 %.
+
+**What the mode is.** A P2 (Legendre l = 2, fore/aft symmetric) pressure mode, oscillating with a period of about 1000 iterations. It peaks at r ≈ 0.27 m, which is where the sink flow's local Mach equals 0.003. The P1 content stays at 1e-5 of it.
+
+**What it is not.**
+- **Not a nonlinear switch.** With M_ref per face and β² per cell frozen at iteration 2000, it grows at the same rate: 0.245 at 6000 against 0.262 with live coefficients.
+- **Not the kink of D4-20's M_ref.** It also grows with `sqrt(M² + M_cut²)` (0.275).
+- **Not β's Δp term.** Without it, the residual reaches 0.349.
+- **Not the kink of β.** The smooth floor β² = M² + minMach² delays the growth (0.10 at 6000) but does not stop it. The same holds with both terms smooth (0.094).
+- **Not D4-20's M_cut at all.** The mode follows the preconditioner's floor minMach:
+  - minMach 0.003 with M_cut 0.0015 grows (0.20);
+  - minMach 0.0015 with M_cut 0.003 converges (5e-5, error 0.7 %).
+- **Not the far-field β∞ or an absolute Mach value.** The case is Mach-similar:
+  - halving the sink (K 112.5) with minMach = M_cut = 0.0015 gives the same residual history to three digits as K 225 at 0.003;
+  - doubling it at 0.006 does the same;
+  - K 112.5 at 0.003 converges.
+
+  So the band is a band of the radius r* where M(r) = minMach: 0.23-0.30 m unstable, 0.19 m and 0.38 m stable. It is not a band of values.
+- **Not a mode of the rest state.** Without the sink, a 1 Pa P2 pulse at r 0.3 m decays at both 0.003 and 0.0015. The base flow is needed to trap the mode.
+- **Not a semi-discrete instability.** The growth falls much faster than linearly with the CFL:
+  - 1.5: fast;
+  - 1.2: about 7× slower;
+  - 1.0: slow growth, to 1.4e-2 and 3.3 % error at 12000;
+  - 0.9: neutral;
+  - 0.75: decays over 16000 iterations, ending at 4e-4 and 0.5 %, with a residual floor that is probably the sharp limiter.
+
+  An unstable eigenvalue of the preconditioned semi-discrete operator would grow at a rate proportional to the CFL per iteration. This is the fully discrete map: the 3-stage RK with local steps. Refining radially (NR 96) delays the growth but keeps it (0.74 error at 12000).
+- **Not fixed by the AUSM+-up-style velocity diffusion floor alone.** It halves the growth at CFL 1.5 (0.128 at 6000) and still grows slowly at CFL 1.2.
+- **Untestable variants:**
+  - the physical far field diverges (NaN at 29 iterations, as the builder found);
+  - Taylor RK3 (1/3, 1/2, 1), α₁ = 0.25, and Jameson RK4 each diverge within about 100 iterations at CFL 1.2-1.5, even at 0.0015, so a stage-set swap is not a drop-in test.
+
+**Mechanism (hypothesis).** A fully discrete instability of the preconditioned tracking iteration at its default CFL 1.5, in the region where the preconditioner's floor holds β above the local Mach (dead air, q ≪ βc).
+
+The 1D von Neumann analysis (probe `w2r-l8-vonneumann`) shows why the margin is thin there:
+- It reproduces D4-8's limit for scalar advection: 1.541.
+- It gives only **0.972** for the preconditioned acoustic pair at rest with the D4-20-matched dissipation, for any β (0.0015, 0.003, 0.006).
+- The reason: linearised at rest, SLAU2's velocity dissipation q̄(β⁺ + β⁻ − 1)ρ̄c̄ is second order and vanishes. The only damping of the pseudo-acoustic pair is then the scaled mass-flux pressure diffusion, about a quarter of what upwinding gives advection. The 3-stage set's |G(iy)|² = 1 + 0.05y⁴ + 0.01y⁶ is anti-dissipative on the imaginary axis and needs that damping.
+- β/M_ref ≠ 1 changes the limit (0.77 at ½, 1.24 at 2).
+- An AUSM+-up p_u term with K_u = 0.5 raises it to 1.41.
+
+D4-8's linear-stability pin (`rk.test.ts`) covers only the advection family. The 1.5 default therefore has no stability basis in preconditioned tracking.
+
+In 2D, local time stepping splits the CFL between the directions, so the margin is case-dependent. In L8 a P2 pseudo-acoustic mode is held near r*, where the pseudo-acoustic speed βc changes from following q (inside, where SLAU2's q̄-scaled velocity diffusion acts) to the constant floor (outside, where it vanishes). That mode crosses the limit for CFL ≳ 0.9 when r* sits at 0.23-0.30 m in this geometry.
+
+The 1D numbers do not order the 2D cases exactly: in 1D, β/M_ref = ½ is the worse case, yet in 2D the minMach 0.0015 / M_cut 0.003 run converged. So the trapping by the β profile is part of the story, and the 2D amplification analysis is the proof still missing.
+
+The engine's static far field is the same regime (local Mach ≪ minMach). The kernel would inherit this.
+
+**Fix direction** (not implemented):
+1. Do the D4-27 analysis as a fully discrete one. Use the amplification of the RK3 + local-step map on the preconditioned operator, not semi-discrete eigenvalues. A power iteration of the frozen-coefficient iteration map about the L8 state gives the mode and its factor cheaply. Extend `rk.test.ts`'s pin to the preconditioned acoustic family.
+2. Give the pseudo-acoustic pair a dissipation matched to the preconditioned speed in both equations. That means a velocity (pressure-flux) diffusion scaled with M_ref c̄ (AUSM+-up's p_u, f_a c̄) next to D4-20's mass-flux term, with K_u from that analysis. It must stay symmetric so the bitwise antisymmetry holds. This is a scheme change beyond D4-20, so it needs a decision.
+3. Set the preconditioned tracking CFL from that analysis: without (2), about 0.75-0.9 for L8; with it, the limit the analysis gives. The cost is iterations within D4-2's solver budget.
+4. **Do not move M_cut.** The band follows minMach, so a different M_cut would not even remove it. The engine's 0.003 can stay once (1)-(3) hold.
+
+The L9a/L9b and duct stalls are the limiter's (D4-25), a separate cause. D4-25's smooth form should go in first, so that L8 at CFL 0.75 can show whether it then converges to 1e-5.
+
+### Blocking
+- **W2R-B1 OPEN: W2R-6, a linear instability of the plain scheme with blockage, is open but invisible.**
+  - **What the round-2 handoff (b7eb36d) found:** "blockage destabilises the plain scheme ... ×1e3 in 300 iterations at M 0.06 and ×1e12 in 1000 at M 0.3", and W3's body-force rows will meet it.
+  - **Where it is now:** it is not in the round-3 handoff's open items or decisions, and no orchestrator decision covers it (D4-19..D4-28 do not mention it). The only trace is a comment in `tests/unit/flow/precondition.test.ts:286-287`. That comment calls the mode "slowly growing" and limits the plain check to 30 iterations so that it does not show.
+  - **My probe `w2r-blockage` at ca296ae**, on the test's duct (b_min 0.85) started from its preconditioned steady state (residual 1e-11):
+
+    | Throat Mach | Mode | Growth of max\|ΔU\| over 1000 iterations |
+    |---|---|---|
+    | 0.06 | plain tracking | 1e-11 → 0.49 |
+    | 0.06 | physical-time SSP-RK3 at its own dt (3.5e-5 s) | 2e-11 → 0.83 |
+    | 0.35 | plain tracking | 3e-9 → 30 |
+    | 0.35 | physical-time SSP-RK3 | 3e-9 → 1.5e-5 |
+    | 0.3, b = 1 (no blockage) | both | stable (3e-9 throughout) |
+
+  - **Why it blocks.** Physical time is the mode of the surge and light-off events, and every W3 blade row has blockage. The rule for this merge is that failing items must be visible and documented, which this one is not.
+  - **Fix (no scheme change needed for the merge):**
+    - pin it as an `it.fails` test, or a ladder row that reports FAIL, for both modes;
+    - correct the comment;
+    - carry it in the handoff and in SOLVER.md's open notes;
+    - raise it for an orchestrator decision before W3. The round-2 lead was to linearise the p∇b source with face against cell pressures.
+
+### Important
+- **W2R-I1 OPEN: the merged contract is not yet the settled scheme.** The decisions were made after this tip:
+  - D4-25: SOLVER.md §6 and `muscl.ts` still have the sharp `ab > 0` switch.
+  - D4-26: L7 still runs at 48 × 48 and fails.
+
+  These rows fail visibly and are documented, so this does not block the oracle. But w2/solver must not implement §6's limiter until the next round lands the smooth form, in this order: SOLVER.md first (the ε rule and its scaling), then the oracle, then the L2/L4 shock rows and the positivity fallback green.
+- **W2R-I2 OPEN: §12.2 has no row for the preconditioned tracking mode, and row C is mis-specified.**
+  - **The gap.** Case C (`tests/ladder/cases/f32.ts`) runs unpreconditioned, and row E does not say. So nothing in the GPU table checks the kernel's β², the δU update, the D4-20 scaling or the preconditioned far field. That is the engine's mode.
+  - **Row C** names `tests/ladder/oracle.ts` `smoothPerturbation`, which does not exist: the pulse is a local function in `cases/f32.ts`. It also says "the real mesh", but the storage experiment runs on a 3-block 20 × 12 closed box.
+  - **Fix:**
+    - add C-pre rows (case C with `lowMachPreconditioning { minMach 0.003 }`, 1 / 10 / 100) and an L7 or L8 set-up row;
+    - export the perturbation from a module that both suites import;
+    - state the mesh of each row;
+    - measure the storage error for the new rows, as for the others.
+- **W2R-I3 OPEN: the preconditioned tracking CFL 1.5 has no stability basis** (§ L8 above). D4-8's pin covers advection. The 1D limit for the preconditioned acoustic pair is 0.97, and L8's mode is a fully discrete instability that follows minMach. Fix: the four steps under "Fix direction" above.
+
+- **W2R-I4 OPEN: the oracle's own flux test cannot tell a wrong SLAU2 flux.**
+  - The Stryker survivors above (the face swirl, the face density sign, dh0's kinetic sign, χ, g, V̄ and p̃'s dissipation) all pass `slau2.test.ts`. That suite checks properties: antisymmetry, consistency for equal states, and D4-20's exact 1/f_a ratio. It never checks a flux value for unequal states.
+  - My term-by-term reading found the code right, and the ladder (L2, L4) would catch gross errors. But this module is what the WGSL kernel is matched against, so a subtle error would pass into the kernel as "agreement".
+  - Fix: add independent value tests for three or four unequal state pairs: a subsonic jump, an expansion with g ≠ 0, a swirl case with w ≠ 0 and ρ′ ≠ 0, and a transonic face. Compute the expected values from the paper's formulas outside the module (by hand, or with a small script of their own), at 1e-12 relative. Then re-run this spot check: the score should be ≥ 97 %.
+
+### Nits
+- **W2R-N1 OPEN.** `ReferenceSolver.setBlockage` (`solver.ts:182-207`) does not check b ∈ (0, 1] (SOLVER.md §8). A b of 0 makes τ = CFL/λ · 1/(bV) infinite, and the failure surfaces only as a later NaN. Throw instead.
+- **W2R-N2 OPEN.** The far-field, wall and outflow ghosts copy T′ and c (record entries 6 and 7) from the source cell instead of computing them (`boundary.ts:119-120, 218-219`). Nothing reads a ghost's T′ or c, since SLAU2 recomputes them. SOLVER.md §5 should say they are don't-care, so the kernel neither relies on them nor wastes work on them.
+- **W2R-N3 OPEN.** `SourceContext.time` is the step's start time in all three SSP-RK3 stages (`sources.ts:25`, `solver.ts:426`). A time-dependent W3 source (a fuel or bleed schedule in a physical-time event) then drops to first-order time accuracy. Pass the stage time: t, t + dt, t + dt/2.
+- **W2R-N4 OPEN.** L4b starts from the exact quasi-1D answer with the shock at the target, and its residual stalls. Keep D4-19's 20 position samples in `reports/ladder/L4b.json` (oscillation against drift). Preferably also start from an offset shock (x_s ± 5 % of the length) to show the equilibrium is reached from both sides.
+- **W2R-N5 OPEN.** `muscl.test.ts` misses two checks: the positivity fallback at exactly zero face density or pressure, and that `limitedSlopes` writes only its six slots. Use a sentinel past `oOff + 6` (survivors `muscl.ts:27, 36`). When D4-25's ε replaces the `1e-30`, test the ε rule's scaling as well.
+- **W2R-N6 OPEN.** `slau2.ts:28-29` keeps `sideL`/`sideR` as module-level scratch objects that `slau2Flux` and `physicalFlux` share, which is what the `:132` survivor relies on. This is fine single-threaded, but it is a re-entrancy trap if the oracle ever runs in workers or interleaved. Make them locals, or give `physicalFlux` its own.
+
+**Verdict w2/reference @ca296ae: FIX FIRST (W2R-B1 only).**
+- **Why it is close.** The oracle implements SOLVER.md term for term. Its ladder is honest and pre-registered, and every failing row is visible and under a decision: L7 under D4-26, L8 under D4-27, L9a/L9b convergence under D4-25. Those do not block it.
+- **Why it waits.** W2R-6 is a real linear instability of the plain and physical-time scheme with blockage, open since round 2. It is no longer in the handoff, has no decision, and is not visible as failing.
+- **What turns it into MERGE without another full pass:** a test that pins W2R-6 as failing in both modes, the corrected comment, and the entry in the handoff and SOLVER.md.
+- W2R-I1..I4 go to the next reference round. W2R-I2 and W2R-I4 must be done before w2/solver writes its oracle comparisons.
+
+**May w2/solver start from the merged reference? Yes, once W2R-B1 is pinned and the reference is merged, within these limits:**
+- **Implement now, as SOLVER.md states it:**
+  - §2-§5: the mesh, the gas, the gauges and the BCs;
+  - §7 SLAU2, including the D4-20 term and its bitwise expression order;
+  - §8 and §9: the sources, the blockage and the residual;
+  - the §10 SSP-RK3 and the plain tracking RK;
+  - the §12.1 exactness properties.
+- **Wait for:**
+  - **the limiter (§6):** the next round's SOLVER.md text for D4-25's smooth form (W2R-I1);
+  - **preconditioned tracking's CFL, minMach and any added velocity diffusion:** D4-27 and W2R-I3, because the 1.5 default has no stability basis there. Implement the preconditioner itself (β², δU, the spectral radius, the preconditioned far field) now. Do not treat its CFL or its dissipation as final.
+  - **the §12.2 preconditioned rows (W2R-I2) and the oracle's SLAU2 value tests (W2R-I4)** before the Dawn tests against the oracle are written.
+
+## Critic pass 7: trial merge (w2/followups @ef2bb19 → w2/reference @ca296ae)
+
+- **Merge.** I ran sequential `git merge --no-ff --no-commit` on a detached HEAD at the critic's HEAD (main 4afb9d4 plus this pass's followups log), with a scratch commit between the steps.
+  - Both steps are clean.
+  - PHYSICS.md auto-merges: followups' ledger rows and C12, and the reference's §3.3 CPU variants.
+  - `stryker.config.mjs` keeps followups' `vitest.mutation.config.ts`. Its default set includes `tests/unit/flow/**`, so the reference's flow suites join the mutation base set.
+- **`npm run mesh`:** no working-tree change, so the committed manifest and outputs are byte-identical.
+- **Gates on the combined tree.** These ran quiet except for the critic's own L8 probes.
+  - `npm test`: 1804 passed, 6 expected fail (91 files).
+  - `npm run typecheck`: clean. `npm run lint`: clean.
+  - `npm run coverage`: lines 99.59 %, statements 98.73 %, branches 88.35 %, functions 99.62 %; every threshold passes.
+    - `src/flow/reference`: lines 100 % (branches 88.45 %).
+    - `src/flow/mesh`: 98.60 %.
+    - `src/cycle`: 99.58 % (91.76 %).
+    - `src/thermo`: 100 %.
+    - `src/contracts`: 99.67 %.
+  - `npm run test:mesh`: 29 passed. `npm run test:gpu`: 15 passed (4 files).
+  - `npm run test:ladder`: 9 files passed, 4 failed, 313 s. The same rows and the same values as at the reference tip: L7 asymmetry, L8, and the L9a/L9b convergence rows fail.
+- **The Stryker spot check** ran on this tree: muscl.ts 88.64 %, slau2.ts 90.96 % (see the reference section above).
+- **Restore.**
+  - `git merge --abort`, back to branch `critic`.
+  - Removed the generated `public/mesh/*.bin`, `coverage/` and `reports/`.
+  - Stryker cleaned its sandboxes.
+  - Both builder worktrees are clean at ef2bb19 and ca296ae. Their ignored `coverage/` and `reports/` existed before and were refreshed by the gate runs.
+  - No dev server or browser was used.
+
+**Orchestrator decisions needed (pass 7):**
+- **(v) W2R-6** (the blockage instability of the plain and physical-time scheme, W2R-B1): investigate it before W3, whose blade rows all carry blockage, or accept it as a known limitation with a stated workaround. My preference is to investigate it, starting with the p∇b source's face against cell pressures.
+- **(w) L8 / D4-27 reframed** (W2R-I3, the L8 section above):
+  - The band follows minMach and the CFL, not M_cut. It is a fully discrete instability of the preconditioned tracking iteration.
+  - In 1D, the 3-stage RK is stable only to CFL 0.97 on the preconditioned acoustic pair, against D4-8's 1.54 for advection.
+  - The question: may the next reference round
+    - amend D4-8 for preconditioned tracking (a CFL from a fully discrete analysis), and
+    - try a matched velocity diffusion (AUSM+-up p_u, a SLAU2 change beyond D4-20),
+
+    keeping M_cut = minMach = 0.003?
+- **(x) C12's recovery bias** (W2F-I2): accept the bias tuned to the case, with a 4 % second pin and the headroom stated in the ledger, or ask the D4-18 round to revisit it.
