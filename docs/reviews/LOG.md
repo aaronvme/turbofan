@@ -1349,3 +1349,204 @@ None.
 **Orchestrator decisions needed (pass 5):**
 - (r) **D3-15 on main:** record D3-15 in the LOG with this merge, so that the relabelled markers (W1K-I1) can cite it.
 - (s) **The post-surge hang (W1K-I2):** the fit's slam surges, then hangs at 10.7 kN instead of recovering. Either add it to the part-power backlog item, or schedule a check of the surge-recovery path (FADEC fuel cut and re-acceleration) before W3's surge scenarios.
+
+## Critic pass 6: w1/lookdev-2 + w1/lookdev-3 @ca4a33a
+
+Reviewed 2026-10-26 by the pass-6 critic: the stack tip `w1/lookdev-3` @ca4a33a (which contains `w1/lookdev-2` @83b5ec7) as one unit. The stack branches from 8c8ed6b, so the review diff is `8c8ed6b...ca4a33a` (44 files: `src/geometry/{visibility,screenRect,engineGeometry}.ts`, `src/gpu/{renderScale,passTimings}.ts`, `src/render/{post,engineView,engineScene,materials,studio,passTimer}.ts`, `src/lookdev/main.ts`, `tools/lookdev/{capture,timing}.ts`, the tests, LOOKDEV, ENGINE_FACTS, GPU_FACTS M42-M44, the shots and `timings.json`). Judged under D0-1, D3-1 (studio product shot), D3-7 and its official result, D3-9, D3-10 and D3-16 (the rotor pass shades each pixel once; no TRAA accumulation of the fan blur). Checklists applied: typescript-reviewer, silent-failure-hunter, pr-test-analyzer, and the three/WebGPU pitfalls in GPU_FACTS (M12, M15-M17, M37, M43, M44). **Nothing was timed** (no `bench:*`, no capture timing run). Browser checks ran on the critic's own MCP page on port 5190, closed afterwards.
+
+New probes:
+- `docs/reviews/probes/w1v-geometry.probe.ts.txt` (Node): the triangles each look preset draws at `high`, by class; the fan blades the cutaway hides.
+- `docs/reviews/probes/w1v-rotor-traa.browser.probe.ts.txt` (browser): TRAA on shutter-0 rotors at rest (dt 0, what the tests do) and in motion (dt 1/60, what the app and the capture do), each against a TRAA-off still at the same phase.
+
+**Gates at the tip** (rerun in the builder worktree; its tracked files unchanged afterwards):
+- `npm test`: 1468 passed (66 files), exit 0.
+- `npm run typecheck`: clean.
+- `npm run lint`: **FAILS.** ESLint is clean; Prettier flags `docs/look-dev/timings.json` (W1V-B1).
+- `npm run coverage`: lines 99.58 %, statements 98.66 %, branches 88.60 %, functions 99.56 %; thresholds pass. Per directory: `src/geometry` lines 99.57 % (branches 90.42 %), `src/gpu` 99.26 %, `src/cycle` 100 %, `src/thermo` 100 %, `tools/mesh` 99.21 %. New and changed files: `src/geometry/visibility.ts` 98.1 % / branches 92 %, `screenRect.ts` 100 / 90, `renderScale.ts` 100 / 100, `passTimings.ts` 100 / 83.3. (`tools/lookdev/timing.ts` is unit-tested but outside the coverage include.)
+- `npm run test:mesh`: 29 passed.
+- `npm run test:browser`: 21 passed (5 files: interop, chrome-gpu, engineView with every preset in both profiles and the profile switches, culling, fanBlur), zero WebGPU errors.
+  - Culling pixel test: every closed preset plus the axial-intake and rear-nozzle orbits, at two fan phases: within the on/on floor.
+  - Fan-blur reference test (my run, bounds unchanged): fanIdle estimator MAE 0.0017 / worst tile 0.0270, shipped 0.0058 / 0.0613; hero 0.0013 / 0.0166, shipped 0.0043 / 0.0361; fanTakeoff 0.0021 / 0.0306, shipped 0.0044 / 0.0466. These match the handoff.
+
+**Pass-4 items, checked against their commits:**
+- **W1L-I1 FIXED** (552e3e4, 74271e0 TDD; 6ce5b12; view-dependent 7fb4d81 TDD / 786aba1). `closedViewLimits` sits at the combustor inlet and the first LPT row (`visibility.ts:44-54`), so every booster, HPC and LPT row is drawn. `tests/browser/culling.test.ts` is my pass-4 probe made a gate, with a fair floor (the same frame spacing for floor and on/off).
+- **W1L-I2 FIXED** (5c24e0c). The rotor key (2048) and rim (1024) cast shadows from static-part proxies on layer 2 (`studio.ts:221-246`, `engineScene.ts:131-140`). three's shadow pass honours `maskNode` (`Renderer.js:3509-3554`), so the proxies follow the cut. In 00 and 05 the fan face now sits in the lip's shadow.
+- **W1L-I3 FIXED for the estimator** (230b2a3 TDD, 5c24e0c, 702754e; cost a482f11). The march is gone; 8 time copies with a per-pixel pick, against a 64-still box-shutter reference. The "shipped" half of the test measures a case the app never shows (W1V-I1).
+- **W1L-I4 FIXED** (401e792 TDD, bee6143, ee463c2). `tools/lookdev/timing.ts` is pure and tested. The capture runs a warm-up before each run, a seeded rotated order, every frame per run, D3-6 validity and the conditions. The official D3-7 run used it: 4 configs, all VALID. Left over: no `--worker` mode, and the render scale and GPU error count of each run are logged but not written to `timings.json` (`capture.ts:217`) (W1V-N1).
+- **W1L-N1 PARTLY** (e9c7d68): panels, seams, hinge and latch lines, flush latches, doors, fastener rows, orange peel, oil canning, the satin lip band. Open: the stand or pylon, 04's framing, the flattened lower cowl (W1V-N5).
+- **W1L-N2 PARTLY:** the lower inner-barrel liner no longer reads as a hole (03 against before/03), and the heat tint has a little chroma. The case speckle was not investigated and still shows in 07.
+- **W1L-N3 CLOSED by D3-9/D3-16:** see the plug check below.
+- **W1L-N4 OPEN:** only `hero` and `cutaway` render at `high` (W1V-N6).
+- **W1L-N5 FIXED** (5eccc78): the dispose failure joins the init error as an `AggregateError` with `cause` (`engineView.ts:177-191`).
+- **W1L-N6 FIXED by measurement:** GPU_FACTS M42 revised, and the D3-7 official run confirms it (the opaque pass 5.59 ms at scale 1 against 5.64 ms at 0.75).
+- **W1L-N7 FIXED** (5eccc78): `beginFrame` advances `renderer.info.frame` (`passTimer.ts:98-101`). It holds while nothing calls `setAnimationLoop`: three's `Animation.js:85` would set `info.frame = nodeFrame.frameId` and could reuse uids (W1V-N6).
+
+**Round 3, checked:**
+- **The rotor pass (D3-16) is correct.**
+  - The depth pre-pass (`fanDepthMaterial`, `materials.ts:650-656`) makes the pick with a trivial shader. The shaded copies draw at `EqualDepth` with no depth write and no discard (`materials.ts:713-721`), so each pixel is shaded once. Both stages use the same `bladeHide` position code.
+  - At shutter 0 only copy 0 is drawn and `fanCopies` = 1 (`engineView.ts:355-372`).
+  - The lighter loft (13 x 23 at `high`, 1,140 triangles a blade) holds the fan-blur bounds.
+  - Gap: nothing can see an EqualDepth hole (W1V-I3).
+- **The gated composite is correct.** `screenRectOfBox` returns the full screen when a corner is at or behind the camera plane. The fan's box covers every angle and follows the exploded offset. The 3 px margin covers TRAA's jitter.
+- **The performance profile is implemented correctly; it barely helps because only the post passes scale.**
+  - `renderScale.ts` is pure and tested. `post.setRenderScale` scales the scene, rotor and composite targets and GTAO. The TRAA history-depth fix (M44) is sound, and the browser test switches profiles both ways with zero errors.
+  - Why it barely helps (official run): GTAO, the composite and TRAA scale (2.89 → 2.04 ms), but the opaque and rotor passes, 7.0 ms together, do not (5.59/1.36 → 5.64/1.51). Net saving 0.61 ms.
+  - The controller's cost model `gpuMs (s'/s)^2` (`renderScale.ts:66`) assumes pixel-bound passes. It predicts 5.7 ms at 0.75 against the measured 9.57. That is harmless today: the controller drops to 0.75 and stays there. It is wrong as a budget model (W1V-N1).
+  - D3-7 asked for "TAA upsampling". What ships is TRAA at the render scale with a bilinear upscale in the output pass. three sets TRAA's jitter from the drawing-buffer size (`TRAANode.js:454-455`), so at 0.75 the jitter spans ±0.375 render pixels (W1V-N1).
+- **View-dependent culling is correct and conservative.**
+  - The eye limits are the splitter x (0.262 m) and the first LPT row (1.975 m). Both lie inside the planes of the openings they guard (the intake highlight, the core-nozzle lip), and the classified rows lie wholly inside the core cowl.
+  - Nothing visible is culled: the culling pixel test is at the floor in 7 poses x 2 phases.
+  - Probe numbers at `high`: front eyes draw 1.06 M triangles, the side view 0.48 M, cutaway, exploded and hotSection all 1.58 M.
+- **Nacelle panels, seams and orange peel: done, procedural, cheap.** `materials.ts:219-325`.
+  - The seams keep a minimum contrast far away, so the joints read at 02's distance.
+  - The orange peel (1.2e-5 m and 2.5e-5 m bumps) and the panel tone steps (±0.7 %) are below what any shot resolves. That is honest, but they add nothing yet.
+  - The doors read as drawn outlines: a uniform dark rounded rectangle with no flush step or fastener ring (01, 02) (W1V-N5).
+- **The plug check (D3-9) is honest and consistent.**
+  - ENGINE_FACTS states no public length, base diameter or cone angle, with the sources searched and why each does not qualify.
+  - The model's figures check: A8 = π(0.39² − 0.3052²) = 0.1852 m²; 0.65 / 0.78 = 0.83 lip diameters; atan(0.3052 / 0.65) = 25°.
+  - It is unchanged, as D3-16 accepts.
+
+**The cutaway fan (orchestrator's note on 03): CONFIRMED that the fan does not read, REFUTED that it is not drawn. It is a bug, with three causes.**
+- **It is drawn.** At the `cutaway` camera, 16 of the 24 blades render.
+  - `?debug=rotorAlpha` shows the fan's full height as a solid band behind the spinner.
+  - `noFan` on/off changes exactly that band: it is the grey "swirl" between the spinner and the fan-frame strut in 03. The strut is the vertical post.
+  - The probe: the 100° wedge plus each blade's 19.5° angular extent hides 8 blades (`bladeHide`, `materials.ts:539-551`), as designed.
+- **Cause 1, the main one: TRAA ghosts the spinning rotors in the shutter-0 modes.**
+  - The `cutaway`, `hotSection` and `exploded` presets have shutter 0 but throttle 0, so the spools keep turning at idle: 1,074 rpm, 107° or about 7 fan pitches per frame (`engineView.ts:341`).
+  - `fanLive` is false at shutter 0, so the fan bypasses the time copies. The rotor image enters TRAA through the composite with the main pass's zero velocity (`post.ts:281`), so each pixel's history is the fan at other phases.
+  - The neighbourhood clamp keeps part of it, so the blades become translucent, feathered plates.
+  - A close cutaway pose (camera (-0.9, 1.0, 2.2)) with TRAA on against off: feathered, multiply-imaged blades against crisp, separate blades. The exploded close-up is the same: double-imaged fan blades with TRAA, crisp without. This is why 04's fan reads as a dark torn disc.
+  - The browser probe quantifies it: differing 16 px tiles against a TRAA-off still at the same phase, at rest (dt 0) / moving (dt 1/60): cutaway close-up 2 / 19, exploded close-up 3 / 21, `cutaway` preset 33 / 47, `exploded` 5 / 10, `hotSection` 0 / 5; the extra tiles lie on the fan and booster blades (the diff images), the rest of both counts is TRAA's edge anti-aliasing.
+  - D3-16 avoided exactly this for the blurred fan, but the shutter-0 path was left in TRAA.
+- **Cause 2:** whole blades touching the wedge are hidden. These are the 8 nearest the camera, whose profiles would carry the shot. The remaining 16 are seen stacked, side-on, about 50 px wide at 03's framing.
+- **Cause 3:** the stacked blades have nothing that separates them. The rotor pass gets no GTAO (the composite applies `occl` to the scene only, `post.ts:185, 232`), and the rotors cast no shadows (`engineScene.ts:182`), so overlapping blades merge into one smooth surface.
+
+**Visual review, 00-07 against before/ (round 2) and D3-1** (1920x1080, plus my own renders):
+What improved:
+- The lip is a leading-edge band of satin aluminium with paint aft of a seam. It no longer reads as a chrome torus (00, 01, 05).
+- Panel joints, hinge and latch lines, and doors show (01, 02).
+- The cutaway's lower inner barrel is grey, not a black hole (03).
+- At shutter 0 with TRAA off, the fan is genuinely good (my fanIdle still): 24 separate wide-chord blades with overlap, the spinner spiral crisp.
+
+What still reads as CG, worst first:
+1. **The cutaway and exploded fans** (03, 04): see above (W1V-I1).
+2. **The fan in motion** (00, 01, 05, 06). The lit side is feathered white smears, and the far side (1-4 o'clock in 05) shows black voids with torn white flecks where the booster shows through. 00 carries a dotted stipple in its lower half (the 8-sample noise left after the 3 x 3 average). The handoff says so.
+3. **The spinner's spiral, the CFM56 signature, is missing from all four committed intake shots.** The spinner is now in the lip's shadow (W1L-I2), and a 0.04-albedo cone with white paint lit only by the image-based light shows its stripe only while the stripe crosses the lit sector. My fresh fanIdle page showed it; the same page after the capture's preset order did not (a phase effect, not state).
+4. **The engine floats** 0.37 m above the floor with its shadow detached (01, 02, 04). There is no stand or pylon. The nacelle is a perfect solid of revolution: no flattened lower cowl, no chine, no drain mast, no stencils.
+5. **The plug** (02, 03, 07) is a uniform polished ogive with one hard specular streak: a chrome bullet. A run engine's plug and core nozzle are dull and heat-stained.
+6. **07:** the LPT/HPT blades between the disk caps read as dark, speckled barrels, and the cases keep the sandpaper speckle (W1L-N2).
+7. **06:** the booster seen through the fan at takeoff is a sawtooth comb (the own-surface blur capped at one pitch).
+8. **The doors** read as stickers (01, 02).
+
+**Performance (for Aaron's D3-7 decision; I do not choose the remedy). Does the code support one?**
+- **Triangles per view at `high`** (probe; the shipped geometry, instances counted):
+  - front eyes (threeQuarterFront, hero, fanIdle, fanTakeoff): **1.06 M**. That is solids 0.50 M, static vanes 0.33 M (main pass), booster and HPC rotors 0.20 M (rotor pass), fan 27 k, struts 4 k. Whenever the fan blurs, the fan's 8 copies are drawn twice (pre-pass and shaded): +0.41 M of vertex work.
+  - side: **0.48 M**.
+  - cutaway, exploded, hotSection: **1.58 M**.
+- **`stats().drawnTriangles` overcounts** (`engineView.ts:266-275`). Since 5c24e0c it traverses the rotor scene's layer-2 shadow proxies, which the camera never draws (0.5-0.63 M): my cutaway page read 2.23 M against 1.58 M real. The D3-7 note's "about 1.5 M" is LOOKDEV round 2's "1.52 of 1.66 M". That was taken before both the proxies and the view-dependent culling, so it is stale, and the HUD cannot give the current figure (W1V-I2).
+- **LOD hooks: none yet, but the structure supports one cheaply.**
+  - Today there is one global `GEOMETRY_QUALITY` (`test`/`high`), built once per view: one `segments` (192) for all 48 solids and one loft per blade family. There is no per-row or per-part LOD and no runtime switching.
+  - There is no occlusion culling inside the closed classes. The cutaway's hidden blades are collapsed in the vertex shader, not culled, so they still cost vertex work.
+  - `buildEngineGeometry` is pure and per-row, and the closed-view classes are a ready LOD key: `frontOnly` rows are seen only through the fan and booster gaps. The culling pixel test is a ready acceptance harness for any LOD, because it compares pictures.
+- **The largest levers, by triangle share:**
+  - the solids at 192 segments (0.50-0.63 M; nacelle skin 104 k, core cowl 78 k, bypass liner 48 k, lip 46 k);
+  - the HPC rows (346 k, seen from the front only through two rows of gaps);
+  - the static vanes (327 k);
+  - the fan pre-pass (219 k per pass).
+- **The cutaway's extra 2.8 ms of opaque time:** it draws all 1.58 M triangles, and every solid's wedge is shaded and then discarded (M43: a discard saves no shading). A geometric wedge would avoid that.
+- **Transitions:** for the 1.4 s of every mode change, all three shadow maps re-render every frame (`engineView.ts:386-388`), now with the rotor lights' maps of every static part. That cost spikes during transitions and is not in any timed config (W1V-N1).
+
+### Blocking
+- **W1V-B1 OPEN: `npm run lint` fails at the tip.**
+  - Where: `docs/look-dev/timings.json`, reformatted by the official-timing commit ca4a33a. The builder's handoff commit 23239a1 was clean, and the LOOKDEV gotcha names this exact step.
+  - Failure: merged as it is, main's lint gate is red, and every builder's next handoff fails it.
+  - Fix: `npx prettier --write docs/look-dev/timings.json`, then commit. Formatting only: no number changes, and no re-review needed.
+
+### Important
+- **W1V-I1 OPEN: TRAA accumulates the spinning rotors at the wrong phase in the shutter-0 modes, and no test sees it. The cutaway fan does not read.**
+  - Where:
+    - `post.ts:281`: TRAA takes the main pass's velocity, which is zero on rotor pixels;
+    - `engineView.ts:341, 352-372`: the spools turn in every mode, and the shutter-0 fan bypasses the time copies;
+    - the `presets.ts` `cutaway`/`exploded`/`hotSection` presets (shutter 0, throttle 0);
+    - `fanBlur.test.ts:142-145`: the "shipped" frame accumulates 48 frames at dt 0, so the fan holds still, which the app never does;
+    - `bladeHide` (`materials.ts:539-551`);
+    - no rotor AO or rotor shadows (`post.ts:185, 232`, `engineScene.ts:182`).
+  - Failure: 03's fan is a grey band, 04's fan a dark torn disc, and every orbit of the cutaway or exploded view shows ghosted blades. The fan-blur test passes on a held-still fan. The probe: differing 16 px tiles against a TRAA-off still at the same phase, at rest (dt 0) / moving (dt 1/60): cutaway close-up 2 / 19, exploded close-up 3 / 21, `cutaway` preset 33 / 47, `exploded` 5 / 10, `hotSection` 0 / 5; the extra tiles lie on the fan and booster blades (the diff images), the rest of both counts is TRAA's edge anti-aliasing.
+  - Fix (pick per question t):
+    - **(a)** in the display modes, ease the spools to a stop or to a display speed (a few rpm) while the cut or the explosion opens;
+    - **or (b)** give rotor pixels a velocity into TRAA: the composite knows `pRotor` and each spool's angle per frame, and rigid rotation reprojects exactly, with TRAA's disocclusion test catching the rest;
+    - **or (c)** mark rotor pixels as having no history.
+    - Then, for the cutaway: keep the fan blades whose root lies outside the wedge (test `|mid| < cutHalf − half` instead of `< cutHalf + half` for the fan row only), so the blades at the cut faces show their profile, as product cutaways do. A whole blade has no open section, so nothing hollow shows.
+    - Darken the overlap with a cheap per-blade cavity term, or let the rotors cast into the rotor maps when the spools are still.
+    - Run the fan-blur "shipped" check at dt 1/60 with the spools turning, and add the probe's moving-vs-still check for the cutaway and exploded presets as a browser test.
+  - Allowed after merge (the follow-up round).
+- **W1V-I2 OPEN: the performance decision rests on a stale triangle count, and the stat that should report the current one counts geometry the camera never draws.**
+  - Where: `engineView.ts:266-275` (`drawnTriangles` traverses the layer-2 shadow proxies), and the D3-7 result's "about 1.5 M triangles" (LOOKDEV round 2's "1.52 of 1.66 M", from before the proxies and the view-dependent culling).
+  - Failure: Aaron weighs a LOD round against a smaller solver budget using the wrong number. The real front-view draw is 1.06 M (+0.41 M of fan-copy vertex work when the fan blurs), and the side view only 0.48 M.
+  - Fix:
+    - count only objects whose layers the camera sees (`obj.layers.test(camera.layers)`), and count the fan's pre-pass copies separately;
+    - put the per-view table above into LOOKDEV;
+    - for the decision, a diagnostic A/B the existing harness can run once at 20 s each: `test` quality for the `frontOnly` rows, and 96 segments for the internal solids.
+  - Allowed after merge. Due before the W1 report goes to Aaron.
+- **W1V-I3 OPEN: an EqualDepth hole in the fan would pass every test.**
+  - Where: `materials.ts:713-721`, and GPU_FACTS M43 ("Equal depth held ... the fan-blur reference test stayed within its bounds").
+  - Failure: the reference stills draw copy 0 through the same pre-pass and EqualDepth, so a hole would sit in the reference and in the estimate alike. The culling test compares two frames that would share the holes too.
+    - Another adapter or a driver or Dawn update that compiles the two vertex stages differently (three emits no `@invariant`) would put pinholes or missing blades into every shot, with every gate green.
+    - M43 cites the fan-blur test as evidence that it cannot provide.
+  - Fix:
+    - a browser test at shutter 0: the rotor-alpha coverage of the fan drawn through the pre-pass and EqualDepth, against the same fan drawn with an ordinary depth test (a debug flag that hides the depth copies and sets `LessEqualDepth` with depth write). 0 differing pixels;
+    - reword M43's evidence to the visual `rotorAlpha` check.
+  - Allowed after merge.
+
+### Nits
+- **W1V-N1 (performance profile and harness):**
+  - the controller's quadratic cost model contradicts the measured geometry-bound passes (`renderScale.ts:66`); predict with a fixed part plus a scaled part, or document it;
+  - "TAA upsampling" is a bilinear upscale, and TRAA's jitter is in output pixels (±0.375 render px at 0.75); say so in LOOKDEV and D3-7's follow-up;
+  - write each run's render scale and GPU error count into `timings.json` (`capture.ts:217`);
+  - no `--worker` mode yet (W1L-I4, W1G-I2);
+  - the transitions re-render three full shadow maps per frame (`engineView.ts:386-388`): untimed.
+- **W1V-N2 (stale text):**
+  - `engineScene.ts:119-127` still says the opaque pass is "fill-bound, not triangle-bound";
+  - LOOKDEV round 3 says the performance profile "is under" 8 ms (indicative 7.15). The official run says 9.57; add the D3-7 result there.
+- **W1V-N3 (silent failure):** the TRAA patch (`post.ts:287-302`) reaches into `_historyRenderTarget` and `_previousDepthNode` unchecked. If a three update renames `_previousDepthNode`, the assignment creates a new property, and TRAA's disocclusion test silently reads a stale depth. Assert both fields exist when the pipeline is built, and throw.
+- **W1V-N4 (the cutaway rule):** the hidden set changes as the spools turn, so at the cut faces blades pop in and out every frame. Fix (a) of W1V-I1 removes this too.
+- **W1V-N5 (visual):** see the list above:
+  - the spinner spiral (lift the paint's response in shadow, or light the spinner through the intake mouth);
+  - the floating engine (a cradle or a pylon stub);
+  - the chrome plug (dull, heat-stained, rougher);
+  - the doors (a flush step and a fastener ring, or drop them);
+  - 04's framing;
+  - 07's speckle (`?debug=ao` against `noShadow`, W1L-N2).
+- **W1V-N6 (tests):**
+  - only `hero` and `cutaway` at `high` (W1L-N4);
+  - the N7 fix depends on nobody calling `setAnimationLoop`; document the rule beside it.
+
+### Trial merge (w1/lookdev-3 @ca4a33a into the critic branch at main 8e93e2e)
+- **Merge:** `git merge --no-ff --no-commit w1/lookdev-3` on the critic branch (main 8e93e2e) is clean: 44 files, and ENGINE_FACTS auto-merges (main's cycle-calib rows plus the plug section).
+- **`npm run mesh`:** no working-tree change (the manifest is unchanged; the plug was not reshaped).
+- **Gates on the combined tree:**
+  - `npm test`: 1600 passed, 5 expected fail (72 files). That is main's 1577 + 5 plus the stack's 23.
+  - `npm run typecheck`: clean.
+  - `npm run lint`: fails on `docs/look-dev/timings.json` only (W1V-B1). ESLint is clean.
+  - `npm run coverage`: lines 99.51 %, statements 98.58 %, branches 87.98 %, functions 99.59 %; every threshold passes (`src/geometry` 99.57 %, `src/cycle` 99.45 %, `src/thermo` 100 %).
+  - `npm run test:mesh`: 29 passed. `npm run build`: ok.
+  - `npm run test:browser`: 21 passed, zero WebGPU errors.
+  - The probes: `w1v-geometry` 2 passed (the numbers above); `w1v-rotor-traa` ran (the numbers in W1V-I1).
+- **Restore:**
+  - `git merge --abort`, then the probe copy, `coverage/`, `dist/`, `test-results/` and the generated `public/mesh/*.bin` were removed. The critic branch is back at 8e93e2e.
+  - The builder worktree is clean at ca4a33a. Its ignored `coverage/` and `test-results/` existed before and were refreshed by the gate run.
+  - The critic's dev server (port 5190) and MCP page were closed.
+
+**Verdict w1/lookdev-2 + w1/lookdev-3 @ca4a33a: FIX FIRST (W1V-B1 only).**
+- W1V-B1 is a formatting-only commit: `npx prettier --write docs/look-dev/timings.json` on `w1/lookdev-3`. Once lint is clean at the tip, this is **MERGE** without another review pass.
+- The stack closes W1L-I1..I4, N3, N5, N6 and N7, and parts of N1 and N2. The rotor pass is a sound, measured implementation of D3-16. The culling is correct and pixel-tested, and the performance profile is correct. The plug check is honest.
+- The Important items are visual or performance and do not block. They go to a named follow-up round `w1/lookdev-4`, in this order:
+  1. W1V-I2: the triangle figures, before the W1 report goes to Aaron;
+  2. W1V-I1: rotor TRAA, the cutaway fan, the dt-1/60 test;
+  3. W1V-I3: the EqualDepth test;
+  4. the nits.
+- The performance remedy itself (a LOD round, a smaller solver budget, or both) stays Aaron's (D3-7 result). The code supports a LOD round cheaply (see Performance).
+
+**Orchestrator decisions needed (pass 6):**
+- (t) **The display modes' spools (W1V-I1):** should the cutaway and the exploded view show a running engine (then rotor velocity into TRAA, fix b), or a display engine with the spools eased to a stop or a slow turn (fix a, simpler, and the product-shot convention)?
+- (u) **The W1 report's triangle figure (W1V-I2):** restate "about 1.5 M" from the probe (front 1.06 M + 0.41 M of fan copies, side 0.48 M, cutaway 1.58 M) before the LOD-or-solver choice goes to Aaron.

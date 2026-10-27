@@ -1,0 +1,68 @@
+// Critic pass 6, w1/lookdev-2 + w1/lookdev-3 @ca4a33a. Each test pins what the critic observed
+// for a finding. Run from a checkout of the branch (see vitest.probes.config.mjs).
+// - W1V-I2 (performance): the triangles each look preset draws at `high`, by class, from the
+//   geometry and the closed-view classes (visibility.ts). The fan's 8 time copies are drawn
+//   twice (depth pre-pass, shaded) whenever the fan blurs; the per-row hidden-blade instances
+//   of the cutaway still run their vertex shader (positions collapsed, not culled).
+// - W1V-I1 (the cutaway fan): which fan blades the cutaway hides at the `cutaway` camera.
+import { appendFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { buildEngineGeometry, GEOMETRY_QUALITY } from '../../../src/geometry/engineGeometry';
+import { closedViewDraws, closedViewVisibility } from '../../../src/geometry/visibility';
+import { bladeHidden, cutawayWedge } from '../../../src/geometry/cutaway';
+import { LOOK_PRESETS } from '../../../src/render/presets';
+import { ENGINE_DEFINITION as def } from '../../../src/engine/definition';
+
+const log = (line: string) => appendFileSync(process.env.PROBE_OUT ?? 'probe-out.txt', `${line}\n`);
+const geo = buildEngineGeometry(def, GEOMETRY_QUALITY.high);
+const set = closedViewVisibility(def, geo);
+
+describe('W1V probes (geometry)', () => {
+  it('triangles drawn per look preset at high', () => {
+    const items = [
+      ...geo.parts.map((p) => ({ id: p.spec.id, tris: p.mesh.indices.length / 3, cls: 'parts' })),
+      ...[...geo.rows, ...geo.struts].map((r) => ({
+        id: r.row.id,
+        tris: (r.blade.mesh.indices.length / 3) * r.row.count,
+        cls: `${r.material}${r.spool ? ' (rotor pass)' : ''}`,
+      })),
+    ];
+    const total = items.reduce((a, b) => a + b.tris, 0);
+    log(`total ${total}`);
+    const drawn: Record<string, number> = {};
+    for (const [name, p] of Object.entries(LOOK_PRESETS)) {
+      const closed = p.mode === 'realistic';
+      const by: Record<string, number> = {};
+      let n = 0;
+      for (const it of items) {
+        if (closed && !closedViewDraws(set, it.id, p.camera[0])) continue;
+        n += it.tris;
+        by[it.cls] = (by[it.cls] ?? 0) + it.tris;
+      }
+      drawn[name] = n;
+      log(`${name} (${p.mode}, eye x ${p.camera[0]}): ${n} ${JSON.stringify(by)}`);
+    }
+    // observed at ca4a33a
+    expect(total).toBe(1_577_784);
+    expect(drawn.threeQuarterFront).toBe(1_063_332);
+    expect(drawn.side).toBe(482_524);
+    expect(drawn.cutaway).toBe(total);
+    const fan = geo.rows.find((r) => r.material === 'fanBlade');
+    const fanTris = (fan?.blade.mesh.indices.length ?? 0) / 3;
+    log(`fan blade ${fanTris} triangles; 24 blades x 8 copies x 2 passes = ${fanTris * 24 * 16}`);
+  });
+
+  it('the cutaway hides 8 of the 24 fan blades at the cutaway camera', () => {
+    const cam = LOOK_PRESETS.cutaway.camera;
+    const w = cutawayWedge(1, Math.atan2(cam[2], cam[1]), (100 * Math.PI) / 180);
+    const fan = geo.rows.find((r) => r.material === 'fanBlade');
+    if (fan === undefined) throw new Error('no fan');
+    const hidden = Array.from(fan.angles).filter((a) =>
+      bladeHidden(a, fan.blade.thetaMin, fan.blade.thetaMax, w),
+    ).length;
+    log(
+      `fan blade angular extent ${(((fan.blade.thetaMax - fan.blade.thetaMin) * 180) / Math.PI).toFixed(1)} deg, hidden ${hidden} of ${fan.row.count}`,
+    );
+    expect(hidden).toBe(8);
+  });
+});
