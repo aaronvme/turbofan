@@ -291,7 +291,7 @@ fn acc6(a: Acc6, xa: vec4f, xb: vec4f) -> Acc6 {
 }
 
 // U^n+1 = (hi + lo) + d as a compensated sum (Knuth's TwoSum): the new hi and the rounding error
-// of hi + (lo + d), carried in lo so that increments below hi's ulp accumulate (SOLVER.md 13)
+// of hi + (lo + d), carried in lo so that increments below hi's ulp accumulate (SOLVER.md 14)
 struct Sum4 { hi: vec4f, lo: vec4f }
 fn twoSum4(a: vec4f, b: vec4f) -> Sum4 {
   let s = a + b;
@@ -399,7 +399,7 @@ fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index)
     let uc = P.uInf + q.y;
     let w = q.w / cg.x;
     // R = sum of the outward face fluxes - the pressure/swirl source - the volume sources, as a
-    // compensated (Neumaier) sum per component (SOLVER.md 13). The face fluxes are gauge flux
+    // compensated (Neumaier) sum per component (SOLVER.md 14). The face fluxes are gauge flux
     // differences F - F_inf(S); the free stream's part of the flow faces comes back as
     // F_inf(sum of b S over the flow faces) = (rho_inf u_inf, rho_inf u_inf^2) cg.w.
     let mInf = P.rhoInf * P.uInf;

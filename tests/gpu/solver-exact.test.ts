@@ -213,7 +213,7 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
   }
 
   it('keeps the f32 free stream at M 0.5 bitwise zero in every gauge and face flux (130k)', async () => {
-    // SOLVER.md 13: with the momentum and velocity gauges and the gauge flux differences, the
+    // SOLVER.md 14: with the momentum and velocity gauges and the gauge flux differences, the
     // kernel's own free stream (rho u = fround(rho_inf) fround(u_inf)) is an exact zero like the
     // quiescent ambient; only the f32 metrics' sum of S_x (the add-back) forces it (ladder L1)
     const probe = await create(engine);
@@ -257,7 +257,7 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
     );
     expect(await checkInterfaces(row, 'three-block row')).toBe(24);
     expect(await checkInterfaces(engine, '130k asset')).toBeGreaterThan(1000);
-    // in a free stream (u_inf != 0) the gauge flux differences of SOLVER.md 13 are used
+    // in a free stream (u_inf != 0) the gauge flux differences of SOLVER.md 14 are used
     expect(await checkInterfaces(row, 'three-block row, u_inf 170 m/s', 170)).toBe(24);
     expect(await checkInterfaces(engine, '130k asset, u_inf 170 m/s', 170)).toBeGreaterThan(1000);
   });
@@ -423,7 +423,7 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
   });
 
   it('accumulates increments below the state ulp (the compensated update, both modes)', async () => {
-    // SOLVER.md 13: U^n is kept as the f32 copy plus a low part, so a source whose increment per
+    // SOLVER.md 14: U^n is kept as the f32 copy plus a low part, so a source whose increment per
     // step is 1/40 of the state's ulp still moves the state at its exact rate. The calorically
     // perfect gas has the same R and cp for air and products, so a uniform fuel fraction in the
     // ambient is a quiet state (every flux an exact zero) with a large rho Z

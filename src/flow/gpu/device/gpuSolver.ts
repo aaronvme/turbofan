@@ -89,7 +89,7 @@ export class GpuSolver {
   iterations = 0;
   /**
    * The momentum gauge's offset rho_inf u_inf of the kernel's f32 reference state (exact in f64):
-   * the state holds (rho u)' = rho u - rho_inf u_inf, the primitives u - u_inf (SOLVER.md 13).
+   * the state holds (rho u)' = rho u - rho_inf u_inf, the primitives u - u_inf (SOLVER.md 14).
    */
   readonly momentumGauge: number;
   /** The kernel's u_inf (the f32 rounding of ref.u): primitive u = uInfF32 + (u - u_inf). */

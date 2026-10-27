@@ -61,7 +61,7 @@ export const PARAM_FIELDS = [
   /** Physical: U = w0 U^n + w1 E(U^(k-1)) (stage 0 takes E alone). */
   ['w0', 'f32'],
   ['w1', 'f32'],
-  /** Physical: the stage's Butcher weight (1/6, 1/6, 2/3) of the compensated update (SOLVER.md 13). */
+  /** Physical: the stage's Butcher weight (1/6, 1/6, 2/3) of the compensated update (SOLVER.md 14). */
   ['wInc', 'f32'],
   // sizes
   ['nCells', 'u32'],
@@ -142,7 +142,7 @@ export const SSP_RK3_WEIGHTS: readonly (readonly [number, number])[] = [
 
 /**
  * The same scheme's Butcher weights: U^n+1 = U^n + sum_k b_k dt L(U^(k-1)), the form the kernel's
- * compensated update accumulates (SOLVER.md 13).
+ * compensated update accumulates (SOLVER.md 14).
  */
 export const SSP_RK3_BUTCHER: readonly number[] = [1 / 6, 1 / 6, 2 / 3];
 

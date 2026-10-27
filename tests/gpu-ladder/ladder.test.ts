@@ -223,7 +223,7 @@ describe('GPU ladder', () => {
       'L1-uniform',
       [
         {
-          // D4-37: the pre-registered 1e-4 m/s, met with the f32 forms of SOLVER.md 13 (the
+          // D4-37: the pre-registered 1e-4 m/s, met with the f32 forms of SOLVER.md 14 (the
           // momentum and velocity gauges, gauge flux differences, compensated sums); before them
           // 2.0e-4 (f32 rounding of the absolute momentum fluxes, 7 ulp of u_inf)
           id: 'L1',
