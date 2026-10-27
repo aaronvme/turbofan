@@ -94,6 +94,22 @@ Never quote personal data (emails, keys, tokens) in this file.
 - **D4-7 Overnight autopilot (Aaron: "auto start when session usage runs out"):**
   - Usage cap 90%. No new agents from 78%, STOP-CLEAN at 84%, resume below 75% after the reset.
   - Official quiet timings (D0-1) run only in the cap pause, when no agents are running.
+- **D4-8 (w2/reference question d): both scheme changes accepted.**
+  - The slip wall uses a pressure-only wall flux with extrapolated ghosts: zero normal mass flux, momentum flux p·n. This is the standard finite-volume inviscid wall. The W0 mirror ghost imposed dp/dn = 0 and failed L6 wherever swirl or curvature sets a normal pressure gradient.
+  - The 3-stage RK coefficients are (0.2, 0.5, 1). The spike's (0.1918, 0.4929, 1) are linearly unstable with κ = 0 MUSCL. The default tracking CFL is 1.5, stable to 1.54 at second order. The plan's "CFL 1.5-1.8" is amended: 1.8 applies only where the limiter is first order.
+  - A linear-stability test pins both coefficient sets' limits. SOLVER.md is the contract; w2/solver implements these, not the spike.
+- **D4-9 (question a): L4b keeps its 2% threshold and its back pressure.** A stalled residual means the shock position is not converged, so 2.26% is not yet a verdict.
+  - First, find and fix the stall (limiter cycling or similar).
+  - Then run a grid-convergence study of two refinements, with the resolution stated in PHYSICS.md "CPU variants" before the runs.
+  - If the error converges below 2%, the case runs at that resolution. If it converges to a value above 2%, report the data as a quasi-1D-theory gap for a decision. No back-pressure change after the fact.
+- **D4-10 (question b): L7's iteration ratio is met with low-Mach preconditioning of the pseudo-time derivative in tracking mode (Weiss-Smith / Turkel type).** This is the standard convergence remedy for density-based solvers at low Mach. It matters beyond L7: the static engine's own far field is near M 0, so unpreconditioned stiffness would slow the app's settling.
+  - The steady solution must not change: the converged states with and without preconditioning must agree within the oracle tolerance (a test).
+  - SLAU2 keeps its own low-Mach dissipation. Physical-time mode is unpreconditioned.
+  - If the combination is unstable with SLAU2, report it rather than forcing it. The threshold stays at 3×.
+  - SOLVER.md is updated before the code.
+- **D4-11 (question c): L7's Cp asymmetry and L8 are set-up investigations,** not thresholds: the axis cells of the polar mesh, the far-field offset, and the entropy error at the stagnation points. No threshold change.
+- **D4-12 (question e): the f32 metric defect is fixed in the asset if w2/solver's 20k-iteration L1 fails,** not in the kernel. The preferred fix is GCL-exact f32 face vectors (computed in f64 and rounded so each cell closes); full f64 metrics (about 5 MB more) is the fallback. The f32 experiment must use a closed box (handoff NEXT 4).
+- The `src/flow/reference` branch coverage must reach the existing 85% gate. `test:ladder` (6.5 min) stays out of `npm run gates`, and the critic and the orchestrator run it at merges.
 
 
 
