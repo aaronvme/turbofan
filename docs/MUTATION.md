@@ -30,7 +30,7 @@ Columns:
 | src/cycle/partPower.ts | base set | 187 | 72 | 40 | 0 | 12 | 63 | 67.74 % | (not re-run) |
 | src/cycle/partPowerFit.ts | - | 0 | - | - | - | - | - | constants only | - |
 
-"Before" is the previous measurement: the 2026-10-26 round at 4d4ce90 on the base set (surgeDetection, greitzer, surgeSystem, model, boundedLeastSquares, partPower), or the orchestrator's pause runs below (gas, componentMaps, newton, at, engine), on the same targeted sets as now. model.ts's "before" was 1041 mutants on the base set; 87 of them moved to fadec.ts with the pure FADEC laws.
+"Before" is the previous measurement: the 2026-10-26 round at 4d4ce90 on the base set (surgeDetection, greitzer, surgeSystem, model, boundedLeastSquares, partPower), or the orchestrator's pause runs below (gas, componentMaps, newton, at, engine), on the same targeted sets as now. model.ts's "before" was 1041 mutants on the base set; it now has 954 (the pure FADEC laws moved out to fadec.ts, the D4-13 hold came in).
 
 ## The orchestrator's pause runs (2026-10-27 00:03-00:05, w2/followups 5a0cf72)
 
