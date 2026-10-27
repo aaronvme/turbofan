@@ -59,7 +59,7 @@ export function run() {
     p: 0.95e5,
     z: 0,
   });
-  const conv = converge(s, 1e-6, 20000);
+  const conv = converge(s, 1e-6, 20000, 'peak');
   const plane = (i: number) => {
     let m = 0;
     let h = 0;

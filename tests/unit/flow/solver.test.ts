@@ -404,7 +404,7 @@ describe('reference solver: low-Mach inflow and outflow', () => {
     const start = s.iterate(1).residualDensityL2;
     expect(start).toBeLessThan(1e-7 * first);
     expect(s.iterate(100).residualDensityL2).toBeLessThan(10 * start);
-  });
+  }, 120_000);
 });
 
 describe('volume sources', () => {

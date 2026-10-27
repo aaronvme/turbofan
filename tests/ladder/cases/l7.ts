@@ -1,6 +1,8 @@
 // L7 (PHYSICS.md 3.3, full size): the inviscid sphere at M 0.01 (and M 0.3 for the iteration
 // ratio): Cp fore/aft symmetry, Cd, iterations to converge. Production gas, polar mesh 48 x 48 from
-// the 0.5 m sphere to 10 m, converged to 1e-4 of the first residual.
+// the 0.5 m sphere to 10 m, converged to 1e-4 of the first residual. Both Mach numbers run with the
+// tracking mode's low-Mach preconditioning (D4-10, minMach = the free-stream Mach); the M 0.3 case
+// also runs without it, to show the same steady state.
 import { THRESHOLDS } from '../../../src/contracts/thresholds';
 import { THERMALLY_PERFECT } from '../../../src/flow/reference/gas';
 import { ReferenceSolver } from '../../../src/flow/reference/solver';
@@ -11,7 +13,7 @@ const RS = 0.5;
 const NR = 48;
 const NT = 48;
 
-function sphere(mach: number) {
+function sphere(mach: number, precondition: boolean) {
   // square wall cells: the first radial spacing equals the polar spacing at the wall
   const g = geometricGrowth((RS * Math.PI) / NT, 10 - RS, NR);
   const mesh = solverMesh(polarMesh(RS, 10, NR, NT, g, BC.SLIP_WALL, BC.FARFIELD));
@@ -23,6 +25,7 @@ function sphere(mach: number) {
   const s = new ReferenceSolver(mesh, {
     gas: THERMALLY_PERFECT,
     freeStream: { pressure: 101325, temperature: 288.15, velocity: u },
+    ...(precondition ? { lowMachPreconditioning: { minMach: mach } } : {}),
   });
   s.setUniform({ rho: s.ref.rho, u, v: 0, w: 0, p: 101325, z: 0 });
   const conv = converge(s, 1e-4, 20000);
@@ -43,14 +46,18 @@ function sphere(mach: number) {
     asym = Math.max(asym, Math.abs((cp[j] ?? NaN) - (cp[NT - 1 - j] ?? NaN)));
   // the force of the gas on the sphere is minus the momentum flux into the gas, per radian x 2 pi
   const cd = (-2 * Math.PI * fx) / (q * Math.PI * RS * RS);
-  return { conv, asym, cd, cpFront: cp[NT - 1] ?? NaN, cpSide: cp[NT / 2] ?? NaN };
+  return { conv, asym, cd, cpFront: cp[NT - 1] ?? NaN, cpSide: cp[NT / 2] ?? NaN, cp };
 }
 
 export function run() {
   const L7 = THRESHOLDS.L7.values;
-  const low = sphere(L7.mach.value);
-  const ref = sphere(L7.referenceMach.value);
+  const low = sphere(L7.mach.value, true);
+  const ref = sphere(L7.referenceMach.value, true);
+  const plain = sphere(L7.referenceMach.value, false);
   const ratio = low.conv.iterations / ref.conv.iterations;
+  let dCp = 0;
+  for (let j = 0; j < NT; j++)
+    dCp = Math.max(dCp, Math.abs((ref.cp[j] ?? NaN) - (plain.cp[j] ?? NaN)));
   return {
     id: 'L7',
     rows: [
@@ -75,7 +82,28 @@ export function run() {
         value: ratio,
         pass: ratio <= L7.maxIterationRatio.value && low.conv.converged && ref.conv.converged,
       },
+      {
+        id: 'L7',
+        metric: 'M 0.3: max |Cp| difference, preconditioned vs plain (both to 1e-4)',
+        threshold: 'reported',
+        value: dCp,
+        pass: 'reported' as const,
+      },
+      {
+        id: 'L7',
+        metric: 'M 0.3 plain: iterations to 1e-4',
+        threshold: 'reported',
+        value: plain.conv.iterations,
+        pass: 'reported' as const,
+      },
+      {
+        id: 'L7',
+        metric: 'M 0.3: max |Cp(theta) - Cp(pi - theta)|',
+        threshold: 'reported',
+        value: ref.asym,
+        pass: 'reported' as const,
+      },
     ],
-    extra: { low, ref },
+    extra: { low, ref, plain },
   };
 }

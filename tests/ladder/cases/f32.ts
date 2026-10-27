@@ -1,8 +1,10 @@
 // The f32-storage experiment behind docs/SOLVER.md 12.2: the oracle with its state rounded to f32
 // after every stage, against the pure f64 oracle, from the same f32-representable start (case C: a
-// smooth acoustic pulse with swirl and a hot fuel-air spot on a curvilinear 3-block mesh with every
-// BC). It measures the storage part of the GPU's f32 error; the table's tolerances must sit at
-// least 10x above it.
+// smooth acoustic pulse with swirl and a hot fuel-air spot on a curvilinear 3-block mesh with both
+// interface orientations). The box is closed (slip walls and the axis, decision D4-12): in the first
+// version, an open domain, the pulse had left by 100 iterations and the relative error divided by a
+// vanishing perturbation scale. It measures the storage part of the GPU's f32 error; the table's
+// tolerances must sit at least 10x above it.
 import { THERMALLY_PERFECT } from '../../../src/flow/reference/gas';
 import { ReferenceSolver } from '../../../src/flow/reference/solver';
 import { NP } from '../../../src/flow/reference/state';
@@ -51,15 +53,15 @@ function relativeError(a: ReferenceSolver, b: ReferenceSolver): number {
 export function run() {
   const mesh = solverMesh(
     threeBlockRow(0.2, 0.15, 20, 12, {
-      left: BC.INFLOW,
-      right: BC.OUTFLOW,
+      left: BC.SLIP_WALL,
+      right: BC.SLIP_WALL,
       bottom: BC.AXIS,
-      top: BC.FARFIELD,
+      top: BC.SLIP_WALL,
     }),
   );
   const opts = {
     gas: THERMALLY_PERFECT,
-    freeStream: { pressure: 101325, temperature: 288.15, velocity: 30 },
+    freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
   };
   const rows: LadderRow[] = [];
   const extra: Record<string, number> = {};
@@ -83,6 +85,11 @@ export function run() {
       const e = relativeError(f32, f64);
       const tol = TOLERANCE[N] ?? NaN;
       extra[`${mode}-${N}`] = e;
+      extra[`${mode}-${N}-pressureScale`] = Math.max(
+        ...Array.from({ length: mesh.nCells }, (_, c) =>
+          Math.abs(f64.primitives()[NP * c + 4] ?? NaN),
+        ),
+      );
       rows.push({
         id: 'SOLVER 12.2',
         metric: `${mode}, f32 storage vs f64 after ${N}: max_q e_q`,

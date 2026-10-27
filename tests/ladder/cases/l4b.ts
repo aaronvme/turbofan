@@ -2,18 +2,19 @@
 // quasi-1D theory gives for a shock at x = 0.2 m.
 import { THRESHOLDS } from '../../../src/contracts/thresholds';
 import { converge } from '../common';
-import { GAMMA, LN, P0, areaRatioAt, columns, nozzleSolver, quasi1d } from '../nozzle';
+import { GAMMA, LN, NI, NJ, P0, areaRatioAt, columns, nozzleSolver, quasi1d } from '../nozzle';
 import { machFromArea, normalShock, pOverP0 } from '../theory';
 
-export function run() {
-  const L4 = THRESHOLDS.L4.values;
-  const XS = 0.2;
+const XS = 0.2;
+
+/** The L4b set-up on ni x nj cells: converged state, shock position and its error / length. */
+export function shockCase(ni: number, nj: number, maxIterations: number) {
   const M1 = machFromArea(areaRatioAt(XS), GAMMA, true);
   const shock = normalShock(M1, GAMMA);
   const aStar2 = 1 / shock.p02p01;
   const Me = machFromArea(areaRatioAt(LN) / aStar2, GAMMA, false);
   const pExit = P0 * shock.p02p01 * pOverP0(Me, GAMMA);
-  const s = nozzleSolver(pExit);
+  const s = nozzleSolver(pExit, ni, nj);
   s.setState((x, r) =>
     quasi1d(x, r, (xx) =>
       xx < XS
@@ -21,7 +22,7 @@ export function run() {
         : { p0: P0 * shock.p02p01, aStar: aStar2, supersonic: false },
     ),
   );
-  const conv = converge(s, 1e-5, 12000);
+  const conv = converge(s, 1e-5, maxIterations);
   const p1 = P0 * pOverP0(M1, GAMMA);
   const mid = 0.5 * (p1 + p1 * shock.p2p1);
   const cols = columns(s);
@@ -36,6 +37,12 @@ export function run() {
     }
   }
   const frac = Math.abs(xs - XS) / (2 * LN);
+  return { conv, xs, frac, pExit };
+}
+
+export function run() {
+  const L4 = THRESHOLDS.L4.values;
+  const { conv, xs, frac, pExit } = shockCase(NI, NJ, 12000);
   return {
     id: 'L4b',
     rows: [

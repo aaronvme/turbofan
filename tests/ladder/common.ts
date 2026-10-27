@@ -43,8 +43,13 @@ export const CONVERGED_WINDOW = 50;
  * Tracking iterations until the residual is <= drop x the first iteration's and stays there for
  * CONVERGED_WINDOW iterations, or maxIterations. `iterations` is the first iteration of that window.
  */
-export function converge(s: ReferenceSolver, drop: number, maxIterations: number): Convergence {
-  const first = s.iterate(1).residualDensityL2;
+export function converge(
+  s: ReferenceSolver,
+  drop: number,
+  maxIterations: number,
+  reference: 'first' | 'peak' = 'first',
+): Convergence {
+  let first = s.iterate(1).residualDensityL2;
   let it = 1;
   let last = first;
   let start = 0;
@@ -52,6 +57,8 @@ export function converge(s: ReferenceSolver, drop: number, maxIterations: number
     last = s.iterate(1).residualDensityL2;
     it++;
     if (!Number.isFinite(last)) break;
+    // 'peak': the reference is the largest residual so far (L9: the first one is zero)
+    if (reference === 'peak' && last > first) first = last;
     if (last > drop * first) start = 0;
     else if (start === 0) start = it;
     if (start > 0 && it - start + 1 >= CONVERGED_WINDOW)

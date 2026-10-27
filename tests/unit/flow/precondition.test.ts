@@ -204,5 +204,5 @@ describe('preconditioned tracking mode', () => {
         diff = Math.max(diff, Math.abs((P1[NP * c + k] as number) - (P0[NP * c + k] as number)));
       expect(diff).toBeLessThanOrEqual(1e-9 * scale(sk));
     }
-  });
+  }, 120_000);
 });

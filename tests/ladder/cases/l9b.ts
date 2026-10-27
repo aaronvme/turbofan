@@ -56,7 +56,7 @@ export function run() {
     sources: force,
   });
   s.setUniform({ rho: s.ref.rho, u, v: 0, w: 0, p: 1e5, z: 0 });
-  const conv = converge(s, 1e-5, 20000);
+  const conv = converge(s, 1e-5, 20000, 'peak');
   const P = s.primitives();
   let vol = 0;
   let ux = 0;

@@ -22,10 +22,10 @@ export const radiusSlope = (x: number): number =>
   (RT * K * x) / (LN * LN * Math.sqrt(1 + K * (x / LN) ** 2));
 export const areaRatioAt = (x: number): number => 1 + K * (x / LN) ** 2;
 
-export function nozzleMesh(): MultiBlockMesh {
-  const b = gridBlock('nozzle', NI, NJ, (i, j) => {
-    const x = -LN + (2 * LN * i) / NI;
-    return { x, r: j === 0 ? 0 : (radius(x) * j) / NJ };
+export function nozzleMesh(ni = NI, nj = NJ): MultiBlockMesh {
+  const b = gridBlock('nozzle', ni, nj, (i, j) => {
+    const x = -LN + (2 * LN * i) / ni;
+    return { x, r: j === 0 ? 0 : (radius(x) * j) / nj };
   });
   return singleBlock(b, { imin: BC.INFLOW, imax: BC.OUTFLOW, jmin: BC.AXIS, jmax: BC.SLIP_WALL });
 }
@@ -46,8 +46,8 @@ export function quasi1d(
   return { rho: p / (RGAS * T), u, v: u * slope, w: 0, p, z: 0 };
 }
 
-export function nozzleSolver(outflowPressure: number): ReferenceSolver {
-  return new ReferenceSolver(solverMesh(nozzleMesh()), {
+export function nozzleSolver(outflowPressure: number, ni = NI, nj = NJ): ReferenceSolver {
+  return new ReferenceSolver(solverMesh(nozzleMesh(ni, nj)), {
     gas: caloricallyPerfectGas(GAMMA, RGAS),
     freeStream: { pressure: 1e5, temperature: T0, velocity: 0 },
     inflowTotal: { p0: P0, t0: T0 },
@@ -60,14 +60,17 @@ export function columns(s: ReferenceSolver): { x: number; mach: number; p: numbe
   const P = s.primitives();
   const m = s.mesh;
   const out: { x: number; mach: number; p: number }[] = [];
-  for (let i = 0; i < NI; i++) {
+  const blk = m.blocks[0];
+  const ni = blk?.ni ?? NI;
+  const nj = blk?.nj ?? NJ;
+  for (let i = 0; i < ni; i++) {
     let wv = 0;
     let wx = 0;
     let wm = 0;
     let wmM = 0;
     let wp = 0;
-    for (let j = 0; j < NJ; j++) {
-      const c = j * NI + i;
+    for (let j = 0; j < nj; j++) {
+      const c = j * ni + i;
       const vol = m.cellVolR[c] ?? NaN;
       const rho = s.ref.rho + (P[NP * c] ?? NaN);
       const u = P[NP * c + 1] ?? NaN;
