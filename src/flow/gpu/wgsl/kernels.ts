@@ -666,3 +666,53 @@ fn probeSlope(@builtin(global_invocation_id) gid: vec3u) {
 }
 `;
 }
+
+/**
+ * The render resample (contracts flow.ts, D0-4): per texel, the primitives of up to four cells
+ * (resampleMap.ts) interpolated into the state texture ((p - p_inf)/p_inf, (rho - rho_inf)/rho_inf,
+ * T, Z) and the velocity texture (u_x, u_r, u_theta, fluid fraction). A texel with no cell gets
+ * the exact ambient: (0, 0, T_inf, 0) and (u_inf, 0, 0, 0). Bindings: 1 prim, 2 geo, 3 map (2 vec4u
+ * per texel: cells, bits of (w0, w1, w2, fluid fraction)), 4 state texture, 5 velocity texture.
+ */
+export function resampleKernelWgsl(o: KernelOptions): string {
+  return `${header(o)}
+@group(0) @binding(1) var<storage, read> prim: array<vec4f>;
+@group(0) @binding(2) var<storage, read> geo: array<vec4f>;
+@group(0) @binding(3) var<storage, read> map: array<vec4u>;
+@group(0) @binding(4) var outState: texture_storage_2d<rgba16float, write>;
+@group(0) @binding(5) var outVel: texture_storage_2d<rgba16float, write>;
+
+const NO_CELL: u32 = 0xffffffffu;
+
+@compute @workgroup_size(8, 8)
+fn resampleMain(@builtin(global_invocation_id) g: vec3u) {
+  let size = textureDimensions(outState);
+  if (g.x >= size.x || g.y >= size.y) { return; }
+  let t = g.y * size.x + g.x;
+  let cells = map[2u * t];
+  let wb = map[2u * t + 1u];
+  let w = vec4f(bitcast<f32>(wb.x), bitcast<f32>(wb.y), bitcast<f32>(wb.z), 0.0);
+  let fluid = bitcast<f32>(wb.w);
+  if (cells.x == NO_CELL) {
+    textureStore(outState, g.xy, vec4f(0.0, 0.0, P.tInf, 0.0));
+    textureStore(outVel, g.xy, vec4f(P.uInf, 0.0, 0.0, 0.0));
+    return;
+  }
+  let ws = vec4f(w.x, w.y, w.z, 1.0 - (w.x + w.y + w.z));
+  var a = vec4f(0.0);  // rho', u, v, w
+  var b = vec4f(0.0);  // p', Z, T', 0
+  for (var k = 0u; k < 4u; k++) {
+    let c = cells[k];
+    let wk = ws[k];
+    if (wk != 0.0 && c != NO_CELL) {
+      let qa = prim[2u * c];
+      let qb = prim[2u * c + 1u];
+      a += wk * vec4f(qa.x, qa.y, qa.z, qa.w / geo[CELL_GEO + c].x);
+      b += wk * vec4f(qb.x, qb.y, qb.z, 0.0);
+    }
+  }
+  textureStore(outState, g.xy, vec4f(b.x / P.pInf, a.x / P.rhoInf, P.tInf + b.z, b.y));
+  textureStore(outVel, g.xy, vec4f(a.y, a.z, a.w, fluid));
+}
+`;
+}

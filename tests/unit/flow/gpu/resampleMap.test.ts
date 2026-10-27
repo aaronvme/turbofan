@@ -76,15 +76,26 @@ describe('resample map', () => {
   });
 
   it('interpolates across a block interface through the neighbour block', () => {
-    const row = threeBlockRow(1, 1, 8, 6, {
-      left: BC.SLIP_WALL,
-      right: BC.SLIP_WALL,
-      bottom: BC.AXIS,
-      top: BC.SLIP_WALL,
-    }, 0);
+    const row = threeBlockRow(
+      1,
+      1,
+      8,
+      6,
+      {
+        left: BC.SLIP_WALL,
+        right: BC.SLIP_WALL,
+        bottom: BC.AXIS,
+        top: BC.SLIP_WALL,
+      },
+      0,
+    );
     const rf = meshFileFromMesh(row, 'f64');
     const rm = solverMeshFromFile(rf);
-    const m = buildResampleMap(rf, rm, extent({ xMin: 0, xMax: 3, rMin: 0, rMax: 1, width: 60, height: 20 }));
+    const m = buildResampleMap(
+      rf,
+      rm,
+      extent({ xMin: 0, xMax: 3, rMin: 0, rMax: 1, width: 60, height: 20 }),
+    );
     // a texel just left of x = 1 (block A's last column) draws on a block-B cell
     const i = Math.floor((1 - 0.01) * 20);
     const j = 10;

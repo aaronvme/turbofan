@@ -581,6 +581,26 @@ export class GpuSolver {
     return r[2 * this.layout.workgroups + SCALAR.dt] ?? NaN;
   }
 
+  /** Bytes of the reduction buffer (tile residual partials, then the dt and clock scalars). */
+  get reductionBytes(): number {
+    return 4 * reductionLength(this.layout);
+  }
+
+  /** Copies the reduction buffer into dst (MAP_READ) at the end of an encoder. */
+  encodeCopyReduction(encoder: GPUCommandEncoder, dst: GPUBuffer): void {
+    encoder.copyBufferToBuffer(this.red, 0, dst, 0, this.reductionBytes);
+  }
+
+  /** The cell metrics (geo buffer: CELL_GEO section first), for kernels that need r_c. */
+  get geometry(): GPUBuffer {
+    return this.geo;
+  }
+
+  /** The uniform buffer and the byte offset of tracking stage 1's block. */
+  get uniformBuffer(): GPUBuffer {
+    return this.uniforms;
+  }
+
   /** Test only: the face fluxes of the last stage, 8 f32 per (workgroup, tile face slot). */
   async readFaceDump(): Promise<Float32Array> {
     if (this.dump === null) throw new Error('the solver was created without faceDump');

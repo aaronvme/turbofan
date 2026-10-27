@@ -30,6 +30,10 @@ export default defineConfig({
         'src/app/**',
         'src/audio/worklet/**',
         'tools/mesh/scripts/**',
+        // the GPU solver's device code (buffers, pipelines, dispatch): it needs a GPUDevice, so
+        // test:gpu (Dawn) and test:gpu-ladder exercise it; its pure parts (layout, params, WGSL
+        // generation, scheduler, status, resample map) are in src/flow/gpu and covered here
+        'src/flow/gpu/device/**',
       ],
       reporter: ['text-summary', 'html', 'json-summary'],
       thresholds: {
