@@ -143,3 +143,20 @@ describe('W2R-6: the plain scheme about a steady state with blockage', () => {
     120_000,
   );
 });
+
+// W2R-N1 (critic pass 7): b must lie in (0, 1] (SOLVER.md 8). b = 0 makes tau = CFL / lambda / (bV)
+// infinite and surfaced only as a later NaN; the solver rejects it, and the field is left unchanged.
+describe('setBlockage validates b in (0, 1]', () => {
+  it('throws on 0, a negative value, a value above 1, NaN or a short field', () => {
+    const s = new ReferenceSolver(duct, opts(0.998));
+    for (const bad of [0, -0.1, 1.0000001, Number.NaN]) {
+      const b = Float64Array.from(blocked);
+      b[5] = bad;
+      expect(() => s.setBlockage(b)).toThrow(/blockage/);
+      expect(s.blockage.every((x) => x === 1)).toBe(true);
+    }
+    expect(() => s.setBlockage(blocked.subarray(0, duct.nCells - 1))).toThrow(/blockage/);
+    s.setBlockage(blocked);
+    expect(s.blockage).toEqual(blocked);
+  });
+});
