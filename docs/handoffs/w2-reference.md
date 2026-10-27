@@ -65,4 +65,33 @@ GOTCHAS
 - With the smooth limiter, machCut-1 preconditioning (a test configuration) needs CFL <= 0.4 (limit 0.475 at beta 0.06).
 - The ladder takes much longer now: L7 at 96 x 96 runs about 8700 iterations at CFL 0.8 (more under load).
 
-GATES: see the GATES block (filled in at the end of the round, at the hash it names).
+GATES @4927332 (the code of HEAD; later commits are docs only)
+- npm test: 1735 passed + 9 expected fail (84 files). npm run lint, npm run typecheck: clean.
+- npm run coverage: passes; lines 99.57 %, branches 88.07 %; src/flow/reference lines 99.50 %, branches 89.19 % (gate 85 %).
+- npm run test:mesh: 29 passed.
+- npm run test:ladder: 10 files passed, 3 failed (the L8, L9a and L9b convergence rows), 625 s.
+
+LADDER (CPU, @4927332; reports/ladder/*.json)
+| case | metric | threshold | value | |
+|---|---|---|---|---|
+| L1 | quiescent 130k f32 (bitwise) / uniform M 0.5, 50 its | < 1e-4 m/s | 0 / 2.0e-13 | PASS |
+| L2 | L1(rho) / shock offset | < 1 % / <= 1 cell | 0.28 % / 0.23 | PASS |
+| L3 | L1(rho) vs 1D | < 2 % | 0.21 % | PASS |
+| L4a | Mach / choked mdot | < 1 % / < 0.5 % | 0.28 % / 0.10 % | PASS |
+| L4b | shock position + D4-19 steadiness | < 2 %, <= 0.1 % | 1.64 %, 0.026 % | PASS |
+| L4b | convergence (reported) | - | 0.146 of the first at 15000 | reported |
+| L5 | mdot | < 1 % | 0.084 % | PASS |
+| L6 | radial equilibrium free / solid; drift | < 0.1 % q; < 1e-4 | 0.030 % / 0.0029 %; 4.7e-15 / 5.4e-8 | PASS |
+| L7 | M 0.01 asymmetry at 96 x 96, sequence 24 / 48 / 96 falling | < 0.02 | 0.0131 (0.135 / 0.0437 / 0.0131) | PASS |
+| L7 | M 0.01 Cd at 96 x 96 | < 0.01 | 0.0016 | PASS |
+| L7 | iterations M 0.01 / M 0.3 at 96 x 96 | <= 3 | 1.05 (8675 / 8280) | PASS |
+| L8 | velocity error, M_cut 0.003, CFL 0.8 | < 1 % | 0.36 % (was 40.6 % at 1.5) | PASS |
+| L8 | convergence to 1e-5 | 20000 | not converged | FAIL |
+| L9a | Euler work / convergence | < 1e-4 / 1e-6 of the peak | 7.8e-6 / not converged | PASS / FAIL |
+| L9b | Rankine-Froude / convergence | < 2 % / 1e-5 of the peak | 0.80 % / not converged | PASS / FAIL |
+| 12.2 | storage C / C-pre / C phys / S after 100 | <= tol / 10 | 7.8e-7 / 5.1e-7 / 4.2e-6 / 6.3e-7 | PASS |
+
+NEXT
+1. The limiter decision (a), then its trial with L8 as the gate, then W2R-6's it.fails flip.
+2. W2R-N4 (L4b's samples; an offset start).
+3. Re-run the slau2/muscl Stryker spot check on the mutation config once it is merged (the slau2.ts number above used a private config).
