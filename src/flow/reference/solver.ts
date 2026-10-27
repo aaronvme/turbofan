@@ -216,6 +216,12 @@ export class ReferenceSolver {
   setBlockage(b: ArrayLike<number>): void {
     const m = this.mesh;
     const n = m.nCells;
+    // W2R-N1: b = 0 would make tau = CFL / lambda / (b V) infinite and surface only as a later NaN
+    if (b.length < n) throw new Error(`blockage: ${b.length} values for ${n} cells`);
+    for (let c = 0; c < n; c++) {
+      const v = b[c] as number;
+      if (!(v > 0 && v <= 1)) throw new Error(`blockage of cell ${c} is ${v}, not in (0, 1]`);
+    }
     for (let c = 0; c < n; c++) this.blockage[c] = b[c] as number;
     for (let c = 0; c < n; c++) this.bExt[c] = this.blockage[c] as number;
     for (let g = 0; g < m.nGhosts; g++)

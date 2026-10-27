@@ -113,7 +113,7 @@ Each stage first converts every cell to primitives, then fills every ghost from 
 
 **Why the wall ghost is extrapolated, not mirrored.** The W0 mirror ghost copies p, which imposes dp/dn = 0 at the wall. Wherever swirl or wall curvature sets a pressure gradient normal to the wall (ρw²/r behind every rotor, ρu²/R on every curved duct wall) that makes the wall pressure first order and leaves an odd-even wall mode: ladder L6 failed with it (radial-equilibrium error 1.3 % of q for the free vortex, 72 Pa at the inner wall), and the extrapolated ghost brings it to 3 Pa. Mirroring the Cartesian (u, v) also let mass leak through walls not aligned with x or r, because MUSCL limits u and v separately; the pressure-only wall flux makes the wall impermeable in any orientation.
 
-Blockage of a ghost: b of its source cell. Both ghost layers are filled the same way, each from its own source cell.
+Blockage of a ghost: b of its source cell. Both ghost layers are filled the same way, each from its own source cell. **A ghost's T′ and c (record entries 6 and 7) are don't-care (W2R-N2):** the oracle copies them from the source cell, but nothing reads them, because SLAU2 recomputes T′ and c from each face state (§7) and the local step reads only real cells. The kernel need not fill them.
 
 ## 6. Reconstruction (`src/flow/reference/muscl.ts`)
 
@@ -181,7 +181,7 @@ p_u worsens L8 (the velocity row fails at both CFLs) and L7's Cd (fails), and it
 
 ## 8. Blockage and volume sources (`src/flow/reference/sources.ts`): the W3 interface
 
-**Blockage.** A per-cell field b_c ∈ (0, 1] (default 1). Face blockage b_f = ½(b_L + b_R) of the two cells (a ghost has its source cell's b, so a boundary face gets b_c). Every face flux is multiplied by b_f, the cell's gas volume is b_c V_c, and the local time step uses b-weighted face vectors (§10).
+**Blockage.** A per-cell field b_c ∈ (0, 1] (default 1; `setBlockage` throws on a value outside it, W2R-N1). Face blockage b_f = ½(b_L + b_R) of the two cells (a ghost has its source cell's b, so a boundary face gets b_c). Every face flux is multiplied by b_f, the cell's gas volume is b_c V_c, and the local time step uses b-weighted face vectors (§10).
 
 **Pressure and swirl source** (the geometric term, `geometricSource`): for cell c with primitives q_c,
 
