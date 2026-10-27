@@ -287,7 +287,16 @@ Protocol: the same mesh (the row's, below; always with f32 metrics, the numbers 
 | S. ladder L8's sink (`sinkCase({ minMach: 0.003 }, 'f32')`: 64 × 24 polar mesh, slip wall inside, the preconditioned far field outside, the point-implicit sink source), preconditioned tracking from the ambient at rest | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
 | any | any | the residual L2 within 1e-3 relative of the oracle's |
 
-Basis: f32 has a relative step of 6e-8; one iteration rounds each face flux and cell update a few dozen times, and the gauges keep that relative to the perturbation, so one iteration lands near 1e-6 and growth is at most linear over N for a stable smooth run. The f32-storage experiment in `tests/ladder/f32.test.ts` (the oracle with its state rounded to f32 after every stage) measures the storage part of this on case C, and the table sits ≥ 10× above it. Measured (2026-10-27, closed box per D4-12: slip walls and the axis, so the pulse stays in the domain): tracking 1.9e-7 / 4.4e-7 / 1.4e-6 after 1 / 10 / 100 iterations, physical time 8.4e-8 / 2.4e-7 / 1.3e-5, so every row, the N = 100 rows included, sits 54-720× above the storage error. A tolerance changes only through an orchestrator decision.
+Basis: f32 has a relative step of 6e-8; one iteration rounds each face flux and cell update a few dozen times, and the gauges keep that relative to the perturbation, so one iteration lands near 1e-6 and growth is at most linear over N for a stable smooth run. The f32-storage experiment in `tests/ladder/f32.test.ts` (the oracle with its state rounded to f32 after every stage) measures the storage part of this on the rows' own set-ups, and the table must sit ≥ 10× above it. Measured (2026-10-27, `tests/ladder/oracle.ts` set-ups, f32 metrics, after 1 / 10 / 100 iterations):
+
+| row | storage error | margin to the tolerance |
+|---|---|---|
+| C, plain tracking (CFL 1.5) | 1.7e-7 / 1.1e-6 / 7.8e-7 | 59 / 90 / 1300 × |
+| C-pre, preconditioned tracking (engine settings, CFL 0.8) | 1.1e-7 / 1.7e-7 / 5.1e-7 | 93 / 590 / 2000 × |
+| C, physical time | 8.0e-8 / 2.4e-7 / 4.2e-6 | 125 / 410 / 240 × |
+| S, the L8 sink, preconditioned (CFL 0.8) | 7.3e-8 / 1.8e-7 / 6.3e-7 | 140 / 570 / 1600 × |
+
+(Before W2R-I2 the box ran with f64 metrics: 1.9e-7 / 4.4e-7 / 1.4e-6 tracking, 8.4e-8 / 2.4e-7 / 1.3e-5 physical time.) At the plain CFL 1.5 the C-pre set-up diverges (NaN at iteration 79, §10), so these rows also check that the kernel takes the preconditioned default CFL. If the p_u trial changes the preconditioned scheme (§10, D4-32), the C-pre and S rows are re-measured with it. A tolerance changes only through an orchestrator decision.
 
 ### 12.3 The f32 metrics and ladder L1
 The f32 asset rounds the face vectors, so a cell's Σ S_x is not zero but of order 6e-8 |S|. In uniform flow that is a residual F∞ Σ S_x in every cell, and the steady state carries a perturbation that grows along streamlines. `tests/ladder/l1.test.ts` reports the asset's worst Σ S_x defect and the spurious velocity the oracle develops with the f32 asset. If it exceeds L1's 1e-4 m/s, the remedy belongs to the mesh asset (f64 metrics, about 5 MB more at 130k, or face vectors computed so that their f32 sums telescope exactly), not to the kernel.

@@ -1,3 +1,9 @@
+ROUND 5 (in progress; this block is rewritten at the end of the round)
+- W2R-I4 DONE f8d539a: SLAU2 value tests against an independent evaluation of the paper formulas (absolute variables, calorically perfect gas), six unequal state pairs at 1e-12 relative. Stryker on slau2.ts with slau2.test.ts alone: 98.80 % (164 killed; the 2 survivors are the equivalent |M| >= 1 -> > 1). W2R-N6 done there (per-call side records).
+- W2R-I2 DONE (the commit "W2R-I2/I4 DONE"): SOLVER.md 12.2 states the mesh of every row; tests/ladder/oracle.ts exports the set-ups (closedBoxMesh with f32 metrics, closedBoxOptions, smoothPerturbation, sinkCase, relativeError); new rows C-pre (the closed box at the engine's preconditioning, minMach = M_cut = 0.003) and S (L8's sink, preconditioned). Storage errors 1.1e-7 / 1.7e-7 / 5.1e-7 (C-pre) and 7.3e-8 / 1.8e-7 / 6.3e-7 (S) after 1 / 10 / 100: 93-2000 x below the tolerances.
+- D4-32 interim: DEFAULT_CFL_PRECONDITIONED = 0.8 (SOLVER.md 10, the acoustic analysis pinned in rk.test.ts). Found on the way: C-pre at CFL 1.5 goes to NaN at iteration 79. At 0.8, L8's velocity error is 0.36 % (PASS; 40.6 % at 1.5) but it does not converge to 1e-5 in 20000 (3.9e-4 of the first); L7 0.0437 / Cd 0.0096 / ratio 0.89 (3901 / 4371).
+- FOR w2/solver NOW: SOLVER.md as of this commit, including the preconditioned default CFL 0.8 and the 12.2 rows (import tests/ladder/oracle.ts). STILL OPEN for the kernel: p_u (D4-32 trial, next), the limiter default (D4-33), W2R-6 (D4-34).
+
 w2/reference: round 3 DONE with open items (from b7eb36d; HEAD = the commit of this handoff).
 - D4-20 (the low-Mach dissipation scaling) is in. It removes the L7 sawtooth: L7 converges, and its iteration ratio and Cd now pass. At most M_cut values it also removes L8's axis error.
 - D4-19's steadiness check passes, so L4b passes.

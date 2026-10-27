@@ -310,10 +310,10 @@ describe('preconditioned tracking mode', () => {
     });
     pre.setBlockage(b);
     // M 0.06 at the throat; the plain scheme is still at 6e2 x its first residual after 20000
-    // iterations from rest (acoustic waves between the reflecting inflow and outflow)
+    // iterations from rest (acoustic waves between the reflecting inflow and outflow). At the
+    // preconditioned default CFL 0.8 (D4-32) this takes 4723 iterations (< 4000 at CFL 1.5).
     const conv = converge(pre, 1e-11, 6000);
     expect(conv.converged).toBe(true);
-    expect(conv.iterations).toBeLessThan(4000);
     // the plain scheme, started from the preconditioned steady state, has R = 0 there too: it is the
     // same equation with and without the preconditioner. This checks the steady state, not its
     // stability, so it runs only 30 iterations: with blockage the plain scheme is linearly unstable

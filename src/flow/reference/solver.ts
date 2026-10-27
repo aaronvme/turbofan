@@ -20,6 +20,12 @@ import { NP, NU, consToPrim, primToCons, physicalToPrim, type PhysicalState } fr
 /** Tracking-mode stage coefficients (section 10: alpha_2 = 1/2 is needed for stability). */
 export const RK3_ALPHA = [0.2, 0.5, 1.0] as const;
 export const DEFAULT_CFL = 1.5;
+/**
+ * The tracking CFL with low-Mach preconditioning (minMach < 1), decision D4-32: 0.82 x the fully
+ * discrete limit 0.972 of the 3-stage scheme on the pseudo-acoustic pair at rest, whose worst cell
+ * shape is the 1D one (section 10; tests/unit/flow/acoustic.ts, pinned in rk.test.ts).
+ */
+export const DEFAULT_CFL_PRECONDITIONED = 0.8;
 export const DEFAULT_CFL_PHYSICAL = 0.9;
 
 export interface SolverOptions {
@@ -127,7 +133,9 @@ export class ReferenceSolver {
             farFieldBeta2: Math.min(1, Math.max(mInf2, pre.minMach * pre.minMach)),
           });
     this.machCut = pre === undefined ? 1 : (pre.machCut ?? pre.minMach);
-    this.cfl = opts.cfl ?? DEFAULT_CFL;
+    // minMach >= 1 is the plain scheme (beta = 1, f_a = 1) and keeps the plain default
+    this.cfl =
+      opts.cfl ?? (pre !== undefined && pre.minMach < 1 ? DEFAULT_CFL_PRECONDITIONED : DEFAULT_CFL);
     this.cflPhysical = opts.cflPhysical ?? DEFAULT_CFL_PHYSICAL;
     this.remap = new Uint8Array(256).map((_, k) => opts.bcRemap?.[k] ?? k);
     this.wall = new Uint8Array(mesh.nCells + mesh.nGhosts);
