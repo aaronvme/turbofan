@@ -31,3 +31,22 @@ export function shutterBlurAngle(rpm: number, shutterAngleDeg: number, fps: numb
 export function bladePassFrequencyHz(rpm: number, bladeCount: number): number {
   return (rpm / 60) * bladeCount;
 }
+
+/** How long the exploded view takes to ease the spools to a stop (D4-4), s. */
+export const SPOOL_STOP_S = 1;
+
+/**
+ * The display factor on the spool speeds (D4-4: an exploded engine cannot run, so it eases to
+ * a stop; it spins back up the same way when it closes). The factor is smoothstep-eased in a
+ * linear progress p (f = 3p^2 - 2p^3, inverted in closed form), so the result composes exactly
+ * over any frame steps.
+ */
+export function spoolDisplayFactor(factor: number, stopped: boolean, dtS: number): number {
+  const f = Math.max(0, Math.min(1, factor));
+  // the inverse of smoothstep on [0, 1]
+  const p = 0.5 - Math.sin(Math.asin(1 - 2 * f) / 3);
+  const q = Math.max(0, Math.min(1, p + ((stopped ? -1 : 1) * dtS) / SPOOL_STOP_S));
+  if (q <= 0) return 0;
+  if (q >= 1) return 1;
+  return q * q * (3 - 2 * q);
+}

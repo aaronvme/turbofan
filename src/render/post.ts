@@ -27,6 +27,7 @@
 
 import {
   HalfFloatType,
+  Matrix4,
   RenderPipeline,
   Vector2,
   Vector4,
@@ -44,12 +45,14 @@ import {
   Fn,
   frameId,
   If,
+  int,
   interleavedGradientNoise,
   length,
   Loop,
   mix,
   mrt,
   normalView,
+  round,
   output,
   pass,
   rtt,
@@ -59,6 +62,7 @@ import {
   select,
   sin,
   smoothstep,
+  texture,
   uniform,
   vec2,
   vec3,
@@ -69,8 +73,9 @@ import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { traa } from 'three/addons/tsl/display/TRAANode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+import { installTraaResolve } from './traaResolve';
 
-export type PostDebug = 'rotorAlpha' | 'rotorBlur' | 'ao' | 'visible' | null;
+export type PostDebug = 'rotorAlpha' | 'rotorBlur' | 'ao' | 'visible' | 'velocity' | null;
 
 export interface PostSettings {
   /** Debug output instead of the final image (look-dev only). */
@@ -81,6 +86,16 @@ export interface PostSettings {
   readonly bloomStrength: number;
   /** Linear radiance above which bloom starts (above the lip's specular peak, LD-3). */
   readonly bloomThreshold: number;
+  /**
+   * The angle each spool turned since the previous frame (rad): the rotors' motion vectors
+   * for TRAA (W1V-I1 fix b). Without it rotor pixels keep the main pass's (zero) velocity.
+   */
+  readonly rotorMotion?: {
+    readonly lpStep: UniformNode<'float', number>;
+    readonly hpStep: UniformNode<'float', number>;
+  };
+  /** three r186's own TRAA resolve (tests: the pre-W1V-I1 pipeline). */
+  readonly legacyTraa?: boolean;
 }
 
 export interface LookPipeline {
@@ -133,6 +148,8 @@ export function createPipeline(
 
   const aoPass = ao(sceneDepth, sceneNormal, camera);
   aoPass.resolutionScale = 0.5;
+  // 8 fixed samples: 6 with the noise rotated every frame (TRAA averaging it) put a 0.11 tile
+  // into the hero's fan-blur check (0.03 with these), so GTAO was not cut (LOD round 2)
   aoPass.samples.value = 8;
   const aoTex = aoPass.getTextureNode();
 
@@ -278,12 +295,73 @@ export function createPipeline(
   const compositeTex = rtt(composite, null, null, { type: HalfFloatType });
   compositeTex.name = 'Composite';
 
-  const traaNode = traa(compositeTex, sceneDepth, sceneVelocity, camera);
+  // Rotor motion vectors (W1V-I1 fix b, D4-4: the cutaway shows a running engine). The rotors
+  // are not in the main pass, so its velocity is zero on them and TRAA averaged each rotor
+  // pixel with the rotor at other phases (ghosted, feathered blades). A rotor turns rigidly
+  // about the engine axis (world x), so its pixel's previous position is exact: the rotor
+  // depth's world point turned back by the spool's step and projected with the previous
+  // frame's (unjittered) view-projection. The step is wrapped to half a blade pitch (the row's
+  // image is periodic in it; the spinner's pitch is a full turn), so at idle the history comes
+  // from the next blade along, a few pixels away, not from 107 degrees round the disc (where
+  // TRAA's motion factor would discard it). The same holds for the fan's time-sampled blur: a
+  // box-shutter exposure turned by the step is the next frame's exposure. TRAA reads the
+  // velocity of one texel per pixel (`velocityNode.load`, three r186 TRAANode.js:554), so the
+  // rotor velocity is computed there and costs no pass of its own.
+  const prevViewProj = uniform(new Matrix4());
+  const currViewProj = uniform(new Matrix4());
+  let havePrev = false;
+  const motion = settings.rotorMotion;
+  if (motion !== undefined) {
+    const velocityNode = sceneVelocity as unknown as {
+      load(texel: Node<'vec2'>): Node<'vec4'>;
+    };
+    const baseLoad = velocityNode.load.bind(velocityNode);
+    velocityNode.load = (texel) =>
+      Fn(() => {
+        const sceneVel = baseLoad(texel);
+        const rd = rotorDepth.load(texel).r;
+        const sd = sceneDepth.load(texel).r;
+        const isRotor = rotorColor.load(texel).a.greaterThan(0.001).and(rd.lessThan(sd));
+        const b = rotorBlur.load(texel);
+        const size = vec2(rotorDepth.size(int(0)) as unknown as Node<'ivec2'>);
+        const uvT = texel.floor().add(0.5).div(size);
+        const ndc = vec4(uvT.x.mul(2).sub(1), float(1).sub(uvT.y.mul(2)), rd, 1);
+        const hv = camProjInv.mul(ndc);
+        const p = camWorld.mul(vec4(hv.xyz.div(hv.w), 1)).xyz;
+        const step = select(b.a.greaterThan(1.5), motion.hpStep, motion.lpStep);
+        const pitch = b.g.max(1e-4);
+        const back = step.sub(pitch.mul(round(step.div(pitch)))).negate();
+        const prev = rotX(p, cos(back), sin(back));
+        const c = currViewProj.mul(vec4(p, 1));
+        const q = prevViewProj.mul(vec4(prev, 1));
+        const vel = c.xy.div(c.w).sub(q.xy.div(q.w));
+        return select(isRotor, vec4(vel, 0, 0), sceneVel);
+      })();
+  }
+
+  // TRAA's current depth: the nearer of the scene and the rotors. Its closest-depth search
+  // picks the texel whose velocity it uses, and its disocclusion test compares that depth with
+  // the history's: with the scene depth alone, a rotor pixel was judged by whatever lies behind
+  // it, which changes under the rotor's reprojection, so its history was mostly thrown away
+  // (and the jittered frame shown as is). The history copy (`.value`) stays the scene depth.
+  const traaDepth = texture(sceneDepth.value);
+  if (motion !== undefined) {
+    const d = traaDepth as unknown as { load(texel: Node<'vec2'>): Node<'vec4'> };
+    const baseDepthLoad = d.load.bind(d);
+    d.load = (texel) => vec4(baseDepthLoad(texel).r.min(rotorDepth.load(texel).r));
+  }
+  const traaNode = traa(compositeTex, traaDepth, sceneVelocity, camera);
+  if (settings.legacyTraa !== true) installTraaResolve(traaNode);
   // three r186's TRAANode copies the scene depth into its history (its disocclusion test) only
   // when the history matches the drawing buffer. Below render scale 1 (the performance
   // profile, D3-7) it never would, so every pixel read as disoccluded and TRAA stopped
   // accumulating: the copy is made here instead whenever three skipped it.
   const traaState = traaNode as unknown as TraaInternals;
+  // W1V-N3: the patch below reaches into three's TRAA internals; a renamed field would make it
+  // create a new property and leave TRAA's disocclusion test on a stale depth, silently
+  for (const field of ['_historyRenderTarget', '_previousDepthNode', 'updateBefore'] as const)
+    if (!(field in traaState))
+      throw new Error(`three's TRAANode has no ${field} (render-scale patch, post.ts)`);
   const traaUpdate = traaState.updateBefore.bind(traaNode);
   const drawing = new Vector2();
   traaState.updateBefore = (frame) => {
@@ -325,6 +403,17 @@ export function createPipeline(
   if (settings.debug === 'rotorBlur')
     pipeline.outputNode = vec4(rotorBlur.r.div(Math.PI), rotorColor.a, 0, 1);
   if (settings.debug === 'ao') pipeline.outputNode = vec4(vec3(aoTex.r), 1);
+  // what TRAA reprojects with (rotor motion included): |velocity| in pixels / 32, red x, green y
+  if (settings.debug === 'velocity')
+    pipeline.outputNode = vec4(
+      (sceneVelocity as unknown as { load(t: Node<'vec2'>): Node<'vec4'> })
+        .load(screenCoordinate)
+        .xy.abs()
+        .mul(screenSize)
+        .mul(0.5 / 32),
+      0,
+      1,
+    );
   // the chain without TRAA (built on first use): the fan-blur reference test averages
   // un-accumulated frames (tests/browser/fanBlur.test.ts)
   const debugPipelines = new Map<string, RenderPipeline>();
@@ -369,6 +458,13 @@ export function createPipeline(
       aoPass.resolutionScale = 0.5 * scale;
     },
     render: (withTraa = true, linear = false) => {
+      // the rotor motion vectors' view-projections, unjittered (TRAA jitters the camera only
+      // inside the pipeline's render)
+      camera.updateMatrixWorld();
+      if (havePrev) prevViewProj.value.copy(currViewProj.value);
+      currViewProj.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      if (!havePrev) prevViewProj.value.copy(currViewProj.value);
+      havePrev = true;
       if (!withTraa || linear) {
         debugPipeline(withTraa, linear).render();
         return;

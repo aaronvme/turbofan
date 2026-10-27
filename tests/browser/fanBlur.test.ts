@@ -14,6 +14,9 @@
 // - What ships (TRAA on, one frame after 48 frames of accumulation, no depth of field):
 //   LIMITS.traa. TRAA clamps its history to the current neighbourhood and anti-aliases the
 //   static edges the reference leaves aliased, so this bound is looser.
+// - What ships in motion (W1V-I1, pass 6: the app never holds the fan still): 48 frames at
+//   dt 1/60 with the spools turning (TRAA reprojects the fan with its rotor motion vectors),
+//   then the frame against a new reference at the fan's final phase: the same LIMITS.traa.
 // The pass-4 march (one rasterised rotor image, reprojected) fails both: its shredded far
 // side, hub comb and dark crescents are tiles far off the reference.
 
@@ -145,9 +148,31 @@ describe('W1L-I3: the fan blur matches a 64-still box-shutter reference', () => 
       const shipped = grab(v, c);
       const raw = error(est.mean, ref.mean, mask);
       const traa = error(shipped.lum, ref.mean, mask);
+      // what ships in motion: the spools turn for 48 frames, then the reference at the new phase
+      v.setDebugFlags({ linear: true });
+      for (let i = 0; i < 48; i++) {
+        v.frame(1 / 60);
+        await nextFrame();
+      }
+      const shippedMoving = grab(v, c);
+      v.setShutter(0);
+      const refMoving = await meanOf(v, c, N_REF, (i) => {
+        v.setDebugFlags({
+          noTraa: true,
+          linear: true,
+          lpPhase: ((i + 0.5) / N_REF - 0.5) * blur,
+        });
+      });
+      v.setShutter(preset.shutterDeg);
+      const maskMoving = new Uint8Array(W * H);
+      for (let p = 0; p < W * H; p++)
+        maskMoving[p] = (refMoving.hi[p] ?? 0) - (refMoving.lo[p] ?? 0) > MOVING ? 1 : 0;
+      const moving = error(shippedMoving.lum, refMoving.mean, maskMoving);
       rows.push(
-        `${shot} (blur ${((blur * 180) / Math.PI).toFixed(1)} deg, moving ${(100 * raw.moving).toFixed(1)} % of the frame): estimator MAE ${raw.mae.toFixed(4)} worst tile ${raw.tile.toFixed(4)} | shipped MAE ${traa.mae.toFixed(4)} worst tile ${traa.tile.toFixed(4)}`,
+        `${shot} (blur ${((blur * 180) / Math.PI).toFixed(1)} deg, moving ${(100 * raw.moving).toFixed(1)} % of the frame): estimator MAE ${raw.mae.toFixed(4)} worst tile ${raw.tile.toFixed(4)} | shipped MAE ${traa.mae.toFixed(4)} worst tile ${traa.tile.toFixed(4)} | shipped in motion MAE ${moving.mae.toFixed(4)} worst tile ${moving.tile.toFixed(4)}`,
       );
+      if (moving.mae > LIMITS.traa.mae || moving.tile > LIMITS.traa.tile)
+        failures.push(`${shot} shipped in motion`);
       if (raw.moving < 0.01) failures.push(`${shot}: the fan barely moves (${raw.moving})`);
       if (raw.mae > LIMITS.raw.mae || raw.tile > LIMITS.raw.tile)
         failures.push(`${shot} estimator`);

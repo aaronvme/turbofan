@@ -56,7 +56,7 @@ export interface PartSpec {
 }
 
 /** Station x of the synthesized structure, m. */
-const X = {
+export const X = {
   lipBulkhead: -0.55,
   fanCaseStart: -0.05,
   fanCaseEnd: 0.35,

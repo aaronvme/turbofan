@@ -10,11 +10,18 @@ import {
   type PassMs,
 } from '../../../src/gpu/passTimings';
 import {
+  abOrder,
+  abSummary,
+  BACK_TO_BACK_MIN_BUSY,
+  backToBackLoad,
   combineReps,
   OFFICIAL_CONFIGS,
+  p4Verdict,
+  pacedValidity,
   parseTimingArgs,
   runOrder,
   runValidityOf,
+  withPacings,
 } from '../../../tools/lookdev/timing';
 
 const pass = (opaque: number, rotors = 0): PassMs => {
@@ -144,5 +151,146 @@ describe('runValidityOf: D2-11 as amended by D3-6', () => {
     );
     expect(slow.valid).toBe(true);
     expect(slow.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+// D4-24 (w2/lookdev-4): P4's measure of record becomes back to back (frames rendered
+// continuously, the GPU at its loaded clock) once the critic confirms the DVFS evidence;
+// until then it is reported both ways and must pass both. The pure parts of that mode and of
+// the A/B of two commits are pinned here (the drivers: tools/lookdev/capture.ts and ab.ts).
+describe('pacing: vsync and back to back (D4-24)', () => {
+  it('--pacing takes vsync, back-to-back or both; the default is both (P4 must pass both ways)', () => {
+    expect(parseTimingArgs([]).pacings).toEqual(['vsync', 'backToBack']);
+    expect(parseTimingArgs(['--pacing', 'both']).pacings).toEqual(['vsync', 'backToBack']);
+    expect(parseTimingArgs(['--pacing', 'vsync']).pacings).toEqual(['vsync']);
+    expect(parseTimingArgs(['--pacing', 'back-to-back']).pacings).toEqual(['backToBack']);
+    expect(() => parseTimingArgs(['--pacing', 'saturated'])).toThrow(/pacing/);
+  });
+
+  it('expands each config once per pacing; the vsync ids stay as recorded before', () => {
+    const x = withPacings(OFFICIAL_CONFIGS, ['vsync', 'backToBack']);
+    expect(x.length).toBe(2 * OFFICIAL_CONFIGS.length);
+    expect(x.filter((c) => c.pacing === 'vsync').map((c) => c.id)).toEqual(
+      OFFICIAL_CONFIGS.map((c) => c.id),
+    );
+    expect(x.filter((c) => c.pacing === 'backToBack').map((c) => c.id)).toEqual(
+      OFFICIAL_CONFIGS.map((c) => `${c.id} [back to back]`),
+    );
+    expect(new Set(x.map((c) => c.id)).size).toBe(x.length);
+  });
+
+  it('backToBackLoad: frames per second and the GPU busy fraction, robust to dropped samples', () => {
+    // 100 intervals of 10 ms (1 s); the GPU ran 8 ms a frame, but only 50 frames' queries came back
+    const frames = Array.from({ length: 50 }, () => ({ gpu: pass(6, 2), cpu: 1 }));
+    const load = backToBackLoad(
+      frames,
+      Array.from({ length: 100 }, () => 10),
+    );
+    expect(load.framesPerS).toBeCloseTo(100, 9);
+    expect(load.gpuBusy).toBeCloseTo(0.8, 9);
+    expect(Number.isNaN(backToBackLoad([], []).gpuBusy)).toBe(true);
+  });
+
+  it('a back-to-back run: INVALID when hidden or stalled; a GPU that idled is a warning', () => {
+    const busy = Array.from({ length: 600 }, () => ({ gpu: pass(8), cpu: 1 }));
+    const steady = Array.from({ length: 600 }, () => 9);
+    const ok = pacedValidity('backToBack', steady, 16.7, 0, busy);
+    expect(ok.valid).toBe(true);
+    // no "below display rate" or other warning: back to back outruns the display by design
+    expect(ok.warnings).toEqual([]);
+    expect(pacedValidity('backToBack', steady, 16.7, 50, busy).valid).toBe(false);
+    const stalled = [...steady, ...Array.from({ length: 6 }, () => 1000)];
+    expect(pacedValidity('backToBack', stalled, 16.7, 0, busy).valid).toBe(false);
+    // the GPU busy under BACK_TO_BACK_MIN_BUSY of the wall time: its clock could still fall
+    const idle = Array.from({ length: 600 }, () => ({ gpu: pass(4), cpu: 1 }));
+    const w = pacedValidity('backToBack', steady, 16.7, 0, idle);
+    expect(w.valid).toBe(true);
+    expect(w.warnings.join(' ')).toMatch(/busy/);
+    expect(BACK_TO_BACK_MIN_BUSY).toBeGreaterThan(0.5);
+    expect(BACK_TO_BACK_MIN_BUSY).toBeLessThan(1);
+  });
+
+  it('a back-to-back run in an occluded window is INVALID: its rAF watcher sees the throttle', () => {
+    // the frame loop does not wait for rAF, so an occluded window does not slow it; the
+    // watcher's rAF deltas show it (w2/lookdev-4: 1 Hz rAF while the back-to-back runs went on)
+    const busy = Array.from({ length: 600 }, () => ({ gpu: pass(8), cpu: 1 }));
+    const steady = Array.from({ length: 600 }, () => 9);
+    const vsyncOk = Array.from({ length: 300 }, () => 16.7);
+    const vsyncOccluded = Array.from({ length: 10 }, () => 1016);
+    expect(pacedValidity('backToBack', steady, 16.7, 0, busy, vsyncOk).valid).toBe(true);
+    const v = pacedValidity('backToBack', steady, 16.7, 0, busy, vsyncOccluded);
+    expect(v.valid).toBe(false);
+    expect(v.reasons.join(' ')).toMatch(/occluded/);
+  });
+
+  it('a vsync run is judged as before (D2-11 / D3-6)', () => {
+    const steady = Array.from({ length: 600 }, () => 16.7);
+    const frames = Array.from({ length: 600 }, () => ({ gpu: pass(8), cpu: 1 }));
+    expect(pacedValidity('vsync', steady, 16.7, 0, frames)).toEqual(runValidityOf(steady, 16.7, 0));
+  });
+
+  it('p4Verdict: PASS only if every measured pacing passes; official only under D0-1', () => {
+    const p = p4Verdict({ vsync: 9.1, backToBack: 7.5 }, 8, true);
+    expect(p.perPacing).toEqual({ vsync: 'FAIL', backToBack: 'PASS' });
+    expect(p.verdict).toBe('FAIL');
+    expect(p4Verdict({ vsync: 7.9, backToBack: 8 }, 8, true).verdict).toBe('PASS');
+    expect(p4Verdict({ backToBack: 7 }, 8, true).verdict).toBe('PASS');
+    expect(p4Verdict({ vsync: 7.9, backToBack: 7 }, 8, false).verdict).toBe(
+      'PASS (indicative: not the D0-1 protocol)',
+    );
+    expect(p4Verdict({}, 8, true).verdict).toBe('NONE');
+  });
+});
+
+describe('the A/B of two commits (D4-24 result: bad7ad0 against 23239a1)', () => {
+  it('abOrder: adjacent pairs, each side first equally often, every pacing every repetition', () => {
+    const o = abOrder(['bad7ad0', '23239a1'], ['vsync', 'backToBack'], 4);
+    expect(o.length).toBe(16);
+    for (let k = 0; k < o.length; k += 2) {
+      const a = o[k];
+      const b = o[k + 1];
+      expect(a?.rep).toBe(b?.rep);
+      expect(a?.pacing).toBe(b?.pacing);
+      expect(new Set([a?.ref, b?.ref])).toEqual(new Set(['bad7ad0', '23239a1']));
+    }
+    for (const pacing of ['vsync', 'backToBack'] as const) {
+      const firsts = o.filter((r, k) => k % 2 === 0 && r.pacing === pacing).map((r) => r.ref);
+      expect(firsts.filter((r) => r === 'bad7ad0').length).toBe(2);
+    }
+    // the pacing that leads alternates too
+    expect(o[0]?.pacing).not.toBe(o[4]?.pacing);
+  });
+
+  it('abSummary: the median of each side and the median of the paired differences a - b per pass', () => {
+    const run = (opaque: number, rotors: number) =>
+      summarizeRun([{ gpu: pass(opaque, rotors), cpu: 1 }]);
+    const s = abSummary(
+      ['a', 'b'],
+      [
+        { ref: 'a', pacing: 'vsync', rep: 0, summary: run(6.3, 1.9) },
+        { ref: 'b', pacing: 'vsync', rep: 0, summary: run(5.6, 1.4) },
+        { ref: 'b', pacing: 'vsync', rep: 1, summary: run(8.0, 1.0) },
+        { ref: 'a', pacing: 'vsync', rep: 1, summary: run(8.2, 1.2) },
+        { ref: 'a', pacing: 'vsync', rep: 2, summary: run(7.0, 1.5) },
+        { ref: 'b', pacing: 'vsync', rep: 2, summary: run(7.1, 1.5) },
+      ],
+    );
+    const v = s.vsync;
+    expect(v?.pairs).toBe(3);
+    expect(v?.side.a?.gpu.opaque.p50).toBeCloseTo(7.0, 9);
+    expect(v?.side.b?.gpu.opaque.p50).toBeCloseTo(7.1, 9);
+    // per pair: +0.7, +0.2, -0.1 -> median +0.2
+    expect(v?.diff.opaque.median).toBeCloseTo(0.2, 9);
+    expect(v?.diff.opaque.values.map((x) => Number(x.toFixed(9)))).toEqual([0.7, 0.2, -0.1]);
+    expect(v?.diff.rotors.median).toBeCloseTo(0.2, 9);
+    expect(v?.diff.gpuTotal.median).toBeCloseTo(0.4, 9);
+    expect(s.backToBack).toBeUndefined();
+  });
+
+  it('abSummary refuses an unpaired run', () => {
+    const r = summarizeRun([{ gpu: pass(1), cpu: 1 }]);
+    expect(() =>
+      abSummary(['a', 'b'], [{ ref: 'a', pacing: 'vsync', rep: 0, summary: r }]),
+    ).toThrow(/pair/);
   });
 });

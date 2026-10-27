@@ -1,0 +1,66 @@
+{
+  "hero": {
+    "drawn": 1259460,
+    "main": 821800,
+    "rotors": 437660,
+    "fanDepth": 218880,
+    "draws": 63,
+    "built": 1577784
+  },
+  "threeQuarterFront": {
+    "drawn": 1259460,
+    "main": 821800,
+    "rotors": 437660,
+    "fanDepth": 218880,
+    "draws": 63,
+    "built": 1577784
+  },
+  "side": {
+    "drawn": 678652,
+    "main": 441852,
+    "rotors": 236800,
+    "fanDepth": 218880,
+    "draws": 31,
+    "built": 1577784
+  },
+  "cutaway": {
+    "drawn": 1587806,
+    "main": 1138726,
+    "rotors": 449080,
+    "fanDepth": 27360,
+    "draws": 186,
+    "built": 1577784
+  },
+  "exploded": {
+    "drawn": 1264312,
+    "main": 815232,
+    "rotors": 449080,
+    "fanDepth": 27360,
+    "draws": 84,
+    "built": 1577784
+  },
+  "fanIdle": {
+    "drawn": 1259460,
+    "main": 821800,
+    "rotors": 437660,
+    "fanDepth": 218880,
+    "draws": 63,
+    "built": 1577784
+  },
+  "fanTakeoff": {
+    "drawn": 1259460,
+    "main": 821800,
+    "rotors": 437660,
+    "fanDepth": 218880,
+    "draws": 63,
+    "built": 1577784
+  },
+  "hotSection": {
+    "drawn": 1587806,
+    "main": 1138726,
+    "rotors": 449080,
+    "fanDepth": 27360,
+    "draws": 186,
+    "built": 1577784
+  }
+}

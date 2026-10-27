@@ -29,10 +29,17 @@ interface LookdevApi {
   renderFrames(n: number): Promise<void>;
   /** Renders n frames and returns the per-pass GPU and CPU medians over them. */
   timeFrames(n: number): Promise<PassMedians>;
-  /** Renders for `ms`, one frame per animation frame (a warm-up). */
-  renderFor(ms: number): Promise<void>;
-  /** One timing run of `ms` (W1L-I4): every frame's passes, the rAF intervals, hidden time. */
-  timeRun(ms: number): Promise<TimingRun>;
+  /**
+   * Renders for `ms` (a warm-up), one frame per animation frame, or back to back with
+   * `saturate` (D4-24: the warm-up of a back-to-back run loads the GPU the same way).
+   */
+  renderFor(ms: number, saturate?: boolean): Promise<void>;
+  /**
+   * One timing run of `ms` (W1L-I4): every frame's passes, the rAF intervals, hidden time.
+   * `saturate` renders back to back (BACK_TO_BACK_AHEAD frames queued) instead of one per animation
+   * frame, so the GPU never idles and its clock cannot drop with the load (LOD round, D4-5).
+   */
+  timeRun(ms: number, saturate?: boolean): Promise<TimingRun>;
   /** What the page can tell about the conditions (D0-1): battery, adapter, user agent. */
   conditions(): Promise<Record<string, unknown>>;
   pause(paused: boolean): void;
@@ -44,6 +51,8 @@ export interface TimingRun {
   readonly rafDeltas: number[];
   readonly hiddenMs: number;
   readonly events: string[];
+  /** Back to back: rAF deltas seen by a watcher during the run (occlusion). */
+  readonly vsyncDeltas: number[];
 }
 
 const params = new URLSearchParams(location.search);
@@ -51,6 +60,22 @@ const canvas = document.getElementById('view') as HTMLCanvasElement;
 const hud = document.getElementById('hud') as HTMLDivElement;
 const passes = document.getElementById('passes') as HTMLDivElement;
 if (params.get('clean') === '1') document.body.classList.add('clean');
+
+/**
+ * Frames kept submitted ahead of the one the CPU waits on in back-to-back pacing (D4-24). With
+ * one or two the timed passes fill about the same share of the wall time (72-77 %, w2/lookdev-4,
+ * indicative): the rest is not a queue that ran dry (GPU_FACTS M46: probably GPU work the
+ * pass timestamps miss, or the canvas). Two, so the CPU
+ * never makes the GPU wait.
+ */
+const BACK_TO_BACK_AHEAD = 2;
+const backToBack = (queue: GPUQueue) => {
+  const inFlight: Promise<undefined>[] = [];
+  return async (): Promise<void> => {
+    inFlight.push(queue.onSubmittedWorkDone());
+    if (inFlight.length > BACK_TO_BACK_AHEAD) await inFlight.shift();
+  };
+};
 
 const nextFrame = () =>
   new Promise<void>((resolve) => {
@@ -176,16 +201,18 @@ async function main(): Promise<void> {
       }
       await view.device.device.queue.onSubmittedWorkDone();
     },
-    async renderFor(ms) {
+    async renderFor(ms, saturate = false) {
       paused = true;
       const end = performance.now() + ms;
+      const pace = backToBack(view.device.device.queue);
       while (performance.now() < end) {
         view.frame(1 / 60);
-        await nextFrame();
+        if (saturate) await pace();
+        else await nextFrame();
       }
       await view.device.device.queue.onSubmittedWorkDone();
     },
-    async timeRun(ms) {
+    async timeRun(ms, saturate = false) {
       paused = true;
       const events: string[] = [];
       let hiddenMs = 0;
@@ -205,12 +232,29 @@ async function main(): Promise<void> {
       window.addEventListener('blur', onBlur);
       window.addEventListener('focus', onFocus);
       const rafDeltas: number[] = [];
+      // back to back, the frame loop never waits for rAF, so an occluded window would not show
+      // in its intervals: a watcher records rAF on the side (the run's occlusion check)
+      const vsyncDeltas: number[] = [];
+      let watching = saturate;
+      if (saturate) {
+        let lastV = performance.now();
+        const tick = () => {
+          if (!watching) return;
+          const t = performance.now();
+          vsyncDeltas.push(t - lastV);
+          lastV = t;
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }
       view.beginTimingRun();
       let last = performance.now();
       const end = last + ms;
+      const pace = backToBack(view.device.device.queue);
       while (last < end) {
         view.frame(1 / 60);
-        await nextFrame();
+        if (saturate) await pace();
+        else await nextFrame();
         const t = performance.now();
         rafDeltas.push(t - last);
         last = t;
@@ -220,12 +264,13 @@ async function main(): Promise<void> {
         view.frame(1 / 60);
         await nextFrame();
       }
+      watching = false;
       const frames = view.endTimingRun();
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('focus', onFocus);
       if (hiddenSince >= 0) hiddenMs += performance.now() - hiddenSince;
-      return { frames, rafDeltas, hiddenMs, events };
+      return { frames, rafDeltas, hiddenMs, events, vsyncDeltas };
     },
     async conditions() {
       const nav = navigator as Navigator & {

@@ -9,7 +9,13 @@
 
 import {
   AgXToneMapping,
+  EqualDepth,
+  LessEqualDepth,
+  type Material,
   Matrix4,
+  MeshBasicNodeMaterial,
+  type Mesh,
+  type Object3D,
   PCFShadowMap,
   PerspectiveCamera,
   Vector3,
@@ -22,9 +28,9 @@ import {
   GEOMETRY_QUALITY,
   type EngineGeometry,
 } from '../geometry/engineGeometry';
-import { cutawayWedge } from '../geometry/cutaway';
+import { cutawayWedge, wrapAngle } from '../geometry/cutaway';
 import { easeInOut, explodeOffsets } from '../geometry/explode';
-import { advanceAngle, shutterBlurAngle } from '../geometry/motion';
+import { advanceAngle, shutterBlurAngle, spoolDisplayFactor } from '../geometry/motion';
 import { screenRectOfBox, type Box3Like } from '../geometry/screenRect';
 import { closedViewVisibility } from '../geometry/visibility';
 import { requestSimDevice, type GpuErrorReport, type SimDevice } from '../gpu/device';
@@ -42,7 +48,9 @@ import { createPassTimer, type PassTimer } from './passTimer';
 import { createPipeline, type LookPipeline, type PostDebug } from './post';
 import { LOOK_PRESETS, SHUTTER_1000, type LookMode, type LookPresetId } from './presets';
 import { createRendererOnDevice } from './rendererOnDevice';
-import { createStudio, type Studio } from './studio';
+import { createStandMesh, createStudio, FLOOR_Y, type Studio } from './studio';
+import { standLayout } from '../geometry/stand';
+import { X as STATIONS } from '../geometry/parts';
 
 export interface EngineViewOptions {
   readonly gpu: GPU;
@@ -58,12 +66,27 @@ export interface EngineViewOptions {
   readonly timing?: boolean;
   /** `quality` (full resolution, the default) or `performance` (dynamic resolution, D3-7). */
   readonly profile?: RenderProfileId;
+  /**
+   * Tests only: the pre-W1V-I1 TRAA (three r186's own resolve, the scene's depth and velocity
+   * only), the negative control of tests/browser/rotorMotion.test.ts.
+   */
+  readonly legacyTraa?: boolean;
 }
 
 export interface EngineViewStats {
   readonly triangles: number;
-  /** Triangles in the scene graph that the current mode draws (culling applied). */
+  /**
+   * Triangles the camera draws this frame (culling applied; W1V-I2): the main and rotor passes,
+   * the fan's shaded time copies included, the layer-2 shadow proxies and the fan's depth
+   * pre-pass excluded (`fanDepthTriangles`).
+   */
   readonly drawnTriangles: number;
+  /** Of `drawnTriangles`, the main (opaque) pass. */
+  readonly mainTriangles: number;
+  /** The fan's depth pre-pass copies (vertex work only). */
+  readonly fanDepthTriangles: number;
+  /** Draw calls of the camera passes (main + rotors + pre-pass). */
+  readonly drawCalls: number;
   readonly n1Rpm: number;
   readonly n2Rpm: number;
   readonly lpBlurDeg: number;
@@ -124,6 +147,25 @@ export interface DebugFlags {
   readonly fanCopies?: number;
   /** No fan at all (what the rest of the rotor pass costs). */
   readonly noFan?: boolean;
+  /** Hide every main/rotor object whose name matches this regular expression (cost bisection). */
+  readonly hide?: string;
+  /** The main pass draws only the nacelle and cowl skins (what the internals cost, D4-5). */
+  readonly skinsOnly?: boolean;
+  /**
+   * The fan drawn with an ordinary depth test (no pre-pass, LessEqual with depth write) at
+   * shutter 0: the reference the EqualDepth path must match pixel for pixel (W1V-I3).
+   */
+  readonly plainFanDepth?: boolean;
+  /** Turns the fan's pre-pass copies by this angle, rad: a hole pattern (W1V-I3 control). */
+  readonly fanDepthNudge?: number;
+  /** Main-pass meshes whose name matches this regular expression get the trivial material. */
+  readonly flatNames?: string;
+  /** The main pass with one trivial unlit material (what its materials cost, D4-5). */
+  readonly flat?: boolean;
+  /** Rotor pixels keep the main pass's zero velocity in TRAA (W1V-I1: the old behaviour). */
+  readonly noRotorMotion?: boolean;
+  /** Scales the rotor motion vectors' spool steps (a probe of their sign and size). */
+  readonly rotorMotionScale?: number;
 }
 
 const FPS = 60;
@@ -220,6 +262,18 @@ async function assemble(
     s.environmentIntensity = 0.55;
   }
   scene.main.add(studio.stage);
+  // the engine rests on its stand (W1V-N5); the cowls and the stand go in the exploded view
+  const stand = createStandMesh(
+    standLayout(
+      {
+        nacelle: (x) => geo.walls.nacelleOuter.radiusAt(x),
+        cowl: (x) => geo.walls.coreCowl.radiusAt(x),
+      },
+      FLOOR_Y,
+      STATIONS.nacelleTe,
+    ),
+  );
+  scene.main.add(stand.group);
   scene.rotors.add(studio.rotorLights);
 
   const camera = new PerspectiveCamera(30, o.width / o.height, 0.05, 200);
@@ -235,6 +289,9 @@ async function assemble(
     bloomStrength: 0.06,
     bloomThreshold: 1.6,
     debug: o.debug ?? null,
+    ...(o.legacyTraa === true
+      ? { legacyTraa: true }
+      : { rotorMotion: { lpStep: uniforms.lpStep, hpStep: uniforms.hpStep } }),
   });
 
   const cycle = createMockCycle(def);
@@ -252,6 +309,8 @@ async function assemble(
   let lastExplode = -1;
   let flags: DebugFlags = {};
   let fanFrame = 0;
+  // the exploded engine eases its spools to a stop (D4-4); 1 = running
+  let spoolFactor = 1;
   let profile: RenderProfileId = o.profile ?? 'quality';
   let scaleState = initialRenderScale(RENDER_PROFILES[profile]);
   post.setRenderScale(scaleState.scale);
@@ -263,16 +322,30 @@ async function assemble(
     throttleLever: lever,
   });
   const speeds = () => (settle ? settled : cycle.state());
-  const drawnTriangles = () => {
-    let n = 0;
+  // what the camera draws (W1V-I2): objects on a layer the camera does not see (the rotor
+  // lights' shadow proxies) are skipped, and the fan's depth pre-pass is counted apart
+  const fanDepthCopies = new Set<Object3D>(scene.fanTimeCopies.map((c) => c.depth));
+  const drawCounts = () => {
+    let main = 0;
+    let rotors = 0;
+    let depth = 0;
+    let draws = 0;
     for (const s of [scene.main, scene.rotors])
       s.traverseVisible((obj) => {
+        if (!obj.layers.test(camera.layers)) return;
         const g = (obj as { geometry?: { index?: { count: number } | null } }).geometry;
-        const count = (obj as { count?: number }).count ?? 1;
-        if (g?.index) n += (g.index.count / 3) * count;
+        if (!g?.index) return;
+        const n = (g.index.count / 3) * ((obj as { count?: number }).count ?? 1);
+        draws++;
+        if (fanDepthCopies.has(obj)) depth += n;
+        else if (s === scene.main) main += n;
+        else rotors += n;
       });
-    return n;
+    return { drawn: main + rotors, main, depth, draws };
   };
+  let hidden: Object3D[] = [];
+  const swapped = new Map<Mesh, Mesh['material']>();
+  const flatMaterial = new MeshBasicNodeMaterial({ color: 0x808080 });
 
   const view: EngineView = {
     renderer,
@@ -302,6 +375,7 @@ async function assemble(
       if (immediate) {
         cut = m === 'cutaway' ? 1 : 0;
         explode = m === 'exploded' ? 1 : 0;
+        spoolFactor = m === 'exploded' ? 0 : 1;
       }
     },
     setThrottle(l, s = false) {
@@ -328,6 +402,44 @@ async function assemble(
     },
     setDebugFlags(f) {
       flags = { ...f };
+      hidden = [];
+      if (f.hide !== undefined && f.hide !== '') {
+        // matched against "main:<name>" / "rotors:<name>", so a pattern can pick one pass
+        const re = new RegExp(f.hide);
+        for (const [tag, s] of [
+          ['main', scene.main],
+          ['rotors', scene.rotors],
+        ] as const)
+          s.traverse((o) => {
+            if (o !== s && re.test(`${tag}:${o.name}`)) hidden.push(o);
+          });
+      }
+      if (f.skinsOnly === true) {
+        const keep = new Set<Object3D>(scene.skins);
+        for (const m of scene.modules)
+          m.groups[0]?.traverse((o) => {
+            if ((o as { isMesh?: boolean }).isMesh === true && !keep.has(o)) hidden.push(o);
+          });
+      }
+      scene.main.overrideMaterial = f.flat === true ? flatMaterial : null;
+      const fanMat = scene.fanTimeCopies[0]?.shaded.material as Material | undefined;
+      if (fanMat !== undefined) {
+        const plain = f.plainFanDepth === true;
+        fanMat.depthFunc = plain ? LessEqualDepth : EqualDepth;
+        fanMat.depthWrite = plain;
+        fanMat.needsUpdate = true;
+      }
+      for (const [mesh, mat] of swapped) mesh.material = mat;
+      swapped.clear();
+      if (f.flatNames !== undefined && f.flatNames !== '') {
+        const re = new RegExp(f.flatNames);
+        scene.main.traverse((o) => {
+          if ((o as { isMesh?: boolean }).isMesh === true && re.test(o.name)) {
+            swapped.set(o as Mesh, (o as Mesh).material);
+            (o as Mesh).material = flatMaterial;
+          }
+        });
+      }
       const cove = studio.stage.getObjectByName('cyclorama');
       if (cove) cove.visible = f.noStage !== true;
       renderer.shadowMap.enabled = f.noShadow !== true;
@@ -337,9 +449,21 @@ async function assemble(
       const t0 = performance.now();
       timer.beginFrame();
       if (!settle) cycle.step(Math.min(dtS, 0.1), inputs());
-      const st = speeds();
+      const cycleSpeeds = speeds();
+      spoolFactor = spoolDisplayFactor(spoolFactor, mode === 'exploded', dtS);
+      const st = {
+        n1Rpm: cycleSpeeds.n1Rpm * spoolFactor,
+        n2Rpm: cycleSpeeds.n2Rpm * spoolFactor,
+      };
+      const lpWas = lp;
+      const hpWas = hp;
       lp = advanceAngle(lp, st.n1Rpm, def.rotation.lp, dtS);
       hp = advanceAngle(hp, st.n2Rpm, def.rotation.hp, dtS);
+      // what each spool turned since the last frame (TRAA's rotor motion vectors); a phase
+      // set by a debug flag is a jump, not motion
+      const motionK = flags.noRotorMotion === true ? 0 : (flags.rotorMotionScale ?? 1);
+      uniforms.lpStep.value = motionK * wrapAngle(lp - lpWas);
+      uniforms.hpStep.value = motionK * wrapAngle(hp - hpWas);
       const lpShown = lp + (flags.lpPhase ?? 0);
       for (const g of scene.spoolGroups.lp) g.rotation.x = lpShown;
       for (const g of scene.spoolGroups.hp) g.rotation.x = hp;
@@ -364,9 +488,11 @@ async function assemble(
       scene.fanTimeCopies.forEach((c, k) => {
         c.depth.visible = c.shaded.visible =
           flags.noFan !== true && (fanLive ? k < nCopies : k === 0);
+        if (flags.plainFanDepth === true) c.depth.visible = false;
         c.depth.rotation.x = c.shaded.rotation.x = fanLive
           ? ((k + j) / nCopies - 0.5) * fanSpan
           : 0;
+        c.depth.rotation.x += flags.fanDepthNudge ?? 0;
       });
 
       const step = dtS / TRANSITION_S;
@@ -401,10 +527,12 @@ async function assemble(
       for (const obj of scene.frontOnly) obj.visible = !closed || eyeX < closedSet.eye.front;
       for (const obj of scene.rearOnly) obj.visible = !closed || eyeX > closedSet.eye.rear;
       const skinsVisible = explode < 0.02;
+      stand.group.visible = skinsVisible;
       for (const s of scene.skins) if (!s.name.startsWith('cap:')) s.visible = skinsVisible;
       if (!skinsVisible)
         for (const s of scene.skins) if (s.name.startsWith('cap:')) s.visible = false;
       studio.contact.value = 1 - easeInOut(explode);
+      for (const o of hidden) o.visible = false;
       // the composite's fan region: the fan's box where the exploded view has moved it, 3 px
       // of margin for the 3 x 3 neighbourhood and TRAA's jitter
       camera.updateMatrixWorld();
@@ -431,9 +559,13 @@ async function assemble(
     },
     stats() {
       const st = speeds();
+      const d = drawCounts();
       return {
         triangles: scene.triangles,
-        drawnTriangles: drawnTriangles(),
+        drawnTriangles: d.drawn,
+        mainTriangles: d.main,
+        fanDepthTriangles: d.depth,
+        drawCalls: d.draws,
         n1Rpm: st.n1Rpm,
         n2Rpm: st.n2Rpm,
         lpBlurDeg: (uniforms.lpBlur.value * 180) / Math.PI,
@@ -453,8 +585,10 @@ async function assemble(
     },
     async dispose() {
       post.dispose();
+      flatMaterial.dispose();
       scene.dispose();
       studio.dispose();
+      stand.dispose();
       // three's dispose is asynchronous; the device goes only after it, whatever happens
       // (three never destroys a supplied device, GPU_FACTS M15)
       try {

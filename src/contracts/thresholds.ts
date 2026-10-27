@@ -410,6 +410,20 @@ export const THRESHOLDS = {
     targetsFrom: 'PHYSICS',
     values: { maxValidationErrors: pass(0, 'errors', 'zero') },
   },
+  P4: {
+    id: 'P4',
+    section: '3.4',
+    checkText:
+      'Render GPU time (engine plus post, excluding the solver and flow visuals) at the default preset, 1080p, default three-quarter front view (D4-2)',
+    passText:
+      '≤ 8.0 ms median under D0-1. The cutaway and hero views are reported (target ≤ 10 ms) but not gated.',
+    targetsFrom: 'PHYSICS',
+    values: {
+      resolutionLines: check(1080, 'px', '1080p'),
+      maxRenderGpuMs: pass(8, 'ms', '≤ 8.0'),
+      reportedTargetMs: pass(10, 'ms', '≤ 10 ms'),
+    },
+  },
 } as const satisfies Record<string, ThresholdSpec>;
 
 export type ThresholdId = keyof typeof THRESHOLDS;

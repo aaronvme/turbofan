@@ -136,3 +136,4 @@ C12 was added by decision D3-17 (critic pass 5, question s, after W1K-I2) before
 | P1 | Solver throughput at ~130k cells inside a 1080p three.js scene (W0 spike a) | ≥ 150 iterations/s, else a logged decision (≈80k cells or a half-rate solver). Measurement protocol (D0-1): on AC power, no other agents/builds/tests running, Chrome in the foreground, 10 s warm-up then the median of 3 runs of 60 s; the conditions (power source, CPU load, GPU clock if readable) are recorded with the number. A result below 150 counts only after a quiet re-run under this protocol. |
 | P2 | Default preset frame rate | ≥ 55 fps (performance trace) |
 | P3 | WebGPU validation errors during any test or scenario | zero |
+| P4 | Render GPU time (engine plus post, excluding the solver and flow visuals) at the default preset, 1080p, default three-quarter front view (D4-2) | ≤ 8.0 ms median under D0-1. The cutaway and hero views are reported (target ≤ 10 ms) but not gated. |

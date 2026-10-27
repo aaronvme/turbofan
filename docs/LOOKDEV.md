@@ -4,18 +4,120 @@ The procedural engine (`src/geometry`) rendered by the look-dev view (`src/rende
 
 ## Screenshots (`docs/look-dev/`, 1920x1080, Chrome 155, Arc 140T)
 
-Regenerate with `node tools/lookdev/capture.ts` (own headed Chrome through Playwright, viewport 1920x1080 DPR 1, 90 frames per preset, one per animation frame so TRAA converges; JPEG q92). The pre-round shots are in `docs/look-dev/before/` (same names) for comparison.
+Regenerate with `node tools/lookdev/capture.ts --no-timing` (own headed Chrome through Playwright, viewport 1920x1080 DPR 1, 90 frames per preset, one per animation frame so TRAA converges; JPEG q92). The pre-round shots are in `docs/look-dev/before/` (same names) for comparison.
 
 | File | Preset | What it shows |
 |---|---|---|
 | `00-hero.jpg` | `hero`, idle, 1/500 s, depth of field + bloom | Low three-quarter product shot of the intake: satin nacelle, brushed lip, the fan disc and the painted spinner |
-| `01-three-quarter-front.jpg` | `threeQuarterFront`, idle, 1/1000 s (the default) | The closed engine on the cyclorama, key shadow and contact shadow under the nacelle |
-| `02-side.jpg` | `side`, idle | Profile: panel joints, core cowl with exhaust stain, core nozzle and plug, the long strip highlights |
+| `01-three-quarter-front.jpg` | `threeQuarterFront`, idle, 1/1000 s (the default) | The closed engine on its transport stand on the cyclorama, key shadow and contact shadow |
+| `02-side.jpg` | `side`, idle | Profile: panel joints, core cowl with exhaust stain, the dull heat-stained core nozzle and plug, the stand's two saddles, the long strip highlights |
 | `03-cutaway.jpg` | `cutaway` | 100 degree wedge: red-orange hatched section caps, fan case, splitter, booster, fan-frame struts, HPC, combustor liner and dome, HPT/LPT, TRF struts, shafts |
 | `04-exploded.jpg` | `exploded` | Modules slid apart in flow order; the fan case slides forward with the intake so the fan shows; per-part floor shadows |
 | `05-fan-idle.jpg` | `fanIdle`, 1/1000 s | 24 wide-chord blades overlapping at the tip, the dark gaps toward the spinner, 6.4 degrees of blur |
 | `06-fan-takeoff.jpg` | `fanTakeoff`, 1/1000 s | 30 degrees per exposure: the fan reads as a disc, no blade-edge teeth at the hub |
 | `07-hot-section.jpg` | `hotSection` (cutaway close-up) | Combustor liner and dome, HPT and LPT disks and blades (10 span sections), heat tint graded along x, TRF struts, plug |
+
+## Look-dev round 4, part 2 (w2/lookdev-4 resumed: D4-24, P4, W1V-I1 fix b, the visual notes)
+
+All eight shots (00-07) were regenerated at the end; the part-1 set is in `docs/look-dev/before/`. Every timing below is **indicative** (the critic's tests shared the GPU; interleaved, paired runs only), never the official D0-1 run.
+
+### The measurement (D4-24)
+
+- **Back-to-back pacing** in `tools/lookdev/capture.ts` (`--pacing both | vsync | back-to-back`, default both): each config runs at vsync (one frame per animation frame, as the app) and back to back (the next frame submitted as soon as the GPU has taken the previous ones, two queued; warm-up included), the same per-pass medians, ids of the back-to-back runs ending in `[back to back]`. P4 is printed per pacing and passes only if both do (until the critic confirms the DVFS evidence). Back-to-back runs also record frames per second and the GPU busy fraction (the timed passes' share of the wall time; a warning under 60 %). Each run's render scale and GPU error count now go into `timings.json` too (W1V-N1), and the JSON is Prettier-formatted when written (W1V-B1). The pure parts (`withPacings`, `backToBackLoad`, `pacedValidity`, `p4Verdict`, `abOrder`, `abSummary`) are unit-tested in `tests/unit/lookdev/timing.test.ts`.
+- **The two-commit A/B** (`tools/lookdev/ab.ts`): detached checkouts under `.claude/worktrees/ab-<sha7>` (own `npm ci`), the page harness (`src/lookdev/main.ts`) made identical on both sides, a Vite server each, one headed Chrome; per repetition one adjacent pair per pacing, the side that goes first and the pacing that leads alternating; the result is each side's median and the paired differences a - b per pass; the checkouts are removed afterwards. The official command (the orchestrator, in a quiet window, about 15 min plus two `npm ci`):
+
+```
+node tools/lookdev/ab.ts --refs bad7ad0,23239a1 --warmup-s 10 --run-s 60 --reps 3
+```
+
+  (writes `docs/look-dev/ab-bad7ad0-23239a1.json`; `--port 5186` and 5187 by default).
+- **Regression verdict (indicative): bad7ad0 did not regress the default view.** `ab.ts --refs bad7ad0,23239a1 --warmup-s 4 --run-s 10 --reps 4` (`docs/look-dev/ab-bad7ad0-23239a1.indicative.json`), paired bad7ad0 - 23239a1: vsync opaque **-0.64 ms** (every pair negative: -0.62, -0.29, -0.66, -0.83), rotors +0.12 (+0.06, +0.31, -0.03, +0.17), GPU total -0.69; back to back opaque **-0.96 ms** (-0.81, -0.56, -1.10, -1.75), rotors +0.01, total -0.82. The official run's 5.59 -> 6.29 ms opaque and 1.36 -> 1.87 ms rotors were between two sessions (D3-7 and D4-24 result), not a change in the code; the shading cuts of part 1 did save opaque time, more of it back to back than at vsync.
+- **The DVFS evidence, same commit, same page:** bad7ad0 at vsync 10.79 ms against 9.75 ms back to back (opaque 5.20 against 4.30); the vsync runs are bimodal inside a run (p10 8.2-9.7, p90 14.3-15.6 ms) while the back-to-back ones are tight (p10 8.5-9.3, p90 10.8-13.2). The same frame takes longer when the GPU has idle time each frame, which is the clock following the load.
+
+### P4 cuts (where the measurements point)
+
+- **TRAA resolve** (`src/render/traaResolve.ts`, installed into three's TRAANode, its history, jitter and copies kept): the closest-depth search and the variance clip over the 4-neighbour cross (5 taps) instead of 3 x 3 (9), the history read with a 5-tap Catmull-Rom filter (sharper under reprojection, see W1V-I1).
+- **Opaque:** the fine noise lookups that are sub-pixel in every shot but the closest are evaluated only where their fade is non-zero (the lip's 5.5 mm buffing grain, the fan's 4 mm grain), with the filter width computed before the branch (WGSL uniformity); the nacelle's latch, door and fastener outlines are evaluated only near them (the skin's footprint taken once); its wipe streaks per vertex.
+- **GTAO** 6 samples with the noise rotated every frame (TRAA averages it) instead of 8 fixed; **fan time copies** 6 instead of 8 (TRAA now accumulates the fan's instants across frames as well).
+- Indicative result: indicative, `ab.ts --refs dad5570,bad7ad0 --warmup-s 4 --run-s 10 --reps 4` (`docs/look-dev/ab-dad5570-bad7ad0.indicative.json`, every run valid; dad5570's render code is HEAD's plus the reverted blade-cavity multiply in two blade materials), the default view:
+
+| pacing | bad7ad0 (part 1) | this round | paired (4 pairs) | opaque | rotors | GTAO | composite | TRAA | output |
+|---|---|---|---|---|---|---|---|---|---|
+| back to back | 8.25 ms | **7.49 ms** | -0.46 (-0.60 -0.32 -1.09 -0.16) | 3.96 -> 3.49 | 1.19 -> 0.99 | 0.77 -> 0.72 | 0.72 -> 0.72 | 1.06 -> 1.08 | 0.28 |
+| vsync | 10.49 ms | **10.71 ms** | -0.54 (-0.89 -0.55 -0.54 +0.99) | 5.55 -> 5.09 | 1.66 -> 2.00 | 1.00 -> 1.11 | 0.84 -> 0.91 | 1.17 -> 1.25 | 0.39 |
+
+  Back to back the default view is under 8 ms here; at vsync it is not (the vsync rotor pass rose 0.35 ms in the pairs while it fell 0.16 ms back to back: not understood; the vsync runs are bimodal, p10 7.1-8.1 against p90 12.8-16.6 ms). Earlier pairs in this session: 1f8de34 - bad7ad0 -1.28 ms back to back (3 pairs, opaque -0.80), a run whose later vsync half was INVALID (occluded window) taught the back-to-back runs their rAF watcher. **P4 as pre-registered (must pass both ways until the critic confirms the DVFS evidence) is not shown to pass**; back to back alone it would, indicatively.
+
+### W1V-I1 fix (b): the cut fan reads while the spools turn (D4-4)
+
+- **Rotor motion vectors** (`src/render/post.ts`): a rotor turns rigidly about the engine axis, so a rotor pixel's previous position is exact: the rotor depth's world point turned back by its spool's step (LP or HP, from the rotor MRT's alpha) and projected with the previous frame's unjittered view-projection. The step is wrapped to half the row's blade pitch (the spinner's is a full turn): at idle the fan turns 107 degrees a frame, about 7 pitches plus 2.4 degrees, so the history comes from the next blade along, a few pixels away. TRAA reads its velocity at one texel per pixel, so the rotor velocity is computed in that read and costs no pass. The rotors' depth also joins TRAA's current depth (its closest-depth search and disocclusion test), and our resolve's Catmull-Rom history keeps the thin dark gaps between stacked blades that bilinear resampling blurred away in motion.
+- **The test** (`tests/browser/rotorMotion.test.ts`, the critic's probe made a test; bound stated before the fix: moving tiles at most the held-still floor + 6): cutaway 32 -> 37 (bound 38), cutaway close-up 2 -> 8 (8), exploded 4 -> 4, exploded close-up 7 -> 9, hotSection 0 -> 0. Negative control, the pre-fix pipeline (`legacyTraa`: three's resolve, zero rotor velocity): close-up 1 -> 34 tiles. (The first control was zero velocity alone; with our resolve's tighter clip that no longer ghosts, 8 tiles, because it throws the history away instead of averaging it.)
+- **The fan blur shipped in motion** (`fanBlur.test.ts`, pass 6: the app never holds the fan still): 48 frames at dt 1/60, then against a 64-still reference at the final phase, the same bound as at rest. Measured (6 time copies): fanIdle shipped at rest MAE 0.0051 / worst tile 0.053, in motion 0.0061 / 0.064; hero 0.0041 / 0.028, in motion 0.0058 / 0.036; fanTakeoff 0.0043 / 0.043, in motion 0.0053 / 0.051 (bound 0.012 / 0.13). With 8 copies and the motion vectors, at rest: fanIdle 0.0047 / 0.045, hero 0.0043 / 0.030; part 1 (no motion vectors): 0.0058 / 0.061, 0.0043 / 0.031.
+- Not done: rotor AO and rotor self-shadow (see "Still CG-like").
+
+### The visual notes and pass-6 nits
+
+- **The floating engine (W1V-N5):** it rests on a transport-stand cradle (`src/geometry/stand.ts`, pure and unit-tested; `createStandMesh` in studio.ts): a saddle under the fan cowl over the fan case and one under the core cowl aft of the nacelle, each on two posts from a floor frame, satin charcoal, casting into the key's static map; it goes with the cowls in the exploded view.
+- **The chrome-bullet plug (W1V-N5):** the plug and core nozzle are oxidised and dull (metalness 0.45, roughness 0.58-0.83), darker aft toward the tip, with flow streaks (per vertex).
+- **The spinner spiral in shadow (W1V-N5):** a faint lift of the white paint stands in for the light the white intake walls bounce onto the spinner (the image-based light has no visibility), so the stripe reads at every phase.
+- **The torn moving fan:** the rotor motion vectors let TRAA average the fan's instants across frames (shipped fanIdle MAE 0.0058 -> 0.0047, worst tile 0.061 -> 0.045 at rest).
+- Pass-6 nits: W1V-N1 run scale and errors in timings.json (done), W1V-N3 TRAA internals asserted (done, post.ts and traaResolve.ts). Skipped, with reasons: W1V-N1's render-scale cost model and its "TAA upsampling" wording (the performance profile was not touched); W1V-N5's doors (flush step, fastener ring), 04's framing and 07's speckle; W1V-N6 more presets at `high` in the tests (time). W1V-N2's "fill-bound" comment stays: this round's measurement supports it (the opaque pass is fragment-bound).
+
+### Still CG-like / not done
+
+- **P4 is not shown to pass** by these indicative numbers (see the cuts above); the official runs decide (handoff NEXT 1).
+- **The cutaway fan at 03's framing** is seen nearly edge-on, so the stacked blades still read as a smooth band at that distance; up close (the test's close-up) they are separate, crisp blades now. No rotor AO (GTAO on the rotor depth) and no rotor self-shadow. A baked blade cavity (darker toward the root and over the overlapped aft chord) was tried and reverted: it failed engineView's centre-contrast check for fanIdle (not loosened) and did not separate the edge-on blades at 03's distance.
+- **The moving fan** (00, 05): the far side still shows torn slivers where the booster shows through the gaps, and 00 keeps a stipple in its lower half; TRAA now averages the instants across frames, but a 6-copy frame is still a noisy estimate.
+- The stand is a plain charcoal cradle: no pads, bolts or wheels; the nacelle is still axisymmetric (no flattened lower cowl, chine or drain mast); the doors still read as drawn outlines.
+- GTAO was not cut (its per-frame rotation broke the hero fan-blur bound).
+
+## Look-dev round 4 + LOD (w2/lookdev-4, D4-2, D4-4, D4-5)
+
+PARTIAL: the measurement, the first shading cuts, the fan's cut rule and the exploded spool stop. P4 is not reached by the indicative numbers; W1V-I1 fix (b), W1V-I3 and the visual notes are not done (see the handoff). All eight shots (00-07) were regenerated; the round-3 set is in `docs/look-dev/before/`.
+
+### P4 (pre-registered first, PHYSICS 3.4 and thresholds.ts)
+
+P4: the render GPU time (engine plus post, excluding the solver and flow visuals) at the default preset, 1080p, default three-quarter front view, at most 8.0 ms median under D0-1; the cutaway and hero are reported against 10 ms, not gated. The official measure is the D0-1 set, and `capture.ts` now prints and records the verdict (`results.P4` in `timings.json`; marked indicative unless the run used at least 10 s warm-up, 60 s runs and 3 reps):
+
+```
+npx vite --port 5184 --strictPort
+node tools/lookdev/capture.ts --only none --warmup-s 10 --run-s 60 --reps 3 --seed 1
+npx prettier --write docs/look-dev/timings.json
+```
+
+### Drawn triangles per view (W1V-I2, D4-5)
+
+`stats()` now counts only what the camera draws (the layer-2 shadow proxies are skipped) and reports the main pass, the rotor pass and the fan's depth pre-pass apart, plus draw calls; `node tools/lookdev/capture.ts --counts --no-timing` writes `docs/look-dev/triangles.json`. At `high` (unchanged by this round: no geometry changed):
+
+| view | drawn (M) | main | rotors (incl. the 8 shaded fan copies, 0.219) | + fan depth pre-pass | draws |
+|---|---|---|---|---|---|
+| threeQuarterFront, hero, fanIdle, fanTakeoff | 1.259 | 0.822 | 0.438 | 0.219 | 63 |
+| side | 0.679 | 0.442 | 0.237 | 0.219 | 31 |
+| cutaway, hotSection | 1.588 | 1.139 | 0.449 | 0.027 (shutter 0: copy 0 only) | 186 |
+| exploded | 1.264 | 0.815 | 0.449 | 0.027 | 84 |
+
+This restates the pass-6 probe: front 1.06 M with one fan copy (1.259 - 7 x 0.027) plus 0.41 M of fan-copy vertex work (the pre-pass and the 7 extra shaded copies), side 0.48 M plus the fan, cutaway 1.58 M.
+
+### What the opaque pass pays for (measured, not assumed)
+
+`node tools/lookdev/opaqueCost.ts --saturate` (new): A/B configs on one page, each timed right after the default (paired, every frame of a 0.6 s run kept, the median of 5-10 rounds), with the debug flags `flat` (one unlit material for the whole main pass), `flatNames` (that material on matching meshes), `skinsOnly`, `hide` (a regex on `main:`/`rotors:` names). Indicative: another builder was using the GPU throughout (identical configs varied by up to 2x between runs; the paired differences are the reliable part).
+
+- **The opaque pass is bound by its fragment shading, not by triangles.** With every main material replaced by an unlit one it falls from about 6 ms to about 1 ms (saturated: -4.9 to -6.3 ms). Hiding every main-pass blade row (0.33 M triangles) saves 0.6 ms or less, culling off is within the noise, and drawing only the nacelle and core-cowl skins costs as much as the whole engine. At 960 x 540 the pass falls by half or more.
+- By part (saturated, paired): the nacelle skin about 2.5 ms, the inlet lip (the solid includes the whole inner barrel) about 1.4 ms, the cyclorama about 0.8 ms, the key's shadow lookups about 0.5 ms, the core cowl about 0.1 ms, everything that is not a skin about 1.8 ms.
+- **Why the D3-7 run saw a geometry-bound pass: the GPU clock follows the load at vsync pacing.** One frame per animation frame leaves the Arc iGPU idle for most of each 16.7 ms, and its clock drops with the work: at vsync the performance profile changed the opaque pass by +0.4 ms (the official run: 5.59 -> 5.64), saturated (frames back to back, `timeRun(ms, true)`) by -1.6 ms; the flat main pass saved 5.1 ms of opaque but only 3.1 ms of total at vsync (the other passes slowed), 8.1 ms saturated. So the GPU ms of a vsync-paced run understate any saving, which matters for P4 (orchestrator: see the handoff).
+
+### What changed
+
+- **Shading cuts (the measured lever):** the nacelle's orange peel is gone (two noise lookups per pixel; no shot resolved it, pass 6); the low-frequency noise (nacelle tone and gloss, the lip, the fan case, the core-cowl stain, the heat tint, the plug soot) is evaluated per vertex and interpolated (`perVertex`, periods well above the vertex spacing); the nacelle's oil canning is a per-vertex tilt of the normal (central differences in the object frame, smooth across triangles) instead of a per-pixel derivative bump; the lip has no anisotropic lobe (roughness 0.42 instead of 0.34 stands in for it; at 0.34 without it the band read as chrome again). Saturated, paired against the round-3 materials (3 alternating pairs): **default opaque 6.09 -> 4.95 ms** (median; 5.80-6.53 -> 4.82-5.04), the main materials' cost (default minus flat) 4.9-5.4 -> 3.7-4.0 ms. Estimated against the official run: about 10.2 -> 9.1 ms, so **P4 is probably not met yet**.
+- **No geometry LOD:** the measurements say triangles are not what the default view pays for, so per-row blade LOD and row culling would not move P4; they stay available (the culling pixel test is the acceptance harness) if a later measurement says otherwise.
+- **The fan's cut rule (W1V-I1, part):** in the cutaway only a fan blade wholly inside the wedge is hidden (`bladeHidden(..., 'inside')`, mirrored in `bladeHide`; the pre-pass and the shaded copies share it, as EqualDepth needs), so the blades at the cut faces keep their profile instead of the 8 nearest vanishing.
+- **The exploded engine stops (D4-4):** `spoolDisplayFactor` eases the displayed spool speeds to a stop over `SPOOL_STOP_S` = 1 s (smoothstep in a linear progress, exact over any frame step) and back up when the view closes. The cutaway keeps the running engine (D4-4).
+
+### Still CG-like / not done
+
+- **The cutaway fan still does not read (03):** the spools turn and the rotor pixels still enter TRAA with zero velocity, so the blades are ghosted; fix (b) of W1V-I1 (rotor motion vectors) is the next step, then rotor AO and self-shadow.
+- The visual notes are untouched: the moving fan's torn far side, the spinner spiral in shadow (it shows in 01 only at some phases), the floating engine, the plug as a uniform bright ogive.
+- The lip is slightly smoother than round 3's brushed band (isotropic lobe).
 
 ## Look-dev round 3 (w1/lookdev-3)
 
