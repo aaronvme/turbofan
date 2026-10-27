@@ -2207,3 +2207,199 @@ The L9a/L9b and duct stalls are the limiter's (D4-25), a separate cause. D4-25's
 
     keeping M_cut = minMach = 0.003?
 - **(x) C12's recovery bias** (W2F-I2): accept the bias tuned to the case, with a 4 % second pin and the headroom stated in the ledger, or ask the D4-18 round to revisit it.
+
+## Critic pass 8: w2/reference @4553ce2
+
+I reviewed `w2/reference` @4553ce2 against main 00bc99b on 2026-10-27 as the pass-8 critic. Main already holds the reference up to 9d99b04 (W2R-B1), so the review diff is `9d99b04..4553ce2`: rounds 4 and 5. In scope: W2R-I2 and W2R-I4, D4-32 and D4-35 (the fully discrete acoustic analysis, CFL 0.8, p_u), D4-26 (L7 at 96 × 96), L8's velocity row, D4-34/D4-36 (the W2R-6 mechanism), D4-33 (the smooth-limiter retest) and the pass-7 nits. D4-35 and D4-36 were decided on this tip, after its code. Checklists applied: typescript-reviewer, silent-failure-hunter, pr-test-analyzer.
+
+New probe: `docs/reviews/probes/w2r-acoustic-flow.probe.ts.txt` (plain Node, `ROOT` = a checkout). It is a fully discrete von Neumann analysis built from the oracle's own functions instead of a hand model:
+- the flux Jacobians of `slau2Flux` by central differences;
+- dq/dU of `consToPrim`;
+- the matrix of `preconditionIncrement`;
+- `spectralRadius` for the local step;
+- central-slope MUSCL and the 3-stage G(z), as in `tests/unit/flow/acoustic.ts`;
+- a uniform base state that may move (M0 > 0), 1D cells.
+
+Also `docs/reviews/probes/w2r-l8-steady.probe.ts.txt`: ladder L8's set-up at CFL 0.8 run to 40000 iterations (W2R-I7).
+
+**Gates at the tip.** I ran them in the builder worktree; its tracked files were unchanged afterwards. The lookdev-4 gates and a solver builder's GPU tests shared the machine.
+- `npm test`: 1735 passed, 9 expected fail, 84 files.
+- `npm run typecheck`: clean. `npm run lint`: clean.
+- `npm run coverage`: lines 99.57 %, statements 98.69 %, branches 88.07 %, functions 99.62 %; thresholds pass. `src/flow/reference`: lines 100 %, branches 88.67 % (gate 85 %). `src/flow/mesh`: 98.60 % / 89.16 %.
+- `npm run test:mesh`: 29 passed.
+- `npm run test:ladder`: 10 files passed, 3 failed, 536 s.
+
+**Ladder at 4553ce2 (my run).** Every value matches the handoff table.
+
+| case | metric | threshold | value | |
+|---|---|---|---|---|
+| L1 | quiescent, 130k f32 asset (residual and state bitwise 0) | < 1e-4 m/s | 0 | PASS |
+| L1 | uniform M 0.5, 130k f64 metrics, 50 its | < 1e-4 m/s, growth ≤ 2× | 2.03e-13 | PASS |
+| L1 | the same on the shipped f32-metric asset; asset GCL defect | reported | 1.42e-5 m/s; 1.31e-7 | reported |
+| L2 | L1(ρ) / shock offset | < 1 % / ≤ 1 cell | 0.277 % / 0.228 | PASS |
+| L3 | L1(ρ) vs the 1D reference | < 2 % | 0.211 % | PASS |
+| L4a | Mach / choked ṁ (915 its) | < 1 % / < 0.5 % | 0.278 % / 0.0997 % | PASS |
+| L4b | shock position at 170 × 17; D4-19 steadiness | < 2 %; ≤ 0.1 % | 1.640 %; 0.0258 % | PASS |
+| L4b | convergence | reported | 0.146 of the first at 15000 | reported (open) |
+| L5 | ṁ (948 its) | < 1 % | 0.0843 % | PASS |
+| L6 | radial equilibrium free / solid; drift | < 0.1 % q; < 1e-4 | 0.0300 % / 0.0029 %; 4.7e-15 / 5.4e-8 | PASS |
+| L7 | M 0.01 asymmetry at 96 × 96; the 24 / 48 / 96 sequence falling, all converged | < 0.02 | 0.0131 (0.1347 / 0.0437 / 0.0131; 2053 / 3901 / 8675 its; order 1.63, 1.74) | PASS |
+| L7 | M 0.01 Cd at 96 × 96 | < 0.01 | 0.00159 (24: 0.0569, 48: 0.0096) | PASS |
+| L7 | iterations M 0.01 / M 0.3 at 96 × 96 | ≤ 3 | 1.048 | PASS |
+| L7 | plain M 0.01 at 48 × 48 asymmetry, Cd (not converged); M 0.3 Cp shift, preconditioned vs plain | reported | 0.347, 0.0043; 5.5e-3 | reported |
+| L8 | velocity error at M_cut 0.003, CFL 0.8 | < 1 % | 0.360 % (not converged) | PASS (see W2R-I7) |
+| L8 | convergence to 1e-5 | 20000 | not converged | **FAIL** (D4-35) |
+| L9a | Euler work; convergence | < 1e-4; 1e-6 of the peak | 7.79e-6; not converged | PASS; **FAIL** (D4-36) |
+| L9b | Rankine-Froude; convergence | < 2 %; 1e-5 of the peak | 0.799 %; not converged | PASS; **FAIL** (D4-36) |
+| 12.2 | storage C / C-pre / C physical / S after 1, 10, 100 | ≤ tol / 10 | 1.7e-7, 1.1e-6, 7.8e-7 / 1.1e-7, 1.7e-7, 5.1e-7 / 8.0e-8, 2.4e-7, 4.2e-6 / 7.3e-8, 1.8e-7, 6.3e-7 | PASS |
+
+**The fully discrete acoustic analysis (D4-32): correct for the family it states, and 1D is its worst cell shape. Two gaps (W2R-I6).**
+- *The hand model.* `tests/unit/flow/acoustic.ts` is a correct linearisation. I checked it term by term:
+  - the central-slope face symbols, the averages (imaginary) and jumps (real);
+  - the mass-flux pressure diffusion β²/(2f_a), the momentum equation without dissipation at rest (SLAU2's p̃ terms are both second order there), p_u as ½K_u f_a Δvn;
+  - the local step 1/(β(1 + a));
+  - the cubic's coefficients;
+  - G(z) = 1 + z + α₂z² + α₁α₂z³.
+
+  Sampling θ in (0, π] is complete, because the r symbols enter only as avg² and jump.
+- *My independent analysis* (probe above) uses the oracle's own flux, primitives and preconditioner, with no hand linearisation. At rest it gives the same limits: plain 1.236, matched 0.972.
+  - So the model's assumptions hold for the code: χ = 1 at rest, SLAU2's velocity dissipation is second order, the D4-20 factor, the δU update.
+  - The scalar rows (v, rw, Z) are exactly decoupled (coupling 0), so the spectrum is the cubic of (ρ′, u, p′) plus three advection diagonals.
+- *Cell shape.* The aspect sweep is symmetric in a ↔ 1/a (1.210 at 0.25 and at 4, 1.069 at 0.1 and at 10, my run of `acousticLimit`). It rises monotonically to 1.550 for a square. So the 1D limit 0.972 is the minimum over cell shapes, and 0.8 = 0.82 × it.
+- *With flow* (minMach = M_cut = 0.003, β = M_ref = max(M0, 0.003)), the limit rises off rest:
+
+  | M0 / 0.003 | 0.01 | 0.1 | 0.3 | 0.7 | 1 to 10 | 30 | 100 (M 0.3) |
+  |---|---|---|---|---|---|---|---|
+  | 1D limit | 0.985 | 1.091 | 1.275 | 1.512 | 1.215 | 1.223 | 1.311 |
+
+  So "at rest" is the worst case of the matched family, and the D4-32 choice stands for it.
+- *Gap 1, β ≠ M_ref.* The analysis assumes β = M_ref. The scheme does not enforce that:
+  - β² takes max(M², minMach², Δp/(ρc²)) per cell;
+  - M_ref takes the face's q̄/c̄.
+
+  At rest the limit falls below 0.8 on both sides of the matched value:
+
+  | β / M_ref | ¼ | ½ | ¾ | 1 | 2 | 4 | 8 | 16 |
+  |---|---|---|---|---|---|---|---|---|
+  | 1D limit | 0.608 | 0.768 | 0.881 | 0.972 | 1.236 | 0.937 | 0.469 | 0.234 |
+
+  With flow at M0 = 0.003, ½ gives 0.907.
+  - **β < M_ref** happens on a face faster than its cell: under-damped. In the engine this is the jet and entrainment shear layer beside the static far field (cell M 0.003, face q̄/c̄ near the jet's).
+  - **β > M_ref** happens where the Δp term lifts β at low speed: over-damped, past the RK3's real-axis limit at CFL × β/M_ref ≈ 3.7. That is a start from rest or a pressure jump in slow flow.
+  - No ladder case shows either one. I checked C-pre: it decays at the same slow rate at CFL 0.8, 0.4 and 0.2 (residual 567 → 18 / 32 / 135 at 4000, my run), so this is not what holds C-pre up.
+  - The §10 basis "0.8 × the worst cell shape" is therefore the worst cell shape of the matched family only.
+- *Gap 2.* The machCut ≥ 1 test configuration gets the 0.8 default too (`solver.ts:151-152`). Its limit is 0.475 at β 0.06 (as SOLVER.md says) and 0.176 at β 0.003 (my probe).
+
+**Is CFL 0.8 pinned by a test? Yes.**
+- `rk.test.ts` pins the limits: plain 1.236, matched 0.972 / 1.550, p_u 1.413 / 1.958. It pins `DEFAULT_CFL_PRECONDITIONED / worst` in [0.8, 0.825], and that the plain 1.5 is unstable on the pair up to aspect 0.5.
+- `precondition.test.ts` pins that the default applies without a `cfl` (0.8) and that minMach ≥ 1 keeps 1.5.
+- The C-pre rows of §12.2 diverge at 1.5 (NaN at 79), so the kernel's default is checked as well.
+
+**Was p_u removed from the oracle (D4-35)? No (W2R-I5).** D4-35 was decided at this tip, so this is the next round's work, not an omission. But the merged oracle would still describe two schemes.
+
+**L7 (D4-26): honest and pre-registered.**
+- 9589a0b (PHYSICS.md 3.3, 14:07:39) states the 96 × 96 pass rows, the 24 / 48 / 96 sequence, the observed order and the monotone-fall condition. It precedes the code (3c9e7c9, 14:28:05) and the run of record (@4927332).
+- The pass row requires asymmetry < 0.02, monotone, and every sequence run converged (`l7.ts:137`). My run reproduces it: 0.1347 / 0.0437 / 0.0131, order 1.63 then 1.74 (second-order-like, so discretisation error as D4-26 assumed). Cd falls 0.057 / 0.0096 / 0.0016. The ratio is 1.048.
+- The sequence values were known from the pass-7 scratch study before the amendment. That is D4-26's evidence, not tuning: the resolution and the rule are D4-26's, not chosen after the run of record.
+- The seven sphere runs run as child processes (`sphereRun.ts`) and parse one tagged JSON line, with an error if it is missing.
+
+**L8's velocity row.** It now passes (0.360 % at CFL 0.8, against 40.6 % at 1.5). But it passes on an unconverged state (3.9e-4 of the first residual at 20000) with no steadiness check (W2R-I7).
+
+**W2R-6 (D4-34/D4-36): the diagnosis is sound.**
+- The evidence is consistent:
+  - the power-iterated mode is acoustic (σ ≈ 590 1/s ≈ c/L) and read in the linear regime;
+  - the steady state has a ±50 Pa sawtooth at the throat;
+  - zeroing or centring the p′ slopes, zeroing the u slopes, first order, or the smooth limiter removes it;
+  - zeroing the ρ′ or v slopes, or replacing the p∇b source by b_c∇p, does not.
+- The reading: blockage is needed only to create a non-uniform plain steady state with extrema. The b ≡ 1 duct is uniform, which is why it was stable in pass 7.
+  - The sharp switch then puts one-sided slopes (φ ≈ the smaller jump, ∂φ/∂a → 1) next to every extremum.
+  - Their linearisation is what grows. A one-sided slope on the downwind side is anti-dissipative, which fits.
+  - b_f = min(b_L, b_R) also removing it fits this reading: it changes the steady state's sawtooth.
+- One direct check is missing (W2R-N13). The pins stay (`blockage.test.ts`, three `it.fails`), and SOLVER.md §8 carries the table.
+
+**The smooth limiter is still optional, not the default.**
+- `limiter?: 'sharp' | 'smooth'`; `loadLine` passes `this.opts.limiter === 'smooth'` (`solver.ts:530`). No default changed.
+- SOLVER.md §6 calls the sharp form the contract and the smooth form a trial.
+- The retest (D4-33) is reported with numbers: L9a/L9b converge and W2R-6 goes; L8 breaks at 27-30 %, L1's growth row fails, and four unit tests fail. D4-36's pre-stated rule is the next round's.
+- On L1 the reason given is slightly off (W2R-N7).
+
+**SOLVER.md and the oracle term for term: yes, for this tip's scheme.** I checked:
+- §6 smooth form, its code order and the ε rule against `muscl.ts:16-44`: S = (ρ∞, c∞, c∞, c∞ r_c, ρ∞c∞², f_st), and a ghost uses its source cell's radius (`rExt`, `solver.ts:166-171`);
+- §7 p_u against `slau2.ts:115` (same order);
+- §8 the stage times (t, t + dt, t + dt/2) against `solver.ts:341-345`, and the blockage range check against `solver.ts:219-224` (validated before any write);
+- §10 the default CFL against `solver.ts:28, 151-152`, except the minMach ≥ 1 clause (W2R-N8);
+- §12.2's rows against `tests/ladder/oracle.ts` and `cases/f32.ts`: the mesh of each row, `relativeError` with exact zeros, and the C-pre and S options.
+
+W2R-N6 is done: the side records are per-call locals, and `physicalFlux` gets its own.
+
+**Pass-7 items.**
+- **W2R-I1 CLOSED** as D4-33 amended it: the smooth form is an option. D4-36 governs the default.
+- **W2R-I2 DONE**: C-pre and S rows, the mesh of each row, the shared set-ups in `tests/ladder/oracle.ts`, measured at 59-2000× margin.
+- **W2R-I3 DONE**: CFL 0.8 from the analysis, pinned. W2R-I6 qualifies it.
+- **W2R-I4 DONE**: six unequal-state value tests against an independent absolute-variable evaluation, at 1e-12 both ways round; `physicalFlux` after an unrelated flux; the zero-area face over NaN. I did not re-run Stryker: the builder reports 98.80 % on a private config, and the re-run on the mutation config is handoff NEXT 3.
+- **W2R-N1 DONE**, **N2 DONE**, **N3 DONE** (its test integrates a linear-in-t fuel source exactly and checks all six stage times), **N5 DONE** (485b69a), **N6 DONE**.
+- **W2R-N4 OPEN**: not done.
+
+### Blocking
+None.
+
+### Important
+- **W2R-I5 OPEN: p_u is still in the oracle (D4-35 says delete it).**
+  - Where:
+    - `slau2.ts:66-67, 82, 115` (the `ku` parameter and term);
+    - `solver.ts:52-60, 98-100, 149, 388, 584` (`lowMachPreconditioning.velocityDiffusion`, `fluxKu`);
+    - SOLVER.md §7 (line 165: "the oracle keeps it as an option for the record") and §12.2 (line 346: "If the p_u trial changes the preconditioned scheme ... re-measured");
+    - the tests: the p_u antisymmetry test and three p_u value cases in `slau2.test.ts`, and "adds p_u to the momentum residual" in `precondition.test.ts`.
+  - The failure scenario: w2/solver's oracle comparisons are written against an oracle with a live, tested second scheme one option away. A later caller (a W3 adapter, a test) turning on `velocityDiffusion` gets a flux the kernel does not have, and the agreement tests would not notice.
+  - Fix:
+    - delete the option, the term and their tests;
+    - keep the SOLVER.md §7 trial table and its numbers as the record of the negative result, with the commit where the code lived (413b623), as D4-35 asks;
+    - `acoustic.ts` may keep `ku` as an analysis parameter, because the analysis is the record.
+- **W2R-I6 OPEN: the CFL 0.8 basis covers only β = M_ref.** See the analysis above.
+  - At rest, with M_cut = 0.003, the 1D limit falls below 0.8:
+    - for β/M_ref ≤ ~0.6: a face faster than its cell (0.768 at ½, 0.608 at ¼);
+    - for β/M_ref ≥ ~4.6: the Δp term at low speed (0.469 at 8, 0.234 at 16).
+  - The failure scenario: the static engine's jet/far-field shear layer and a start from rest put cells in both regimes at the kernel's fixed CFL 0.8. A locally unstable acoustic pair then either stalls the residual or grows, and nothing in the ladder covers it (L7 and L8 are smooth and matched to within a few %).
+  - Fix (for a decision; not for this merge):
+    - extend §10's table and `rk.test.ts` to β/M_ref ∈ [¼, 16] and state the CFL's validity range;
+    - pick a remedy:
+      - (a) take the D4-20 M_ref per face from the preconditioner's β (for example max(M_cut, ½(β_L + β_R)) instead of the face Mach), so that dissipation and time derivative are matched by construction (the Weiss-Smith form);
+      - (b) include the scaled pressure diffusion's own eigenvalue, β²χ|S|/(2f_a), in the local step's λ, which closes the over-damped side;
+      - (c) a ladder case that exercises both sides: a low-Mach jet into dead air, and a start from rest.
+    - Also: the machCut ≥ 1 test configuration takes the 0.8 default with a limit of 0.475 at β 0.06 and 0.176 at β 0.003 (`solver.ts:151-152`). Either throw without an explicit `cfl`, or document it at the option.
+- **W2R-I7 OPEN: L8's velocity PASS (and L9a/L9b's value rows) are taken on unconverged states with no steadiness check.**
+  - `l8.ts:54` passes the row on `worst < 0.01 && count > 0` after 20000 iterations, at 3.9e-4 of the first residual. The case definition (PHYSICS.md 3.3 L8) says "converged to 1e-5", and D4-35 counts the row as passing. L9a's Euler-work and L9b's Rankine-Froude rows do the same. Only L4b has D4-19's steadiness rule.
+  - My run of L8's set-up at CFL 0.8 to 40000 iterations (sampled every 2500) settles the substance:
+
+    | iterations | 2500 | 5000 | 10000 | 15000 | 20000 | 25000 | 30000 | 32500 | 40000 |
+    |---|---|---|---|---|---|---|---|---|---|
+    | velocity error | 1.27 % | 0.48 % | 0.35 % | 0.68 % | 0.36 % | 0.46 % | 0.46 % | 0.45 % | 0.449 % |
+    | residual / first | 3.9e-3 | 1.1e-3 | 1.5e-3 | 1.1e-3 | 3.9e-4 | 4.2e-5 | 4.6e-5 | 9.9e-6 | 3.1e-6 |
+
+    - It is slow, oscillating convergence, not a floor and not a growing mode. It reaches 1e-5 at about 32500.
+    - The converged error is 0.449 %, so the row's verdict holds.
+    - The handoff's "likely the sharp limiter's floor" is not what happens at L8 (the L9 stalls may still be the limiter's).
+  - But at 20000 the row read 0.360 %, and between 2500 and 20000 it swung from 0.35 to 0.68 %. A case nearer its threshold would pass or fail on the iteration it stopped at.
+  - Fix:
+    - pre-register a D4-19-style steadiness condition for every value row taken before convergence (L8's velocity, L9a, L9b): the metric sampled every 100 iterations over the last 2000, max − min within a stated fraction of the threshold. Report it as a row, and make the PASS depend on it.
+    - For the orchestrator: L8's convergence row fails only on the 20000 cap (it converges by about 32500 at CFL 0.8). A cap scaled by 1.5 / 0.8 for the CFL change would be a decision, not a fix.
+
+### Nits
+- **W2R-N7 OPEN.** SOLVER.md §6 (line 127) explains L1's failure with the smooth limiter as "plain CFL 1.5, above the central-slope acoustic limit 1.236 of §10".
+  - 1.236 is the at-rest limit. At L1's M 0.5 the 1D central-slope plain limit is 1.448 (my probe), still below 1.5, so the conclusion holds.
+  - The same numbers say the plain default 1.5 has no linear basis for the acoustic family in 1D at any Mach number up to 0.8 (1.236-1.448); it is stable at aspect ≥ 0.25 (1.539). It relies on the sharp switch's clipping.
+  - State that in §10, and set D4-36(a)'s plain CFL from the flow-dependent minimum (0.8 × 1.236 = 0.99, so 1.0 is at the edge of the margin, not inside it).
+- **W2R-N8 OPEN.** SOLVER.md §10 (line 270) says the default applies "whenever `lowMachPreconditioning` is set and the caller gives no `cfl`". The code (`solver.ts:151-152`) and the handoff exclude minMach ≥ 1. Add the clause. The §7 trial table's "bounded, 36 at 2000 (from 567)" needs its quantity named: the density-residual L2, which I reproduced.
+- **W2R-N9 OPEN.** `l7.ts:144`: L7's Cd row passes without `low.conv.converged`, unlike the asymmetry and ratio rows (`l7.ts:137, 151`). An unconverged 96 × 96 run would pass Cd. Add the condition.
+- **W2R-N10 OPEN.** `precondition.test.ts:315` dropped the duct's iteration bound (< 4000 at CFL 1.5) instead of restating it for 0.8 (4723 measured). Only the 6000 cap now bounds it. Restate a bound (for example < 5500) so a slowdown in the preconditioned path is caught.
+- **W2R-N11 OPEN.** `reports/ladder/` keeps stale reports from 2026-10-26: `L6-free-vortex.json` and `L6-solid-body.json`, whose free-vortex and solid-body rows fail at 1.29 % and 0.45 %, beside the current passing `L6.json`. The directory is ignored, but it is where a reader looks for the ladder of record. Clear `reports/ladder/` at the start of `test:ladder`, or name per run.
+- **W2R-N12 OPEN.** The ladder now runs 13 forked files plus L7's seven child processes, so up to 20 solver processes run on a 16-thread machine. Fine for the CPU ladder, but the 30-minute test timeout (`vitest.ladder.config.ts:13`) now hides a hung child for half an hour. Give `sphereChild` a shorter timeout derived from the cap (it has 30 min too, `l7.ts:82`).
+- **W2R-N13 OPEN.** W2R-6's reading ("the linearisation of the switch grows") is inferred from term switches. The direct check: a power iteration with the limiter's switch pattern frozen at the steady state (the sign masks of ab and of which one-sided slope is taken). If that frozen linear operator grows, the switch's linearisation is proved; if not, the nonlinear switching is the cause. Cheap with the round-5 scratch driver; worth having before D4-36's trials so the selection rule tests the right mechanism.
+
+**Verdict w2/reference @4553ce2: MERGE.**
+- Every failing row is visible and under a decision:
+  - L8 convergence (D4-35);
+  - L9a/L9b convergence and W2R-6's three `it.fails` (D4-36);
+  - L4b convergence, reported (D4-19).
+- W2R-I2 and W2R-I4, which gated w2/solver's oracle comparisons, are done and correct. The acoustic analysis and its CFL are correct for the matched family and pinned. L7's refinement is honest and passes.
+- Before merge, or as the first item of the next round (orchestrator's choice): **W2R-I5**, deleting p_u as D4-35 decided (small). **W2R-I6** and **W2R-I7** go to the next reference round with D4-36's trials. W2R-I6 also goes to w2/solver as a known limit of CFL 0.8.

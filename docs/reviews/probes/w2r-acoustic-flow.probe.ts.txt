@@ -1,0 +1,225 @@
+// Critic pass 8, w2/reference @4553ce2 (D4-32 / D4-35): an independent fully discrete von Neumann
+// analysis of the preconditioned tracking iteration, built from the ORACLE'S OWN functions instead
+// of a hand-linearised model (tests/unit/flow/acoustic.ts is a hand model of SLAU2 at rest).
+//   ROOT=<checkout> node --import file:///<checkout>/tools/mesh/ts-resolve.mjs w2r-acoustic-flow.ts
+// 1D (x faces only, the a = 0 cell shape that SOLVER.md 10 says is the worst), unit cells, uniform
+// base state with axial velocity u0 = M0 c (the free stream moves with it, so every gauge is 0):
+// - flux Jacobians dF/dq_L and dF/dq_R of the module's slau2Flux by central differences on the six
+//   primitives (records rebuilt through primToCons / consToPrim so T' and c are consistent);
+// - MUSCL with central slopes (the smooth-data linearisation, as acoustic.ts): q_L = q_i + (q_{i+1}
+//   - q_{i-1}) / 4, q_R = q_{i+1} - (q_{i+2} - q_i) / 4, residual F_{i+1/2} - F_{i-1/2};
+// - dq/dU of consToPrim by central differences; the preconditioned increment as the matrix of the
+//   module's preconditionIncrement at beta^2; tau = CFL / spectralRadius(u0, c, beta^2);
+// - Z = -tau (dq/dU) P (dR/dq) in q space; the scalar rows (v, rw, Z) only see themselves, so the
+//   spectrum is the (rho', u, p') block's cubic plus the three scalar diagonals (checked);
+// - G(z) = 1 + z + a2 z^2 + a1 a2 z^3 with RK3_ALPHA; the largest CFL with max |G| <= 1 + 1e-9.
+// Prints the limit for: the plain scheme at rest; matched preconditioning at rest; a sweep of the
+// flow Mach M0 at minMach = M_cut = 0.003; beta / M_ref mismatches; the machCut >= 1 test set-up.
+import { pathToFileURL } from 'node:url';
+
+const ROOT = process.env.ROOT ?? '.';
+const imp = (p: string) => import(pathToFileURL(`${ROOT}/${p}`).href);
+const { THERMALLY_PERFECT, referenceState } = await imp('src/flow/reference/gas.ts');
+const { slau2Flux } = await imp('src/flow/reference/slau2.ts');
+const { NP, consToPrim, primToCons } = await imp('src/flow/reference/state.ts');
+const { preconditionIncrement, spectralRadius } = await imp('src/flow/reference/precondition.ts');
+const { RK3_ALPHA } = await imp('src/flow/reference/solver.ts');
+
+type C = [number, number];
+const cadd = (a: C, b: C): C => [a[0] + b[0], a[1] + b[1]];
+const csub = (a: C, b: C): C => [a[0] - b[0], a[1] - b[1]];
+const cmul = (a: C, b: C): C => [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]];
+const cdiv = (a: C, b: C): C => {
+  const d = b[0] * b[0] + b[1] * b[1];
+  return [(a[0] * b[0] + a[1] * b[1]) / d, (a[1] * b[0] - a[0] * b[1]) / d];
+};
+const csc = (s: number, a: C): C => [s * a[0], s * a[1]];
+const cexp = (t: number): C => [Math.cos(t), Math.sin(t)];
+const cabs = (a: C) => Math.hypot(a[0], a[1]);
+
+const RF = 1;
+
+interface Case {
+  m0: number; // flow Mach number of the base state
+  beta2: number; // preconditioner beta^2 (1: none)
+  machCut: number; // D4-20 M_cut (1: unscaled)
+  recon?: 'central' | 'first';
+}
+
+function build(k: Case) {
+  const c0 = referenceState(THERMALLY_PERFECT, { pressure: 101325, temperature: 288.15, velocity: 0 }).c;
+  const u0 = k.m0 * c0;
+  const ref = referenceState(THERMALLY_PERFECT, { pressure: 101325, temperature: 288.15, velocity: u0 });
+  const q0 = [0, u0, 0, 0, 0, 0];
+  const rec = (q: readonly number[]) => {
+    const P = new Float64Array(NP);
+    for (let m = 0; m < 6; m++) P[m] = q[m] as number;
+    const U = new Float64Array(6);
+    primToCons(ref, P, 0, RF, U, 0);
+    const out = new Float64Array(NP);
+    consToPrim(ref, U, 0, RF, out, 0);
+    return out;
+  };
+  const base = rec(q0);
+  const hq = [1e-7 * ref.rho, u0 > 0 ? Math.min(1e-7 * ref.c, 1e-3 * u0) : 1e-7 * ref.c, 1e-7 * ref.c, 1e-7 * ref.c * RF, 1e-7 * ref.rho * ref.c * ref.c, 1e-7];
+  const F = (L: Float64Array, R: Float64Array) => {
+    const out = new Float64Array(6);
+    slau2Flux(ref, L, 0, R, 0, 1, 0, 1, RF, out, k.machCut);
+    return out;
+  };
+  const JL: number[][] = Array.from({ length: 6 }, () => new Array(6).fill(0));
+  const JR: number[][] = Array.from({ length: 6 }, () => new Array(6).fill(0));
+  for (let m = 0; m < 6; m++) {
+    const qp = [...q0];
+    const qm = [...q0];
+    qp[m] = (qp[m] as number) + (hq[m] as number);
+    qm[m] = (qm[m] as number) - (hq[m] as number);
+    const Pp = rec(qp);
+    const Pm = rec(qm);
+    const fl = [F(Pp, base), F(Pm, base)];
+    const fr = [F(base, Pp), F(base, Pm)];
+    for (let i = 0; i < 6; i++) {
+      (JL[i] as number[])[m] = (((fl[0] as Float64Array)[i] as number) - ((fl[1] as Float64Array)[i] as number)) / (2 * (hq[m] as number));
+      (JR[i] as number[])[m] = (((fr[0] as Float64Array)[i] as number) - ((fr[1] as Float64Array)[i] as number)) / (2 * (hq[m] as number));
+    }
+  }
+  // dq/dU by central differences of consToPrim
+  const U0 = new Float64Array(6);
+  primToCons(ref, base, 0, RF, U0, 0);
+  const hu = [1e-7 * ref.rho, 1e-7 * ref.rho * ref.c, 1e-7 * ref.rho * ref.c, 1e-7 * ref.rho * ref.c * RF, 1e-7 * ref.rho * ref.c * ref.c, 1e-7 * ref.rho];
+  const A: number[][] = Array.from({ length: 6 }, () => new Array(6).fill(0));
+  for (let m = 0; m < 6; m++) {
+    const Up = Float64Array.from(U0);
+    const Um = Float64Array.from(U0);
+    Up[m] = (Up[m] as number) + (hu[m] as number);
+    Um[m] = (Um[m] as number) - (hu[m] as number);
+    const qp = new Float64Array(NP);
+    const qm = new Float64Array(NP);
+    consToPrim(ref, Up, 0, RF, qp, 0);
+    consToPrim(ref, Um, 0, RF, qm, 0);
+    for (let i = 0; i < 6; i++) (A[i] as number[])[m] = ((qp[i] as number) - (qm[i] as number)) / (2 * (hu[m] as number));
+  }
+  // the preconditioned increment as a matrix
+  const Pre: number[][] = Array.from({ length: 6 }, () => new Array(6).fill(0));
+  for (let m = 0; m < 6; m++) {
+    const dU = new Float64Array(6);
+    dU[m] = 1;
+    preconditionIncrement(ref, base, 0, RF, k.beta2, dU, 0);
+    for (let i = 0; i < 6; i++) (Pre[i] as number[])[m] = dU[i] as number;
+  }
+  const tau = 1 / spectralRadius(u0, base[7] as number, k.beta2);
+  // AP = A Pre (real 6 x 6)
+  const AP: number[][] = Array.from({ length: 6 }, (_, i) =>
+    Array.from({ length: 6 }, (_, j) => {
+      let s = 0;
+      for (let l = 0; l < 6; l++) s += ((A[i] as number[])[l] as number) * ((Pre[l] as number[])[j] as number);
+      return s;
+    }),
+  );
+  return { JL, JR, AP, tau };
+}
+
+function stepMatrix(b: ReturnType<typeof build>, t: number, recon: 'central' | 'first'): C[][] {
+  const sL: C = recon === 'first' ? [1, 0] : cadd([1, 0], csc(0.25, csub(cexp(t), cexp(-t))));
+  const sR: C = recon === 'first' ? cexp(t) : csub(cexp(t), csc(0.25, csub(cexp(2 * t), [1, 0])));
+  const d = csub([1, 0], cexp(-t));
+  // J(t) = (JL sL + JR sR) d, then Z = -tau AP J
+  const J: C[][] = Array.from({ length: 6 }, (_, i) =>
+    Array.from({ length: 6 }, (_, j) =>
+      cmul(cadd(csc((b.JL[i] as number[])[j] as number, sL), csc((b.JR[i] as number[])[j] as number, sR)), d),
+    ),
+  );
+  return Array.from({ length: 6 }, (_, i) =>
+    Array.from({ length: 6 }, (_, j) => {
+      let s: C = [0, 0];
+      for (let l = 0; l < 6; l++) s = cadd(s, csc((b.AP[i] as number[])[l] as number, (J[l] as C[])[j] as C));
+      return csc(-b.tau, s);
+    }),
+  );
+}
+
+function cubicRoots(c2: C, c1: C, c0: C): C[] {
+  const f = (x: C) => cadd(cmul(cadd(cmul(cadd(x, c2), x), c1), x), c0);
+  let r: C[] = [[0.41, 0.93], [-0.71, 0.62], [0.18, -0.87]];
+  for (let it = 0; it < 400; it++) {
+    r = r.map((x, i) => {
+      let den: C = [1, 0];
+      r.forEach((y, j) => {
+        if (j !== i) den = cmul(den, csub(x, y));
+      });
+      return csub(x, cdiv(f(x), den));
+    });
+  }
+  return r;
+}
+
+let worstCoupling = 0;
+function eigen(Z: C[][]): C[] {
+  const ac = [0, 1, 4];
+  const sc = [2, 3, 5];
+  // the scalar rows must not see the acoustic variables (block triangular), nor each other
+  let zmax = 0;
+  for (const row of Z) for (const e of row) zmax = Math.max(zmax, cabs(e));
+  for (const i of sc) for (const j of [...ac, ...sc]) if (j !== i) worstCoupling = Math.max(worstCoupling, cabs((Z[i] as C[])[j] as C) / zmax);
+  const m = (i: number, j: number) => (Z[ac[i] as number] as C[])[ac[j] as number] as C;
+  const tr = cadd(cadd(m(0, 0), m(1, 1)), m(2, 2));
+  const minors = cadd(
+    cadd(csub(cmul(m(0, 0), m(1, 1)), cmul(m(0, 1), m(1, 0))), csub(cmul(m(0, 0), m(2, 2)), cmul(m(0, 2), m(2, 0)))),
+    csub(cmul(m(1, 1), m(2, 2)), cmul(m(1, 2), m(2, 1))),
+  );
+  const det = csub(
+    cadd(
+      cmul(m(0, 0), csub(cmul(m(1, 1), m(2, 2)), cmul(m(1, 2), m(2, 1)))),
+      cmul(m(0, 2), csub(cmul(m(1, 0), m(2, 1)), cmul(m(1, 1), m(2, 0)))),
+    ),
+    cmul(m(0, 1), csub(cmul(m(1, 0), m(2, 2)), cmul(m(1, 2), m(2, 0)))),
+  );
+  const roots = cubicRoots(csc(-1, tr), minors, csc(-1, det));
+  return [...roots, ...sc.map((i) => (Z[i] as C[])[i] as C)];
+}
+
+function limit(k: Case, n = 240): number {
+  const b = build(k);
+  const zs: C[] = [];
+  for (let i = 1; i <= n; i++) zs.push(...eigen(stepMatrix(b, (Math.PI * i) / n, k.recon ?? 'central')));
+  const [a1, a2] = RK3_ALPHA as unknown as [number, number];
+  const gain = (cfl: number) => {
+    let w = 0;
+    for (const z1 of zs) {
+      const z = csc(cfl, z1);
+      const z2 = cmul(z, z);
+      w = Math.max(w, cabs(cadd(cadd([1, 0], z), cadd(csc(a2, z2), csc(a1 * a2, cmul(z2, z))))));
+    }
+    return w;
+  };
+  let lo = 0.02;
+  let hi = 4;
+  if (gain(lo) > 1 + 1e-9) return 0;
+  for (let it = 0; it < 40; it++) {
+    const mid = 0.5 * (lo + hi);
+    if (gain(mid) <= 1 + 1e-9) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+const f = (x: number) => x.toFixed(3);
+const MC = 0.003;
+console.log(`plain at rest (beta 1, machCut 1): ${f(limit({ m0: 0, beta2: 1, machCut: 1 }))}   [acoustic.ts: 1.236]`);
+console.log(`plain at rest, first order: ${f(limit({ m0: 0, beta2: 1, machCut: 1, recon: 'first' }))}`);
+console.log(`matched at rest (beta = M_cut = 0.003): ${f(limit({ m0: 0, beta2: MC * MC, machCut: MC }))}   [acoustic.ts: 0.972]`);
+console.log(`matched at rest, first order: ${f(limit({ m0: 0, beta2: MC * MC, machCut: MC, recon: 'first' }))}`);
+console.log('flow sweep at minMach = M_cut = 0.003 (beta = M_ref = max(M0, 0.003)):');
+for (const r of [0.01, 0.1, 0.2, 0.3, 0.5, 0.7, 1, 1.5, 2, 3, 5, 10, 30, 100]) {
+  const m0 = r * MC;
+  const bm = Math.max(m0, MC);
+  console.log(`  M0 = ${r} x 0.003 = ${m0.toExponential(2)}: ${f(limit({ m0, beta2: bm * bm, machCut: MC }))}`);
+}
+console.log('mismatch at rest, M_cut 0.003: beta / M_ref =');
+for (const r of [0.25, 0.5, 0.75, 1.5, 2, 4, 8, 16, 64]) console.log(`  ${r}: ${f(limit({ m0: 0, beta2: (r * MC) ** 2, machCut: MC }))}`);
+console.log('mismatch with flow M0 = 0.003 (face M_ref = 0.003), beta / M_ref =');
+for (const r of [0.5, 0.75]) console.log(`  ${r}: ${f(limit({ m0: MC, beta2: (r * MC) ** 2, machCut: MC }))}`);
+console.log(`machCut 1 test set-up at rest, beta 0.06: ${f(limit({ m0: 0, beta2: 0.0036, machCut: 1 }))}   [SOLVER.md 10: 0.475]`);
+console.log(`machCut 1 test set-up at rest, beta 0.003: ${f(limit({ m0: 0, beta2: MC * MC, machCut: 1 }))}`);
+console.log(`L7 M 0.3 sphere far field (beta = M_ref = 0.3, flow M 0.3): ${f(limit({ m0: 0.3, beta2: 0.09, machCut: 0.3 }))}`);
+console.log(`worst scalar-row coupling (relative): ${worstCoupling.toExponential(2)}`);
