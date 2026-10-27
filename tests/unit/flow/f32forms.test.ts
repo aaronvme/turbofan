@@ -165,15 +165,11 @@ describe('SOLVER.md 14: the f32 implementation forms agree with the oracle to f6
         0.5 * (ref.u * ref.u + q2) +
         deltaE(ref, tP, phi);
       const n =
-        (y * dRho -
-          (dU[4] ?? NaN) +
-          u * (dU[1] ?? NaN) +
-          v * (dU[2] ?? NaN) +
-          (w * (dU[3] ?? NaN)) / rc) /
+        (y * dRho - dU[4] + u * (dU[1] ?? NaN) + v * (dU[2] ?? NaN) + (w * (dU[3] ?? NaN)) / rc) /
         (cp * t);
       const form = n + beta2 * (dRho - n);
       // the literal form loses ~eps |dp / c^2| to cancellation; the scale bounds both roundings
-      const scale = Math.abs(dRho) + Math.abs(n) + Math.abs((dU[4] ?? NaN) / (cp * t));
+      const scale = Math.abs(dRho) + Math.abs(n) + Math.abs(dU[4] / (cp * t));
       expect(Math.abs(form - (literal[0] ?? NaN))).toBeLessThanOrEqual(64 * EPS * scale);
     }
   });

@@ -5,8 +5,7 @@
 // the CPU ladder's set-up, runs the GPU from its f32-rounded state, then copies the GPU's final
 // state back into the ReferenceSolver to evaluate the CPU ladder's metric in f64. Results go to
 // reports/gpu-ladder/<id>.json and print as "[gpu-ladder]" rows.
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, it } from 'vitest';
 import { THRESHOLDS } from '../../src/contracts/thresholds';
 import type { SimDevice } from '../../src/gpu/device';
 import { GpuSolver } from '../../src/flow/gpu/device/gpuSolver';
@@ -15,7 +14,8 @@ import { ReferenceSolver, type SolverOptions } from '../../src/flow/reference/so
 import type { SolverMesh } from '../../src/flow/reference/solverMesh';
 import { NP, type PhysicalState } from '../../src/flow/reference/state';
 import { BC as MESH_BC } from '../../tools/mesh/types';
-import { CONVERGED_WINDOW, converge as cpuConverge, type LadderRow } from '../ladder/common';
+import type { LadderRow } from '../ladder/common';
+import { back, onGpu as onGpuWith, report, settle, settleRow } from './helpers';
 import {
   GAMMA as NZ_GAMMA,
   K,
@@ -39,22 +39,11 @@ import { GpuErrorLog, shippedMesh, solverDevice } from '../gpu/helpers/solver';
 const GAMMA = 1.4;
 const RGAS = 287.05287;
 
-function report(id: string, rows: readonly LadderRow[], extra: Record<string, unknown> = {}) {
-  mkdirSync('reports/gpu-ladder', { recursive: true });
-  writeFileSync(
-    `reports/gpu-ladder/${id}.json`,
-    `${JSON.stringify({ id, rows, ...extra }, null, 2)}\n`,
-  );
-  for (const r of rows) {
-    process.stdout.write(
-      `[gpu-ladder] ${r.id} | ${r.metric} | ${r.threshold} | ${r.value.toPrecision(4)} | ${String(r.pass)}\n`,
-    );
-  }
-  for (const r of rows) {
-    if (r.pass === 'reported') continue;
-    expect(r.pass, `${r.id}: ${r.metric} = ${r.value} (${r.threshold})`).toBe(true);
-  }
-}
+/**
+ * D4-38: the stated f32 residual plateaus (over the first residual): the oracle's converged state
+ * of each case rounded to f32, its residual evaluated in f64 (round 1, @8883b02).
+ */
+const PLATEAU = { L4a: 4e-5, L5: 1.7e-4 } as const;
 
 describe('GPU ladder', () => {
   const log = new GpuErrorLog();
@@ -72,81 +61,7 @@ describe('GPU ladder', () => {
     sim.destroy();
   });
 
-  /** A GPU solver with the oracle's options, started from the oracle's state rounded to f32. */
-  async function onGpu(s: ReferenceSolver, options: SolverOptions): Promise<GpuSolver> {
-    const g = await GpuSolver.create(sim.device, s.mesh, {
-      gas: options.gas,
-      freeStream: options.freeStream,
-      ...(options.cfl === undefined ? {} : { cfl: options.cfl }),
-      ...(options.inflowTotal === undefined ? {} : { inflowTotal: options.inflowTotal }),
-      ...(options.outflowPressure === undefined
-        ? {}
-        : { outflowPressure: options.outflowPressure }),
-      ...(options.bcRemap === undefined ? {} : { bcRemap: options.bcRemap }),
-    });
-    g.setBlockage(s.blockage);
-    g.setConserved(Float64Array.from(s.U, Math.fround));
-    return g;
-  }
-
-  /** The GPU's state into the oracle shell, for the CPU ladder's f64 metric code. */
-  async function back(g: GpuSolver, s: ReferenceSolver) {
-    s.U.set(await g.readConserved());
-  }
-
-  /** PHYSICS.md 3.3's "converged" (drop x the first residual for CONVERGED_WINDOW iterations). */
-  async function converge(g: GpuSolver, drop: number, max: number) {
-    g.iterate(1);
-    const first = await g.readResidual();
-    let it = 1;
-    let start = 0;
-    let last = first;
-    while (it < max) {
-      g.iterate(1);
-      last = await g.readResidual();
-      it++;
-      if (!Number.isFinite(last)) break;
-      if (last > drop * first) start = 0;
-      else if (start === 0) start = it;
-      if (start > 0 && it - start + 1 >= CONVERGED_WINDOW) {
-        return { iterations: start, first, last, converged: true };
-      }
-    }
-    return { iterations: it, first, last, converged: false };
-  }
-
-  /**
-   * The density-residual floor of any f32 state of a case: the oracle converged in f64 from the
-   * same start (the CPU ladder's converge), its state rounded to f32, its residual evaluated in f64,
-   * over the case's first residual. The GPU cannot converge below this.
-   */
-  function f32Floor(make: () => ReferenceSolver, drop: number, max: number) {
-    const s = make();
-    const conv = cpuConverge(s, drop, max);
-    for (let k = 0; k < s.U.length; k++) s.U[k] = Math.fround(s.U[k] ?? NaN);
-    const R = s.residual();
-    let sum = 0;
-    for (let c = 0; c < s.mesh.nCells; c++) {
-      const q = (R[6 * c] ?? NaN) / ((s.blockage[c] ?? NaN) * (s.mesh.cellVolR[c] ?? NaN));
-      sum += q * q;
-    }
-    return { cpu: conv, floor: Math.sqrt(sum / s.mesh.nCells) / conv.first };
-  }
-
-  /** The convergence row: gated as PHYSICS.md 3.3 defines it; see the handoff (decision). */
-  function convergenceRow(
-    id: string,
-    conv: Awaited<ReturnType<typeof converge>>,
-    floor: ReturnType<typeof f32Floor>,
-  ): LadderRow {
-    return {
-      id,
-      metric: `GPU iterations to converge to 1e-5 (reached ${(conv.last / conv.first).toExponential(2)} of the first; the f32 floor of this case ${floor.floor.toExponential(2)}, the oracle ${floor.cpu.converged ? `converged in ${floor.cpu.iterations}` : 'did not converge'})`,
-      threshold: '<= 8000 (KNOWN-FAIL: decision needed)',
-      value: conv.iterations,
-      pass: 'reported',
-    };
-  }
+  const onGpu = (x: ReferenceSolver, options: SolverOptions) => onGpuWith(sim.device, x, options);
 
   async function runTo(g: GpuSolver, tEnd: number) {
     let t = 0;
@@ -435,23 +350,25 @@ describe('GPU ladder', () => {
       return r;
     };
     const s = make();
-    const g = await onGpu(s, options);
-    const conv = await converge(g, 1e-5, 8000);
-    await back(g, s);
-    g.destroy();
-    let worst = 0;
-    for (const col of columns(s)) {
-      const theory = machFromArea(areaRatioAt(col.x), NZ_GAMMA, col.x > 0);
-      worst = Math.max(worst, Math.abs(col.mach / theory - 1));
-    }
-    let mdot = 0;
-    for (let j = 0; j < NZ_NJ; j++)
-      mdot += 2 * Math.PI * (s.faceFlux(0, 'i', NZ_NI / 2, j)[0] ?? NaN);
     const rBar = (LN / RT) ** 2 / K;
     const cd = 1 - (NZ_GAMMA + 1) / (96 * rBar * rBar);
     const ideal = chokedMassFlow(Math.PI * RT * RT, NZ_P0, NZ_T0, NZ_GAMMA, NZ_RGAS) * cd;
-    const mErr = Math.abs(mdot / ideal - 1);
-    const floor = f32Floor(make, 1e-5, 8000);
+    const metric = () => {
+      let worst = 0;
+      for (const col of columns(s)) {
+        const theory = machFromArea(areaRatioAt(col.x), NZ_GAMMA, col.x > 0);
+        worst = Math.max(worst, Math.abs(col.mach / theory - 1));
+      }
+      let mdot = 0;
+      for (let j = 0; j < NZ_NJ; j++)
+        mdot += 2 * Math.PI * (s.faceFlux(0, 'i', NZ_NI / 2, j)[0] ?? NaN);
+      return [worst, Math.abs(mdot / ideal - 1)];
+    };
+    const g = await onGpu(s, options);
+    const conv = await settle(g, s, metric, { max: 8000, plateau: PLATEAU.L4a });
+    await back(g, s);
+    g.destroy();
+    const [worst = NaN, mErr = NaN] = metric();
     report(
       'L4a',
       [
@@ -469,13 +386,10 @@ describe('GPU ladder', () => {
           value: mErr,
           pass: mErr < L4.maxChokedMassFlowRelativeError.value,
         },
-        convergenceRow('L4', conv, floor),
+        settleRow('L4', conv, 8000),
       ],
-      { conv, floor },
+      { conv },
     );
-    // KNOWN-FAIL pin: the f32 residual floor sits above 1e-5 of the first residual
-    expect(conv.converged).toBe(false);
-    expect(floor.floor).toBeGreaterThan(1e-5);
   });
 
   it('L5: choking through a blockage-only row', async () => {
@@ -513,15 +427,17 @@ describe('GPU ladder', () => {
       return r;
     };
     const s = make();
+    const theory = chokedMassFlow(B_MIN * Math.PI * (0.6 ** 2 - 0.5 ** 2), P0, T0, GAMMA, RGAS);
+    const metric = () => {
+      let mdot = 0;
+      for (let j = 0; j < nj; j++) mdot += 2 * Math.PI * (s.faceFlux(0, 'i', ni / 2, j)[0] ?? NaN);
+      return [Math.abs(mdot / theory - 1)];
+    };
     const g = await onGpu(s, options);
-    const conv = await converge(g, 1e-5, 8000);
+    const conv = await settle(g, s, metric, { max: 8000, plateau: PLATEAU.L5 });
     await back(g, s);
     g.destroy();
-    let mdot = 0;
-    for (let j = 0; j < nj; j++) mdot += 2 * Math.PI * (s.faceFlux(0, 'i', ni / 2, j)[0] ?? NaN);
-    const theory = chokedMassFlow(B_MIN * Math.PI * (0.6 ** 2 - 0.5 ** 2), P0, T0, GAMMA, RGAS);
-    const err = Math.abs(mdot / theory - 1);
-    const floor = f32Floor(make, 1e-5, 8000);
+    const [err = NaN] = metric();
     report(
       'L5',
       [
@@ -532,12 +448,10 @@ describe('GPU ladder', () => {
           value: err,
           pass: err < L5.maxMassFlowRelativeError.value,
         },
-        convergenceRow('L5', conv, floor),
+        settleRow('L5', conv, 8000),
       ],
-      { conv, floor },
+      { conv },
     );
-    expect(conv.converged).toBe(false);
-    expect(floor.floor).toBeGreaterThan(1e-5);
   });
 
   it('L6: free vortex and solid-body rotation in a closed annulus', async () => {
