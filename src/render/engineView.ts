@@ -9,6 +9,9 @@
 
 import {
   AgXToneMapping,
+  EqualDepth,
+  LessEqualDepth,
+  type Material,
   Matrix4,
   MeshBasicNodeMaterial,
   type Mesh,
@@ -141,6 +144,13 @@ export interface DebugFlags {
   readonly hide?: string;
   /** The main pass draws only the nacelle and cowl skins (what the internals cost, D4-5). */
   readonly skinsOnly?: boolean;
+  /**
+   * The fan drawn with an ordinary depth test (no pre-pass, LessEqual with depth write) at
+   * shutter 0: the reference the EqualDepth path must match pixel for pixel (W1V-I3).
+   */
+  readonly plainFanDepth?: boolean;
+  /** Turns the fan's pre-pass copies by this angle, rad: a hole pattern (W1V-I3 control). */
+  readonly fanDepthNudge?: number;
   /** Main-pass meshes whose name matches this regular expression get the trivial material. */
   readonly flatNames?: string;
   /** The main pass with one trivial unlit material (what its materials cost, D4-5). */
@@ -386,6 +396,13 @@ async function assemble(
           });
       }
       scene.main.overrideMaterial = f.flat === true ? flatMaterial : null;
+      const fanMat = scene.fanTimeCopies[0]?.shaded.material as Material | undefined;
+      if (fanMat !== undefined) {
+        const plain = f.plainFanDepth === true;
+        fanMat.depthFunc = plain ? LessEqualDepth : EqualDepth;
+        fanMat.depthWrite = plain;
+        fanMat.needsUpdate = true;
+      }
       for (const [mesh, mat] of swapped) mesh.material = mat;
       swapped.clear();
       if (f.flatNames !== undefined && f.flatNames !== '') {
@@ -438,9 +455,11 @@ async function assemble(
       scene.fanTimeCopies.forEach((c, k) => {
         c.depth.visible = c.shaded.visible =
           flags.noFan !== true && (fanLive ? k < nCopies : k === 0);
+        if (flags.plainFanDepth === true) c.depth.visible = false;
         c.depth.rotation.x = c.shaded.rotation.x = fanLive
           ? ((k + j) / nCopies - 0.5) * fanSpan
           : 0;
+        c.depth.rotation.x += flags.fanDepthNudge ?? 0;
       });
 
       const step = dtS / TRANSITION_S;
