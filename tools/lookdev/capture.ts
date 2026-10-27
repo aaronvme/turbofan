@@ -2,7 +2,7 @@
 //
 //   npx vite --port 5184 --strictPort        (in another shell; not `npm run dev`, W1M-N1)
 //   node tools/lookdev/capture.ts [--out docs/look-dev] [--only hero,side | none] [--no-timing]
-//     [--warmup-s 10] [--run-s 60] [--reps 3] [--seed 1] [--diagnostics] [--port 5184]
+//     [--warmup-s 10] [--run-s 60] [--reps 3] [--seed 1] [--diagnostics] [--counts] [--port 5184]
 //
 // It launches its own headed Chrome (Playwright, channel "chrome", --enable-unsafe-webgpu so
 // timestamps are not quantized to 65.5 us, GPU_FACTS M12), opens the look-dev page at a
@@ -89,6 +89,9 @@ interface LookdevPage {
     stats(): {
       errors: unknown[];
       drawnTriangles: number;
+      mainTriangles: number;
+      fanDepthTriangles: number;
+      drawCalls: number;
       triangles: number;
       renderScale: number;
     };
@@ -152,6 +155,38 @@ async function main(): Promise<void> {
       const path = join(out, `${file}.jpg`);
       await page.screenshot({ path, type: 'jpeg', quality: 92, ...(clip ? { clip } : {}) });
       log(`saved ${path}`);
+    }
+    // --counts: what the camera draws per view (W1V-I2, D4-5): no shadow proxies, the fan's
+    // depth pre-pass apart
+    if (args.includes('--counts')) {
+      const counts: Record<string, unknown> = {};
+      for (const [preset] of SHOTS) {
+        const c = await page.evaluate(async (p) => {
+          const l = (window as LookdevPage).lookdev;
+          if (l === undefined) throw new Error('no lookdev');
+          l.setPreset(p);
+          await l.renderFrames(4);
+          const s = l.stats();
+          return {
+            drawn: s.drawnTriangles,
+            main: s.mainTriangles,
+            rotors: s.drawnTriangles - s.mainTriangles,
+            fanDepth: s.fanDepthTriangles,
+            draws: s.drawCalls,
+            built: s.triangles,
+          };
+        }, preset);
+        counts[preset] = c;
+        const m = (n: number) => (n / 1e6).toFixed(3);
+        log(
+          `counts ${preset}: drawn ${m(c.drawn)} M (main ${m(c.main)}, rotors ${m(c.rotors)}) + fan pre-pass ${m(c.fanDepth)} M, ${c.draws} draws, built ${m(c.built)} M`,
+        );
+      }
+      writeFileSync(
+        join(out, 'triangles.json'),
+        `${JSON.stringify(counts, null, 2)}
+`,
+      );
     }
     if (timing) {
       const t = parseTimingArgs(args);

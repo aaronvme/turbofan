@@ -10,6 +10,9 @@
 import {
   AgXToneMapping,
   Matrix4,
+  MeshBasicNodeMaterial,
+  type Mesh,
+  type Object3D,
   PCFShadowMap,
   PerspectiveCamera,
   Vector3,
@@ -62,8 +65,18 @@ export interface EngineViewOptions {
 
 export interface EngineViewStats {
   readonly triangles: number;
-  /** Triangles in the scene graph that the current mode draws (culling applied). */
+  /**
+   * Triangles the camera draws this frame (culling applied; W1V-I2): the main and rotor passes,
+   * the fan's shaded time copies included, the layer-2 shadow proxies and the fan's depth
+   * pre-pass excluded (`fanDepthTriangles`).
+   */
   readonly drawnTriangles: number;
+  /** Of `drawnTriangles`, the main (opaque) pass. */
+  readonly mainTriangles: number;
+  /** The fan's depth pre-pass copies (vertex work only). */
+  readonly fanDepthTriangles: number;
+  /** Draw calls of the camera passes (main + rotors + pre-pass). */
+  readonly drawCalls: number;
   readonly n1Rpm: number;
   readonly n2Rpm: number;
   readonly lpBlurDeg: number;
@@ -124,6 +137,14 @@ export interface DebugFlags {
   readonly fanCopies?: number;
   /** No fan at all (what the rest of the rotor pass costs). */
   readonly noFan?: boolean;
+  /** Hide every main/rotor object whose name matches this regular expression (cost bisection). */
+  readonly hide?: string;
+  /** The main pass draws only the nacelle and cowl skins (what the internals cost, D4-5). */
+  readonly skinsOnly?: boolean;
+  /** Main-pass meshes whose name matches this regular expression get the trivial material. */
+  readonly flatNames?: string;
+  /** The main pass with one trivial unlit material (what its materials cost, D4-5). */
+  readonly flat?: boolean;
 }
 
 const FPS = 60;
@@ -263,16 +284,30 @@ async function assemble(
     throttleLever: lever,
   });
   const speeds = () => (settle ? settled : cycle.state());
-  const drawnTriangles = () => {
-    let n = 0;
+  // what the camera draws (W1V-I2): objects on a layer the camera does not see (the rotor
+  // lights' shadow proxies) are skipped, and the fan's depth pre-pass is counted apart
+  const fanDepthCopies = new Set<Object3D>(scene.fanTimeCopies.map((c) => c.depth));
+  const drawCounts = () => {
+    let main = 0;
+    let rotors = 0;
+    let depth = 0;
+    let draws = 0;
     for (const s of [scene.main, scene.rotors])
       s.traverseVisible((obj) => {
+        if (!obj.layers.test(camera.layers)) return;
         const g = (obj as { geometry?: { index?: { count: number } | null } }).geometry;
-        const count = (obj as { count?: number }).count ?? 1;
-        if (g?.index) n += (g.index.count / 3) * count;
+        if (!g?.index) return;
+        const n = (g.index.count / 3) * ((obj as { count?: number }).count ?? 1);
+        draws++;
+        if (fanDepthCopies.has(obj)) depth += n;
+        else if (s === scene.main) main += n;
+        else rotors += n;
       });
-    return n;
+    return { drawn: main + rotors, main, depth, draws };
   };
+  let hidden: Object3D[] = [];
+  const swapped = new Map<Mesh, Mesh['material']>();
+  const flatMaterial = new MeshBasicNodeMaterial({ color: 0x808080 });
 
   const view: EngineView = {
     renderer,
@@ -328,6 +363,37 @@ async function assemble(
     },
     setDebugFlags(f) {
       flags = { ...f };
+      hidden = [];
+      if (f.hide !== undefined && f.hide !== '') {
+        // matched against "main:<name>" / "rotors:<name>", so a pattern can pick one pass
+        const re = new RegExp(f.hide);
+        for (const [tag, s] of [
+          ['main', scene.main],
+          ['rotors', scene.rotors],
+        ] as const)
+          s.traverse((o) => {
+            if (o !== s && re.test(`${tag}:${o.name}`)) hidden.push(o);
+          });
+      }
+      if (f.skinsOnly === true) {
+        const keep = new Set<Object3D>(scene.skins);
+        for (const m of scene.modules)
+          m.groups[0]?.traverse((o) => {
+            if ((o as { isMesh?: boolean }).isMesh === true && !keep.has(o)) hidden.push(o);
+          });
+      }
+      scene.main.overrideMaterial = f.flat === true ? flatMaterial : null;
+      for (const [mesh, mat] of swapped) mesh.material = mat;
+      swapped.clear();
+      if (f.flatNames !== undefined && f.flatNames !== '') {
+        const re = new RegExp(f.flatNames);
+        scene.main.traverse((o) => {
+          if ((o as Mesh).isMesh === true && re.test(o.name)) {
+            swapped.set(o as Mesh, (o as Mesh).material);
+            (o as Mesh).material = flatMaterial;
+          }
+        });
+      }
       const cove = studio.stage.getObjectByName('cyclorama');
       if (cove) cove.visible = f.noStage !== true;
       renderer.shadowMap.enabled = f.noShadow !== true;
@@ -405,6 +471,7 @@ async function assemble(
       if (!skinsVisible)
         for (const s of scene.skins) if (s.name.startsWith('cap:')) s.visible = false;
       studio.contact.value = 1 - easeInOut(explode);
+      for (const o of hidden) o.visible = false;
       // the composite's fan region: the fan's box where the exploded view has moved it, 3 px
       // of margin for the 3 x 3 neighbourhood and TRAA's jitter
       camera.updateMatrixWorld();
@@ -431,9 +498,13 @@ async function assemble(
     },
     stats() {
       const st = speeds();
+      const d = drawCounts();
       return {
         triangles: scene.triangles,
-        drawnTriangles: drawnTriangles(),
+        drawnTriangles: d.drawn,
+        mainTriangles: d.main,
+        fanDepthTriangles: d.depth,
+        drawCalls: d.draws,
         n1Rpm: st.n1Rpm,
         n2Rpm: st.n2Rpm,
         lpBlurDeg: (uniforms.lpBlur.value * 180) / Math.PI,
@@ -453,6 +524,7 @@ async function assemble(
     },
     async dispose() {
       post.dispose();
+      flatMaterial.dispose();
       scene.dispose();
       studio.dispose();
       // three's dispose is asynchronous; the device goes only after it, whatever happens

@@ -74,6 +74,27 @@ export const DIAGNOSTIC_CONFIGS: readonly TimingConfig[] = [
     flags: { fanCopies: 4 },
   },
   { id: 'fanTakeoff', group: 'fan', preset: 'fanTakeoff', flags: {} },
+  // what the opaque pass pays for (D4-5): its materials, its vanes, its internal solids
+  { id: 'default, flat main', group: 'opaque', preset: 'threeQuarterFront', flags: { flat: true } },
+  {
+    id: 'default, no main rows',
+    group: 'opaque',
+    preset: 'threeQuarterFront',
+    flags: { hide: '^main:row:' },
+  },
+  {
+    id: 'default, main skins only',
+    group: 'opaque',
+    preset: 'threeQuarterFront',
+    flags: { skinsOnly: true },
+  },
+  {
+    id: 'default, performance, flat main',
+    group: 'opaque',
+    preset: 'threeQuarterFront',
+    flags: { flat: true },
+    profile: 'performance',
+  },
   { id: 'cutaway, caps off', group: 'cutaway', preset: 'cutaway', flags: { noCaps: true } },
   { id: 'exploded', group: 'other', preset: 'exploded', flags: {} },
   { id: 'hotSection', group: 'other', preset: 'hotSection', flags: {} },
