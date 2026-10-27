@@ -44,6 +44,12 @@ export interface SolverOptions {
    * Physical time ignores both.
    */
   readonly lowMachPreconditioning?: { readonly minMach: number; readonly machCut?: number };
+  /**
+   * The limiter (section 6): 'sharp' van Albada (default) or the 'smooth' eps form, the D4-25
+   * trial that is not yet the contract (round 4: below eps the reconstruction is central, and the
+   * low-Mach acoustic pair then lacks the damping the sharp switch's clipping gave).
+   */
+  readonly limiter?: 'sharp' | 'smooth';
   /** 'f32': round the state to f32 after every stage (the f32-storage tolerance experiment). */
   readonly storage?: 'f64' | 'f32';
 }
@@ -81,6 +87,8 @@ export class ReferenceSolver {
   private readonly U0: Float64Array;
   private readonly R: Float64Array;
   private readonly bExt: Float64Array;
+  /** Radius per extended index (a ghost: its source cell's), for the limiter's rw scale. */
+  private readonly rExt: Float64Array;
   private readonly bSx: Float64Array;
   private readonly bSr: Float64Array;
   private readonly tau: Float64Array;
@@ -135,6 +143,10 @@ export class ReferenceSolver {
     this.P = new Float64Array(NP * nx);
     this.blockage = new Float64Array(n).fill(1);
     this.bExt = new Float64Array(nx);
+    this.rExt = new Float64Array(nx);
+    for (let c = 0; c < n; c++) this.rExt[c] = mesh.cellR[c] as number;
+    for (let g = 0; g < mesh.nGhosts; g++)
+      this.rExt[n + g] = mesh.cellR[mesh.ghostSrc[g] ?? 0] as number;
     this.bSx = new Float64Array(n);
     this.bSr = new Float64Array(n);
     this.tau = new Float64Array(n);
@@ -470,7 +482,7 @@ export class ReferenceSolver {
 
   /** Extended indices of grid line `fixed` of block b in direction dir, positions -2..n+1. */
   private loadLine(b: number, dir: 'i' | 'j', fixed: number, L: number): void {
-    const { line, slope, P, ref } = this;
+    const { line, slope, P, ref, rExt } = this;
     const pre = this.lines[b];
     if (pre === undefined) throw new Error(`no block ${b}`);
     line.set((dir === 'i' ? pre.i : pre.j).subarray(fixed * L, fixed * L + L));
@@ -481,8 +493,10 @@ export class ReferenceSolver {
         NP * (line[p - 1] ?? 0),
         NP * (line[p] ?? 0),
         NP * (line[p + 1] ?? 0),
+        rExt[line[p] ?? 0] as number,
         slope,
         NU * p,
+        this.opts.limiter === 'smooth',
       );
     }
   }

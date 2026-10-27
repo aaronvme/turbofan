@@ -4,7 +4,22 @@ w2/reference: round 3 DONE with open items (from b7eb36d; HEAD = the commit of t
 - D4-22 is measured and accepted.
 - D4-23 examined: the point-implicit Jacobian does nothing, and L9a's stall is the limiter.
 - Still open: L7's asymmetry (resolution), L8 at its pre-registered M_cut 0.003 (an instability band), and van Albada's switch (L9a, the D4-20 duct). Decisions below.
-- Round 4 started (critic pass 7, FIX FIRST): W2R-B1 is done (W2R-6 pinned, below); W2R-I1..I4, D4-29 and D4-30 follow.
+- ROUND 4: STOP-CLEAN (usage brake at 85 %), WIP. W2R-B1 DONE at 9d99b04 (gates green there). The rest is partial, below.
+
+ROUND 4 STATUS (WIP; the last commit is the STOP-CLEAN one)
+- W2R-B1 DONE 9d99b04: W2R-6 pinned (blockage.test.ts, it.fails x3 + b = 1 control), comment fixed, SOLVER.md 8 + this file.
+- W2R-I1 PARTIAL: 1d85b0c (SOLVER.md 6 first), 485b69a (TDD), then the WIP commit. FINDING, decision needed: the smooth van Albada at K_eps 1e-3 (eps rule in SOLVER.md 6) does NOT land as the contract. It converges the D4-20 far-field duct at M_cut = minMach, but on the inflow/outflow blockage duct the residual floors at a level proportional to eps at every CFL 0.8-1.5 (machCut 1: ~10x the first at 1e-3, 0.7 / 5e-2 / 5e-3 at 1e-4 / 1e-5 / 1e-6), and solver.test's plain low-Mach duct leaves its steady state. Cause: below eps the slopes are central and the low-Mach acoustic pair has only the scheme's own damping; the sharp switch's clipping of noise extrema was a hidden first-order dissipation. So the code keeps the sharp form as default and the smooth form is an option (`limiter: 'smooth'`, `smoothVanAlbada`, `limiterEpsilon`, unit-tested). D4-26 (L7 at 96 x 96) NOT started.
+- D4-30 PARTIAL: `tests/unit/flow/acoustic.ts` (fully discrete von Neumann of the 3-stage scheme on the at-rest acoustic family, 1D and 2D with cell aspect; NOT yet in a test, and slow: precompute the eigenvalues per wave number before bisecting the CFL). It reproduces the critic's probe. CFL limits (aspect 0 = 1D / 0.25 / 0.5 / 1 = square): plain tracking 1.236 / 1.539 / 1.791 / 1.878; plain SSP-RK3 1.256 (all aspects); preconditioned matched (beta = M_ref = 0.003) 0.972 / 1.210 / 1.408 / 1.550; + p_u K_u 0.25: 1.231 / 1.517 / 1.691 / 1.777; K_u 0.5: 1.413 / 1.726 / 1.885 / 1.958; K_u 0.75: 1.254 / 1.567 / 1.880; preconditioned with machCut 1 at beta 0.06: 0.475 / 0.591 / 0.687. High-aspect cells bind. Proposed (not implemented): preconditioned CFL 0.8 without p_u (0.82 x 0.972; L8 was neutral at 0.9 in the critic's runs), or 1.15 with p_u K_u 0.5. p_u trial NOT run.
+- D4-29 PARTIAL (W2R-6 mechanism): the p grad b source IS well-balanced (uniform p' 500 Pa, u = 0, b_min 0.85: max |R|/V 4.4e-12 against p'/dx 2e4, i.e. rounding). The growth does not depend on the CFL (tracking 0.8-1.5 and SSP-RK3 at CFL_phys 0.3-0.9 all reach 5e-3..1e-2; physical time delays it in proportion to dt), so it is an unstable eigenvalue of the SEMI-DISCRETE operator with blockage, not a time-stepping limit. Scratch: reports/scratch/r4/w2r6cfl.ts. Next: find the mode (shape, which BC) and whether b_f = (b_L + b_R)/2 with b_c V against the inflow characteristic BC is the cause.
+- W2R-I2, W2R-I4, the nits (except N5, done in the TDD tests): NOT started.
+
+NEXT (round 4 continued, in order)
+1. W2R-I4 (SLAU2 value tests from an independent script) and W2R-I2 (12.2 C-pre rows, shared perturbation module, mesh per row, measured storage error): w2/solver's oracle comparisons wait for both.
+2. D4-30: pin acoustic.ts in rk.test.ts (precompute eigenvalues), set DEFAULT_CFL for preconditioned tracking, implement p_u (preconditioned tracking only, off at machCut >= 1 so the plain flux stays bitwise), run L8 / L7 / L2 / L4.
+3. Decision on D4-25 given the finding above (smooth form only with the acoustic damping of step 2?).
+4. D4-29 continued; D4-26 (L7 96 x 96 + PHYSICS.md CPU variants first).
+
+GATES @ the WIP commit: npx vitest run tests/unit/flow: 116 passed + 4 expected fail; typecheck clean; eslint on the touched files clean. Full gates and the ladder were NOT rerun after 9d99b04.
 
 OPEN ITEMS
 - W2R-6 (open since round 2, b7eb36d; critic pass 7 W2R-B1; decision D4-29: investigate and fix before W3). With blockage the plain scheme is linearly unstable about its own steady state, in tracking AND in physical time (SSP-RK3 at the default dt, the mode of surge and light-off events).
