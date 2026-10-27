@@ -194,6 +194,28 @@ with S_f the cell's **outward** face vectors. For b ≡ 1 this is (0, p′A + ρ
 
 **Open: W2R-6, the plain scheme is unstable with blockage (decision D4-29: investigated and fixed before W3).** About its own steady state in a blockage duct (24 × 3 cells, b_min 0.85, throat M 0.06 or 0.35), the plain scheme grows a mode in both the tracking mode and the physical-time mode: from the converged state (relative 1e-12) the drift reaches 8e-3 in 1000 tracking iterations and 1e-2 in 1000 SSP-RK3 steps at the default dt at M 0.06; at M 0.35 the physical-time growth is slower (4e-9 at 1000 steps, 8e-3 at 2000). It saturates near 1 % of the state. The same duct with b ≡ 1 stays at 1e-12 in both modes, and the preconditioned tracking mode converges the blockage duct to 1e-11. Physical time is the mode of the surge and light-off events and every W3 blade row carries blockage, so this is a defect of the scheme, not a limitation to live with. Pinned as KNOWN-FAIL (`it.fails`) in `tests/unit/flow/blockage.test.ts`, with the b ≡ 1 control passing. The kernel implements this section as written; the fix may change it.
 
+**W2R-6 located (decision D4-34, round 5, 2026-10-27): it is the sharp limiter's switch, not a blockage term.**
+- *p_u does not remove it.* p_u lives in preconditioned tracking, where this duct is stable anyway. Put into the plain scheme (f_a = 1) it moves the M 0.06 duct's steady state by 16 % of the state, so it is not a candidate.
+- *The mode* (a power iteration of the plain scheme about its steady state, physical time, read at a drift of 1e-7 where it is linear): growth × 20 per 80 SSP-RK3 steps at the default dt, σ ≈ 590 1/s, of the order of c/L of the duct. It is acoustic (δρ = δp/c², δ(ρu) ≈ δp/c): a smooth standing wave between the inflow and the outflow plus a grid-scale pressure/axial-velocity oscillation in the blockage cells.
+- *Term switches* (a scratch copy of the oracle, `reports/scratch/r5/w2r6.ts` on `reports/scratch/ref5`, the duct of `blockage.test.ts`, physical time, 1000 steps from the converged state):
+
+| variant | M 0.06 | M 0.35 |
+|---|---|---|
+| as specified | grows to 1e-2 | grows to 6e-3 at 2000 |
+| first-order reconstruction | stable | |
+| p′ slopes zero, the others limited | stable | stable |
+| u slopes zero | stable | |
+| p′ slopes central (unlimited) | stable | |
+| ρ′ slopes zero; v slopes zero | grows | |
+| the pressure force as b_c ∇p (each side's b on the face pressure, the p∇b source not used) | grows | |
+| b_f = min(b_L, b_R) instead of the average | stable | stable |
+| smooth van Albada (§6), 24 × 6 cells | stable (2e-13) | |
+| smooth van Albada for all but v, 24 × 3 | stable | stable |
+| as specified, 24 × 12 cells | grows (slower) | |
+
+- *Reading.* The plain scheme's steady state carries a grid-scale pressure sawtooth at the throat (±50 Pa on a 200 Pa dynamic pressure; plain SLAU2's O(M) pressure coupling at M 0.06, the L7 sawtooth that D4-20 removes only in preconditioned tracking). So p′ and u have an extremum in nearly every blockage cell, where the sharp van Albada switches (φ = 0 for ab ≤ 0, and next to it a one-sided slope with ∂φ/∂b → 1). The linearisation of that switch is what grows. The p∇b source is well-balanced (D4-29), and replacing it does not help. The smooth limiter, which linearises to the central slope where |a|, |b| ≪ ε, removes the mode. With 3 radial cells it cannot be shown: its central reconstruction of the noise-level radial velocity (|v| ~ 1e-13 ≪ ε_v = 0.34 m/s) keeps this narrow annulus from converging even preconditioned. Central v slopes alone do that at 24 × 3, and 24 × 6 does not show it.
+- *Fix proposed:* the smooth limiter as the default (D4-33). Until a decision this section, §6 and the KNOWN-FAIL pins stand.
+
 **Volume sources.** A source model (`SourceModel`) is called once per RK stage with the stage's primitives. Per cell it writes:
 - `rate` s_c (6 values): conserved-gauge component rates per unit **gas** volume (kg/(m³ s), N/m³, N/m³, N m/m³, W/m³, kg/(m³ s)), for U = (ρ′, ρu, ρv, ρrw, η, ρZ). Since η = ρE − ρh0∞ + p∞, an energy source s_E and a mass source s_m give **s_η = s_E − h0∞ s_m**. A mass source at the local state carrying its stagnation enthalpy h0 (bleed, cooling flow) therefore has s_η = s_m (h0 − h0∞); helper `massSourceRates`.
 - `damping` d_c (6 values, ≥ 0, 1/s): the diagonal of −∂s/∂U, for the point-implicit update. 0 means explicit.
