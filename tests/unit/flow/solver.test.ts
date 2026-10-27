@@ -263,13 +263,21 @@ describe('reference solver: time stepping', () => {
     'the tracking RK3 has the low-storage amplification with local dt (point-implicit: %s)',
     (implicit) => {
       const gas = caloricallyPerfectGas(1.4, 287.05287);
+      // local steps differ per cell, so a decaying density would make the field non-uniform and
+      // drive fluxes; decay only a tiny swirl instead: rho r w has no flux while the mass flux is 0
+      const swirlDecay: SourceModel = (ctx, out) => {
+        for (let c = 0; c < ctx.mesh.nCells; c++) {
+          out.rate[6 * c + 3] = -K * (ctx.U[6 * c + 3] ?? 0);
+          out.damping[6 * c + 3] = implicit ? K : 0;
+        }
+      };
       const s = new ReferenceSolver(solverMesh(box), {
         gas,
         freeStream: AMBIENT,
-        sources: decay(implicit),
+        sources: swirlDecay,
       });
-      s.setUniform(start);
-      const u0 = s.U[0] ?? NaN;
+      s.setUniform({ ...start, w: 0.01 });
+      const u0 = Float64Array.from(s.U);
       s.iterate(1);
       const dts = s.localDt();
       expect(new Set(Array.from(dts)).size).toBeGreaterThan(1); // the cells differ in size
@@ -277,7 +285,7 @@ describe('reference solver: time stepping', () => {
         const a = K * (dts[c] ?? NaN);
         let g = 1;
         for (const alpha of RK3_ALPHA) g = 1 - (alpha * a * g) / (implicit ? 1 + alpha * a : 1);
-        expect((s.U[6 * c] ?? NaN) / u0).toBeCloseTo(g, 12);
+        expect((s.U[6 * c + 3] ?? NaN) / (u0[6 * c + 3] ?? NaN)).toBeCloseTo(g, 10);
       }
     },
   );

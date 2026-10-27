@@ -1,0 +1,484 @@
+// The f64 reference solver: the oracle for the WGSL kernel (docs/SOLVER.md). Readable rather than
+// fast, but allocation-free per iteration. One stage: conserved -> primitives (cells, then ghosts
+// with their BCs), MUSCL + SLAU2 face fluxes accumulated per cell, the pressure/swirl source, the
+// volume sources, then the RK update (tracking: 3-stage, local dt; physical: SSP-RK3, global dt).
+import { boundaryParams, ghostPrimitive, type BoundaryParams } from './boundary';
+import { referenceState, type GasModel, type ReferenceState } from './gas';
+import { limitedSlopes } from './muscl';
+import { slau2Flux } from './slau2';
+import { extIndex, type SolverMesh } from './solverMesh';
+import type { SourceModel, SourceRates } from './sources';
+import { NP, NU, consToPrim, primToCons, physicalToPrim, type PhysicalState } from './state';
+
+/** Tracking-mode stage coefficients (section 10: alpha_2 = 1/2 is needed for stability). */
+export const RK3_ALPHA = [0.2, 0.5, 1.0] as const;
+export const DEFAULT_CFL = 1.5;
+export const DEFAULT_CFL_PHYSICAL = 0.9;
+
+export interface SolverOptions {
+  readonly gas: GasModel;
+  /** The ambient the gauges are measured from, with its axial velocity (the free stream). */
+  readonly freeStream: {
+    readonly pressure: number;
+    readonly temperature: number;
+    readonly velocity: number;
+  };
+  readonly cfl?: number;
+  readonly cflPhysical?: number;
+  readonly inflowTotal?: { readonly p0: number; readonly t0: number };
+  readonly outflowPressure?: number;
+  /** BC code -> BC code applied to physical ghosts (tests only, e.g. ladder L1). */
+  readonly bcRemap?: Readonly<Partial<Record<number, number>>>;
+  readonly sources?: SourceModel;
+  /** 'f32': round the state to f32 after every stage (the f32-storage tolerance experiment). */
+  readonly storage?: 'f64' | 'f32';
+}
+
+export interface IterationStats {
+  /** sqrt(mean (R_rho / (b V))^2) of the last iteration's first stage, kg/(m^3 s). */
+  readonly residualDensityL2: number;
+}
+
+export class ReferenceSolver {
+  readonly mesh: SolverMesh;
+  readonly ref: ReferenceState;
+  readonly bc: BoundaryParams;
+  /** Conserved gauge state, 6 per cell. */
+  readonly U: Float64Array;
+  /** Blockage per cell (set with setBlockage). */
+  readonly blockage: Float64Array;
+  iterations = 0;
+  time = 0;
+  stats: IterationStats = { residualDensityL2: 0 };
+
+  private readonly opts: SolverOptions;
+  private readonly cfl: number;
+  private readonly cflPhysical: number;
+  private readonly remap: Uint8Array;
+  private readonly P: Float64Array;
+  private readonly U0: Float64Array;
+  private readonly R: Float64Array;
+  private readonly bExt: Float64Array;
+  private readonly bSx: Float64Array;
+  private readonly bSr: Float64Array;
+  private readonly tau: Float64Array;
+  private readonly dt: Float64Array;
+  private readonly src: SourceRates;
+  /** Per cell: i-face west, i-face east, j-face south, j-face north; ext index of each neighbour. */
+  private readonly cellFace: Int32Array;
+  private readonly cellNbr: Int32Array;
+  private readonly line: Int32Array;
+  private readonly slope: Float64Array;
+  private readonly qL = new Float64Array(NP);
+  private readonly qR = new Float64Array(NP);
+  private readonly F = new Float64Array(NU);
+
+  constructor(mesh: SolverMesh, opts: SolverOptions) {
+    this.mesh = mesh;
+    this.opts = opts;
+    this.ref = referenceState(opts.gas, opts.freeStream);
+    this.bc = boundaryParams(this.ref, {
+      ...(opts.inflowTotal === undefined ? {} : { inflowTotal: opts.inflowTotal }),
+      ...(opts.outflowPressure === undefined ? {} : { outflowPressure: opts.outflowPressure }),
+    });
+    this.cfl = opts.cfl ?? DEFAULT_CFL;
+    this.cflPhysical = opts.cflPhysical ?? DEFAULT_CFL_PHYSICAL;
+    this.remap = new Uint8Array(256).map((_, k) => opts.bcRemap?.[k] ?? k);
+    const n = mesh.nCells;
+    const nx = n + mesh.nGhosts;
+    this.U = new Float64Array(NU * n);
+    this.U0 = new Float64Array(NU * n);
+    this.R = new Float64Array(NU * n);
+    this.P = new Float64Array(NP * nx);
+    this.blockage = new Float64Array(n).fill(1);
+    this.bExt = new Float64Array(nx);
+    this.bSx = new Float64Array(n);
+    this.bSr = new Float64Array(n);
+    this.tau = new Float64Array(n);
+    this.dt = new Float64Array(n);
+    this.src = { rate: new Float64Array(NU * n), damping: new Float64Array(NU * n) };
+    this.cellFace = new Int32Array(4 * n);
+    this.cellNbr = new Int32Array(4 * n);
+    let maxLine = 0;
+    mesh.blocks.forEach((b, bi) => {
+      maxLine = Math.max(maxLine, b.ni + 4, b.nj + 4);
+      for (let j = 0; j < b.nj; j++) {
+        for (let i = 0; i < b.ni; i++) {
+          const c = b.cellOffset + j * b.ni + i;
+          const w = b.iFaceOffset + j * (b.ni + 1) + i;
+          const s = b.jFaceOffset + j * b.ni + i;
+          this.cellFace.set([w, w + 1, s, s + b.ni], 4 * c);
+          this.cellNbr.set(
+            [
+              extIndex(mesh, bi, i - 1, j),
+              extIndex(mesh, bi, i + 1, j),
+              extIndex(mesh, bi, i, j - 1),
+              extIndex(mesh, bi, i, j + 1),
+            ],
+            4 * c,
+          );
+        }
+      }
+    });
+    this.line = new Int32Array(maxLine);
+    this.slope = new Float64Array(NU * maxLine);
+    this.setBlockage(this.blockage);
+  }
+
+  /** Sets the blockage field (per cell, in (0, 1]) and the b-weighted face-vector sums. */
+  setBlockage(b: ArrayLike<number>): void {
+    const m = this.mesh;
+    const n = m.nCells;
+    for (let c = 0; c < n; c++) this.blockage[c] = b[c] ?? NaN;
+    for (let c = 0; c < n; c++) this.bExt[c] = this.blockage[c] ?? NaN;
+    for (let g = 0; g < m.nGhosts; g++) this.bExt[n + g] = this.blockage[m.ghostSrc[g] ?? 0] ?? NaN;
+    for (let c = 0; c < n; c++) {
+      const bc = this.blockage[c] ?? NaN;
+      let sx = 0;
+      let sr = 0;
+      for (let k = 0; k < 4; k++) {
+        const f = this.cellFace[4 * c + k] ?? 0;
+        const bf = 0.5 * (bc + (this.bExt[this.cellNbr[4 * c + k] ?? 0] ?? NaN));
+        const iDir = k < 2;
+        const sign = k % 2 === 0 ? -1 : 1;
+        const area = (iDir ? m.iArea[f] : m.jArea[f]) ?? NaN;
+        sx += sign * bf * area * ((iDir ? m.iNx[f] : m.jNx[f]) ?? NaN);
+        sr += sign * bf * area * ((iDir ? m.iNr[f] : m.jNr[f]) ?? NaN);
+      }
+      this.bSx[c] = sx;
+      this.bSr[c] = sr;
+    }
+  }
+
+  /** Sets every cell from a physical state at its centroid. */
+  setState(at: (x: number, r: number, cell: number) => PhysicalState): void {
+    const m = this.mesh;
+    for (let c = 0; c < m.nCells; c++) {
+      const rc = m.cellR[c] ?? NaN;
+      const q = physicalToPrim(this.ref, at(m.cellX[c] ?? NaN, rc, c), rc);
+      primToCons(this.ref, q, 0, rc, this.U, NU * c);
+    }
+    this.roundStorage();
+  }
+
+  setUniform(s: PhysicalState): void {
+    this.setState(() => s);
+  }
+
+  /** The primitive records of every cell then every ghost for the current state. */
+  primitives(): Float64Array {
+    this.updatePrimitives();
+    return this.P;
+  }
+
+  /** The residual R (section 9) of the current state; a copy. */
+  residual(): Float64Array {
+    this.updatePrimitives();
+    this.evaluateSources();
+    this.assembleResidual();
+    return Float64Array.from(this.R);
+  }
+
+  /** Local time step dt_c of the last tracking iteration (or of the current state if none). */
+  localDt(): Float64Array {
+    if (this.iterations === 0) {
+      this.updatePrimitives();
+      this.computeLocalDt();
+    }
+    return Float64Array.from(this.dt);
+  }
+
+  /** The physical-time step CFL_phys min_c (b V / lambda) of the current state. */
+  globalDt(): number {
+    this.updatePrimitives();
+    this.computeLocalDt();
+    let dt = Infinity;
+    for (let c = 0; c < this.mesh.nCells; c++) {
+      const bv = (this.blockage[c] ?? NaN) * (this.mesh.cellVolR[c] ?? NaN);
+      dt = Math.min(dt, ((this.tau[c] ?? NaN) / this.cfl) * this.cflPhysical * bv);
+    }
+    return dt;
+  }
+
+  /** Tracking mode: n iterations of the 3-stage RK with local time steps. */
+  iterate(n = 1): IterationStats {
+    const N = this.mesh.nCells;
+    for (let it = 0; it < n; it++) {
+      this.U0.set(this.U);
+      for (let k = 0; k < 3; k++) {
+        this.updatePrimitives();
+        if (k === 0) this.computeLocalDt();
+        this.evaluateSources();
+        this.assembleResidual();
+        if (k === 0) this.recordResidual();
+        const a = RK3_ALPHA[k] ?? NaN;
+        const { U, U0, R, tau, dt } = this;
+        const d = this.src.damping;
+        for (let c = 0; c < N; c++) {
+          const at = a * (tau[c] ?? NaN);
+          const adt = a * (dt[c] ?? NaN);
+          for (let m = NU * c; m < NU * c + NU; m++) {
+            U[m] = (U0[m] ?? NaN) - (at * (R[m] ?? NaN)) / (1 + adt * (d[m] ?? NaN));
+          }
+        }
+        this.roundStorage();
+      }
+      this.iterations++;
+    }
+    return this.stats;
+  }
+
+  /** Physical-time mode: one SSP-RK3 step of dt (default: the CFL_phys global step). */
+  stepPhysical(dtGiven?: number): number {
+    const dtStep = dtGiven ?? this.globalDt();
+    const N = this.mesh.nCells;
+    const { U, U0, R } = this;
+    U0.set(U);
+    const weights: readonly [number, number][] = [
+      [0, 1],
+      [3 / 4, 1 / 4],
+      [1 / 3, 2 / 3],
+    ];
+    for (let k = 0; k < 3; k++) {
+      this.updatePrimitives();
+      this.evaluateSources();
+      this.assembleResidual();
+      if (k === 0) this.recordResidual();
+      const [w0, w1] = weights[k] ?? [NaN, NaN];
+      const d = this.src.damping;
+      for (let c = 0; c < N; c++) {
+        const tau = dtStep / ((this.blockage[c] ?? NaN) * (this.mesh.cellVolR[c] ?? NaN));
+        for (let m = NU * c; m < NU * c + NU; m++) {
+          const e = (U[m] ?? NaN) - (tau * (R[m] ?? NaN)) / (1 + dtStep * (d[m] ?? NaN));
+          U[m] = k === 0 ? e : w0 * (U0[m] ?? NaN) + w1 * e;
+        }
+      }
+      this.roundStorage();
+    }
+    this.time += dtStep;
+    this.iterations++;
+    return dtStep;
+  }
+
+  /** Per-radian totals sum_c b V U_k. */
+  totals(): Float64Array {
+    return this.sumOver((u) => u);
+  }
+
+  /** Per-radian totals of |U_k| (a scale for conservation checks). */
+  absTotals(): Float64Array {
+    return this.sumOver(Math.abs);
+  }
+
+  /**
+   * The flux (times b_f) through i-face (i, j) (dir 'i') or j-face (i, j) (dir 'j') of block b in
+   * the direction of the stored face vector, for the current state.
+   */
+  faceFlux(b: number, dir: 'i' | 'j', i: number, j: number): Float64Array {
+    this.updatePrimitives();
+    const blk = this.mesh.blocks[b];
+    if (blk === undefined) throw new Error(`no block ${b}`);
+    const out = new Float64Array(NU);
+    const L = dir === 'i' ? blk.ni + 4 : blk.nj + 4;
+    const fixed = dir === 'i' ? j : i;
+    const f = dir === 'i' ? i : j;
+    this.loadLine(b, dir, fixed, L);
+    this.faceFromLine(
+      f,
+      dir === 'i' ? blk.iFaceOffset + j * (blk.ni + 1) + i : blk.jFaceOffset + j * blk.ni + i,
+      dir,
+    );
+    out.set(this.F);
+    const bf =
+      0.5 * ((this.bExt[this.line[f + 1] ?? 0] ?? NaN) + (this.bExt[this.line[f + 2] ?? 0] ?? NaN));
+    for (let k = 0; k < NU; k++) out[k] = bf * (out[k] ?? NaN);
+    return out;
+  }
+
+  private sumOver(fn: (u: number) => number): Float64Array {
+    const t = new Float64Array(NU);
+    for (let c = 0; c < this.mesh.nCells; c++) {
+      const bv = (this.blockage[c] ?? NaN) * (this.mesh.cellVolR[c] ?? NaN);
+      for (let k = 0; k < NU; k++) t[k] = (t[k] ?? 0) + bv * fn(this.U[NU * c + k] ?? NaN);
+    }
+    return t;
+  }
+
+  private roundStorage(): void {
+    if (this.opts.storage !== 'f32') return;
+    const U = this.U;
+    for (let k = 0; k < U.length; k++) U[k] = Math.fround(U[k] ?? NaN);
+  }
+
+  private updatePrimitives(): void {
+    const m = this.mesh;
+    const n = m.nCells;
+    const { P, ref, bc } = this;
+    for (let c = 0; c < n; c++) consToPrim(ref, this.U, NU * c, m.cellR[c] ?? NaN, P, NP * c);
+    for (let g = 0; g < m.nGhosts; g++) {
+      const code = m.ghostBc[g] ?? 0;
+      ghostPrimitive(
+        ref,
+        bc,
+        code === 0 ? 0 : (this.remap[code] ?? code),
+        P,
+        NP * (m.ghostSrc[g] ?? 0),
+        m.ghostNx[g] ?? NaN,
+        m.ghostNr[g] ?? NaN,
+        P,
+        NP * (n + g),
+      );
+    }
+  }
+
+  private evaluateSources(): void {
+    const model = this.opts.sources;
+    this.src.rate.fill(0);
+    this.src.damping.fill(0);
+    if (model === undefined) return;
+    model(
+      {
+        mesh: this.mesh,
+        ref: this.ref,
+        prim: this.P,
+        U: this.U,
+        blockage: this.blockage,
+        time: this.time,
+      },
+      this.src,
+    );
+  }
+
+  private computeLocalDt(): void {
+    const m = this.mesh;
+    const { P, tau, dt, cellFace, cellNbr, bExt } = this;
+    for (let c = 0; c < m.nCells; c++) {
+      const u = P[NP * c + 1] ?? NaN;
+      const v = P[NP * c + 2] ?? NaN;
+      const a = P[NP * c + 7] ?? NaN;
+      const bc = this.blockage[c] ?? NaN;
+      let lam = 0;
+      for (let d = 0; d < 2; d++) {
+        let best = 0;
+        for (let s = 0; s < 2; s++) {
+          const k = 2 * d + s;
+          const f = cellFace[4 * c + k] ?? 0;
+          const nx = (d === 0 ? m.iNx[f] : m.jNx[f]) ?? NaN;
+          const nr = (d === 0 ? m.iNr[f] : m.jNr[f]) ?? NaN;
+          const area = (d === 0 ? m.iArea[f] : m.jArea[f]) ?? NaN;
+          const bf = 0.5 * (bc + (bExt[cellNbr[4 * c + k] ?? 0] ?? NaN));
+          best = Math.max(best, bf * area * (Math.abs(u * nx + v * nr) + a));
+        }
+        lam += best;
+      }
+      tau[c] = this.cfl / lam;
+      dt[c] = (tau[c] ?? NaN) * bc * (m.cellVolR[c] ?? NaN);
+    }
+  }
+
+  /** Extended indices of grid line `fixed` of block b in direction dir, positions -2..n+1. */
+  private loadLine(b: number, dir: 'i' | 'j', fixed: number, L: number): void {
+    const { line, slope, P, ref } = this;
+    for (let p = 0; p < L; p++) {
+      line[p] =
+        dir === 'i' ? extIndex(this.mesh, b, p - 2, fixed) : extIndex(this.mesh, b, fixed, p - 2);
+    }
+    for (let p = 1; p < L - 1; p++) {
+      limitedSlopes(
+        ref,
+        P,
+        NP * (line[p - 1] ?? 0),
+        NP * (line[p] ?? 0),
+        NP * (line[p + 1] ?? 0),
+        slope,
+        NU * p,
+      );
+    }
+  }
+
+  /** The SLAU2 flux (before b_f) through face f of the loaded line (between positions f+1, f+2). */
+  private faceFromLine(f: number, face: number, dir: 'i' | 'j'): number {
+    const m = this.mesh;
+    const area = (dir === 'i' ? m.iArea[face] : m.jArea[face]) ?? NaN;
+    if (!(area > 0)) {
+      this.F.fill(0);
+      return 0;
+    }
+    const { P, slope, line, qL, qR } = this;
+    const l = line[f + 1] ?? 0;
+    const r = line[f + 2] ?? 0;
+    for (let k = 0; k < NU; k++) {
+      qL[k] = (P[NP * l + k] ?? NaN) + 0.5 * (slope[NU * (f + 1) + k] ?? NaN);
+      qR[k] = (P[NP * r + k] ?? NaN) - 0.5 * (slope[NU * (f + 2) + k] ?? NaN);
+    }
+    slau2Flux(
+      this.ref,
+      qL,
+      0,
+      qR,
+      0,
+      (dir === 'i' ? m.iNx[face] : m.jNx[face]) ?? NaN,
+      (dir === 'i' ? m.iNr[face] : m.jNr[face]) ?? NaN,
+      area,
+      (dir === 'i' ? m.iRf[face] : m.jRf[face]) ?? NaN,
+      this.F,
+    );
+    return area;
+  }
+
+  private assembleResidual(): void {
+    const m = this.mesh;
+    const { R, F, line, bExt } = this;
+    R.fill(0);
+    m.blocks.forEach((b, bi) => {
+      for (const dir of ['i', 'j'] as const) {
+        const nAlong = dir === 'i' ? b.ni : b.nj;
+        const nAcross = dir === 'i' ? b.nj : b.ni;
+        const L = nAlong + 4;
+        for (let fixed = 0; fixed < nAcross; fixed++) {
+          this.loadLine(bi, dir, fixed, L);
+          for (let f = 0; f <= nAlong; f++) {
+            const face =
+              dir === 'i'
+                ? b.iFaceOffset + fixed * (b.ni + 1) + f
+                : b.jFaceOffset + f * b.ni + fixed;
+            if (this.faceFromLine(f, face, dir) === 0) continue;
+            const l = line[f + 1] ?? 0;
+            const r = line[f + 2] ?? 0;
+            const bf = 0.5 * ((bExt[l] ?? NaN) + (bExt[r] ?? NaN));
+            if (f >= 1)
+              for (let k = 0; k < NU; k++)
+                R[NU * l + k] = (R[NU * l + k] ?? 0) + bf * (F[k] ?? NaN);
+            if (f < nAlong)
+              for (let k = 0; k < NU; k++)
+                R[NU * r + k] = (R[NU * r + k] ?? 0) - bf * (F[k] ?? NaN);
+          }
+        }
+      }
+    });
+    // pressure and swirl source, then the volume sources (section 8)
+    const { P, bSx, bSr } = this;
+    const rate = this.src.rate;
+    for (let c = 0; c < m.nCells; c++) {
+      const pP = P[NP * c + 4] ?? NaN;
+      const rho = this.ref.rho + (P[NP * c] ?? NaN);
+      const w = (P[NP * c + 3] ?? NaN) / (m.cellR[c] ?? NaN);
+      const bc = this.blockage[c] ?? NaN;
+      R[NU * c + 1] = (R[NU * c + 1] ?? NaN) - pP * (bSx[c] ?? NaN);
+      R[NU * c + 2] =
+        (R[NU * c + 2] ?? NaN) - (pP * (bSr[c] ?? NaN) + bc * rho * w * w * (m.cellArea[c] ?? NaN));
+      const bv = bc * (m.cellVolR[c] ?? NaN);
+      for (let k = NU * c; k < NU * c + NU; k++) R[k] = (R[k] ?? NaN) - bv * (rate[k] ?? NaN);
+    }
+  }
+
+  private recordResidual(): void {
+    const m = this.mesh;
+    let sum = 0;
+    for (let c = 0; c < m.nCells; c++) {
+      const q = (this.R[NU * c] ?? NaN) / ((this.blockage[c] ?? NaN) * (m.cellVolR[c] ?? NaN));
+      sum += q * q;
+    }
+    this.stats = { residualDensityL2: Math.sqrt(sum / m.nCells) };
+  }
+}
