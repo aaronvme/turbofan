@@ -14,14 +14,28 @@ export const SLOW_TRANSIENT_TESTS = [
   'tests/unit/cycle/surgeRecovery.test.ts',
 ];
 
+/**
+ * A targeted run (D3-13: per file) may narrow the set further with MUTATION_TESTS, a comma-separated
+ * list of test globs, e.g. the thermo suite alone for src/thermo, whose functions sit in every
+ * solve's inner loop, so that instrumenting them makes each cycle test tens of times slower.
+ * docs/MUTATION.md records the set each score was measured with.
+ */
+const targeted = process.env.MUTATION_TESTS?.split(',').filter((g) => g.length > 0);
+
 export default defineConfig({
   test: {
-    include: [
-      'tests/unit/thermo/**/*.test.ts',
-      'tests/unit/cycle/**/*.test.ts',
-      'tests/unit/flow/**/*.test.ts',
-    ],
+    include:
+      targeted !== undefined && targeted.length > 0
+        ? targeted
+        : [
+            'tests/unit/thermo/**/*.test.ts',
+            'tests/unit/cycle/**/*.test.ts',
+            'tests/unit/flow/**/*.test.ts',
+          ],
     exclude: SLOW_TRANSIENT_TESTS,
     environment: 'node',
+    // Stryker's instrumented runs are several times slower than npm test: a test that builds two
+    // models' schedules (about 1 s plain) took over vitest's default 5 s in the dry run
+    testTimeout: 120_000,
   },
 });
