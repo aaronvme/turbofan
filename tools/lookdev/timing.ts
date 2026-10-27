@@ -236,6 +236,7 @@ export function pacedValidity(
     {
       frameTime: { p50: 0 },
       longestThrottledMs: h.longestThrottledMs,
+      longestOcclusionMs: h.longestOcclusionMs,
       displayIntervalMs: displayMs,
     },
     hiddenMs,
