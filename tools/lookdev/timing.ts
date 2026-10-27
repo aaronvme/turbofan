@@ -169,11 +169,13 @@ export function withPacings(
 }
 
 /**
- * A back-to-back run's GPU busy fraction under which it gets a warning: the GPU idled for more
- * than a quarter of the wall time (a CPU-bound loop, or the queue ran dry), so its clock could
- * still have dropped. A warning, not INVALID: the run's numbers are kept beside it (D3-6).
+ * A back-to-back run's GPU busy fraction (the timed passes' share of the wall time) under which
+ * it gets a warning: the loop left the GPU idle, so its clock could still have dropped. A
+ * warning, not INVALID (D3-6). 0.6: the timed passes fill 72-77 % of a back-to-back run here
+ * (the rest is untimed GPU work: copies between passes, TRAA's history copies), and 60-72 % of
+ * a vsync run of the same frame.
  */
-export const BACK_TO_BACK_MIN_BUSY = 0.75;
+export const BACK_TO_BACK_MIN_BUSY = 0.6;
 
 export interface BackToBackLoad {
   readonly framesPerS: number;

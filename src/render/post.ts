@@ -148,6 +148,8 @@ export function createPipeline(
 
   const aoPass = ao(sceneDepth, sceneNormal, camera);
   aoPass.resolutionScale = 0.5;
+  // 8 fixed samples: 6 with the noise rotated every frame (TRAA averaging it) put a 0.11 tile
+  // into the hero's fan-blur check (0.03 with these), so GTAO was not cut (LOD round 2)
   aoPass.samples.value = 8;
   const aoTex = aoPass.getTextureNode();
 

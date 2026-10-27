@@ -184,6 +184,18 @@ async function main(): Promise<void> {
         timeout: 120_000,
       });
     };
+    // a fresh checkout's first page load makes Vite optimize its dependencies and reload the
+    // page: load each side until a load holds still for 5 s
+    for (const s of sides)
+      for (let tries = 0; ; tries++) {
+        await open(s);
+        await page.waitForTimeout(5000);
+        const ok = await page
+          .evaluate(() => (window as LookdevPage).lookdev?.ready === true)
+          .catch(() => false);
+        if (ok) break;
+        if (tries > 5) throw new Error(`the ${s.ref} page does not settle`);
+      }
     await open(a);
     const atStart = await page.evaluate(async () => {
       const l = (window as LookdevPage).lookdev;

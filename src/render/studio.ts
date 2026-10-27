@@ -13,17 +13,21 @@
 
 import {
   BackSide,
+  BoxGeometry,
   Color,
   DirectionalLight,
   DoubleSide,
+  ExtrudeGeometry,
   Group,
   LatheGeometry,
   Mesh,
   MeshBasicNodeMaterial,
   MeshLambertNodeMaterial,
+  MeshStandardNodeMaterial,
   PlaneGeometry,
   PMREMGenerator,
   Scene,
+  Shape,
   SphereGeometry,
   Vector2,
   type Texture,
@@ -41,6 +45,7 @@ import {
   vec2,
   vec3,
 } from 'three/tsl';
+import type { StandLayout } from '../geometry/stand';
 
 /** Floor height, m (the nacelle's lowest point is ~0.95 m below the axis). */
 export const FLOOR_Y = -1.32;
@@ -259,6 +264,58 @@ export async function createStudio(renderer: WebGPURenderer): Promise<Studio> {
       key.shadow.dispose();
       keyR.shadow.dispose();
       rimR.shadow.dispose();
+    },
+  };
+}
+
+/**
+ * The transport stand's mesh (W1V-N5) from its pure layout (src/geometry/stand.ts): satin
+ * charcoal painted steel, so it reads as studio furniture under the white engine, not as part
+ * of it. It casts into the key's static map and receives it; the view hides it with the cowls
+ * in the exploded view (the modules leave it).
+ */
+export function createStandMesh(layout: StandLayout): { group: Group; dispose(): void } {
+  const group = new Group();
+  group.name = 'stand';
+  const mat = new MeshStandardNodeMaterial({ color: 0x1c1d1f, roughness: 0.48, metalness: 0.15 });
+  const geometries: { dispose(): void }[] = [];
+  const add = (g: BoxGeometry | ExtrudeGeometry, name: string) => {
+    geometries.push(g);
+    const m = new Mesh(g, mat);
+    m.name = name;
+    m.castShadow = true;
+    m.receiveShadow = true;
+    group.add(m);
+    return m;
+  };
+  for (const [k, s] of layout.saddles.entries()) {
+    // an annular sector about the bottom, in the (z, y) cross-section, extruded along x
+    const a0 = -Math.PI / 2 - s.halfAngle;
+    const a1 = -Math.PI / 2 + s.halfAngle;
+    const shape = new Shape();
+    shape.absarc(0, 0, s.outerRadius, a0, a1, false);
+    shape.absarc(0, 0, s.innerRadius, a1, a0, true);
+    const g = new ExtrudeGeometry(shape, {
+      depth: s.width,
+      bevelEnabled: false,
+      curveSegments: 24,
+    });
+    // the shape's x is the engine's z and its extrusion the engine's x
+    g.rotateY(Math.PI / 2);
+    g.translate(s.x - s.width / 2, 0, 0);
+    add(g, `stand-saddle-${String(k)}`);
+  }
+  for (const [k, b] of [...layout.posts, ...layout.rails].entries()) {
+    const size = [b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]] as const;
+    const g = new BoxGeometry(size[0], size[1], size[2]);
+    g.translate((b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2);
+    add(g, `stand-frame-${String(k)}`);
+  }
+  return {
+    group,
+    dispose: () => {
+      for (const g of geometries) g.dispose();
+      mat.dispose();
     },
   };
 }

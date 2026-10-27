@@ -94,7 +94,9 @@ export interface LookUniforms {
 }
 
 /** Time-offset copies of the fan drawn per frame (stochastic blur, src/render/post.ts). */
-export const FAN_TIME_SAMPLES = 8;
+// 6, not 8 (LOD round 2, D4-5): with the rotor motion vectors TRAA accumulates the fan's
+// instants across frames too, so fewer per frame hold the fan-blur bounds (fanBlur.test.ts)
+export const FAN_TIME_SAMPLES = 6;
 
 export function createLookUniforms(): LookUniforms {
   return {
@@ -512,19 +514,35 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
     }
     case 'exhaust':
     case 'plug': {
-      const base = kind === 'plug' ? vec3(0.4, 0.39, 0.37) : vec3(0.44, 0.43, 0.41);
-      m = phys({ color: c3(0.42, 0.41, 0.39), metalness: 0.75, roughness: 0.5 });
+      // a run engine's core nozzle and plug: oxidised, dull and heat-stained, not the polished
+      // ogive that read as a chrome bullet (W1V-N5): mostly diffuse (metalness 0.45 for the
+      // oxide), rough, darker aft toward the tip where the soot settles, with streaks along the
+      // flow (per vertex: 4 cm round, 0.8 m along)
+      const plug = kind === 'plug';
+      const base = plug ? vec3(0.34, 0.32, 0.3) : vec3(0.42, 0.41, 0.39);
+      m = phys({ color: c3(0.36, 0.34, 0.32), metalness: 0.45, roughness: 0.66 });
       const soot = perVertex(mx_fractal_noise_float(positionLocal.mul(vec3(2.5, 9, 9)), 3, 2, 0.5))
         .mul(0.5)
         .add(0.5);
-      m.colorNode = heatTint(base, u, 0.5).mul(float(1).sub(soot.mul(0.12)));
-      m.roughnessNode = mix(float(0.42), float(0.62), soot);
+      const streak = perVertex(mx_noise_float(positionLocal.mul(vec3(1.2, 24, 24))))
+        .mul(0.5)
+        .add(0.5);
+      const aft = plug ? smoothstep(2.9, 3.6, positionLocal.x) : float(0);
+      m.colorNode = heatTint(base, u, 0.6).mul(
+        float(1).sub(soot.mul(0.16)).sub(streak.mul(0.08)).sub(aft.mul(0.25)),
+      );
+      m.roughnessNode = mix(float(0.58), float(0.78), soot).add(streak.mul(0.05));
       break;
     }
     case 'spinner': {
       // matte enough that it no longer mirrors the softboxes as dark chrome (W1L-N1)
       m = phys({ color: c3(0.04, 0.041, 0.043), metalness: 0, roughness: 0.52 });
       m.colorNode = spinnerSpiral();
+      // the spiral read only while it crossed the lit sector (W1V-N5): in the lip's shadow the
+      // spinner sees the studio only through the intake, and the light the white intake walls
+      // and the fan bounce onto it is not in the image-based light (it has no visibility). A
+      // faint lift of the white paint stands in for that bounce, so the stripe always reads
+      m.emissiveNode = spinnerSpiral().sub(0.035).max(0).mul(0.085);
       // the spinner turns with the fan and is drawn (and blurred) in the rotor pass
       m.mrtNode = mrt({ blur: vec4(u.lpBlur, TWO_PI, 0, 1) });
       break;

@@ -48,7 +48,9 @@ import { createPassTimer, type PassTimer } from './passTimer';
 import { createPipeline, type LookPipeline, type PostDebug } from './post';
 import { LOOK_PRESETS, SHUTTER_1000, type LookMode, type LookPresetId } from './presets';
 import { createRendererOnDevice } from './rendererOnDevice';
-import { createStudio, type Studio } from './studio';
+import { createStandMesh, createStudio, FLOOR_Y, type Studio } from './studio';
+import { standLayout } from '../geometry/stand';
+import { X as STATIONS } from '../geometry/parts';
 
 export interface EngineViewOptions {
   readonly gpu: GPU;
@@ -260,6 +262,18 @@ async function assemble(
     s.environmentIntensity = 0.55;
   }
   scene.main.add(studio.stage);
+  // the engine rests on its stand (W1V-N5); the cowls and the stand go in the exploded view
+  const stand = createStandMesh(
+    standLayout(
+      {
+        nacelle: (x) => geo.walls.nacelleOuter.radiusAt(x),
+        cowl: (x) => geo.walls.coreCowl.radiusAt(x),
+      },
+      FLOOR_Y,
+      STATIONS.nacelleTe,
+    ),
+  );
+  scene.main.add(stand.group);
   scene.rotors.add(studio.rotorLights);
 
   const camera = new PerspectiveCamera(30, o.width / o.height, 0.05, 200);
@@ -513,6 +527,7 @@ async function assemble(
       for (const obj of scene.frontOnly) obj.visible = !closed || eyeX < closedSet.eye.front;
       for (const obj of scene.rearOnly) obj.visible = !closed || eyeX > closedSet.eye.rear;
       const skinsVisible = explode < 0.02;
+      stand.group.visible = skinsVisible;
       for (const s of scene.skins) if (!s.name.startsWith('cap:')) s.visible = skinsVisible;
       if (!skinsVisible)
         for (const s of scene.skins) if (s.name.startsWith('cap:')) s.visible = false;
@@ -573,6 +588,7 @@ async function assemble(
       flatMaterial.dispose();
       scene.dispose();
       studio.dispose();
+      stand.dispose();
       // three's dispose is asynchronous; the device goes only after it, whatever happens
       // (three never destroys a supplied device, GPU_FACTS M15)
       try {
