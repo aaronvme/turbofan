@@ -39,9 +39,11 @@ export interface SolverOptions {
   readonly sources?: SourceModel;
   /**
    * Low-Mach preconditioning of the tracking mode's pseudo-time derivative (section 10, D4-10):
-   * beta^2 = min(1, max(M^2, minMach^2)). The steady state does not change; physical time ignores it.
+   * beta^2 = min(1, max(M^2, minMach^2, dp / (rho c^2))), with SLAU2's pressure diffusion scaled by
+   * 1 / f_a(max(M, machCut)) (section 7, D4-20; machCut defaults to minMach, >= 1 turns it off).
+   * Physical time ignores both.
    */
-  readonly lowMachPreconditioning?: { readonly minMach: number };
+  readonly lowMachPreconditioning?: { readonly minMach: number; readonly machCut?: number };
   /** 'f32': round the state to f32 after every stage (the f32-storage tolerance experiment). */
   readonly storage?: 'f64' | 'f32';
 }
@@ -68,6 +70,10 @@ export class ReferenceSolver {
   private readonly opts: SolverOptions;
   private readonly cfl: number;
   private readonly cflPhysical: number;
+  /** M_cut of the tracking mode's dissipation scaling (1: off); physical time always uses 1. */
+  private readonly machCut: number;
+  /** The M_cut of the residual being assembled. */
+  private fluxMachCut = 1;
   private readonly remap: Uint8Array;
   /** 1 for the ghosts that are slip walls (after the remap), per extended index. */
   private readonly wall: Uint8Array;
@@ -112,6 +118,7 @@ export class ReferenceSolver {
             ...bcOpts,
             farFieldBeta2: Math.min(1, Math.max(mInf2, pre.minMach * pre.minMach)),
           });
+    this.machCut = pre === undefined ? 1 : (pre.machCut ?? pre.minMach);
     this.cfl = opts.cfl ?? DEFAULT_CFL;
     this.cflPhysical = opts.cflPhysical ?? DEFAULT_CFL_PHYSICAL;
     this.remap = new Uint8Array(256).map((_, k) => opts.bcRemap?.[k] ?? k);
@@ -222,7 +229,7 @@ export class ReferenceSolver {
   residual(): Float64Array {
     this.updatePrimitives();
     this.evaluateSources();
-    this.assembleResidual();
+    this.assembleResidual(this.machCut);
     return Float64Array.from(this.R);
   }
 
@@ -256,7 +263,7 @@ export class ReferenceSolver {
         this.updatePrimitives();
         if (k === 0) this.computeLocalDt(true);
         this.evaluateSources();
-        this.assembleResidual();
+        this.assembleResidual(this.machCut);
         if (k === 0) this.recordResidual();
         const a = RK3_ALPHA[k] as number;
         const { U, U0, R, tau, dt, dU, beta2, P } = this;
@@ -294,7 +301,7 @@ export class ReferenceSolver {
     for (let k = 0; k < 3; k++) {
       this.updatePrimitives(true);
       this.evaluateSources();
-      this.assembleResidual();
+      this.assembleResidual(1);
       if (k === 0) this.recordResidual();
       const [w0, w1] = weights[k] ?? [NaN, NaN];
       const d = this.src.damping;
@@ -335,6 +342,7 @@ export class ReferenceSolver {
     const fixed = dir === 'i' ? j : i;
     const f = dir === 'i' ? i : j;
     this.loadLine(b, dir, fixed, L);
+    this.fluxMachCut = this.machCut;
     this.faceFromLine(
       f,
       dir === 'i' ? blk.iFaceOffset + j * (blk.ni + 1) + i : blk.jFaceOffset + j * blk.ni + i,
@@ -517,13 +525,16 @@ export class ReferenceSolver {
       area,
       (dir === 'i' ? m.iRf[face] : m.jRf[face]) as number,
       this.F,
+      this.fluxMachCut,
     );
     return area;
   }
 
-  private assembleResidual(): void {
+  /** The residual of section 9; machCut < 1 scales SLAU2's pressure diffusion (tracking, D4-20). */
+  private assembleResidual(machCut: number): void {
     const m = this.mesh;
     const { R, F, line, bExt } = this;
+    this.fluxMachCut = machCut;
     R.fill(0);
     m.blocks.forEach((b, bi) => {
       for (const dir of ['i', 'j'] as const) {
