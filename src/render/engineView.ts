@@ -388,7 +388,7 @@ async function assemble(
       if (f.flatNames !== undefined && f.flatNames !== '') {
         const re = new RegExp(f.flatNames);
         scene.main.traverse((o) => {
-          if ((o as Mesh).isMesh === true && re.test(o.name)) {
+          if ((o as { isMesh?: boolean }).isMesh === true && re.test(o.name)) {
             swapped.set(o as Mesh, (o as Mesh).material);
             (o as Mesh).material = flatMaterial;
           }
