@@ -51,9 +51,10 @@ function flux(
   area: number,
   rf: number,
   machCut?: number,
+  betaFace?: number,
 ) {
   const out = new Float64Array(6);
-  slau2Flux(ref, L, 0, R, 0, nx, nr, area, rf, out, machCut);
+  slau2Flux(ref, L, 0, R, 0, nx, nr, area, rf, out, machCut, betaFace);
   return out;
 }
 
@@ -142,20 +143,23 @@ describe('SLAU2', () => {
     for (let m = 0; m < 6; m++) expect(G[m] === 0).toBe(true);
   });
 
-  describe('low-Mach dissipation scaling (D4-20)', () => {
+  // D4-20 with D4-44: M_ref = min(1, max(beta_f, M_cut)), beta_f = (beta_L + beta_R) / 2 of the
+  // preconditioner (the solver forms it), not the face Mach number
+  describe('low-Mach dissipation scaling (D4-20, D4-44)', () => {
     const fa = (m: number) => m * (2 - m);
     const low = (p: number, u: number) =>
       physicalToPrim(ref, { rho: 1.2, u, v: 0.4, w: 0.3, p, z: 0 }, 1);
 
-    it('divides only the mass flux pressure diffusion by f_a(M_ref), M_ref = max(qbar/cbar, M_cut)', () => {
-      // qbar/cbar ~ 3e-3, below both cuts: the diffusion part is (1/f_a(M_cut)) x the plain one
+    it('divides only the mass flux pressure diffusion by f_a(M_ref), M_ref = max(beta_f, M_cut)', () => {
       const L = low(101325 + 40, 1.0);
       const R = low(101325 - 25, 1.1);
       const plain = flux(L, R, 1, 0, 0.7, 1);
-      const unit = flux(L, R, 1, 0, 0.7, 1, 1);
-      for (let m = 0; m < 6; m++) expect(unit[m]).toBe(plain[m]);
-      const a = flux(L, R, 1, 0, 0.7, 1, 0.01);
-      const b = flux(L, R, 1, 0, 0.7, 1, 0.04);
+      // beta_f = 1 (no preconditioning) or M_cut = 1 (scaling off): the plain flux, bitwise
+      for (const F of [flux(L, R, 1, 0, 0.7, 1, 0.01), flux(L, R, 1, 0, 0.7, 1, 1, 0.01)])
+        for (let m = 0; m < 6; m++) expect(F[m]).toBe(plain[m]);
+      // beta_f below the cut: M_ref = M_cut; above it: M_ref = beta_f
+      const a = flux(L, R, 1, 0, 0.7, 1, 0.01, 0.004);
+      const b = flux(L, R, 1, 0, 0.7, 1, 0.003, 0.04);
       const ratio = ((a[0] ?? NaN) - (plain[0] ?? NaN)) / ((b[0] ?? NaN) - (plain[0] ?? NaN));
       expect(ratio).toBeCloseTo((1 / fa(0.01) - 1) / (1 / fa(0.04) - 1), 9);
       // with p_L > p_R the extra diffusion pushes mass from L to R
@@ -166,19 +170,24 @@ describe('SLAU2', () => {
       expect((a[1] ?? NaN) - (plain[1] ?? NaN)).toBeCloseTo(dm * 1.0, 6);
     });
 
-    it('uses the local Mach number above M_cut and leaves transonic faces unchanged', () => {
+    it('takes M_ref from beta_f, not from the face Mach number (D4-44)', () => {
+      // M_local ~ 0.09: the same beta_f gives the same flux at any cut below it, and a beta_f
+      // below the face Mach scales the diffusion more (before D4-44 it was f_a(0.09) here)
       const L = low(101325 + 40, 30);
       const R = low(101325 - 25, 31);
       const plain = flux(L, R, 1, 0, 0.7, 1);
-      const a = flux(L, R, 1, 0, 0.7, 1, 1e-3);
-      const b = flux(L, R, 1, 0, 0.7, 1, 1e-4);
-      // M_local ~ 0.09 > both cuts: the same scaled flux
+      const a = flux(L, R, 1, 0, 0.7, 1, 1e-3, 0.02);
+      const b = flux(L, R, 1, 0, 0.7, 1, 1e-4, 0.02);
       for (let m = 0; m < 6; m++) expect(a[m]).toBe(b[m]);
-      expect(Math.abs((a[0] ?? NaN) - (plain[0] ?? NaN))).toBeGreaterThan(0);
+      const c = flux(L, R, 1, 0, 0.7, 1, 1e-3, 0.09);
+      const da = (a[0] ?? NaN) - (plain[0] ?? NaN);
+      const dc = (c[0] ?? NaN) - (plain[0] ?? NaN);
+      expect(da / dc).toBeCloseTo((1 / fa(0.02) - 1) / (1 / fa(0.09) - 1), 9);
+      // a transonic face has beta_f = 1: unchanged
       const S = physicalToPrim(ref, { rho: 1.1, u: 420, v: 30, w: 40, p: 9e4, z: 0 }, 1);
       const T = physicalToPrim(ref, { rho: 0.9, u: 400, v: -20, w: 0, p: 8.5e4, z: 0 }, 1);
       const sp = flux(S, T, 1, 0, 1.5, 1);
-      const ss = flux(S, T, 1, 0, 1.5, 1, 0.003);
+      const ss = flux(S, T, 1, 0, 1.5, 1, 0.003, 1);
       for (let m = 0; m < 6; m++) expect(ss[m]).toBe(sp[m]);
     });
 
@@ -189,12 +198,13 @@ describe('SLAU2', () => {
         const L = randomPrim(next, rf);
         const R = randomPrim(next, rf);
         const a = 2 * Math.PI * next();
-        const F = flux(L, R, Math.cos(a), Math.sin(a), 0.3, rf, 0.003);
-        const G = flux(R, L, -Math.cos(a), -Math.sin(a), 0.3, rf, 0.003);
+        const bf = 0.001 + 0.5 * next();
+        const F = flux(L, R, Math.cos(a), Math.sin(a), 0.3, rf, 0.003, bf);
+        const G = flux(R, L, -Math.cos(a), -Math.sin(a), 0.3, rf, 0.003, bf);
         for (let m = 0; m < 6; m++) expect(F[m]).toBe(-(G[m] ?? NaN));
       }
       const q = new Float64Array(NP);
-      const Z = flux(q, q, 0.3, -0.95, 1, 1, 0.003);
+      const Z = flux(q, q, 0.3, -0.95, 1, 1, 0.003, 0.003);
       for (let m = 0; m < 6; m++) expect(Z[m] === 0).toBe(true);
     });
   });
@@ -266,6 +276,7 @@ describe('SLAU2 values against an independent evaluation of the paper formulas (
     area: number,
     rf: number,
     machCut = 1,
+    betaFace = 1,
   ): number[] {
     const a = absolute(L, nx, nr);
     const b = absolute(R, nx, nr);
@@ -280,7 +291,8 @@ describe('SLAU2 values against an independent evaluation of the paper formulas (
     const vBar = (a.rho * Math.abs(a.vn) + b.rho * Math.abs(b.vn)) / (a.rho + b.rho);
     const vPlus = (1 - g) * vBar + g * Math.abs(a.vn);
     const vMinus = (1 - g) * vBar + g * Math.abs(b.vn);
-    const mRef = Math.min(1, Math.max(qBar / cBar, machCut));
+    // D4-44: the reference Mach of the scaled diffusion is the face's beta, at least M_cut
+    const mRef = Math.min(1, Math.max(betaFace, machCut));
     const dp = R.dp - L.dp;
     const mdot =
       (a.rho * (a.vn + vPlus) + b.rho * (b.vn - vMinus)) / 2 -
@@ -311,9 +323,10 @@ describe('SLAU2 values against an independent evaluation of the paper formulas (
     area: number,
     rf: number,
     machCut?: number,
+    betaFace?: number,
   ): Float64Array {
     const out = new Float64Array(6).fill(NaN);
-    slau2Flux(cref, record(L, rf), 0, record(R, rf), 0, nx, nr, area, rf, out, machCut);
+    slau2Flux(cref, record(L, rf), 0, record(R, rf), 0, nx, nr, area, rf, out, machCut, betaFace);
     return out;
   }
 
@@ -336,6 +349,7 @@ describe('SLAU2 values against an independent evaluation of the paper formulas (
     area: number;
     rf: number;
     machCut?: number;
+    betaFace?: number;
     check: (k: { mL: number; mR: number; mHat: number; mdot: number }) => boolean;
   }[] = [
     {
@@ -379,26 +393,28 @@ describe('SLAU2 values against an independent evaluation of the paper formulas (
       check: (k) => k.mL > 1 && k.mR > 0 && k.mR < 1 && k.mHat === 1,
     },
     {
-      // D4-20: q-bar/c-bar ~ 2e-3 is below the cut, so M_ref = M_cut = 0.003
-      name: 'a low-Mach face below M_cut (D4-20)',
+      // D4-20: beta_f 0.002 is below the cut, so M_ref = M_cut = 0.003
+      name: 'a low-Mach face with beta_f below M_cut (D4-20, D4-44)',
       L: { drho: 0.002, u: 0.6, v: 0.2, w: 0.1, dp: 3, z: 0.001 },
       R: { drho: -0.001, u: 0.5, v: -0.3, w: 0.2, dp: -2, z: 0.002 },
       angle: 0.4,
       area: 0.8,
       rf: 0.45,
       machCut: 0.003,
+      betaFace: 0.002,
       check: (k) => k.mHat < 0.003,
     },
     {
-      // D4-20: q-bar/c-bar ~ 0.04 is above the cut, so M_ref is the local Mach number
-      name: 'a low-Mach face above M_cut (D4-20)',
+      // D4-44: beta_f 0.07 is above the cut and the face Mach (~0.04), so M_ref = beta_f
+      name: 'a low-Mach face with beta_f above M_cut and the face Mach (D4-44)',
       L: { drho: 0.01, u: 14, v: 3, w: 2, dp: 120, z: 0.001 },
       R: { drho: -0.004, u: 12, v: -2, w: 4, dp: -60, z: 0.003 },
       angle: -0.3,
       area: 0.25,
       rf: 0.8,
       machCut: 0.003,
-      check: (k) => k.mHat > 0.003 && k.mHat < 0.1,
+      betaFace: 0.07,
+      check: (k) => k.mHat > 0.003 && k.mHat < 0.07,
     },
   ];
 
@@ -408,7 +424,7 @@ describe('SLAU2 values against an independent evaluation of the paper formulas (
       const a = absolute(c.L, nx, nr);
       const b = absolute(c.R, nx, nr);
       const cBar = (a.c + b.c) / 2;
-      const E = expected(c.L, c.R, nx, nr, c.area, c.rf, c.machCut);
+      const E = expected(c.L, c.R, nx, nr, c.area, c.rf, c.machCut, c.betaFace);
       // the case exercises what its name says
       expect(
         c.check({
@@ -418,10 +434,10 @@ describe('SLAU2 values against an independent evaluation of the paper formulas (
           mdot: (E[0] ?? NaN) / c.area,
         }),
       ).toBe(true);
-      expectClose(moduleFlux(c.L, c.R, nx, nr, c.area, c.rf, c.machCut), E);
+      expectClose(moduleFlux(c.L, c.R, nx, nr, c.area, c.rf, c.machCut, c.betaFace), E);
       // and through the reversed face, F(R, L, -S) = -F(L, R, S)
       expectClose(
-        moduleFlux(c.R, c.L, -nx, -nr, c.area, c.rf, c.machCut),
+        moduleFlux(c.R, c.L, -nx, -nr, c.area, c.rf, c.machCut, c.betaFace),
         E.map((f) => -f),
       );
     });

@@ -22,7 +22,7 @@ import {
 } from '../../../src/flow/reference/solver';
 import { NP, NU, consToPrim, physicalToPrim, primToCons } from '../../../src/flow/reference/state';
 import { converge } from '../../ladder/common';
-import { BC, rectangle, singleBlock, solverMesh, threeBlockRow } from './helpers';
+import { BC, facePatches, rectangle, singleBlock, solverMesh, threeBlockRow } from './helpers';
 
 const AMBIENT = { pressure: 101325, temperature: 288.15, velocity: 0 } as const;
 
@@ -384,6 +384,26 @@ describe('low-Mach dissipation scaling in the solver (D4-20)', () => {
     expect(make({ minMach: 0.01, machCut: 0.01 }).residual()).toEqual(on);
   });
 
+  // D4-44 (section 7): M_ref is the face's beta, so the residual depends on minMach at a fixed cut
+  it('takes M_ref from the cells beta (D4-44): the residual follows minMach at a fixed M_cut', () => {
+    const a = make({ minMach: 0.01, machCut: 0.003 }).residual();
+    const b = make({ minMach: 0.05, machCut: 0.003 }).residual();
+    let diff = 0;
+    for (let k = 0; k < a.length; k += NU)
+      diff = Math.max(diff, Math.abs((a[k] as number) - (b[k] as number)));
+    expect(diff).toBeGreaterThan(0);
+    // minMach 0.05 holds beta at 0.05 here (M ~ 0.01), the same as M_cut 0.05 with minMach 0.05
+    expect(make({ minMach: 0.05, machCut: 0.05 }).residual()).toEqual(b);
+  });
+
+  it('evaluates beta from the current state for residual() (not the last iteration)', () => {
+    const s = make({ minMach: 0.01 });
+    const before = s.residual();
+    s.iterate(3);
+    s.setState(bump);
+    expect(s.residual()).toEqual(before);
+  });
+
   it('leaves the physical-time mode unscaled', () => {
     const a = make({ minMach: 0.01 });
     const b = make();
@@ -392,4 +412,63 @@ describe('low-Mach dissipation scaling in the solver (D4-20)', () => {
     b.stepPhysical(dt);
     expect(a.U).toEqual(b.U);
   });
+});
+
+// D4-44 (c), docs/SOLVER.md section 10: where beta varies between cells, the face's beta_f differs
+// from each cell's own beta, which a von Neumann analysis cannot cover. Two flow cases started from
+// rest at the engine settings (minMach = M_cut = 0.003) and the default CFL 0.8; the rule stated
+// before the runs: the residual <= 1e-5 of its peak, staying there 50 iterations, within 20000.
+describe('D4-44 (c): preconditioned tracking where beta varies between cells', () => {
+  const gas = caloricallyPerfectGas(1.4, 287.05287);
+  const ENGINE = { minMach: 0.003, machCut: 0.003 } as const;
+
+  it('R: converges a blockage duct started from rest (the dp term lifts beta)', () => {
+    const duct = solverMesh(
+      singleBlock(rectangle('duct', -0.3, 0.3, 0.5, 0.6, 24, 6), {
+        imin: BC.INFLOW,
+        imax: BC.OUTFLOW,
+        jmin: BC.SLIP_WALL,
+        jmax: BC.SLIP_WALL,
+      }),
+    );
+    const s = new ReferenceSolver(duct, {
+      gas,
+      freeStream: AMBIENT,
+      inflowTotal: { p0: 101325, t0: 288.15 },
+      outflowPressure: 101325 * 0.998,
+      lowMachPreconditioning: ENGINE,
+    });
+    s.setBlockage(
+      Float64Array.from(duct.cellX, (x) =>
+        Math.abs(x) < 0.1 ? 1 - 0.15 * Math.cos((Math.PI * x) / 0.2) ** 2 : 1,
+      ),
+    );
+    s.setUniform({ rho: s.ref.rho, u: 0, v: 0, w: 0, p: 101325, z: 0 });
+    // before D4-44 (M_ref = the face Mach): a limit cycle at 8e-5 of the peak at 20000
+    const conv = converge(s, 1e-5, 20000, 'peak');
+    expect(conv.converged).toBe(true);
+  }, 600_000);
+
+  it('J: converges a low-Mach jet into dead air (a shear layer beside cells at M_cut)', () => {
+    const b = rectangle('jet', 0, 0.8, 0, 0.4, 32, 16);
+    const mesh = solverMesh({
+      blocks: [b],
+      patches: [
+        { block: 0, face: 'imin', start: 0, end: 4, bc: BC.INFLOW, label: 'nozzle' },
+        { block: 0, face: 'imin', start: 4, end: 16, bc: BC.SLIP_WALL, label: 'base' },
+        ...facePatches(b, 0, { imax: BC.OUTFLOW, jmin: BC.AXIS, jmax: BC.FARFIELD }),
+      ],
+    });
+    const M = 0.05;
+    const s = new ReferenceSolver(mesh, {
+      gas,
+      freeStream: AMBIENT,
+      inflowTotal: { p0: 101325 * (1 + 0.2 * M * M) ** 3.5, t0: 288.15 * (1 + 0.2 * M * M) },
+      lowMachPreconditioning: ENGINE,
+    });
+    s.setUniform({ rho: s.ref.rho, u: 0, v: 0, w: 0, p: 101325, z: 0 });
+    // before D4-44: 3e-2 of the peak at 20000, wandering between 5e-3 and 0.17
+    const conv = converge(s, 1e-5, 20000, 'peak');
+    expect(conv.converged).toBe(true);
+  }, 600_000);
 });
