@@ -29,3 +29,13 @@ export function hiddenMs(events: readonly VisibilityEvent[], from: number, to: n
   if (hidden) total += to - since;
   return total;
 }
+
+/** D3-6 (TDD stub). */
+export interface FocusEvent {
+  readonly at: number;
+  readonly focused: boolean;
+}
+
+export function blurCount(events: readonly FocusEvent[], from: number, to: number): number {
+  return events.length > 0 && from > to ? 1 : 0;
+}

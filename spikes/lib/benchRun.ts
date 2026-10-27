@@ -35,8 +35,13 @@ export interface RunResult {
   readonly longFrames: number;
   /** Time in frames longer than 2.5 display intervals (spikes/lib/validity.ts). */
   readonly throttledMs: number;
-  /** The longest span of consecutive such frames; the validity gate reads it. */
+  /** The longest span of consecutive such frames; a WARNING above 500 ms (D3-6). */
   readonly longestThrottledMs: number;
+  /**
+   * The longest span of consecutive rAF intervals of 500 ms or more: the occlusion signature
+   * the validity gate reads (D3-6).
+   */
+  readonly longestOcclusionMs: number;
   /**
    * How late each rAF callback started after its frame time (performance.now() - t), or null
    * if the caller gave no callback times. The timestamps are vsync-aligned, so a callback held

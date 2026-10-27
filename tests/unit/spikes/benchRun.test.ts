@@ -94,6 +94,13 @@ describe('RunRecorder (D0-1 phases)', () => {
     expect(r1?.longFrames).toBe(1);
   });
 
+  it('W0G-N6: the warm-up fallback passes the probe check: a warm-up throttled from the start throws', () => {
+    // a 1 Hz warm-up would otherwise make a 1 Hz run look healthy (its median is the interval)
+    const rec = new RunRecorder({ warmupMs: 20_000, runMs: 2000, runs: 1 }, 0);
+    drive(rec, 0, 1016, 1, 40_000);
+    expect(() => rec.results()).toThrow(/display interval.*Hz/);
+  });
+
   it('refuses to guess a display interval with neither a given one nor warm-up frames', () => {
     const rec = new RunRecorder(P, 1000);
     drive(rec, 1000, 1000, 1, 2000); // one warm-up frame, so no warm-up frame time

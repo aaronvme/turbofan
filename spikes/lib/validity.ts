@@ -30,6 +30,9 @@ export const MAX_THROTTLED_STRETCH_MS = 500;
  * 30 Hz throttle (e.g. Chrome's energy saver, 2-interval deltas) shows up only as this warning.
  */
 export const BELOW_RATE_MEDIAN_FACTOR = 1.5;
+/** D3-6 (TDD stub). */
+export const OCCLUSION_DELTA_MS = 500;
+export const OCCLUSION_MIN_STRETCH_MS = 1000;
 
 /** Plausible display refresh rates; outside them the probe did not see the display's rate. */
 const MIN_HZ = 24;
@@ -43,6 +46,8 @@ export interface FrameHealth {
   readonly throttledMs: number;
   /** The longest span of consecutive throttled deltas. */
   readonly longestThrottledMs: number;
+  /** D3-6 (TDD stub). */
+  readonly longestOcclusionMs: number;
 }
 
 export function frameHealth(deltas: readonly number[], displayIntervalMs: number): FrameHealth {
@@ -63,7 +68,7 @@ export function frameHealth(deltas: readonly number[], displayIntervalMs: number
       stretch = 0;
     }
   }
-  return { longFrames, throttledMs, longestThrottledMs };
+  return { longFrames, throttledMs, longestThrottledMs, longestOcclusionMs: 0 };
 }
 
 /**
@@ -97,10 +102,12 @@ export interface Validity {
 export interface RunFrames {
   readonly frameTime: { readonly p50: number };
   readonly longestThrottledMs: number;
+  readonly longestOcclusionMs: number;
   readonly displayIntervalMs: number;
 }
 
-export function runValidity(run: RunFrames, pageHiddenMs: number): Validity {
+export function runValidity(run: RunFrames, pageHiddenMs: number, pageBlurs = 0): Validity {
+  void pageBlurs;
   const reasons: string[] = [];
   const p = run.displayIntervalMs;
   if (run.longestThrottledMs > MAX_THROTTLED_STRETCH_MS) {

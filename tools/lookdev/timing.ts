@@ -149,6 +149,7 @@ export function runValidityOf(
     {
       frameTime: { p50: med(rafDeltasMs) },
       longestThrottledMs: h.longestThrottledMs,
+      longestOcclusionMs: h.longestOcclusionMs,
       displayIntervalMs: displayMs,
     },
     hiddenMs,
