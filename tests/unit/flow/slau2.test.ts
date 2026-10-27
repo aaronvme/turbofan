@@ -197,7 +197,6 @@ describe('SLAU2', () => {
       const Z = flux(q, q, 0.3, -0.95, 1, 1, 0.003);
       for (let m = 0; m < 6; m++) expect(Z[m] === 0).toBe(true);
     });
-
   });
 });
 
