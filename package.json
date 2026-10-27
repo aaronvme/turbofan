@@ -19,6 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:mesh": "vitest run -c vitest.mesh.config.ts",
+    "test:ladder": "vitest run -c vitest.ladder.config.ts",
     "coverage": "vitest run --coverage",
     "test:gpu": "vitest run -c vitest.gpu.config.ts",
     "test:browser": "vitest run -c vitest.browser.config.ts",

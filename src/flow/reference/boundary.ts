@@ -1,0 +1,259 @@
+// Ghost-cell boundary conditions (docs/SOLVER.md section 5). The codes are the mesh asset's
+// (tools/mesh/types.ts BC, never renumbered): 0 interface, 1 slip wall, 2 axis, 3 far field,
+// 4 inflow, 5 outflow. Each ghost is computed from its source cell's primitive record and the unit
+// outward normal of its boundary face.
+import {
+  NEWTON_STEPS,
+  cpMix,
+  enthalpyDelta,
+  entropyDelta,
+  soundSpeed,
+  type ReferenceState,
+} from './gas';
+import { NP } from './state';
+
+export const BC_CODE = {
+  INTERFACE: 0,
+  SLIP_WALL: 1,
+  AXIS: 2,
+  FARFIELD: 3,
+  INFLOW: 4,
+  OUTFLOW: 5,
+} as const;
+
+export interface BoundaryParams {
+  /** Inflow total pressure and temperature (default: the free stream's). */
+  readonly p0: number;
+  readonly t0: number;
+  /** Outflow static pressure (default p_inf). */
+  readonly pOut: number;
+  /**
+   * beta^2 of the low-Mach preconditioner at the free stream (1: off). The far field then uses the
+   * characteristics of the preconditioned pseudo-time system (section 5); tracking mode only.
+   */
+  readonly farFieldBeta2: number;
+}
+
+/** Total temperature and pressure of the free stream (thermally perfect: h and phi_s exact). */
+export function freeStreamTotals(ref: ReferenceState): { p0: number; t0: number } {
+  const g = ref.gas;
+  const dh = 0.5 * ref.u * ref.u;
+  let tau = dh / ref.cp;
+  for (let k = 0; k < 20; k++)
+    tau -= (enthalpyDelta(g, ref.t, tau, 0) - dh) / cpMix(g, ref.t + tau, 0);
+  return { p0: ref.p * Math.exp(entropyDelta(g, ref.t, tau, 0) / ref.r), t0: ref.t + tau };
+}
+
+export function boundaryParams(
+  ref: ReferenceState,
+  opts: {
+    readonly inflowTotal?: { readonly p0: number; readonly t0: number };
+    readonly outflowPressure?: number;
+    readonly farFieldBeta2?: number;
+  } = {},
+): BoundaryParams {
+  const totals = opts.inflowTotal ?? freeStreamTotals(ref);
+  return {
+    p0: totals.p0,
+    t0: totals.t0,
+    pOut: opts.outflowPressure ?? ref.p,
+    farFieldBeta2: opts.farFieldBeta2 ?? 1,
+  };
+}
+
+function copy(P: ArrayLike<number>, s: number, out: Float64Array, o: number): void {
+  for (let k = 0; k < NP; k++) out[o + k] = P[s + k] as number;
+}
+
+/**
+ * Linearised characteristic far field about the free stream (section 5). With beta2 < 1 (the
+ * preconditioned tracking mode) the characteristics are those of the preconditioned pseudo-time
+ * system, dp + rho (lambda -+ beta2 vn) dvn with lambda its two acoustic speeds: the physical ones
+ * reflect its waves, and the preconditioned iteration diverged against them (ladder L7 at M 0.01).
+ */
+function farField(
+  ref: ReferenceState,
+  beta2: number,
+  P: ArrayLike<number>,
+  s: number,
+  nx: number,
+  nr: number,
+  out: Float64Array,
+  o: number,
+): void {
+  const rhoC = ref.rho * ref.c;
+  const du = (P[s + 1] as number) - ref.u;
+  const dv = P[s + 2] as number;
+  const pP = P[s + 4] as number;
+  const dun = du * nx + dv * nr;
+  const dut = -du * nr + dv * nx;
+  const vnInf = ref.u * nx;
+  let pb: number;
+  let unb: number;
+  if (beta2 < 1) {
+    const d = 1 - beta2;
+    const root = Math.sqrt(d * d * vnInf * vnInf + 4 * beta2 * ref.c * ref.c);
+    const lPlus = 0.5 * ((1 + beta2) * vnInf + root);
+    const lMinus = 0.5 * ((1 + beta2) * vnInf - root);
+    const aPlus = ref.rho * (lPlus - beta2 * vnInf);
+    const aMinus = ref.rho * (lMinus - beta2 * vnInf);
+    const wPlus = lPlus > 0 ? pP + aPlus * dun : 0;
+    const wMinus = lMinus > 0 ? pP + aMinus * dun : 0;
+    unb = (wPlus - wMinus) / (aPlus - aMinus);
+    pb = wPlus - aPlus * unb;
+  } else {
+    const wPlus = vnInf + ref.c > 0 ? pP + rhoC * dun : 0;
+    const wMinus = vnInf - ref.c > 0 ? pP - rhoC * dun : 0;
+    pb = 0.5 * (wPlus + wMinus);
+    unb = (wPlus - wMinus) / (2 * rhoC);
+  }
+  const outflow = vnInf + unb >= 0;
+  const ws = outflow ? pP - ref.c * ref.c * (P[s] as number) : 0;
+  const utb = outflow ? dut : 0;
+  out[o] = (pb - ws) / (ref.c * ref.c);
+  out[o + 1] = ref.u + unb * nx - utb * nr;
+  out[o + 2] = unb * nr + utb * nx;
+  out[o + 3] = outflow ? (P[s + 3] as number) : 0;
+  out[o + 4] = pb;
+  out[o + 5] = outflow ? (P[s + 5] as number) : 0;
+  out[o + 6] = P[s + 6] as number;
+  out[o + 7] = P[s + 7] as number;
+}
+
+/** Static temperature offset tau = T - t0 on the h0 isentrope at speed sigma: h(t0 + tau) - h(t0) = -sigma^2 / 2. */
+function stagnationOffset(ref: ReferenceState, t0: number, sigma: number): number {
+  const g = ref.gas;
+  const dh = -0.5 * sigma * sigma;
+  let tau = dh / cpMix(g, t0, 0);
+  for (let k = 0; k < NEWTON_STEPS; k++)
+    tau -= (enthalpyDelta(g, t0, tau, 0) - dh) / cpMix(g, t0 + tau, 0);
+  return tau;
+}
+
+/**
+ * Subsonic inflow at the total conditions (p0, t0), normal to the boundary, no swirl, Z = 0
+ * (section 5): the ghost lies on the (p0, t0) isentrope at the speed sigma for which the outgoing
+ * characteristic p' + rho c u_n of the cell reaches the ghost unchanged, p'_b - rho c sigma =
+ * p'_s + rho c u_n,s (3 Newton steps on sigma, each with 3 on T). Taking the static pressure from
+ * inside instead made the ghost's speed answer a pressure change with -dp / (rho u), a feedback 1 / M
+ * times faster than the acoustic time step covers: the plain scheme diverged from its own steady
+ * state at low Mach, and stalled at M 0.3-0.4 (ladder L4b, L9). A supersonic free stream is imposed
+ * whole.
+ */
+function inflow(
+  ref: ReferenceState,
+  bp: BoundaryParams,
+  P: ArrayLike<number>,
+  s: number,
+  nx: number,
+  nr: number,
+  out: Float64Array,
+  o: number,
+): void {
+  if (ref.u >= ref.c) {
+    out.fill(0, o, o + NP);
+    out[o + 1] = ref.u;
+    out[o + 7] = ref.c;
+    return;
+  }
+  const g = ref.gas;
+  const r = ref.r;
+  const un = (P[s + 1] as number) * nx + (P[s + 2] as number) * nr;
+  const rc = (ref.rho + (P[s] as number)) * (P[s + 7] as number);
+  const w = (P[s + 4] as number) + rc * un;
+  const dp0 = bp.p0 - ref.p;
+  // the ghost's gauge pressure on the isentrope at speed sigma (exact zero at sigma = 0, p0 = p_inf)
+  const pAt = (tau: number) => dp0 + bp.p0 * Math.expm1(entropyDelta(g, bp.t0, tau, 0) / r);
+  let sigma = Math.max(0, -un);
+  for (let k = 0; k < NEWTON_STEPS; k++) {
+    const tau = stagnationOffset(ref, bp.t0, sigma);
+    const pb = pAt(tau);
+    const rhoB = (ref.p + pb) / (r * (bp.t0 + tau));
+    // G(sigma) = p'_b - rho c sigma - w, G' = -(rho_b sigma + rho c) < 0
+    sigma = Math.max(0, sigma + (pb - rc * sigma - w) / (rhoB * sigma + rc));
+  }
+  const tau = stagnationOffset(ref, bp.t0, sigma);
+  const pP = pAt(tau);
+  const tb = bp.t0 + tau;
+  const dT = bp.t0 - ref.t + tau;
+  out[o] = (pP - ref.rho * r * dT) / (r * tb);
+  out[o + 1] = -nx * sigma;
+  out[o + 2] = -nr * sigma;
+  out[o + 3] = 0;
+  out[o + 4] = pP;
+  out[o + 5] = 0;
+  out[o + 6] = dT;
+  out[o + 7] = soundSpeed(g, tb, 0);
+}
+
+/**
+ * Slip-wall ghost of layer 1 or 2 from the wall cell P[s0..] and the next cell inwards P[s1..]
+ * (section 5): the scalars, rw and the tangential velocity are extrapolated linearly (layer 1:
+ * 2 q0 - q1, layer 2: 3 q0 - 2 q1), the normal velocity is mirrored (-vn0, -vn1). The mirror ghost
+ * of W0 imposed dp/dn = 0, which is wrong wherever swirl or wall curvature sets a pressure gradient
+ * normal to the wall (it left an odd-even wall mode in ladder L6). The wall face itself carries
+ * only the wall pressure (solver.ts), so these values only shape the wall cell's slope.
+ */
+export function wallGhost(
+  P: ArrayLike<number>,
+  s0: number,
+  s1: number,
+  nx: number,
+  nr: number,
+  layer: 1 | 2,
+  out: Float64Array,
+  o: number,
+): void {
+  const a = layer === 1 ? 2 : 3;
+  const b = a - 1;
+  for (const k of [0, 3, 4, 5]) out[o + k] = a * (P[s0 + k] as number) - b * (P[s1 + k] as number);
+  const u0 = P[s0 + 1] as number;
+  const v0 = P[s0 + 2] as number;
+  const u1 = P[s1 + 1] as number;
+  const v1 = P[s1 + 2] as number;
+  const vt = a * (-u0 * nr + v0 * nx) - b * (-u1 * nr + v1 * nx);
+  const vn = -(layer === 1 ? u0 * nx + v0 * nr : u1 * nx + v1 * nr);
+  out[o + 1] = vn * nx - vt * nr;
+  out[o + 2] = vn * nr + vt * nx;
+  out[o + 6] = P[s0 + 6] as number;
+  out[o + 7] = P[s0 + 7] as number;
+}
+
+/**
+ * The ghost primitives for BC `code` from the source cell's record P[s..], with the boundary
+ * face's unit outward normal (nx, nr), into out[o..o + 8).
+ */
+export function ghostPrimitive(
+  ref: ReferenceState,
+  bp: BoundaryParams,
+  code: number,
+  P: ArrayLike<number>,
+  s: number,
+  nx: number,
+  nr: number,
+  out: Float64Array,
+  o: number,
+): void {
+  switch (code) {
+    case BC_CODE.SLIP_WALL:
+      throw new Error('a slip-wall ghost needs both wall cells: use wallGhost');
+    case BC_CODE.AXIS:
+      copy(P, s, out, o);
+      out[o + 2] = -(P[s + 2] as number);
+      return;
+    case BC_CODE.FARFIELD:
+      farField(ref, bp.farFieldBeta2, P, s, nx, nr, out, o);
+      return;
+    case BC_CODE.INFLOW:
+      inflow(ref, bp, P, s, nx, nr, out, o);
+      return;
+    case BC_CODE.OUTFLOW: {
+      copy(P, s, out, o);
+      const vn = (P[s + 1] as number) * nx + (P[s + 2] as number) * nr;
+      if (vn < (P[s + 7] as number)) out[o + 4] = bp.pOut - ref.p;
+      return;
+    }
+    default:
+      copy(P, s, out, o);
+  }
+}
