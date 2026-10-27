@@ -282,9 +282,11 @@ describe('preconditioned tracking mode', () => {
     const conv = converge(pre, 1e-11, 6000);
     expect(conv.converged).toBe(true);
     expect(conv.iterations).toBeLessThan(4000);
-    // the plain scheme, started from the preconditioned steady state, stays there: R = 0 is the same
-    // equation with and without the preconditioner. (Only 30 iterations: with blockage the plain
-    // scheme has a slowly growing mode about this state, x1e3 in 300 iterations; handoff W2R-6.)
+    // the plain scheme, started from the preconditioned steady state, has R = 0 there too: it is the
+    // same equation with and without the preconditioner. This checks the steady state, not its
+    // stability, so it runs only 30 iterations: with blockage the plain scheme is linearly unstable
+    // about this state, in tracking and in physical time (W2R-6, D4-29: max |dU| 1e-11 -> 0.5 in
+    // 1000 iterations, saturating near 1 % of the state; KNOWN-FAIL pins in blockage.test.ts).
     const plain = new ReferenceSolver(duct, opts);
     plain.setBlockage(b);
     plain.U.set(pre.U);

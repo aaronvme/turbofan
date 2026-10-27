@@ -4,6 +4,14 @@ w2/reference: round 3 DONE with open items (from b7eb36d; HEAD = the commit of t
 - D4-22 is measured and accepted.
 - D4-23 examined: the point-implicit Jacobian does nothing, and L9a's stall is the limiter.
 - Still open: L7's asymmetry (resolution), L8 at its pre-registered M_cut 0.003 (an instability band), and van Albada's switch (L9a, the D4-20 duct). Decisions below.
+- Round 4 started (critic pass 7, FIX FIRST): W2R-B1 is done (W2R-6 pinned, below); W2R-I1..I4, D4-29 and D4-30 follow.
+
+OPEN ITEMS
+- W2R-6 (open since round 2, b7eb36d; critic pass 7 W2R-B1; decision D4-29: investigate and fix before W3). With blockage the plain scheme is linearly unstable about its own steady state, in tracking AND in physical time (SSP-RK3 at the default dt, the mode of surge and light-off events).
+  - Duct of precondition.test.ts (24 x 3, b_min 0.85), converged preconditioned (machCut 1) to 1e-11, then iterated plain. Relative drift from 1e-12: tracking 8e-3 at 1000 iterations (M 0.06); physical time 1e-2 at 1000 steps (M 0.06), 4e-9 at 1000 and 8e-3 at 2000 (M 0.35). It saturates near 1 % of the state.
+  - Control: the same duct with b = 1 stays at 1e-12 in both modes for 2000 iterations.
+  - Pinned: `tests/unit/flow/blockage.test.ts`, three `it.fails` (KNOWN-FAIL, tracking and physical time) and two passing tests (the set-ups converge; the b = 1 control). SOLVER.md 8 carries it as open.
+  - First suspect (D4-29): the well-balancedness of the p grad b source (face pressures against the cell p').
 
 DONE (W2R-n IDs -> commits; W2R-1..10 are in b7eb36d's handoff)
 - W2R-11 f87ffcc (SOLVER.md first) / 27b6bff (TDD) / 66164a5: D4-20.
