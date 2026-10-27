@@ -63,9 +63,7 @@ function betaMinus(m: number): number {
  * Writes the six components (already times the area) to out[0..6). A zero area gives zeros.
  * `machCut` < 1 divides the mass flux pressure diffusion by f_a(M_ref) = M_ref (2 - M_ref),
  * M_ref = min(1, max(qbar / cbar, machCut)): the low-Mach scaling of the preconditioned tracking
- * mode (section 7, D4-20). The default 1 gives f_a = 1, the plain flux bitwise. `ku` > 0 subtracts
- * AUSM+-up's velocity diffusion p_u = K_u beta+ beta- (rho_L + rho_R) f_a cbar (vn_R - vn_L) from the
- * pressure flux (section 7, D4-32's trial); the default 0 leaves it out, bitwise.
+ * mode (section 7, D4-20). The default 1 gives f_a = 1, the plain flux bitwise.
  */
 export function slau2Flux(
   ref: ReferenceState,
@@ -79,7 +77,6 @@ export function slau2Flux(
   rf: number,
   out: Float64Array,
   machCut = 1,
-  ku = 0,
 ): void {
   if (!(area > 0)) {
     out.fill(0, 0, 6);
@@ -107,12 +104,10 @@ export function slau2Flux(
     0.5 * (l.rho * (l.vn + vbarP) + r.rho * (r.vn - vbarM) - (chi / (cbar * fa)) * (pR - pL));
   const bp = betaPlus(mL);
   const bm = betaMinus(mR);
-  let pt =
+  const pt =
     0.5 * (pL + pR) +
     0.5 * (bp - bm) * (pL - pR) +
     qAvg * (bp + bm - 1) * 0.5 * (l.rho + r.rho) * cbar;
-  // every factor is symmetric under (L, R, S) -> (R, L, -S), so the antisymmetry stays bitwise
-  if (ku > 0) pt = pt - ku * (bp * bm) * (l.rho + r.rho) * fa * cbar * (r.vn - l.vn);
   const mp = 0.5 * (mdot + Math.abs(mdot));
   const mm = 0.5 * (mdot - Math.abs(mdot));
   out[0] = area * (mp + mm);

@@ -198,39 +198,6 @@ describe('SLAU2', () => {
       for (let m = 0; m < 6; m++) expect(Z[m] === 0).toBe(true);
     });
 
-    it('with p_u (D4-32 trial): bitwise antisymmetric, exact in the ambient, off at K_u = 0', () => {
-      const next = rng(23);
-      const pu = (
-        L: Float64Array,
-        R: Float64Array,
-        nx: number,
-        nr: number,
-        rf: number,
-        ku: number,
-      ) => {
-        const out = new Float64Array(6);
-        slau2Flux(ref, L, 0, R, 0, nx, nr, 0.3, rf, out, 0.003, ku);
-        return out;
-      };
-      for (let k = 0; k < 300; k++) {
-        const rf = 0.05 + next();
-        const L = randomPrim(next, rf);
-        const R = randomPrim(next, rf);
-        const a = 2 * Math.PI * next();
-        const F = pu(L, R, Math.cos(a), Math.sin(a), rf, 0.5);
-        const G = pu(R, L, -Math.cos(a), -Math.sin(a), rf, 0.5);
-        // === (not Object.is): a vacuum-forming expansion (g = 1, chi = 0) has m = +0 both ways
-        for (let m = 0; m < 6; m++) expect(F[m] === -(G[m] ?? NaN)).toBe(true);
-        // K_u = 0 is the D4-20 flux bitwise; only the pressure flux changes with K_u > 0
-        expect(pu(L, R, Math.cos(a), Math.sin(a), rf, 0)).toEqual(
-          flux(L, R, Math.cos(a), Math.sin(a), 0.3, rf, 0.003),
-        );
-        expect(F[0]).toBe(flux(L, R, Math.cos(a), Math.sin(a), 0.3, rf, 0.003)[0]);
-      }
-      const q = new Float64Array(NP);
-      const Z = pu(q, q, 0.3, -0.95, 1, 0.5);
-      for (let m = 0; m < 6; m++) expect(Z[m] === 0).toBe(true);
-    });
   });
 });
 
@@ -300,7 +267,6 @@ describe('SLAU2 values against an independent evaluation of the paper formulas (
     area: number,
     rf: number,
     machCut = 1,
-    ku = 0,
   ): number[] {
     const a = absolute(L, nx, nr);
     const b = absolute(R, nx, nr);
@@ -325,9 +291,7 @@ describe('SLAU2 values against an independent evaluation of the paper formulas (
     const pTilde =
       (L.dp + R.dp) / 2 -
       ((bPlus - bMinus) * dp) / 2 +
-      qBar * (bPlus + bMinus - 1) * ((a.rho + b.rho) / 2) * cBar -
-      // AUSM+-up's p_u (Liou 2006), D4-32's trial: K_u P+ P- (rho_L + rho_R) f_a c (vn_R - vn_L)
-      ku * bPlus * bMinus * (a.rho + b.rho) * mRef * (2 - mRef) * cBar * (b.vn - a.vn);
+      qBar * (bPlus + bMinus - 1) * ((a.rho + b.rho) / 2) * cBar;
     const up = mdot > 0 ? mdot : 0;
     const dn = mdot > 0 ? 0 : mdot;
     return [
@@ -348,10 +312,9 @@ describe('SLAU2 values against an independent evaluation of the paper formulas (
     area: number,
     rf: number,
     machCut?: number,
-    ku?: number,
   ): Float64Array {
     const out = new Float64Array(6).fill(NaN);
-    slau2Flux(cref, record(L, rf), 0, record(R, rf), 0, nx, nr, area, rf, out, machCut, ku);
+    slau2Flux(cref, record(L, rf), 0, record(R, rf), 0, nx, nr, area, rf, out, machCut);
     return out;
   }
 
@@ -374,7 +337,6 @@ describe('SLAU2 values against an independent evaluation of the paper formulas (
     area: number;
     rf: number;
     machCut?: number;
-    ku?: number;
     check: (k: { mL: number; mR: number; mHat: number; mdot: number }) => boolean;
   }[] = [
     {
@@ -439,42 +401,6 @@ describe('SLAU2 values against an independent evaluation of the paper formulas (
       machCut: 0.003,
       check: (k) => k.mHat > 0.003 && k.mHat < 0.1,
     },
-    {
-      // D4-32's trial: p_u at the cut (f_a = f_a(M_cut))
-      name: 'a low-Mach face below M_cut with p_u (K_u 0.5)',
-      L: { drho: 0.002, u: 0.6, v: 0.2, w: 0.1, dp: 3, z: 0.001 },
-      R: { drho: -0.001, u: -0.5, v: -0.3, w: 0.2, dp: -2, z: 0.002 },
-      angle: 0.4,
-      area: 0.8,
-      rf: 0.45,
-      machCut: 0.003,
-      ku: 0.5,
-      check: (k) => k.mHat < 0.003,
-    },
-    {
-      // p_u above the cut, f_a = f_a(q-bar / c-bar)
-      name: 'a low-Mach face above M_cut with p_u (K_u 0.5)',
-      L: { drho: 0.01, u: 14, v: 3, w: 2, dp: 120, z: 0.001 },
-      R: { drho: -0.004, u: 9, v: -2, w: 4, dp: -60, z: 0.003 },
-      angle: -0.3,
-      area: 0.25,
-      rf: 0.8,
-      machCut: 0.003,
-      ku: 0.5,
-      check: (k) => k.mHat > 0.003 && k.mHat < 0.1,
-    },
-    {
-      // p_u on a transonic face (f_a = 1: AUSM+-up's own term)
-      name: 'a transonic face with p_u (K_u 0.5)',
-      L: { drho: 0.175, u: 520, v: 40, w: 60, dp: 40000, z: 0.01 },
-      R: { drho: -0.025, u: 300, v: 10, w: 50, dp: 30000, z: 0.002 },
-      angle: 0.1,
-      area: 0.9,
-      rf: 1.7,
-      machCut: 0.003,
-      ku: 0.5,
-      check: (k) => k.mL > 1 && k.mR > 0 && k.mR < 1 && k.mHat === 1,
-    },
   ];
 
   for (const c of CASES) {
@@ -483,7 +409,7 @@ describe('SLAU2 values against an independent evaluation of the paper formulas (
       const a = absolute(c.L, nx, nr);
       const b = absolute(c.R, nx, nr);
       const cBar = (a.c + b.c) / 2;
-      const E = expected(c.L, c.R, nx, nr, c.area, c.rf, c.machCut, c.ku);
+      const E = expected(c.L, c.R, nx, nr, c.area, c.rf, c.machCut);
       // the case exercises what its name says
       expect(
         c.check({
@@ -493,10 +419,10 @@ describe('SLAU2 values against an independent evaluation of the paper formulas (
           mdot: (E[0] ?? NaN) / c.area,
         }),
       ).toBe(true);
-      expectClose(moduleFlux(c.L, c.R, nx, nr, c.area, c.rf, c.machCut, c.ku), E);
+      expectClose(moduleFlux(c.L, c.R, nx, nr, c.area, c.rf, c.machCut), E);
       // and through the reversed face, F(R, L, -S) = -F(L, R, S)
       expectClose(
-        moduleFlux(c.R, c.L, -nx, -nr, c.area, c.rf, c.machCut, c.ku),
+        moduleFlux(c.R, c.L, -nx, -nr, c.area, c.rf, c.machCut),
         E.map((f) => -f),
       );
     });
