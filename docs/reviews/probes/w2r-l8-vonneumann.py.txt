@@ -1,0 +1,75 @@
+# Critic pass 7 (D4-27, the L8 band): a 1D von Neumann analysis of the preconditioned tracking
+# iteration on the acoustic family, at rest, against D4-8's scalar-advection analysis.
+#   python -I w2r-l8-vonneumann.py
+# Linearised at rest (c = rho0 = dx = 1), SLAU2's flux has no velocity dissipation (q_bar and
+# beta+ + beta- - 1 are both first order), so the only damping of the pseudo-acoustic pair is the
+# D4-20-scaled mass-flux pressure diffusion  -(chi / (2 c_bar f_a)) (p_R - p_L),  chi = 1,
+# f_a = M_ref (2 - M_ref). Preconditioning multiplies the pressure increment by beta^2, and the
+# local step is CFL / lambda with lambda = beta c (the preconditioned spectral radius at vn = 0).
+# Reconstruction: MUSCL with central slopes (van Albada in smooth data), face states q_i + s_i / 2.
+# Time stepping: the 3-stage scheme alpha = (0.2, 0.5, 1): G(z) = 1 + z + a2 z^2 + a1 a2 z^3.
+# Prints the largest stable CFL (max |G| <= 1 + 1e-12 over theta) for:
+#   - scalar upwind advection (D4-8's case: should give about 1.54);
+#   - the preconditioned acoustic pair with M_ref = beta (matched: the inner region);
+#   - the same with an AUSM+-up-style velocity diffusion  K_u f_a c_bar rho_bar (u_R - u_L) / 2 added.
+import cmath, math
+
+A1, A2 = 0.2, 0.5
+
+def G(z):
+    return 1 + z + A2 * z * z + A1 * A2 * z ** 3
+
+def shifts(t):
+    e = lambda k: cmath.exp(1j * k * t)
+    # face i+1/2 states from cell values u_j = e^{i j t} (relative to u_i)
+    uL = 1 + 0.25 * (e(1) - e(-1))
+    uR = e(1) - 0.25 * (e(2) - 1)
+    d = 1 - e(-1)  # F_{i+1/2} - F_{i-1/2} = (1 - e^{-it}) F_{i+1/2}
+    return uL, uR, d
+
+def eig2(a, b, c, d):
+    tr, det = a + d, a * d - b * c
+    s = cmath.sqrt(tr * tr / 4 - det)
+    return (tr / 2 + s, tr / 2 - s)
+
+def max_growth(cfl, family, beta=0.003, ku=0.0, n=720):
+    worst = 0.0
+    for k in range(1, n):
+        t = math.pi * k / n
+        uL, uR, d = shifts(t)
+        if family == 'advection':
+            zs = [-cfl * d * uL]
+        else:
+            fa = beta * (2 - beta)
+            D = 1 / (2 * fa)              # mass-flux pressure diffusion coefficient (chi = 1, c = 1)
+            avg = 0.5 * (uL + uR) * d     # central part of each flux difference
+            jump = (uR - uL) * d          # (q_R - q_L) differenced across the cell
+            # R_p = avg u - D jump p ;  R_u = avg p - Ku fa jump u / 2 (AUSM+-up p_u, rho = c = 1)
+            # dp/dtau = -beta^2 R_p ; du/dtau = -R_u ; step = cfl / beta
+            a11 = beta * beta * D * jump
+            a12 = -beta * beta * avg
+            a21 = -avg
+            a22 = 0.5 * ku * fa * jump
+            step = cfl / beta
+            zs = [step * ev for ev in eig2(a11, a12, a21, a22)]
+        for z in zs:
+            worst = max(worst, abs(G(z)))
+    return worst
+
+def limit(family, **kw):
+    lo, hi = 0.05, 3.0
+    if max_growth(lo, family, **kw) > 1 + 1e-12:
+        return 0.0
+    for _ in range(50):
+        mid = 0.5 * (lo + hi)
+        if max_growth(mid, family, **kw) <= 1 + 1e-12:
+            lo = mid
+        else:
+            hi = mid
+    return lo
+
+print('scalar upwind advection, MUSCL k=0:        CFL limit %.3f' % limit('advection'))
+for beta in (0.0015, 0.003, 0.006):
+    print('preconditioned acoustics, beta = M_ref = %.4f: CFL limit %.3f' % (beta, limit('acoustic', beta=beta)))
+for ku in (0.25, 0.5, 0.75, 1.0):
+    print('  + AUSM+-up velocity diffusion K_u = %.2f (beta 0.003): CFL limit %.3f' % (ku, limit('acoustic', beta=0.003, ku=ku)))
