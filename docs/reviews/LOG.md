@@ -73,6 +73,28 @@ Never quote personal data (emails, keys, tokens) in this file.
   - **Cycle:** W1K-I1/I2 (KNOWN-FAIL wording, pin the rejection reason in a test); D3-17 (a surge-recovery test before W3); D3-13 (a mutation config excluding slow tests, then real scores); the part-power map-fidelity backlog (D3-15).
   - **Bench harness (D3-6):** N6 per-run timeout, N7 load-sensitive test:gpu timing check.
 
+## W2 orchestrator decisions: 2026-10-26 ~22:40 (Aaron: "whatever you recommend. keep going"; overnight autopilot)
+- **D4-1 (Aaron): W2 goes ahead** on the orchestrator's recommendations below (D4-2, D4-3).
+- **D4-2 Render budget: both remedies.**
+  - (a) A geometry LOD/simplification round (`w2/lookdev-4`) brings the engine render to 8 ms. New pre-registered threshold **P4**: the render GPU time (engine plus post, excluding the solver and flow visuals) at the default preset, 1080p, default three-quarter front view must be ≤ 8.0 ms median under D0-1. The cutaway and hero views are reported (target ≤ 10 ms) but not gated. P4 is added to PHYSICS.md §3.4 and thresholds.ts before the LOD code.
+  - (b) The solver's per-frame GPU budget at the default preset is capped at **5 ms**. The adaptive scheduler gives the solver min(5 ms, 15 ms − measured render − measured flow visuals), with a floor of 2 iterations per frame. L13's 7 ms stays the hard ceiling. Budget at the default view: render 8 + solver 5 + flow visuals 2 = 15 ms of the 16.7 ms frame. At 1.28 ms per iteration that is 3 iterations per frame (about 180 it/s), above P1's 150, so tracking-mode settling takes about 1.7× longer than at full rate; the warm-start snapshots cover that.
+- **D4-3 Part-power accuracy (D3-15): backlog until after W2.** The C10/C11 KNOWN-FAIL markers stay visible. It only affects mid-power numbers, and the GPU solver is the critical path.
+- **D4-4 (pass-6 question t): the cutaway shows a running engine.** Rotor motion vectors go into the TRAA velocity buffer (W1V-I1 fix b), so the cut fan reads while the spools turn, which W2's flow visuals need (particles through moving rows). The exploded view eases the spools to a stop over about 1 s, because an exploded engine can't run.
+- **D4-5 (question u):** the LOD round restates the triangle figures from the pass-6 probe (front 1.06 M + 0.41 M fan copies, side 0.48 M, cutaway 1.58 M). It adds per-view drawn-triangle counts that exclude shadow proxies (W1V-I2), measured before and after LOD.
+- **D4-6 W2 scope and order.** The f64 reference solver and the CPU ladder were not built in W1 (w1/mesh delivered the mesh only), so the solver track starts with the oracle.
+  - **Slot A:**
+    1. `w2/reference`: the production f64 reference solver in `src/flow/reference/` (the exact discrete scheme the WGSL kernel will implement) and ladder L1-L9 on the CPU.
+    2. `w2/solver`: the WGSL kernels, Dawn tests against the oracle (several iterations, relative errors, W0G-N4), L1-L9 on the GPU, timings, W1F-I1 (D2-6), W1F-N1 and W0M-N4 if the plume viscosity needs corner ghosts. The solver merge gets the plan's two-reviewer santa-loop.
+  - **Slot B:**
+    1. `w2/followups`: cycle W1K-I1/I2, D3-17 surge recovery, the D3-13 mutation config with real scores, and bench harness N6/N7 (D3-6).
+    2. `w2/lookdev-4`: W1V-I1..I3, the visual notes, LOD to P4, D4-4, D4-5.
+    3. `w2/flowviz`: on the synthetic mock field.
+    4. `w2/app-ui`: the D2-4 worker app shell, main loop and store, and the UI on the real cycle model.
+  - Max 2 agents at once, the critic included. A critic pass follows each finished pair.
+- **D4-7 Overnight autopilot (Aaron: "auto start when session usage runs out"):**
+  - Usage cap 90%. No new agents from 78%, STOP-CLEAN at 84%, resume below 75% after the reset.
+  - Official quiet timings (D0-1) run only in the cap pause, when no agents are running.
+
 
 
 
