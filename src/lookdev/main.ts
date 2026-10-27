@@ -36,7 +36,7 @@ interface LookdevApi {
   renderFor(ms: number, saturate?: boolean): Promise<void>;
   /**
    * One timing run of `ms` (W1L-I4): every frame's passes, the rAF intervals, hidden time.
-   * `saturate` renders back to back (one frame queued ahead) instead of one per animation
+   * `saturate` renders back to back (BACK_TO_BACK_AHEAD frames queued) instead of one per animation
    * frame, so the GPU never idles and its clock cannot drop with the load (LOD round, D4-5).
    */
   timeRun(ms: number, saturate?: boolean): Promise<TimingRun>;
@@ -58,6 +58,20 @@ const canvas = document.getElementById('view') as HTMLCanvasElement;
 const hud = document.getElementById('hud') as HTMLDivElement;
 const passes = document.getElementById('passes') as HTMLDivElement;
 if (params.get('clean') === '1') document.body.classList.add('clean');
+
+/**
+ * Frames kept submitted ahead of the one the CPU waits on in back-to-back pacing (D4-24): with
+ * one, the GPU idled while the CPU learnt a frame was done and encoded the next (busy about
+ * 72 % of the wall time, w2/lookdev-4); with two the queue does not run dry.
+ */
+const BACK_TO_BACK_AHEAD = 2;
+const backToBack = (queue: GPUQueue) => {
+  const inFlight: Promise<undefined>[] = [];
+  return async (): Promise<void> => {
+    inFlight.push(queue.onSubmittedWorkDone());
+    if (inFlight.length > BACK_TO_BACK_AHEAD) await inFlight.shift();
+  };
+};
 
 const nextFrame = () =>
   new Promise<void>((resolve) => {
@@ -186,17 +200,13 @@ async function main(): Promise<void> {
     async renderFor(ms, saturate = false) {
       paused = true;
       const end = performance.now() + ms;
-      const queue = view.device.device.queue;
-      let ahead: Promise<undefined> = Promise.resolve(undefined);
+      const pace = backToBack(view.device.device.queue);
       while (performance.now() < end) {
         view.frame(1 / 60);
-        if (saturate) {
-          const done = queue.onSubmittedWorkDone();
-          await ahead;
-          ahead = done;
-        } else await nextFrame();
+        if (saturate) await pace();
+        else await nextFrame();
       }
-      await queue.onSubmittedWorkDone();
+      await view.device.device.queue.onSubmittedWorkDone();
     },
     async timeRun(ms, saturate = false) {
       paused = true;
@@ -221,15 +231,11 @@ async function main(): Promise<void> {
       view.beginTimingRun();
       let last = performance.now();
       const end = last + ms;
-      const queue = view.device.device.queue;
-      let ahead: Promise<undefined> = Promise.resolve(undefined);
+      const pace = backToBack(view.device.device.queue);
       while (last < end) {
         view.frame(1 / 60);
-        if (saturate) {
-          const done = queue.onSubmittedWorkDone();
-          await ahead;
-          ahead = done;
-        } else await nextFrame();
+        if (saturate) await pace();
+        else await nextFrame();
         const t = performance.now();
         rafDeltas.push(t - last);
         last = t;
