@@ -22,6 +22,11 @@
 //   once the FADEC's fuel cut moves that point back inside the surge line the equilibrium is
 //   stable again, the oscillation decays and the episode ends. The period is whatever the derived
 //   Helmholtz frequency and B give.
+// - Surge detection and recovery (D3-17, PHYSICS.md C12; ENGINE_FACTS "Surge detection and
+//   recovery"): the FADEC never reads the surge margin. It detects a surge from the decay of the
+//   sensed P3 (surgeDetection.ts), then cuts the fuel back to the decel schedule, opens the VBVs
+//   fully and switches the igniters on, holds that for the confirmation time and restores the
+//   acceleration limit on a timed ramp. A new detection restarts the sequence.
 
 import { ISA_SLS, type AmbientConditions } from '../contracts/ambient';
 import {
@@ -79,6 +84,7 @@ import {
   withStallRline,
   type CompressionSystem,
 } from './surgeSystem';
+import { P3_DETECTOR_START, feedP3, type P3DecayDetector } from './surgeDetection';
 
 /**
  * Spool polar moments of inertia (estimates; no public figure), kg m^2. LP: 24 fan blades of
@@ -150,8 +156,26 @@ const HUNG_RATE = 0.05;
 const HUNG_TIME_S = 10;
 /** No light-off: fuel on for this long beyond the light-off delay without lighting. */
 const NO_LIGHT_WINDOW_S = 10;
-/** The FADEC's fuel cut at surge onset (stall recovery), fraction of the Wf/P3 demand. */
-const SURGE_FUEL_CUT = 0.25;
+/**
+ * Surge recovery (D3-17): after a detection the fuel demand is held on the decel schedule for
+ * SURGE_HOLD_S, the confirmation delay of [RR06] (about 0.5 s), then the acceleration limit ramps
+ * back from the decel to the accel schedule over SURGE_RESTORE_S, the "timed sequence" of
+ * [UTC77]. The ramp lets the HP spool climb out of the low speeds where a worn compressor's
+ * margin is smallest on a reduced fuel ratio, instead of going straight back to the schedule that
+ * surged it.
+ */
+const SURGE_HOLD_S = 0.5;
+const SURGE_RESTORE_S = 1;
+/**
+ * After a surge the re-acceleration runs on a biased schedule: the steady line plus
+ * SURGE_ACCEL_RESET of the accel schedule's excess over it (a second surge multiplies the bias
+ * again), until the acceleration is over and another loop takes the fuel. The surge line has not
+ * moved, so the full schedule would surge again at the same speed: without the bias the C12 slam
+ * cycles surge, cut-back and re-surge at 62-63 % N2, the hang a nonrecoverable stall is ([GE91]).
+ * 0.8 keeps the C12 slam to one surge and inside its 10 s to 95 % thrust (0.75 needs 9.3 s, 0.85
+ * re-surges nowhere but leaves less margin at the surge speed); control tuning, not a threshold.
+ */
+const SURGE_ACCEL_RESET = 0.8;
 /**
  * An injected surge fault holds the throttle this far inside the surge line (equilibrium at
  * (1 - x) of the peak flow) for SURGE_FAULT_S, as a transient blockage or ingestion would.
@@ -281,6 +305,9 @@ function buildSchedules(e: SizedEngine, ambient: AmbientConditions): Schedules {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
+/** HPC exit pressure during a surge relative to the matched point's: Psi / Psi_eq, at least 0.2. */
+const surgePressureFactor = (g: GreitzerState, eq: GreitzerState) => Math.max(0.2, g.psi / eq.psi);
+
 class TurbofanCycleModel implements CycleModel {
   readonly source = 'model' as const;
   readonly definition: EngineDefinition;
@@ -326,6 +353,18 @@ class TurbofanCycleModel implements CycleModel {
   };
   private pending: CycleFault | null = null;
   private surge: SurgeEpisode | null = null;
+  /** The FADEC's surge detector on the sensed P3 (D3-17). */
+  private p3Detector: P3DecayDetector = P3_DETECTOR_START;
+  /** Simulation time of the last surge detection while the recovery sequence runs, else null. */
+  private recoverySinceS: number | null = null;
+  /** The decel schedule's Wf/P3 at the last fuel computation (the recovery's cut-back level). */
+  private ruDecNow = 0;
+  /** The steady line's Wf/P3 at the last fuel computation. */
+  private ruSsNow = 0;
+  /** Corrected N2 at the last fuel computation, % (the recovery opens the VBVs below closing). */
+  private n2cNow = 0;
+  /** After a surge: the fraction of the accel schedule's excess over the steady line allowed. */
+  private surgeCap: number | null = null;
   private readonly surgeSystem: CompressionSystem;
   private last!: CycleState;
   private inputs: CycleInputs = DEFAULT_CYCLE_INPUTS;
@@ -348,6 +387,12 @@ class TurbofanCycleModel implements CycleModel {
     this.dn2 = 0;
     this.surge = null;
     this.pending = null;
+    this.p3Detector = P3_DETECTOR_START;
+    this.recoverySinceS = null;
+    this.ruDecNow = 0;
+    this.ruSsNow = 0;
+    this.n2cNow = 0;
+    this.surgeCap = null;
     this.phase = 'none';
     this.starterOn = false;
     this.starterCutOut = false;
@@ -478,7 +523,11 @@ class TurbofanCycleModel implements CycleModel {
     if (this.mode === 'start' && this.phase === 'cranking' && !inp.starter) this.phase = 'aborted';
     this.igniters =
       inp.ignition === 'continuous' ||
-      (inp.ignition === 'auto' && this.fuelOnTime !== null && !this.lit && inp.fuelLever === 'run');
+      (inp.ignition === 'auto' &&
+        this.fuelOnTime !== null &&
+        !this.lit &&
+        inp.fuelLever === 'run') ||
+      (inp.ignition === 'auto' && this.recovering());
     if (
       !this.lit &&
       this.igniters &&
@@ -507,6 +556,9 @@ class TurbofanCycleModel implements CycleModel {
     const accel = ACCEL_FACTOR + ACCEL_FACTOR_HIGH * clamp((n2c - 68) / 12, 0, 1);
     const ruAcc = (accel * ruSs) / this.sched.ruDesign;
     const ruDec = (DECEL_FACTOR * ruSs) / this.sched.ruDesign;
+    this.ruDecNow = ruDec;
+    this.ruSsNow = ruSs / this.sched.ruDesign;
+    this.n2cNow = n2c;
     if (this.mode === 'start' && this.phase !== 'cranking' && this.phase !== 'aborted') {
       this.wf =
         this.startFuelScale *
@@ -564,18 +616,27 @@ class TurbofanCycleModel implements CycleModel {
         }
       }
       this.ru += rate * dt;
-      if (this.ru > ruAcc) {
-        this.ru = ruAcc;
+      const accLimit = this.accelLimit(ruAcc, ruDec);
+      if (this.ru > accLimit) {
+        this.ru = accLimit;
         which = 'accelSchedule';
       } else if (this.ru < ruDec) {
         this.ru = ruDec;
         which = 'decelSchedule';
       }
+      // the acceleration after a surge is over once another loop takes the fuel
+      if (this.recoverySinceS === null && which !== 'accelSchedule') this.surgeCap = null;
       this.limiter = which;
       this.wf = this.lit ? this.ru * this.sched.ruDesign * p3 : 0;
     } else {
       this.wf = 0;
       this.limiter = 'none';
+    }
+    if (this.mode !== 'run' || !this.lit) {
+      // the recovery belongs to a running engine; a start, a flameout or a shutdown ends it
+      this.recoverySinceS = null;
+      this.surgeCap = null;
+      this.p3Detector = P3_DETECTOR_START;
     }
     if (this.mode !== 'run' && this.mode !== 'start') this.wf = 0;
     if (!fuelAllowed) this.wf = 0;
@@ -616,14 +677,28 @@ class TurbofanCycleModel implements CycleModel {
     ) {
       this.startSurge(snap, false);
     }
+    const sensing = this.mode === 'run' && this.lit;
+    /** Feeds the FADEC's P3 sensor; true on a detection. */
+    const sense = (p3Pa: number, dtS: number): boolean => {
+      if (!sensing) return false;
+      const r = feedP3(this.p3Detector, p3Pa, dtS);
+      this.p3Detector = r.detector;
+      return r.surge;
+    };
+    let detected = this.surge === null && sense(snap.stations['3'].ptPa, dt);
     if (this.surge !== null) {
       const ep = this.surge;
       const sys = this.surgeAt(snap, this.t < ep.forcedUntilS);
       const steps = Math.ceil((sys.omegaH * dt) / SURGE_DXI);
-      let g = ep.g;
-      for (let k = 0; k < steps; k++) g = greitzerStep(sys.params, g, (sys.omegaH * dt) / steps);
-      const elapsedS = ep.elapsedS + dt;
       const eq = equilibrium(sys.params);
+      let g = ep.g;
+      for (let k = 0; k < steps; k++) {
+        g = greitzerStep(sys.params, g, (sys.omegaH * dt) / steps);
+        // the P3 sensor follows the plenum pressure through the surge cycle (compose's P3)
+        detected =
+          sense(snap.stations['3'].ptPa * surgePressureFactor(g, eq), dt / steps) || detected;
+      }
+      const elapsedS = ep.elapsedS + dt;
       const settled =
         Math.abs(g.phi - eq.phi) <= SURGE_RECOVERED * Math.abs(eq.phi) &&
         Math.abs(g.psi - eq.psi) <= SURGE_RECOVERED * Math.abs(eq.psi);
@@ -633,8 +708,58 @@ class TurbofanCycleModel implements CycleModel {
         (this.t >= ep.forcedUntilS && elapsedS >= (2 * Math.PI) / sys.omegaH && stable && settled);
       this.surge = done ? null : { ...ep, g, params: sys.params, omegaH: sys.omegaH, elapsedS };
     }
+    if (detected) this.startRecovery(prev.stations['3'].ptPa, inp);
     this.flags = { ...this.flags, surge: this.surge !== null };
     return snap;
+  }
+
+  private recovering(): boolean {
+    return this.recoverySinceS !== null;
+  }
+
+  /**
+   * The recovery commands the VBVs fully open (D3-17, [UTC77]'s bleed opening) wherever their
+   * schedule has them open at all, i.e. below its closing corrected speed. Above it they stay
+   * shut: the booster has no stall to guard there, and dumping a quarter of its flow at high
+   * power pushes it past its map's choke edge (the D3-14 fit's failure, ENGINE_FACTS).
+   */
+  private recoveryVbvOpen(): boolean {
+    return this.recovering() && this.n2cNow < this.e.calibration.vbv.closedAboveN2cPercent;
+  }
+
+  /**
+   * D3-17 recovery on a detection: the fuel demand drops to the decel schedule at once (the
+   * minimum while running, [UTC93], so the flame stays lit), the VBVs open and the igniters come
+   * on ([UTC77], [RR06]); the sequence (re)starts now, and the re-acceleration is biased below the
+   * schedule that surged (SURGE_ACCEL_RESET).
+   */
+  private startRecovery(p3Pa: number, inp: CycleInputs): void {
+    // detections during the hold are the same surge still cycling; one after it (on the ramp or
+    // the biased schedule) is a new surge, and the bias drops again
+    if (this.recoverySinceS === null || this.t - this.recoverySinceS >= SURGE_HOLD_S) {
+      this.surgeCap = (this.surgeCap ?? 1) * SURGE_ACCEL_RESET;
+    }
+    this.recoverySinceS = this.t;
+    this.ru = Math.min(this.ru, this.ruDecNow);
+    this.wf = this.ru * this.sched.ruDesign * p3Pa;
+    if (inp.ignition === 'auto') this.igniters = true;
+  }
+
+  /**
+   * The acceleration limit, Wf/P3: the accel schedule; after a surge the recovery's hold on the
+   * decel schedule, its timed ramp, then the capped schedule until the acceleration is over.
+   */
+  private accelLimit(ruAcc: number, ruDec: number): number {
+    const capped =
+      this.surgeCap === null ? ruAcc : this.ruSsNow + this.surgeCap * (ruAcc - this.ruSsNow);
+    if (this.recoverySinceS === null) return capped;
+    const el = this.t - this.recoverySinceS;
+    if (el >= SURGE_HOLD_S + SURGE_RESTORE_S) {
+      this.recoverySinceS = null;
+      return capped;
+    }
+    if (el < SURGE_HOLD_S) return ruDec;
+    return ruDec + ((capped - ruDec) * (el - SURGE_HOLD_S)) / SURGE_RESTORE_S;
   }
 
   /**
@@ -682,11 +807,12 @@ class TurbofanCycleModel implements CycleModel {
       elapsedS: 0,
       forcedUntilS,
     };
-    this.ru *= 1 - SURGE_FUEL_CUT;
   }
 
   private snapshot(inp: CycleInputs): Snapshot {
-    const c = conditionsOf(inp);
+    const c: OperatingConditions = this.recoveryVbvOpen()
+      ? { ...conditionsOf(inp), vbvFraction: this.e.calibration.vbv.maxFraction }
+      : conditionsOf(inp);
     if (this.lit && this.pct2() >= SUBIDLE_N2_PERCENT && this.wf > 0) {
       const s = solveGasPath(this.e, c, this.n1, this.n2, this.wf, this.x);
       // a converged but non-physical root (BPR near zero) falls back to the similarity model
@@ -857,7 +983,7 @@ class TurbofanCycleModel implements CycleModel {
       // the HPC exit follows the Greitzer state; reverse flow shows as zero (StationState.w >= 0)
       const eq = equilibrium(this.surge.params);
       const fr = this.surge.g.phi / eq.phi;
-      const pr = Math.max(0.2, this.surge.g.psi / eq.psi);
+      const pr = surgePressureFactor(this.surge.g, eq);
       const s3 = stations['3'];
       stations = {
         ...stations,
@@ -919,8 +1045,11 @@ class TurbofanCycleModel implements CycleModel {
       fan: snap.fan,
       hpc,
       vsvClosureRad: Math.max(0, vsvClosure),
-      vbvOpenFraction:
-        cal.vbv.maxFraction > 0 ? vbvScheduleFraction(cal, n2c) / cal.vbv.maxFraction : 0,
+      vbvOpenFraction: this.recoveryVbvOpen()
+        ? 1
+        : cal.vbv.maxFraction > 0
+          ? vbvScheduleFraction(cal, n2c) / cal.vbv.maxFraction
+          : 0,
       starterEngaged: this.starterOn,
       ignitersOn: this.igniters,
       combustorLit: this.lit,

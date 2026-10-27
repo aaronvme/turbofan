@@ -26,6 +26,10 @@ export function feedP3(
   p3Pa: number,
   dtS: number,
 ): { readonly detector: P3DecayDetector; readonly surge: boolean } {
-  // TDD stub (D3-17): not implemented yet
-  return { detector: { ...d, lastPa: p3Pa }, surge: dtS < 0 };
+  if (!(p3Pa > 0) || !(dtS > 0)) throw new Error(`P3 ${p3Pa} Pa and dt ${dtS} s must be > 0`);
+  if (d.lastPa === null) return { detector: { lastPa: p3Pa, dropFraction: 0 }, surge: false };
+  const drop = (d.lastPa - p3Pa) / d.lastPa;
+  // integrate only while the decay is fast; a slower fall or a rise starts the integral again
+  const dropFraction = drop / dtS > SURGE_DETECT_DECAY_RATE_PER_S ? d.dropFraction + drop : 0;
+  return { detector: { lastPa: p3Pa, dropFraction }, surge: dropFraction >= SURGE_DETECT_DROP };
 }

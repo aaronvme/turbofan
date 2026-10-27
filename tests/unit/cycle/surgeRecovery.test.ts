@@ -160,7 +160,9 @@ describe('D3-17: the surge detector on the clean engine', { timeout: TIMEOUT_MS 
     const onset = after[0];
     expect(onset?.flags.surge).toBe(true);
     expect(onset?.ignitersOn).toBe(true);
-    expect(onset?.vbvOpenFraction).toBe(1);
+    // above their closing speed the VBVs stay shut: at takeoff the booster has no stall to guard,
+    // and a quarter of its flow dumped would push it past its map's choke edge
+    expect(onset?.vbvOpenFraction).toBe(0);
     expect(onset?.fuelFlowKgPerS ?? Infinity).toBeLessThan(before?.fuelFlowKgPerS ?? 0);
     const end = after[after.length - 1];
     expect(end?.flags.surge).toBe(false);

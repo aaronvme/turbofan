@@ -278,9 +278,19 @@ No CFM56-7B control logic for surges is public. The web search for it on 2026-10
 |---|---|---|
 | Detect | A rapid decay of compressor discharge pressure, integrated so that only a sufficient drop counts ([GE74]); P3 decays and turbine temperature rises in a stall ([GE91]); combustor pressure ([RR06]); rotor deceleration with high temperature ([UTC77]) | The sensed P3 (the HPC exit pressure, which the Greitzer state modulates during a surge) feeds a decay detector: while the relative decay rate exceeds a threshold the drop is integrated, and a surge is detected once the integrated drop is large enough. Normal decelerations stay under the rate threshold. The controller never reads the true surge margin. |
 | Fuel | De-rich or interrupt the fuel ([GE74], [UTC77], [RR06]), but not below a minimum flow ([UTC93]) | The fuel demand drops to the deceleration schedule (the minimum the control allows while running), so the flame stays lit. |
-| Bleed, vanes | Open the compressor bleeds or change the stator angles ([UTC77]) | The VBVs are commanded fully open while recovering. The VSV schedule is unchanged. |
+| Bleed, vanes | Open the compressor bleeds or change the stator angles ([UTC77]) | The VBVs are commanded fully open while recovering, wherever their schedule has them open at all (below vbvClosedAboveN2c). Above that they stay shut: the booster has no stall to guard there, and a quarter of its flow dumped at high power pushes it past its map's choke edge (the D3-14 fit's failure). The VSV schedule is unchanged. |
 | Ignition | Start the ignition, relight ([UTC77], [RR06]) | The igniters are on while recovering (unless ignition is selected off). |
-| Restore | Restore the fuel in a timed sequence ([UTC77]); normal fuel once the stall has ended ([UTC93]) | The fuel is held on the deceleration schedule for the confirmation time ([RR06]: about 0.5 s), then the acceleration limit ramps back from the deceleration to the acceleration schedule. A new detection restarts the sequence. |
+| Restore | Restore the fuel in a timed sequence ([UTC77]); normal fuel once the stall has ended ([UTC93]) | The fuel is held on the deceleration schedule for the confirmation time ([RR06]: about 0.5 s), then the acceleration limit ramps back over 1 s to a biased schedule: the steady line plus 0.8 of the acceleration schedule's excess over it. The bias holds until the acceleration is over (another loop takes the fuel). A detection during the hold is the same surge; one after it restarts the sequence and multiplies the bias by 0.8 again. |
+
+Why the bias: the surge line does not move after a surge, so going back to the full schedule surges again at the same speed. With only the hold and the ramp, the C12 slam cycled surge, cut-back and re-surge at 62-63 % N2 for as long as it ran, which is the hang D3-17 asks about. The 0.8 is control tuning, not a source figure: it is the largest round value that keeps the C12 slam to one surge with margin inside C12's 10 s to 95 % thrust.
+
+Result (tests/unit/cycle/surgeRecovery.test.ts, ISA SLS, Delta PRS 6 %):
+- One surge at 0.74 s (N2 61.8 %), detected in the same 20 ms step. Fuel flow 0.138 to 0.039 kg/s, igniters on, VBVs open (already open by schedule at that speed).
+- 95 % rated thrust at 8.4 s, surge-free to the end of the 30 s. At minimum lever the engine is back at N1 20.26 %, N2 60.99 %.
+- Delta PRS 2 % does not surge (95 % at 5.8 s, as the clean engine). 4 % gives one surge (8.4 s), 8 % two (11.6 s), 10 % three (15.5 s), 12 % four (20.2 s). Every case recovers and returns to idle.
+- Injected surges at 15, 45 and -20 C ambient, levers 0.15-1 (a scratch sweep, not a test): each is detected once and the episode ends; 10 s later the thrust is within 10 % of its pre-surge value. The test pins the takeoff case.
+- The W1 control instead cut 25 % of the fuel at every model surge onset, reading the true margin, and ramped straight back. In the C12 slam it surged 13 times.
+
 
 ## Cycle model calibration (W1)
 
