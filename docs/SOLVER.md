@@ -191,7 +191,7 @@ The max over the two faces (not their average, as in the W0 spike) keeps the axi
 U^(k) = Uⁿ − α_k τ_c (R_c(U^(k−1)) ) / (1 + α_k dt_c d_c)        k = 1, 2, 3 (componentwise)
 ```
 
-**The coefficients are not the W0 spike's** (0.1918, 0.4929, 1.0; van Leer, Tai & Powell 1989). A linear (von Neumann) analysis of the 3-stage scheme G(z) = 1 + z + α₂z² + α₁α₂z³ with this MUSCL (κ = 0 in smooth regions, whose dissipation is O(θ⁴)) shows that α₂ < ½ leaves |G| > 1 near the origin of the imaginary axis: the spike's set is unstable for long waves at any CFL (growth about 3e-4 per iteration at CFL 1.5). With α₂ = ½, α₁ = 0.2 the stability limit is **CFL 1.54** for the second-order scheme and 1.85 for first order (`tests/unit/flow/rk.test.ts` repeats the analysis). The default tracking CFL is **1.5**; the brief's range 1.5-1.8 is stable only where the limiter goes first order.
+**The coefficients are not the W0 spike's** (0.1918, 0.4929, 1.0; van Leer, Tai & Powell 1989). A linear (von Neumann) analysis of the 3-stage scheme G(z) = 1 + z + α₂z² + α₁α₂z³ with this MUSCL (κ = 0 in smooth regions, whose dissipation is O(θ⁴)) shows that α₂ < ½ leaves |G| > 1 near the origin of the imaginary axis: the spike's set is unstable for long waves at any CFL (growth 1.3e-4 per iteration at CFL 1, 1.5e-3 at CFL 1.5). With α₂ = ½, α₁ = 0.2 the stability limit is **CFL 1.54** for the second-order scheme and 1.86 for first order (`tests/unit/flow/rk.test.ts` repeats the analysis and pins both sets, decision D4-8). The default tracking CFL is **1.5**; the brief's range 1.5-1.8 is stable only where the limiter goes first order.
 
 **Physical-time mode: SSP-RK3** (Shu & Osher 1988) at one global dt:
 
