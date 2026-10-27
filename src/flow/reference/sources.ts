@@ -21,7 +21,7 @@ export interface SourceContext {
   readonly U: Float64Array;
   /** Blockage per cell. */
   readonly blockage: Float64Array;
-  /** Simulated time at the start of the step (physical mode), s. */
+  /** Simulated time of the stage (physical mode: t, t + dt, t + dt / 2 for SSP-RK3's stages), s. */
   readonly time: number;
 }
 

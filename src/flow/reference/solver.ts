@@ -338,9 +338,11 @@ export class ReferenceSolver {
       [3 / 4, 1 / 4],
       [1 / 3, 2 / 3],
     ];
+    // each stage's time (W2R-N3): Shu-Osher's stages sit at t, t + dt and t + dt / 2
+    const stageTime = [0, 1, 0.5];
     for (let k = 0; k < 3; k++) {
       this.updatePrimitives(true);
-      this.evaluateSources();
+      this.evaluateSources(this.time + (stageTime[k] as number) * dtStep);
       this.assembleResidual(1);
       if (k === 0) this.recordResidual();
       const [w0, w1] = weights[k] ?? [NaN, NaN];
@@ -452,7 +454,7 @@ export class ReferenceSolver {
     }
   }
 
-  private evaluateSources(): void {
+  private evaluateSources(time = this.time): void {
     const model = this.opts.sources;
     this.src.rate.fill(0);
     this.src.damping.fill(0);
@@ -464,7 +466,7 @@ export class ReferenceSolver {
         prim: this.P,
         U: this.U,
         blockage: this.blockage,
-        time: this.time,
+        time,
       },
       this.src,
     );
