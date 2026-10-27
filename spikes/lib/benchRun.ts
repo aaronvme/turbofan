@@ -3,7 +3,7 @@
 // attributed to the run its frame started in. Rates are counts over the fixed run window.
 
 import { median, medianOfRuns, quantile, summarize, type Summary } from './stats.ts';
-import { frameHealth } from './validity.ts';
+import { displayIntervalMs, frameHealth } from './validity.ts';
 
 export interface ProtocolTimes {
   readonly warmupMs: number;
@@ -157,14 +157,28 @@ export class RunRecorder {
     if (sample.iterations > 0) a.msPerIt.push(sample.solverMs / sample.iterations);
   }
 
+  /**
+   * Without a probe interval, the warm-up's median frame time, held to the same 24-500 Hz and
+   * frame-count check as the probe (W0G-N6): a warm-up throttled from the start (median ~1 s)
+   * would otherwise make a 1 Hz run look healthy.
+   */
+  private warmupDisplayInterval(): number {
+    if (this.warmupDeltas.length === 0) {
+      throw new Error('no display interval: pass one, or let the warm-up record frames');
+    }
+    try {
+      return displayIntervalMs(this.warmupDeltas);
+    } catch (e) {
+      throw new Error(`no usable display interval from the warm-up: ${(e as Error).message}`, {
+        cause: e,
+      });
+    }
+  }
+
   results(): RunResult[] {
     if (this.current !== 'done') throw new Error('protocol not done yet');
     const sec = this.p.runMs / 1000;
-    const display =
-      this.displayMs ?? (this.warmupDeltas.length > 0 ? median(this.warmupDeltas) : null);
-    if (display === null) {
-      throw new Error('no display interval: pass one, or let the warm-up record frames');
-    }
+    const display = this.displayMs ?? this.warmupDisplayInterval();
     return this.acc.map((a, index) => {
       const total = a.gpuMs.reduce((s, x) => s + x, 0);
       return {

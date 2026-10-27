@@ -30,12 +30,14 @@ export function hiddenMs(events: readonly VisibilityEvent[], from: number, to: n
   return total;
 }
 
-/** D3-6 (TDD stub). */
+/** A window focus change (D3-6: a blur during a run makes it INVALID). */
 export interface FocusEvent {
+  /** Absolute time (performance.timeOrigin + performance.now()), ms. */
   readonly at: number;
   readonly focused: boolean;
 }
 
+/** How many times the page lost focus (blur) in [from, to). */
 export function blurCount(events: readonly FocusEvent[], from: number, to: number): number {
-  return events.length > 0 && from > to ? 1 : 0;
+  return events.filter((e) => !e.focused && e.at >= from && e.at < to).length;
 }

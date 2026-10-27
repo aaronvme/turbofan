@@ -27,7 +27,11 @@ describe('withTimeout (fake timers: deterministic)', () => {
   });
 
   it('passes the value through when the work settles in time, and clears its timer', async () => {
-    const work = new Promise<number>((resolve) => setTimeout(() => resolve(7), 1000));
+    const work = new Promise<number>((resolve) => {
+      setTimeout(() => {
+        resolve(7);
+      }, 1000);
+    });
     const timed = withTimeout(work, 5000);
     await vi.advanceTimersByTimeAsync(1000);
     await expect(timed).resolves.toEqual({ ok: true, value: 7 });
@@ -35,7 +39,9 @@ describe('withTimeout (fake timers: deterministic)', () => {
   });
 
   it('reports a stall when the timer fires first; the late rejection is swallowed', async () => {
-    let reject: (e: Error) => void = () => undefined;
+    let reject: (e: Error) => void = () => {
+      // replaced by the promise's reject below
+    };
     const work = new Promise<number>((_, r) => {
       reject = r;
     });

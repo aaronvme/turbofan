@@ -4,7 +4,7 @@
 
 import { BenchApp, type BenchConfig, type ConfigResult } from '../scene/benchApp';
 import { summarize, type Summary } from '../lib/stats';
-import { trackVisibility } from '../scene/visibilityTracker';
+import { trackFocus, trackVisibility } from '../scene/visibilityTracker';
 import { mountReactLoad, type ReactLoadStats } from './reactLoad';
 import type { ToWorker } from './worker';
 import type { ProbeResult } from './workerProbe';
@@ -21,6 +21,8 @@ export interface WorkerBenchResult {
   readonly longTasks: { count: number; totalMs: number; maxMs: number };
   /** How long the page was hidden during the runs; > 0 makes the timing invalid (D0-1). */
   readonly pageHiddenMs: number;
+  /** How often the page lost focus during the runs; > 0 makes the timing invalid (D3-6). */
+  readonly pageBlurs: number;
 }
 
 export interface CoiReport {
@@ -52,6 +54,7 @@ const ui = document.getElementById('ui');
 if (!(canvas instanceof HTMLCanvasElement) || !ui) throw new Error('page markup missing');
 
 const hiddenDuring = trackVisibility();
+const blursDuring = trackFocus();
 
 /** Long tasks with absolute start times (timeOrigin + startTime), to compare across threads. */
 const longTasks: { start: number; duration: number }[] = [];
@@ -106,6 +109,7 @@ function finish(frame: ConfigResult): WorkerBenchResult {
       maxMs: tasks.length > 0 ? Math.max(...tasks) : 0,
     },
     pageHiddenMs: hiddenDuring(frame.measured),
+    pageBlurs: blursDuring(frame.measured),
   };
 }
 
