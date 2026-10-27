@@ -210,6 +210,19 @@ describe('pacing: vsync and back to back (D4-24)', () => {
     expect(BACK_TO_BACK_MIN_BUSY).toBeLessThan(1);
   });
 
+  it('a back-to-back run in an occluded window is INVALID: its rAF watcher sees the throttle', () => {
+    // the frame loop does not wait for rAF, so an occluded window does not slow it; the
+    // watcher's rAF deltas show it (w2/lookdev-4: 1 Hz rAF while the back-to-back runs went on)
+    const busy = Array.from({ length: 600 }, () => ({ gpu: pass(8), cpu: 1 }));
+    const steady = Array.from({ length: 600 }, () => 9);
+    const vsyncOk = Array.from({ length: 300 }, () => 16.7);
+    const vsyncOccluded = Array.from({ length: 10 }, () => 1016);
+    expect(pacedValidity('backToBack', steady, 16.7, 0, busy, vsyncOk).valid).toBe(true);
+    const v = pacedValidity('backToBack', steady, 16.7, 0, busy, vsyncOccluded);
+    expect(v.valid).toBe(false);
+    expect(v.reasons.join(' ')).toMatch(/occluded/);
+  });
+
   it('a vsync run is judged as before (D2-11 / D3-6)', () => {
     const steady = Array.from({ length: 600 }, () => 16.7);
     const frames = Array.from({ length: 600 }, () => ({ gpu: pass(8), cpu: 1 }));
