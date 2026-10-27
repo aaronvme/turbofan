@@ -11,6 +11,7 @@ import {
 } from './boundary';
 import { referenceState, type GasModel, type ReferenceState } from './gas';
 import { limitedSlopes } from './muscl';
+import { lowMachBeta2, preconditionIncrement, spectralRadius } from './precondition';
 import { slau2Flux } from './slau2';
 import { extIndex, type SolverMesh } from './solverMesh';
 import type { SourceModel, SourceRates } from './sources';
@@ -36,6 +37,11 @@ export interface SolverOptions {
   /** BC code -> BC code applied to physical ghosts (tests only, e.g. ladder L1). */
   readonly bcRemap?: Readonly<Partial<Record<number, number>>>;
   readonly sources?: SourceModel;
+  /**
+   * Low-Mach preconditioning of the tracking mode's pseudo-time derivative (section 10, D4-10):
+   * beta^2 = min(1, max(M^2, minMach^2)). The steady state does not change; physical time ignores it.
+   */
+  readonly lowMachPreconditioning?: { readonly minMach: number };
   /** 'f32': round the state to f32 after every stage (the f32-storage tolerance experiment). */
   readonly storage?: 'f64' | 'f32';
 }
@@ -71,6 +77,9 @@ export class ReferenceSolver {
   private readonly bSr: Float64Array;
   private readonly tau: Float64Array;
   private readonly dt: Float64Array;
+  /** Per cell beta^2 of the preconditioner, frozen at stage 1 like tau (1 without it). */
+  private readonly beta2: Float64Array;
+  private readonly dU = new Float64Array(NU);
   private readonly src: SourceRates;
   /** Per cell: i-face west, i-face east, j-face south, j-face north; ext index of each neighbour. */
   private readonly cellFace: Int32Array;
@@ -111,6 +120,7 @@ export class ReferenceSolver {
     this.bSr = new Float64Array(n);
     this.tau = new Float64Array(n);
     this.dt = new Float64Array(n);
+    this.beta2 = new Float64Array(n).fill(1);
     this.src = { rate: new Float64Array(NU * n), damping: new Float64Array(NU * n) };
     this.cellFace = new Int32Array(4 * n);
     this.cellNbr = new Int32Array(4 * n);
@@ -208,7 +218,7 @@ export class ReferenceSolver {
   localDt(): Float64Array {
     if (this.iterations === 0) {
       this.updatePrimitives();
-      this.computeLocalDt();
+      this.computeLocalDt(true);
     }
     return Float64Array.from(this.dt);
   }
@@ -216,7 +226,7 @@ export class ReferenceSolver {
   /** The physical-time step CFL_phys min_c (b V / lambda) of the current state. */
   globalDt(): number {
     this.updatePrimitives();
-    this.computeLocalDt();
+    this.computeLocalDt(false);
     let dt = Infinity;
     for (let c = 0; c < this.mesh.nCells; c++) {
       const bv = (this.blockage[c] as number) * (this.mesh.cellVolR[c] as number);
@@ -232,19 +242,24 @@ export class ReferenceSolver {
       this.U0.set(this.U);
       for (let k = 0; k < 3; k++) {
         this.updatePrimitives();
-        if (k === 0) this.computeLocalDt();
+        if (k === 0) this.computeLocalDt(true);
         this.evaluateSources();
         this.assembleResidual();
         if (k === 0) this.recordResidual();
         const a = RK3_ALPHA[k] as number;
-        const { U, U0, R, tau, dt } = this;
+        const { U, U0, R, tau, dt, dU, beta2, P } = this;
         const d = this.src.damping;
         for (let c = 0; c < N; c++) {
           const at = a * (tau[c] as number);
           const adt = a * (dt[c] as number);
-          for (let m = NU * c; m < NU * c + NU; m++) {
-            U[m] = (U0[m] as number) - (at * (R[m] as number)) / (1 + adt * (d[m] as number));
+          const o = NU * c;
+          for (let m = 0; m < NU; m++) {
+            dU[m] = -(at * (R[o + m] as number)) / (1 + adt * (d[o + m] as number));
           }
+          const b2 = beta2[c] as number;
+          if (b2 < 1)
+            preconditionIncrement(this.ref, P, NP * c, this.mesh.cellR[c] as number, b2, dU, 0);
+          for (let m = 0; m < NU; m++) U[o + m] = (U0[o + m] as number) + (dU[m] as number);
         }
         this.roundStorage();
       }
@@ -392,14 +407,26 @@ export class ReferenceSolver {
     );
   }
 
-  private computeLocalDt(): void {
+  /** tau and dt per cell; `tracking` applies the low-Mach preconditioner's beta^2 if it is on. */
+  private computeLocalDt(tracking: boolean): void {
     const m = this.mesh;
-    const { P, tau, dt, cellFace, cellNbr, bExt } = this;
+    const { P, tau, dt, cellFace, cellNbr, bExt, beta2 } = this;
+    const pre = tracking ? this.opts.lowMachPreconditioning : undefined;
     for (let c = 0; c < m.nCells; c++) {
       const u = P[NP * c + 1] as number;
       const v = P[NP * c + 2] as number;
       const a = P[NP * c + 7] as number;
       const bc = this.blockage[c] as number;
+      let b2 = 1;
+      if (pre !== undefined) {
+        let dpMax = 0;
+        const pc = P[NP * c + 4] as number;
+        for (let k = 0; k < 4; k++)
+          dpMax = Math.max(dpMax, Math.abs((P[NP * (cellNbr[4 * c + k] ?? 0) + 4] as number) - pc));
+        const rho = this.ref.rho + (P[NP * c] as number);
+        b2 = lowMachBeta2(P, NP * c, m.cellR[c] as number, pre.minMach, dpMax, rho);
+      }
+      beta2[c] = b2;
       let lam = 0;
       for (let d = 0; d < 2; d++) {
         let best = 0;
@@ -410,7 +437,7 @@ export class ReferenceSolver {
           const nr = (d === 0 ? m.iNr[f] : m.jNr[f]) as number;
           const area = (d === 0 ? m.iArea[f] : m.jArea[f]) as number;
           const bf = 0.5 * (bc + (bExt[cellNbr[4 * c + k] ?? 0] as number));
-          best = Math.max(best, bf * area * (Math.abs(u * nx + v * nr) + a));
+          best = Math.max(best, bf * area * spectralRadius(u * nx + v * nr, a, b2));
         }
         lam += best;
       }

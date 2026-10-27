@@ -128,7 +128,10 @@ describe('boundary conditions', () => {
     // p' + rho c u_n of the cell (u_n = -u along the outward normal -x) is carried to the ghost
     const rc = (ref.rho + (q[0] ?? NaN)) * (q[7] ?? NaN);
     const wCell = (q[4] ?? NaN) - rc * (q[1] ?? NaN);
-    expect((g[4] ?? NaN) - rc * (g[1] ?? NaN)).toBeCloseTo(wCell, 6);
+    // 3 Newton steps from the cell's speed (here 10 against the ghost's 230 m/s): 1e-7 relative
+    expect(Math.abs((g[4] ?? NaN) - rc * (g[1] ?? NaN) - wCell)).toBeLessThan(
+      1e-6 * Math.abs(wCell),
+    );
     const rho = ref.rho + (g[0] ?? NaN);
     const p = ref.p + (g[4] ?? NaN);
     const T = p / (rho * 287.05287);
@@ -149,7 +152,11 @@ describe('boundary conditions', () => {
     const g = ghost(cruise, BC.INFLOW, q, -1, 0);
     expect(Math.abs(g[0] ?? NaN)).toBeLessThan(1e-12);
     expect(g[1]).toBeCloseTo(cruise.u, 9);
-    const q0 = new Float64Array(NP);
+    const q0 = physicalToPrim(
+      ambient,
+      { rho: ambient.rho, u: 0, v: 0, w: 0, p: ambient.p, z: 0 },
+      1,
+    );
     const g0 = ghost(ambient, BC.INFLOW, q0, -1, 0);
     for (let k = 0; k < 6; k++) expect(g0[k] === 0).toBe(true);
   });

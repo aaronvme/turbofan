@@ -88,10 +88,25 @@ function farField(
   out[o + 7] = P[s + 7] as number;
 }
 
+/** Static temperature offset tau = T - t0 on the h0 isentrope at speed sigma: h(t0 + tau) - h(t0) = -sigma^2 / 2. */
+function stagnationOffset(ref: ReferenceState, t0: number, sigma: number): number {
+  const g = ref.gas;
+  const dh = -0.5 * sigma * sigma;
+  let tau = dh / cpMix(g, t0, 0);
+  for (let k = 0; k < NEWTON_STEPS; k++)
+    tau -= (enthalpyDelta(g, t0, tau, 0) - dh) / cpMix(g, t0 + tau, 0);
+  return tau;
+}
+
 /**
- * Subsonic inflow at the total conditions (p0, t0), normal to the boundary, no swirl, Z = 0: the
- * static pressure is the cell's, the temperature is on the isentrope through (p0, t0) and the speed
- * follows from h0. A supersonic free stream is imposed whole.
+ * Subsonic inflow at the total conditions (p0, t0), normal to the boundary, no swirl, Z = 0
+ * (section 5): the ghost lies on the (p0, t0) isentrope at the speed sigma for which the outgoing
+ * characteristic p' + rho c u_n of the cell reaches the ghost unchanged, p'_b - rho c sigma =
+ * p'_s + rho c u_n,s (3 Newton steps on sigma, each with 3 on T). Taking the static pressure from
+ * inside instead made the ghost's speed answer a pressure change with -dp / (rho u), a feedback 1 / M
+ * times faster than the acoustic time step covers: the plain scheme diverged from its own steady
+ * state at low Mach, and stalled at M 0.3-0.4 (ladder L4b, L9). A supersonic free stream is imposed
+ * whole.
  */
 function inflow(
   ref: ReferenceState,
@@ -111,22 +126,27 @@ function inflow(
   }
   const g = ref.gas;
   const r = ref.r;
-  const pP = P[s + 4] as number;
-  // phi_s(t0 + tau) - phi_s(t0) = R ln(pb / p0), written with log1p of the small difference
-  const x = (pP - (bp.p0 - ref.p)) / bp.p0;
-  const target = r * Math.log1p(x);
-  const cp0 = cpMix(g, bp.t0, 0);
-  let tau = bp.t0 * Math.expm1((r / cp0) * Math.log1p(x));
+  const un = (P[s + 1] as number) * nx + (P[s + 2] as number) * nr;
+  const rc = (ref.rho + (P[s] as number)) * (P[s + 7] as number);
+  const w = (P[s + 4] as number) + rc * un;
+  const dp0 = bp.p0 - ref.p;
+  // the ghost's gauge pressure on the isentrope at speed sigma (exact zero at sigma = 0, p0 = p_inf)
+  const pAt = (tau: number) => dp0 + bp.p0 * Math.expm1(entropyDelta(g, bp.t0, tau, 0) / r);
+  let sigma = Math.max(0, -un);
   for (let k = 0; k < NEWTON_STEPS; k++) {
-    const t = bp.t0 + tau;
-    tau -= (entropyDelta(g, bp.t0, tau, 0) - target) / (cpMix(g, t, 0) / t);
+    const tau = stagnationOffset(ref, bp.t0, sigma);
+    const pb = pAt(tau);
+    const rhoB = (ref.p + pb) / (r * (bp.t0 + tau));
+    // G(sigma) = p'_b - rho c sigma - w, G' = -(rho_b sigma + rho c) < 0
+    sigma = Math.max(0, sigma + (pb - rc * sigma - w) / (rhoB * sigma + rc));
   }
+  const tau = stagnationOffset(ref, bp.t0, sigma);
+  const pP = pAt(tau);
   const tb = bp.t0 + tau;
-  const speed = Math.sqrt(Math.max(0, -2 * enthalpyDelta(g, bp.t0, tau, 0)));
   const dT = bp.t0 - ref.t + tau;
   out[o] = (pP - ref.rho * r * dT) / (r * tb);
-  out[o + 1] = -nx * speed;
-  out[o + 2] = -nr * speed;
+  out[o + 1] = -nx * sigma;
+  out[o + 2] = -nr * sigma;
   out[o + 3] = 0;
   out[o + 4] = pP;
   out[o + 5] = 0;

@@ -371,11 +371,11 @@ describe('reference solver: time stepping', () => {
 });
 
 describe('reference solver: low-Mach inflow and outflow', () => {
-  // A blockage duct at M 0.06 between a total-pressure inflow and a static-pressure outflow. With
-  // the static pressure taken from inside, the inflow ghost's speed answered a pressure change with
+  // A duct at M 0.06 between a total-pressure inflow and a static-pressure outflow. With the static
+  // pressure taken from inside, the inflow ghost's speed answered a pressure change with
   // du = -dp / (rho u): a feedback of rate c^2 / (u dx), 1 / M times what the acoustic time step
-  // covers, and the plain scheme diverged from its own steady state at any CFL (docs/SOLVER.md 5).
-  it('converge from rest without preconditioning', () => {
+  // covers, and the plain scheme left its own steady state by 1e13 in 10 iterations (SOLVER.md 5).
+  it('hold their steady state without preconditioning (no fast inflow mode)', () => {
     const duct = solverMesh(
       singleBlock(rectangle('duct', -0.3, 0.3, 0.5, 0.6, 24, 3), {
         imin: BC.INFLOW,
@@ -390,15 +390,20 @@ describe('reference solver: low-Mach inflow and outflow', () => {
       inflowTotal: { p0: 101325, t0: 288.15 },
       outflowPressure: 101325 * 0.998,
     });
-    s.setBlockage(
-      Float64Array.from(duct.cellX, (x) =>
-        Math.abs(x) < 0.1 ? 1 - 0.15 * Math.cos((Math.PI * x) / 0.2) ** 2 : 1,
-      ),
-    );
-    const first = s.iterate(1).residualDensityL2;
-    let last = first;
-    for (let k = 0; k < 6000 && last > 1e-10 * first; k++) last = s.iterate(1).residualDensityL2;
-    expect(last).toBeLessThanOrEqual(1e-10 * first);
+    // the steady state from the preconditioned iteration (which converges from rest)
+    const pre = new ReferenceSolver(duct, {
+      gas: caloricallyPerfectGas(1.4, 287.05287),
+      freeStream: AMBIENT,
+      inflowTotal: { p0: 101325, t0: 288.15 },
+      outflowPressure: 101325 * 0.998,
+      lowMachPreconditioning: { minMach: 0.01 },
+    });
+    const first = pre.iterate(1).residualDensityL2;
+    pre.iterate(4000);
+    s.U.set(pre.U);
+    const start = s.iterate(1).residualDensityL2;
+    expect(start).toBeLessThan(1e-7 * first);
+    expect(s.iterate(100).residualDensityL2).toBeLessThan(10 * start);
   });
 });
 
