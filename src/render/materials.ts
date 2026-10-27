@@ -689,6 +689,20 @@ function fanTimeMask(u: LookUniforms): Node<'bool'> {
 /** Per-blade variation in [-1, 1] (V2: identical blades give one identical highlight each). */
 const bladeJitter = (): F => hash(instanceIndex).mul(2).sub(1);
 
+/**
+ * A rotor blade's baked cavity (W1V-I1 cause 3: stacked blades seen side-on in the cutaway had
+ * nothing to separate them; there is no rotor AO, and the rotors cast no shadow while they
+ * turn). Darker toward the root, where the passage narrows and the hub and the neighbours
+ * close in, and over the aft part of the chord, which the next blade overlaps: each blade then
+ * ends in a darker band where it tucks under its neighbour. In the albedo, so the key light
+ * shows it too.
+ */
+function bladeCavity(span: F, chord: F): F {
+  return mix(float(0.62), float(1), smoothstep(0, 0.32, span)).mul(
+    mix(float(1), float(0.7), smoothstep(0.5, 1, chord)),
+  );
+}
+
 function rowSurface(kind: RowMaterial, u: LookUniforms): MeshPhysicalNodeMaterial {
   const span = uv().y;
   const chord = uv().x;
@@ -708,7 +722,9 @@ function rowSurface(kind: RowMaterial, u: LookUniforms): MeshPhysicalNodeMateria
       // the 4 mm grain is sub-pixel in every shot but the closest: faded and gated (D4-5)
       const pg = positionLocal.mul(vec3(30, 260, 260));
       const grain = gated(resolved(pg.yz, 1), () => mx_noise_float(pg)).mul(0.03);
-      m.colorNode = ti.mul(float(1).add(le.mul(0.08)).add(jit.mul(0.02)));
+      m.colorNode = ti
+        .mul(float(1).add(le.mul(0.08)).add(jit.mul(0.02)))
+        .mul(bladeCavity(span, chord));
       m.roughnessNode = float(0.3).add(le.mul(0.1)).add(grain).add(jit.mul(0.025));
       return m;
     }
@@ -720,7 +736,9 @@ function rowSurface(kind: RowMaterial, u: LookUniforms): MeshPhysicalNodeMateria
         anisotropy: 0.3,
       });
       m.roughnessNode = float(0.4).add(jit.mul(0.07));
-      m.colorNode = vec3(0.58, 0.56, 0.53).mul(float(1).add(jit.mul(0.03)));
+      m.colorNode = vec3(0.58, 0.56, 0.53)
+        .mul(float(1).add(jit.mul(0.03)))
+        .mul(bladeCavity(span, chord));
       return m;
     }
     case 'compressorVane': {
