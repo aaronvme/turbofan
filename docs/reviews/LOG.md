@@ -188,6 +188,29 @@ Never quote personal data (emails, keys, tokens) in this file.
   - **The rule:** adopt the first variant that keeps every row the sharp limiter passes (L1-L7, L8 velocity, L9 values) and fixes W2R-6. Otherwise keep the sharp limiter, with W2R-6 open and pinned, and bring the data back.
   - Write the rule into SOLVER.md before the runs.
 - **Slot plan update:** after W2R-B1 merges, slot A runs the reference round 4 (W2R-I1..I4, D4-29, D4-30). When w2/lookdev-4 finishes, slot B runs **w2/solver**, which starts on the parts the critic cleared and holds back the limiter, the preconditioned CFL/dissipation and the oracle comparisons until round 4 lands. w2/flowviz and w2/app-ui follow.
+- **D4-24 evidence: the official A/B of record, 2026-10-27 14:50-15:36.**
+  - Conditions: AC, plan Balanced, no agents. The run was `node tools/lookdev/ab.ts --refs bad7ad0,23239a1 --warmup-s 10 --run-s 60 --reps 3` on w2/lookdev-4 (default view, quality profile). The JSON is `docs/look-dev/ab-bad7ad0-23239a1.json` on w2/lookdev-4.
+  - **Back to back:** bad7ad0 8.28 ms (opaque 3.80) vs 23239a1 8.87 ms (opaque 4.60). Paired, bad7ad0 is −0.89 ms [−0.89, −0.58, −1.23], with the opaque pass −0.90 ms, faster in every pair.
+  - **Vsync:** both are about 16.3 ms (16.37 vs 16.34). Paired the difference is −0.05 ms, while the opaque pass is still −0.88 ms.
+  - **What that shows:** under vsync the GPU time expands to fill the frame whatever the workload. The vsync timestamps measure the clock governor, not the work. This is strong evidence for D4-24's DVFS reading, and it shows bad7ad0 was an improvement, not a regression.
+  - One back-to-back repetition (23239a1 rep 1) was INVALID (occluded: rAF at 1.5 fps, probably the display sleeping), so its pair excludes it.
+  - **P4 at 6091d53 was not measured.** The capture's Chrome launch timed out at 15:36-16:24, again likely the display asleep. It re-runs in the next quiet window, with the display kept awake.
+  - The critic confirms or refutes D4-24 in pass 8.
+- **D4-37 (w2/solver @d5c87df, question a): L1 uniform keeps its pre-registered 1e-4 m/s.** The GPU reaches 2.0e-4 m/s, and the cause is f32 arithmetic, not the metrics: the oracle with the same f32 metrics reaches 1.5e-5, so D4-12's asset fix would not help.
+  - Solver round 2 applies the standard mixed-precision mitigations first, then reports:
+    - compensated (Kahan/Neumaier) summation of each cell's face-flux accumulation and of the update;
+    - flux differences formed in the gauge variables;
+    - whether the error grows or plateaus over the 20k iterations.
+  - If it is still over 1e-4 after these, bring the data back. No threshold change.
+- **D4-38 (question b): the GPU ladder judges convergence at the f32 floor.** "Converged to 1e-5" is a stopping rule inside the tests, not a PHYSICS.md threshold. The accuracy rows (L4a Mach and mass flow, L5 mass flow) are the pre-registered checks.
+  - The GPU stopping rule: the residual has reached its plateau (stated per case: 4e-5 and 1.7e-4), and the accuracy metric changes by less than 1e-4 relative over the last 2000 iterations.
+  - The oracle keeps its f64 1e-5 rule.
+- **D4-39 (question c): the E-L5 residual row (1.5e-3 vs 1e-3) keeps its tolerance.**
+  - First check the row's normalisation. A residual near convergence is a small difference of large fluxes, so a relative error divided by the residual itself is ill-posed in f32. The well-posed form divides by the flux scale (the sum of |face flux| per cell).
+  - If the row divides by the residual, the solver proposes the flux-scale normalisation for both rows (E and B), and the critic rules on it.
+  - If it already uses the flux scale, investigate the blockage terms in f32 (b-weighted areas, p∇b).
+- **D4-40 (question d): the engine adapter's defaults are accepted.** minMach = M_cut = 0.003 and preconditioned CFL 0.8, per D4-35.
+- **D4-41 (question e): the two f32 reorderings go into SOLVER.md as a new, appended §13 "f32 implementation forms",** written by w2/solver: R(φ) − R∞ evaluated as φ·dR, and the preconditioned density increment. Each states the algebraic identity, and an oracle-side test shows both forms agree to f64 rounding. The reference does not edit §13, which keeps the two branches' SOLVER.md edits disjoint.
 
 
 
