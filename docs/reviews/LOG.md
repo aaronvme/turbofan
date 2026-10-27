@@ -110,6 +110,13 @@ Never quote personal data (emails, keys, tokens) in this file.
 - **D4-11 (question c): L7's Cp asymmetry and L8 are set-up investigations,** not thresholds: the axis cells of the polar mesh, the far-field offset, and the entropy error at the stagnation points. No threshold change.
 - **D4-12 (question e): the f32 metric defect is fixed in the asset if w2/solver's 20k-iteration L1 fails,** not in the kernel. The preferred fix is GCL-exact f32 face vectors (computed in f64 and rounded so each cell closes); full f64 metrics (about 5 MB more) is the fallback. The f32 experiment must use a closed box (handoff NEXT 4).
 - The `src/flow/reference` branch coverage must reach the existing 85% gate. `test:ladder` (6.5 min) stays out of `npm run gates`, and the critic and the orchestrator run it at merges.
+- **D4-13 (w2/followups question a): a lost gas-path solve is flagged, never patched over silently.**
+  - Above the sub-idle switch, a failed gas-path solve holds the last converged state and sets a visible solve-failure status in the snapshot. A minimal contract field is allowed; flag it for the critic.
+  - The sub-idle model engages only in genuine sub-idle states (start, windmill, shutdown).
+  - Every transient and scenario test asserts zero lost solves. The W1K-I2 pin names the real cause: the rejected D3-14 fit's "hang" is a lost solve.
+- **D4-14 (question b): accepted as a model limitation.** The surge recovery opens the VBVs only below `vbvClosedAboveN2c`, because opening them at high power drives the booster off its map. The real FADEC's bleed opening during recovery is recorded in the fidelity ledger as not modeled above the closing speed. It is linked to the part-power map-fidelity backlog (booster map extension). C12 passes without it.
+- **D4-15 (question c): backlog.** After a takeoff chop, the idle-floor loop undershoots N2 to 57.4% (0.4 points above the sub-idle switch) and takes about 25 s to settle. It is not new and breaks no threshold. It goes into the ledger and joins the part-power backlog; W3's scenarios will make it visible, so revisit it there.
+- **Cap-pause jobs, 2026-10-27 00:03:** with no agents running, the orchestrator runs the bench `--quick --only=130k-16x8` smoke run and targeted Stryker runs on the files the round did not reach (species, gas, componentMaps, newton, at, engine, each with its direct suites via `MUTATION_TESTS`). The results are in the job tmp `pause_w2/` and go to the resumed w2/followups round.
 
 
 
