@@ -424,3 +424,39 @@ describe('volume sources', () => {
     expect(out[4]).toBeLessThan(0);
   });
 });
+
+// W2R-N3 (critic pass 7): a time-dependent source (a fuel or bleed schedule in a physical-time
+// event) must see each SSP-RK3 stage's own time, t, t + dt, t + dt / 2, or the step drops to first
+// order in time. A fuel source k t in a closed box at rest: SSP-RK3 then integrates it exactly.
+describe('physical time passes each stage its own time to the sources', () => {
+  it('t, t + dt, t + dt/2: a source linear in time is integrated exactly', () => {
+    const box = solverMesh(
+      singleBlock(rectangle('box', 0, 0.1, 0.5, 0.6, 4, 3), {
+        imin: BC.SLIP_WALL,
+        imax: BC.SLIP_WALL,
+        jmin: BC.SLIP_WALL,
+        jmax: BC.SLIP_WALL,
+      }),
+    );
+    const k = 0.37;
+    const seen: number[] = [];
+    const s = new ReferenceSolver(box, {
+      gas: caloricallyPerfectGas(1.4, 287.05287),
+      freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
+      sources: (ctx, out) => {
+        seen.push(ctx.time);
+        for (let c = 0; c < box.nCells; c++) out.rate[6 * c + 5] = k * ctx.time;
+      },
+    });
+    s.stepPhysical(2e-3);
+    s.stepPhysical(1e-3);
+    const stages = [0, 2e-3, 1e-3, 2e-3, 3e-3, 2.5e-3];
+    expect(seen.length).toBe(stages.length);
+    stages.forEach((t, i) => expect(Math.abs((seen[i] ?? NaN) - t)).toBeLessThan(1e-15));
+    // rho Z(t) = k t^2 / 2 at t = 3 ms
+    for (let c = 0; c < box.nCells; c++)
+      expect(Math.abs((s.U[6 * c + 5] as number) - (k * 3e-3 ** 2) / 2)).toBeLessThan(
+        1e-12 * ((k * 3e-3 ** 2) / 2),
+      );
+  });
+});
