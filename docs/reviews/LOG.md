@@ -1645,3 +1645,210 @@ What still reads as CG, worst first:
 **Orchestrator decisions needed (pass 6):**
 - (t) **The display modes' spools (W1V-I1):** should the cutaway and the exploded view show a running engine (then rotor velocity into TRAA, fix b), or a display engine with the spools eased to a stop or a slow turn (fix a, simpler, and the product-shot convention)?
 - (u) **The W1 report's triangle figure (W1V-I2):** restate "about 1.5 M" from the probe (front 1.06 M + 0.41 M of fan copies, side 0.48 M, cutaway 1.58 M) before the LOD-or-solver choice goes to Aaron.
+
+## Critic pass 7: w2/followups @ef2bb19
+
+Reviewed 2026-10-27 by the pass-7 critic: `w2/followups` @ef2bb19 against main 4afb9d4. The branch is from e1ca8a2, and main has only LOG commits since, so the review diff is `e1ca8a2...ef2bb19` (54 files). Scope: W1K-I1/I2; D3-17/C12 (FADEC surge detection and recovery); D4-13 (the lost-solve flag, with the `src/contracts` field `CycleState.gasPathSolve` and `src/cycle/matchedSolve.ts`); D4-16/D4-17; the D3-13 mutation config and scores, with `src/cycle/fadec.ts`; and the bench harness D3-6 / W0G-N5..N7. Checklists applied: typescript-reviewer, silent-failure-hunter (the lost-solve and sub-idle paths), pr-test-analyzer.
+
+New probes (plain Node; they import the checkout named by `ROOT`, and each header says how to run it):
+- `docs/reviews/probes/w2f-c12.probe.ts.txt`:
+  - the C12 case at any ΔPRS: the onsets, the action delay, the time to 95 %, the end state, max EGT and the solver calls;
+  - the solver calls per lost solve on the W1K-I2 fit's slam.
+- `docs/reviews/probes/w2f-fingerprint.probe.ts.txt`: an independent behaviour fingerprint (SHA-256 over the JSON of every state) of five transients:
+  - a slam and chop;
+  - the C12 case;
+  - a start;
+  - a hot day with an injected surge and a flameout;
+  - a part-lever chop and re-slam.
+
+**Gates at the tip.** I reran them in the builder worktree, and its tracked files were unchanged afterwards. A ladder run on the other branch shared the CPU, so the durations are long.
+- `npm test`: 1700 passed, 5 expected fail (C10 ×3, C11 ×2), 80 files.
+- `npm run typecheck`: clean.
+- `npm run lint`: clean.
+- `npm run coverage`: lines 99.53 %, statements 98.62 %, branches 88.31 %, functions 99.60 %; thresholds pass.
+  - `src/cycle`: lines 99.58 % (branches 91.76 %).
+  - `src/thermo`: 100 %.
+  - `src/contracts`: 99.67 %.
+- `npm run test:mesh`: 29 passed.
+- `npm run test:gpu`: 15 passed (4 files), with the W0G-N7 order check passing under that load.
+
+**W1K-I1 / W1K-I2.**
+- **W1K-I2 FIXED** (2a2f145, then 1105b36). `surgeRecovery.test.ts` "W1K-I2" pins the fit's slam: a surge, then lost and held matched solves while lit, at N2 70-80 % with the VBV open. The state is never `subIdle` above the switch, and there is no 95 % thrust in 10 s. The pin names the real cause, as D4-13 asked.
+- **W1K-I1 mostly FIXED** (2a2f145). The KNOWN FAIL labels cite D3-15, and the fit comments and facts rows are right. Three pointers are still wrong (W2F-N1).
+
+**C12 (D3-17).**
+- **Pre-registered and sourced.**
+  - fe2e294 comes before the TDD commit 98683d9 and the code 8998462. It adds the PHYSICS.md §3.2 row, `thresholds.ts`, and the ENGINE_FACTS sources [GE74], [GE91], [UTC77], [UTC93], [RR06] and [ARP1420].
+  - The `checkText` and `passText` in `thresholds.ts` repeat the PHYSICS.md row word for word.
+  - PHYSICS.md gives the rationale for each part, and the constants are labelled model assumptions.
+- **Honest.** Probe `w2f-c12` at ΔPRS 6 % gives:
+  - one surge, at 0.74 s and N2 61.8 %;
+  - the fuel cut, the VBVs fully open and the igniters on in the same 20 ms step;
+  - an episode of 0.04 s;
+  - 95 % thrust at 8.44 s, with no dip below it until the end of the hold;
+  - an end state of N1 20.26 %, N2 60.99 %;
+  - max EGT 955 °C, no flameout and zero lost solves.
+
+  This matches the handoff and ENGINE_FACTS. The VBV clause holds because the surge is below `vbvClosedAboveN2c`. D4-14's limitation (no VBV opening above it) is in the ledger, and the injected takeoff-surge test pins the VBVs at 0 there.
+- **The headroom is narrow (W2F-I2).** The sweep:
+
+  | ΔPRS | Surges | 95 % thrust at | C12's 10 s row |
+  |---|---|---|---|
+  | 3 % | 0 | 5.82 s | pass |
+  | 4 %, 5 % | 1 | 8.42 s | pass |
+  | 7 % | 2 | 11.54 s | fail |
+  | 8 % | 2 | 11.56 s | fail |
+  | 10 % | 3 | 15.46 s | fail |
+
+  Every case recovers to idle with zero lost solves. The max EGT comes from the slam itself: 958 °C at 3 %, with no surge.
+
+**The FADEC surge logic** (`surgeDetection.ts`, `model.ts:646-722`):
+- **Detection uses only the model's P3.** That is the matched P3, or during an episode the plenum P3 at every Greitzer substep (`model.ts:664-676`). It never reads `flags.surge` or the margin: `startRecovery` runs only on `detected`.
+- **No false trips.** The clean-engine slam deceleration never trips the detector.
+- **The recovery sequence:**
+  - the fuel drops to the decel schedule, and never below it ([UTC93]);
+  - the igniters switch on (auto ignition);
+  - the VBVs open only below their closing speed (D4-14);
+  - then a 0.5 s hold, and a 1 s ramp to the biased schedule.
+- **The test is tight.** The C12 test checks each action within 0.1 s of each onset, so dropping any of the three fails it.
+
+**D4-13: the lost-solve flag.**
+- **No silent fallback is left.**
+  - The old `snapshot()` fell back to the sub-idle model on any root that did not converge or was not physical (e1ca8a2 `model.ts`).
+  - The new code calls the sub-idle model only when the engine is unlit, unfuelled or below 57 % N2 (`model.ts:772-790`).
+  - A lost solve returns `{ ...held, solve: 'held' }`, bumps `lostSolves` and leaves the anchor where it was.
+  - The only other `catch` blocks in `src/cycle` predate this branch: Newton's `safe()`, the `solveLinear` break, and the sizing wrapper, which re-throws with a cause.
+  - `matchedSolve.ts` swallows every exception as a lost solve. That is flagged, but its cause is lost (W2F-I1).
+- **The continuation is correct.**
+  - It walks a straight line in (N1, N2, Wf) from the last converged point, and warm-starts each step on the one before.
+  - The step halves on a failure, down to 1/256, and doubles after a success. A walk makes at most 64 solves, and the last step lands exactly on the target.
+  - A failing solver costs 9 calls per lost snapshot. `gasPathHold.test.ts` pins that count.
+  - A converged root with BPR ≤ 1 counts as lost.
+  - Only (N1, N2, Wf) are walked. The operating conditions take their target value at the first step (W2F-N2).
+- **The zero-lost assertions are real.**
+  - `expectNoLostSolves` runs at the end of every run helper in `model.test.ts`, `modelPaths.test.ts` and `surgeRecovery.test.ts`. The W1K-I2 pin is excepted on purpose.
+  - It also runs after every 1 s chunk of the start's settling loop, and in each direct-step test of `modelPaths.test.ts`.
+  - `lostSolves` counts since the reset, and no test resets mid-run.
+  - With a stub solver, the hold tests cover the edge cases:
+    - the held state equals the last converged one;
+    - the matched solve resumes;
+    - the count survives until a reset;
+    - a root that is not physical counts as lost;
+    - a reset whose first solve is lost;
+    - the dry crank, the cutoff and the flameout run as `subIdle`, with zero solver calls.
+- **The contract field is minimal and validated.**
+  - The field is `CycleState.gasPathSolve = { status: 'matched' | 'subIdle' | 'held'; lostSolves }` (`src/contracts/cycle.ts:112-127`).
+  - `validateCycleState` rejects a missing field, an unknown status, and a `lostSolves` that is not a whole number ≥ 0 (`cycle.ts:391-404`).
+  - The mock and the contract fixture fill it.
+  - One cross-check is missing: `held` should imply `lostSolves ≥ 1` (W2F-N3).
+  - I approve it as the D4-13 / D4-17 field.
+- **D4-16 and D4-17.**
+  - The start test's C4 check now uses a stated settling rule: N1 within 0.1 points over a 20 s window, waiting at most 200 s (`model.test.ts:199-221`). The thresholds are unchanged.
+  - While held, the spools run on the held power balance, as D4-17 accepted.
+
+**The fadec.ts extraction is bit-identical.** I ran probe `w2f-fingerprint` on `git archive` copies of three commits:
+- 5794941, the TDD stub before the move;
+- 7bb37c7, the move;
+- ef2bb19, the tip.
+
+All five scenarios (5,900 states) give the same hash on all three:
+
+| Scenario | Hash |
+|---|---|
+| slam-chop | 677bc456986a5a05 |
+| c12 | c34d477cd5c496da |
+| start | dd082a71bf4f71e5 |
+| hot-surge-flameout | 63915b7e9bdc421b |
+| part-lever | 0b0723fc0d3f481e |
+
+So the move is a pure refactor, and the later kill-only commits did not change behaviour either.
+
+**The mutation table (docs/MUTATION.md).**
+- **The scores are real.** I ran Stryker with `--mutate src/cycle/fadec.ts,src/cycle/surgeDetection.ts`, `MUTATION_TESTS` set to their two suites, a private incremental file and concurrency 4. It reproduced both rows exactly:
+  - fadec.ts: 98.20 % (109 killed, 2 survived);
+  - surgeDetection.ts: 97.14 % (34 killed, 1 survived).
+
+  The survivors are the ones MUTATION.md names.
+- **The orchestrator's correction of the pause runs is right.** A shared incremental file makes Stryker's "All files" line a running total, so the per-file rows are the true scores.
+- **model.ts at 43.6 % is acceptable as a labelled lower bound under D3-13, but it hides the newest logic (W2F-I3).**
+  - Only 269 of 950 mutants are killed (28 %). The 145 timeouts count as detected.
+  - By region (survived / no fast coverage): the recovery 2 / 16, the surge episode 31 / 66, `surgeAt` 0 / 22.
+  - The fast set reaches these regions only through the few seconds that `gasPathHold.test.ts` runs the model.
+  - So D3-17's wiring from detection to recovery has no mutation evidence. The C12 transient covers it only behaviourally.
+- **`vitest.mutation.config.ts` is sound.**
+  - It excludes the three slow files, and `mutationConfig.test.ts` pins that list.
+  - `MUTATION_TESTS` narrows a targeted run.
+  - Stryker reads the config.
+
+**The harness (D3-6, W0G-N5..N7).** All of this matches D3-6.
+- **INVALID** only for:
+  - two or more consecutive rAF intervals of at least 500 ms (at least 1000 ms in a row);
+  - a hidden page;
+  - a blur.
+- **WARNING** for:
+  - a stretch of frames over 2.5 display intervals that lasts more than 500 ms;
+  - a median frame over 1.5 intervals.
+- **The timeout (`timeout.ts`).**
+  - Each run is raced against warm-up + runs + 30 s.
+  - A stall is INVALID "stalled", with no numbers, and the page is reloaded under the same timeout.
+  - A rejection after the timeout is absorbed, and one before it propagates.
+  - If the reload fails, the sweep aborts loudly.
+- **W0G-N6:** the warm-up interval fallback is now held to the probe's 24-500 Hz check.
+- **W0G-N7:** `timestamp-ring.test.ts` compares medians at 8× the work.
+- **The smoke run:** the orchestrator's run (`docs/bench/throughput-2026-10-27-0002-quick.json`) is committed exactly as written.
+
+### Blocking
+None.
+
+### Important
+- **W2F-I1 OPEN: a lost solve keeps no cause.**
+  - `attempt` in `src/cycle/matchedSolve.ts:41-48` catches every exception and treats it as "no solution there".
+  - The only expected throw is a thermo range error. A programming error therefore reaches the app as `held`, with nothing to tell it apart from a physical loss. Examples: a TypeError, an index guard or a NaN guard in `solveGasPath` or `engine.ts`.
+  - The tests catch both kinds only because they assert zero losses. In the app, where D4-17 shows `status` and `lostSolves`, the cause is gone.
+  - Fix, either:
+    - keep the last failure's message (for a root that is not physical, its BPR) as a model diagnostic, logged once per held episode; or
+    - re-throw anything that is not a thermo range or convergence error. gas.ts throws plain `Error`s, so that needs a typed error first.
+
+    The contract field can stay as it is.
+- **W2F-I2 OPEN: C12 passes at 6 % with about one point of ΔPRS to spare, on a bias tuned to the case.**
+  - ENGINE_FACTS says the recovery's 0.8 bias is "the largest round value that keeps the C12 slam to one surge with margin inside C12's 10 s".
+  - The sweep above shows the cliff: from 7 %, two surges and 11.5 s.
+  - This is disclosed, not hidden: the 8 %, 10 % and 12 % runs are in ENGINE_FACTS, and the threshold was registered before the code. But W3's surge scenarios (other ambients, other deteriorations) will land on both sides of the cliff.
+  - Fix:
+    - say in the PHYSICS.md ledger row that above about 6.5 % the recovery needs 2 surges and more than 10 s;
+    - pin a second ΔPRS (4 %: one surge, 95 % within 10 s), so that a loss of headroom shows;
+    - revisit the bias with the D4-18 settling round.
+- **W2F-I3 OPEN: the D3-17 wiring in model.ts has no mutation evidence.** In MUTATION.md (survived / no fast coverage), the recovery region is 2 / 16 and the surge episode 31 / 66.
+  - Fix, either:
+    - (a) factor the state from detection to recovery (`startRecovery`, `recoveryVbvOpen`, the episode bookkeeping) into a pure step function with fast tests, as was done for `fadec.ts`; or
+    - (b) run one targeted Stryker run of those line ranges against `surgeRecovery.test.ts` in a cap pause.
+  - Until then, read 43.6 % as "28 % killed".
+
+### Nits
+- **W2F-N1 OPEN: a W1K-I1 leftover.**
+  - `src/cycle/engine.ts:243`, `tests/unit/cycle/c10.test.ts:89` and `c11.test.ts:77` say that `partPower.test.ts` pins the fit's rejection. The pin is in `surgeRecovery.test.ts` ("W1K-I2"), and `partPower.test.ts` has no slam.
+  - `engine.ts:242` still says the fit "hangs at about 11 kN". Since D4-13 it loses the gas path, holds it, and makes about 94 kN by 10 s.
+- **W2F-N2 OPEN: the continuation walks only (N1, N2, Wf).**
+  - The operating conditions take their target value at the first step. Examples: the recovery's VBV jump to `maxFraction` (`model.ts:772-775`), or an ambient change.
+  - The W1K-I2 fit's losses happen with the VBV fully open.
+  - If losses appear at a VBV switch, walk the VBV fraction too. Say so in the `matchedSolve.ts` header.
+- **W2F-N3 OPEN: a missing contract invariant.** `validateCycleState` (`src/contracts/cycle.ts:391-404`) does not check that `status === 'held'` implies `lostSolves ≥ 1`. This is a cheap invariant for the UI annunciator.
+- **W2F-N4 OPEN: the "sensed P3" has no sensor lag or noise** (`model.ts:664-676`). A detection in 0.02 s is therefore the best case. Before W3's surge scenarios, add a ledger note, or a first-order lag with a stated time constant.
+- **W2F-N5 OPEN: a held step costs about 12× a normal step.**
+  - Measured on the W1K-I2 fit's slam (probe `w2f-c12`, `CASE=fit`): steps with a lost solve make 24.2 matched-solver calls, against 2.0 on the other steps.
+  - The cause: every snapshot retries the direct solve plus the whole halving walk.
+  - Fix: w2/app-ui's worker budget should allow for this, or the retry should back off while held, for example to once per 0.1 s of simulation.
+- **W2F-N6 OPEN: a constant-dependent survivor.**
+  - The `fadec.ts` survivor `/ SURGE_RESTORE_S` → `*` (`fadec.ts:153`) is equivalent only while the constant is 1. A ramp test with another restore time would kill it.
+  - MUTATION.md should say "equivalent at the current constant".
+
+**Verdict w2/followups @ef2bb19: MERGE.**
+- Every gate is green.
+- C12 is pre-registered, sourced, mirrored in `thresholds.ts`, and honestly met.
+- D4-13 removes the silent sub-idle fallback and flags every lost solve. Every transient test backs this with a real zero-lost assertion.
+- The contract field is minimal and validated.
+- The FADEC extraction is bit-identical (independent fingerprint), and the mutation scores reproduce.
+- The Important items are follow-ups:
+  - W2F-I1, before w2/app-ui shows the annunciator;
+  - W2F-I2, with the D4-18 settling round;
+  - W2F-I3, in the next cycle round.

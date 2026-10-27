@@ -1,0 +1,39 @@
+// Critic pass 7, w2/followups: an independent behaviour fingerprint of the transient model, to
+// check that the fadec.ts extraction (7bb37c7) is bit for bit a refactor of its parent (5794941).
+// Plain Node, imports the checkout at ROOT (a `git archive` of src/ and tools/mesh is enough):
+//   ROOT=<checkout> node --import file:///<checkout>/tools/mesh/ts-resolve.mjs w2f-fingerprint.ts
+// Prints one SHA-256 per scenario over the JSON of every state (all fields, full precision).
+import { createHash } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
+
+const ROOT = process.env.ROOT ?? '.';
+const imp = (p: string) => import(pathToFileURL(`${ROOT}/${p}`).href);
+const { ISA_SLS } = await imp('src/contracts/ambient.ts');
+const { DEFAULT_CYCLE_INPUTS } = await imp('src/contracts/cycle.ts');
+const { createCycleModel } = await imp('src/cycle/model.ts');
+
+const base = { ...DEFAULT_CYCLE_INPUTS, fuelLever: 'run', ignition: 'auto' };
+type Inp = typeof base;
+function scenario(name: string, opts: object, init: string, ambient: object, plan: (t: number, i: number) => Partial<Inp>, n: number, dt: number, faults: Record<number, string> = {}) {
+  const m = createCycleModel(opts);
+  const h = createHash('sha256');
+  h.update(JSON.stringify(m.reset(init, ambient)));
+  for (let i = 0; i < n; i++) {
+    const f = faults[i];
+    if (f !== undefined) m.injectFault(f);
+    const s = m.step(dt, { ...base, ambient, ...plan(m.state().timeS, i) });
+    h.update(JSON.stringify(s));
+  }
+  console.log(`${name.padEnd(28)} ${h.digest('hex').slice(0, 16)}`);
+}
+const hot = { ...ISA_SLS, temperatureK: ISA_SLS.temperatureK + 30 };
+// slam to takeoff, chop to idle
+scenario('slam-chop', {}, 'groundIdle', ISA_SLS, (t) => ({ throttleLever: t < 15 ? Math.min(1, t) : 0 }), 1500, 0.02);
+// the C12 case (6 % surge pressure ratio loss)
+scenario('c12', { hpcSurgeMarginLoss: 0.06 }, 'groundIdle', ISA_SLS, (t) => ({ throttleLever: t < 30 ? Math.min(1, t) : Math.max(0, 31 - t) }), 1000, 0.02);
+// a start from shutdown
+scenario('start', {}, 'shutdown', ISA_SLS, (t) => ({ starter: t < 60, throttleLever: 0 }), 1200, 0.1);
+// a hot day at full lever, an injected surge, then a flameout and relight
+scenario('hot-surge-flameout', {}, 'groundIdle', hot, () => ({ throttleLever: 1 }), 1200, 0.02, { 600: 'surge', 900: 'flameout' });
+// part lever with a mid-run chop and re-slam
+scenario('part-lever', {}, 'groundIdle', ISA_SLS, (t) => ({ throttleLever: t < 8 ? 0.5 : t < 12 ? 0 : 1 }), 1000, 0.02);
