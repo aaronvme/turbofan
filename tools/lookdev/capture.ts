@@ -101,6 +101,7 @@ interface LookdevPage {
       rafDeltas: number[];
       hiddenMs: number;
       events: string[];
+      vsyncDeltas?: number[];
     }>;
     conditions(): Promise<Record<string, unknown>>;
     stats(): {
@@ -273,6 +274,7 @@ async function main(): Promise<void> {
             displayMs,
             run.hiddenMs,
             run.frames,
+            run.vsyncDeltas ?? [],
           );
           const load = backToBackLoad(run.frames, run.rafDeltas);
           const e = perConfig.get(id) ?? {

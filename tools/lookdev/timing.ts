@@ -5,7 +5,13 @@
 // signature or a hidden page; a slow load is a warning with its numbers kept).
 
 import { sweepOrder } from '../../spikes/lib/order.ts';
-import { frameHealth, runValidity, type Validity } from '../../spikes/lib/validity.ts';
+import {
+  frameHealth,
+  MAX_THROTTLED_STRETCH_MS,
+  runValidity,
+  THROTTLE_FACTOR,
+  type Validity,
+} from '../../spikes/lib/validity.ts';
 import {
   PASS_GROUPS,
   quantile,
@@ -172,7 +178,8 @@ export function withPacings(
  * A back-to-back run's GPU busy fraction (the timed passes' share of the wall time) under which
  * it gets a warning: the loop left the GPU idle, so its clock could still have dropped. A
  * warning, not INVALID (D3-6). 0.6: the timed passes fill 72-77 % of a back-to-back run here
- * (the rest is untimed GPU work: copies between passes, TRAA's history copies), and 60-72 % of
+ * (the rest is not measured: probably GPU work the timestamps miss, the copies between
+ * passes and TRAA's history copies, GPU_FACTS M46), and 60-72 % of
  * a vsync run of the same frame.
  */
 export const BACK_TO_BACK_MIN_BUSY = 0.6;
@@ -213,8 +220,17 @@ export function pacedValidity(
   displayMs: number,
   hiddenMs: number,
   frames: readonly FrameSample[],
+  /** Back to back: the rAF deltas a watcher saw during the run (an occluded window throttles rAF, not the frame loop). */
+  vsyncDeltasMs: readonly number[] = [],
 ): Validity {
   if (pacing === 'vsync') return runValidityOf(intervalsMs, displayMs, hiddenMs);
+  const watched = frameHealth(vsyncDeltasMs, displayMs);
+  const occluded =
+    watched.longestThrottledMs > MAX_THROTTLED_STRETCH_MS
+      ? [
+          `INVALID (occluded): the rAF watcher saw intervals over ${String(THROTTLE_FACTOR)} display intervals for ${watched.longestThrottledMs.toFixed(0)} ms in a row (the window was occluded or unfocused)`,
+        ]
+      : [];
   const h = frameHealth(intervalsMs, displayMs);
   const v = runValidity(
     {
@@ -232,8 +248,8 @@ export function pacedValidity(
         ]
       : [];
   return {
-    valid: v.valid,
-    reasons: v.reasons.map((r) => `INVALID (hidden or stalled): ${r}`),
+    valid: v.valid && occluded.length === 0,
+    reasons: [...v.reasons.map((r) => `INVALID (hidden or stalled): ${r}`), ...occluded],
     warnings,
   };
 }

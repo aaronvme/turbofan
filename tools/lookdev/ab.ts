@@ -154,7 +154,13 @@ interface LookdevPage {
     timeRun(
       ms: number,
       saturate?: boolean,
-    ): Promise<{ frames: FrameSample[]; rafDeltas: number[]; hiddenMs: number; events: string[] }>;
+    ): Promise<{
+      frames: FrameSample[];
+      rafDeltas: number[];
+      hiddenMs: number;
+      events: string[];
+      vsyncDeltas?: number[];
+    }>;
     conditions(): Promise<Record<string, unknown>>;
     stats(): { errors: unknown[]; renderScale: number };
   };
@@ -243,7 +249,14 @@ async function main(): Promise<void> {
         [preset, profile, t.warmupS * 1000, t.runS * 1000, sat] as const,
       );
       const summary = summarizeRun(run.frames);
-      const v = pacedValidity(r.pacing, run.rafDeltas, displayMs, run.hiddenMs, run.frames);
+      const v = pacedValidity(
+        r.pacing,
+        run.rafDeltas,
+        displayMs,
+        run.hiddenMs,
+        run.frames,
+        run.vsyncDeltas ?? [],
+      );
       const load = backToBackLoad(run.frames, run.rafDeltas);
       runs.push({ ...r, summary, ...v, ...load, errors: run.errors });
       const g = summary.gpu;

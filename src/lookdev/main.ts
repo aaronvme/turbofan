@@ -51,6 +51,8 @@ export interface TimingRun {
   readonly rafDeltas: number[];
   readonly hiddenMs: number;
   readonly events: string[];
+  /** Back to back: rAF deltas seen by a watcher during the run (occlusion). */
+  readonly vsyncDeltas: number[];
 }
 
 const params = new URLSearchParams(location.search);
@@ -62,8 +64,8 @@ if (params.get('clean') === '1') document.body.classList.add('clean');
 /**
  * Frames kept submitted ahead of the one the CPU waits on in back-to-back pacing (D4-24). With
  * one or two the timed passes fill about the same share of the wall time (72-77 %, w2/lookdev-4,
- * indicative): the rest is GPU work the pass timestamps do not cover (the copies between
- * passes, TRAA's history copies) and the canvas, not a queue that ran dry. Two, so the CPU
+ * indicative): the rest is not a queue that ran dry (GPU_FACTS M46: probably GPU work the
+ * pass timestamps miss, or the canvas). Two, so the CPU
  * never makes the GPU wait.
  */
 const BACK_TO_BACK_AHEAD = 2;
@@ -230,6 +232,21 @@ async function main(): Promise<void> {
       window.addEventListener('blur', onBlur);
       window.addEventListener('focus', onFocus);
       const rafDeltas: number[] = [];
+      // back to back, the frame loop never waits for rAF, so an occluded window would not show
+      // in its intervals: a watcher records rAF on the side (the run's occlusion check)
+      const vsyncDeltas: number[] = [];
+      let watching = saturate;
+      if (saturate) {
+        let lastV = performance.now();
+        const tick = () => {
+          if (!watching) return;
+          const t = performance.now();
+          vsyncDeltas.push(t - lastV);
+          lastV = t;
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }
       view.beginTimingRun();
       let last = performance.now();
       const end = last + ms;
@@ -247,12 +264,13 @@ async function main(): Promise<void> {
         view.frame(1 / 60);
         await nextFrame();
       }
+      watching = false;
       const frames = view.endTimingRun();
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('focus', onFocus);
       if (hiddenSince >= 0) hiddenMs += performance.now() - hiddenSince;
-      return { frames, rafDeltas, hiddenMs, events };
+      return { frames, rafDeltas, hiddenMs, events, vsyncDeltas };
     },
     async conditions() {
       const nav = navigator as Navigator & {
