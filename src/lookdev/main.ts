@@ -29,8 +29,11 @@ interface LookdevApi {
   renderFrames(n: number): Promise<void>;
   /** Renders n frames and returns the per-pass GPU and CPU medians over them. */
   timeFrames(n: number): Promise<PassMedians>;
-  /** Renders for `ms`, one frame per animation frame (a warm-up). */
-  renderFor(ms: number): Promise<void>;
+  /**
+   * Renders for `ms` (a warm-up), one frame per animation frame, or back to back with
+   * `saturate` (D4-24: the warm-up of a back-to-back run loads the GPU the same way).
+   */
+  renderFor(ms: number, saturate?: boolean): Promise<void>;
   /**
    * One timing run of `ms` (W1L-I4): every frame's passes, the rAF intervals, hidden time.
    * `saturate` renders back to back (one frame queued ahead) instead of one per animation
@@ -180,14 +183,20 @@ async function main(): Promise<void> {
       }
       await view.device.device.queue.onSubmittedWorkDone();
     },
-    async renderFor(ms) {
+    async renderFor(ms, saturate = false) {
       paused = true;
       const end = performance.now() + ms;
+      const queue = view.device.device.queue;
+      let ahead: Promise<undefined> = Promise.resolve(undefined);
       while (performance.now() < end) {
         view.frame(1 / 60);
-        await nextFrame();
+        if (saturate) {
+          const done = queue.onSubmittedWorkDone();
+          await ahead;
+          ahead = done;
+        } else await nextFrame();
       }
-      await view.device.device.queue.onSubmittedWorkDone();
+      await queue.onSubmittedWorkDone();
     },
     async timeRun(ms, saturate = false) {
       paused = true;

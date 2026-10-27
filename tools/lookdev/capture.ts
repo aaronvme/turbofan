@@ -3,6 +3,7 @@
 //   npx vite --port 5184 --strictPort        (in another shell; not `npm run dev`, W1M-N1)
 //   node tools/lookdev/capture.ts [--out docs/look-dev] [--only hero,side | none] [--no-timing]
 //     [--warmup-s 10] [--run-s 60] [--reps 3] [--seed 1] [--diagnostics] [--counts] [--port 5184]
+//     [--pacing both | vsync | back-to-back]
 //
 // It launches its own headed Chrome (Playwright, channel "chrome", --enable-unsafe-webgpu so
 // timestamps are not quantized to 65.5 us, GPU_FACTS M12), opens the look-dev page at a
@@ -15,6 +16,13 @@
 // page (D2-11 as amended by D3-6). The conditions (battery, power plan, CPU load, Chrome,
 // adapter) are recorded at the start and the end. Official only on AC with nothing else
 // running and Chrome in the foreground; otherwise the numbers are indicative.
+//
+// Pacing (D4-24, `--pacing`, default both): every config runs at vsync (one frame per
+// animation frame, as the app) and back to back (the next frame as soon as the previous one
+// is done, so the iGPU stays at its loaded clock), warm-up included; ids of the back-to-back
+// runs end in "[back to back]". P4 is printed per pacing and passes only if both do (until the
+// critic confirms the DVFS evidence, D4-24). Back-to-back runs also record their frames per
+// second and the GPU busy fraction (a warning under BACK_TO_BACK_MIN_BUSY).
 
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -24,12 +32,17 @@ import { displayIntervalMs, type Validity } from '../../spikes/lib/validity.ts';
 import { THRESHOLDS } from '../../src/contracts/thresholds.ts';
 import { summarizeRun, type FrameSample, type RunSummary } from '../../src/gpu/passTimings.ts';
 import {
+  backToBackLoad,
   combineReps,
   DIAGNOSTIC_CONFIGS,
   OFFICIAL_CONFIGS,
+  p4Verdict,
+  pacedValidity,
   parseTimingArgs,
   runOrder,
-  runValidityOf,
+  withPacings,
+  type BackToBackLoad,
+  type Pacing,
 } from './timing.ts';
 
 // a command-line tool: its progress goes to stdout
@@ -79,8 +92,11 @@ interface LookdevPage {
     setProfile(id: string): void;
     renderFrames(n: number): Promise<void>;
     timeFrames(n: number): Promise<Medians>;
-    renderFor(ms: number): Promise<void>;
-    timeRun(ms: number): Promise<{
+    renderFor(ms: number, saturate?: boolean): Promise<void>;
+    timeRun(
+      ms: number,
+      saturate?: boolean,
+    ): Promise<{
       frames: FrameSample[];
       rafDeltas: number[];
       hiddenMs: number;
@@ -191,11 +207,11 @@ async function main(): Promise<void> {
     }
     if (timing) {
       const t = parseTimingArgs(args);
-      const configs = t.diagnostics ? DIAGNOSTIC_CONFIGS : OFFICIAL_CONFIGS;
+      const configs = withPacings(t.diagnostics ? DIAGNOSTIC_CONFIGS : OFFICIAL_CONFIGS, t.pacings);
       const order = runOrder(configs, t.reps, t.seed);
       const atStart = await conditions(page, browser.version());
       log(
-        `timing: ${configs.length} configs x ${t.reps} reps, ${t.warmupS} s warm-up + ${t.runS} s per run, seed ${t.seed}`,
+        `timing: ${configs.length} configs (pacing ${t.pacings.join(' + ')}) x ${t.reps} reps, ${t.warmupS} s warm-up + ${t.runS} s per run, seed ${t.seed}`,
       );
       log(`conditions: ${JSON.stringify(atStart)}`);
       // the display interval, from an idle rAF probe (refuses a throttled, background page)
@@ -211,36 +227,69 @@ async function main(): Promise<void> {
         return d;
       });
       const displayMs = displayIntervalMs(probe);
-      const perConfig = new Map<string, { runs: RunSummary[]; validity: Validity[] }>();
+      const perConfig = new Map<
+        string,
+        {
+          runs: RunSummary[];
+          validity: Validity[];
+          load: BackToBackLoad[];
+          scales: number[];
+          errors: number[];
+        }
+      >();
       for (const [rep, ids] of order.entries()) {
         for (const id of ids) {
           const c = configs.find((k) => k.id === id);
           if (c === undefined) throw new Error(`no config ${id}`);
+          const saturate = c.pacing === 'backToBack';
           const run = await page.evaluate(
-            async ([preset, flags, profile, warmMs, runMs]) => {
+            async ([preset, flags, profile, warmMs, runMs, sat]) => {
               const l = (window as LookdevPage).lookdev;
               if (l === undefined) throw new Error('no lookdev');
               l.setDebugFlags(flags);
               l.setProfile(profile);
               l.setPreset(preset);
-              await l.renderFor(warmMs);
-              const r = await l.timeRun(runMs);
+              await l.renderFor(warmMs, sat);
+              const r = await l.timeRun(runMs, sat);
               const errors = l.stats().errors.length;
               const scale = l.stats().renderScale;
               l.setDebugFlags({});
               l.setProfile('quality');
               return { ...r, errors, scale };
             },
-            [c.preset, c.flags, c.profile ?? 'quality', t.warmupS * 1000, t.runS * 1000] as const,
+            [
+              c.preset,
+              c.flags,
+              c.profile ?? 'quality',
+              t.warmupS * 1000,
+              t.runS * 1000,
+              saturate,
+            ] as const,
           );
           const summary = summarizeRun(run.frames);
-          const validity = runValidityOf(run.rafDeltas, displayMs, run.hiddenMs);
-          const e = perConfig.get(id) ?? { runs: [], validity: [] };
+          const validity = pacedValidity(
+            c.pacing,
+            run.rafDeltas,
+            displayMs,
+            run.hiddenMs,
+            run.frames,
+          );
+          const load = backToBackLoad(run.frames, run.rafDeltas);
+          const e = perConfig.get(id) ?? {
+            runs: [],
+            validity: [],
+            load: [],
+            scales: [],
+            errors: [],
+          };
           e.runs.push(summary);
           e.validity.push(validity);
+          e.load.push(load);
+          e.scales.push(run.scale);
+          e.errors.push(run.errors);
           perConfig.set(id, e);
           log(
-            `rep ${rep + 1} ${id}: GPU p50 ${summary.gpuTotal.p50.toFixed(2)} ms (p10 ${summary.gpuTotal.p10.toFixed(2)}, p90 ${summary.gpuTotal.p90.toFixed(2)}), ${summary.frames} frames, ${validity.valid ? 'valid' : validity.reasons.join('; ')}${validity.warnings.length > 0 ? ` [${validity.warnings.join('; ')}]` : ''}${run.events.length > 0 ? ` events: ${run.events.join(', ')}` : ''}, render scale ${run.scale}, errors ${run.errors}`,
+            `rep ${rep + 1} ${id}: GPU p50 ${summary.gpuTotal.p50.toFixed(2)} ms (p10 ${summary.gpuTotal.p10.toFixed(2)}, p90 ${summary.gpuTotal.p90.toFixed(2)}), ${summary.frames} frames, ${load.framesPerS.toFixed(1)} fps, GPU busy ${(100 * load.gpuBusy).toFixed(0)} %, ${validity.valid ? 'valid' : validity.reasons.join('; ')}${validity.warnings.length > 0 ? ` [${validity.warnings.join('; ')}]` : ''}${run.events.length > 0 ? ` events: ${run.events.join(', ')}` : ''}, render scale ${run.scale}, errors ${run.errors}`,
           );
         }
       }
@@ -250,7 +299,16 @@ async function main(): Promise<void> {
         if (e === undefined) continue;
         const combined = combineReps(e.runs);
         const valid = e.validity.every((v) => v.valid);
-        results[c.id] = { ...combined, valid, validity: e.validity };
+        // W1V-N1: each run's render scale and GPU error count go into the record too
+        results[c.id] = {
+          ...combined,
+          pacing: c.pacing,
+          valid,
+          validity: e.validity,
+          load: e.load,
+          renderScale: e.scales,
+          errors: e.errors,
+        };
         const passes = Object.entries(combined.gpu)
           .filter(([, v]) => v.p50 > 0.0005)
           .map(([k, v]) => `${k} ${v.p50.toFixed(2)}`)
@@ -261,29 +319,43 @@ async function main(): Promise<void> {
       }
       // P4 (D4-2, PHYSICS 3.4): the default view's median render GPU time, gated at <= 8.0 ms
       // only under D0-1 (the official set: 10 s warm-up, 3 x 60 s, AC, nothing else running);
-      // the cutaway and hero are reported against the 10 ms target, not gated
+      // the cutaway and hero are reported against the 10 ms target, not gated. D4-24: it is
+      // reported per pacing and passes only if both do, until the critic confirms the DVFS
+      // evidence (then back to back is the measure of record)
       const p4 = THRESHOLDS.P4.values;
-      const gpuOf = (id: string): number | null => {
-        const r = results[id] as { gpuTotal?: { p50: number } } | undefined;
-        return r?.gpuTotal?.p50 ?? null;
+      const gpuOf = (id: string, pacing: Pacing): number | undefined => {
+        const key = pacing === 'vsync' ? id : `${id} [back to back]`;
+        const r = results[key] as { gpuTotal?: { p50: number } } | undefined;
+        return r?.gpuTotal?.p50;
       };
-      const p4Default = gpuOf('default (threeQuarterFront)');
       const official = !t.diagnostics && t.warmupS >= 10 && t.runS >= 60 && t.reps >= 3;
-      if (p4Default !== null) {
-        const verdict = p4Default <= p4.maxRenderGpuMs.value ? 'PASS' : 'FAIL';
-        results.P4 = {
-          defaultGpuMs: p4Default,
-          maxMs: p4.maxRenderGpuMs.value,
-          verdict: official ? verdict : `${verdict} (indicative: not the D0-1 protocol)`,
-          reported: {
-            cutaway: gpuOf('cutaway'),
-            hero: gpuOf('hero (cinematic, DoF on)'),
-            targetMs: p4.reportedTargetMs.value,
-          },
-        };
-        log(
-          `P4: default ${p4Default.toFixed(2)} ms vs <= ${String(p4.maxRenderGpuMs.value)} ms: ${official ? verdict : `${verdict}, indicative only`}; cutaway ${gpuOf('cutaway')?.toFixed(2) ?? '-'}, hero ${gpuOf('hero (cinematic, DoF on)')?.toFixed(2) ?? '-'} (target <= ${String(p4.reportedTargetMs.value)} ms, not gated)`,
+      const defaults: Partial<Record<Pacing, number>> = {};
+      for (const pacing of t.pacings) {
+        const ms = gpuOf('default (threeQuarterFront)', pacing);
+        if (ms !== undefined) defaults[pacing] = ms;
+      }
+      const v = p4Verdict(defaults, p4.maxRenderGpuMs.value, official);
+      if (v.verdict !== 'NONE') {
+        const reported = Object.fromEntries(
+          t.pacings.map((pacing) => [
+            pacing,
+            { cutaway: gpuOf('cutaway', pacing), hero: gpuOf('hero (cinematic, DoF on)', pacing) },
+          ]),
         );
+        results.P4 = {
+          defaultGpuMs: defaults,
+          maxMs: p4.maxRenderGpuMs.value,
+          perPacing: v.perPacing,
+          verdict: v.verdict,
+          reported: { ...reported, targetMs: p4.reportedTargetMs.value },
+        };
+        const f = (x: number | undefined) => (x === undefined ? '-' : x.toFixed(2));
+        for (const pacing of t.pacings)
+          log(
+            `P4 ${pacing}: default ${f(defaults[pacing])} ms vs <= ${String(p4.maxRenderGpuMs.value)} ms: ${v.perPacing[pacing] ?? '-'}; cutaway ${f(gpuOf('cutaway', pacing))}, hero ${f(gpuOf('hero (cinematic, DoF on)', pacing))} (target <= ${String(p4.reportedTargetMs.value)} ms, not gated)`,
+          );
+        log(`P4: ${v.verdict}`);
+        if (v.verdict.startsWith('FAIL')) process.exitCode = 1;
       }
       const file = join(out, 'timings.json');
       writeFileSync(
@@ -293,7 +365,14 @@ async function main(): Promise<void> {
             date: new Date().toISOString(),
             viewport: '1920x1080 DPR 1',
             quality: 'high',
-            protocol: { warmupS: t.warmupS, runS: t.runS, reps: t.reps, seed: t.seed, order },
+            protocol: {
+              warmupS: t.warmupS,
+              runS: t.runS,
+              reps: t.reps,
+              seed: t.seed,
+              pacings: t.pacings,
+              order,
+            },
             displayIntervalMs: displayMs,
             note: 'official only on AC, nothing else running, Chrome in the foreground (D0-1); otherwise indicative',
             conditions: { start: atStart, end: atEnd },
@@ -303,6 +382,10 @@ async function main(): Promise<void> {
           2,
         )}\n`,
       );
+      // Prettier-formatted, so `npm run lint` stays green (W1V-B1)
+      execFileSync(process.execPath, ['node_modules/prettier/bin/prettier.cjs', '--write', file], {
+        stdio: 'ignore',
+      });
       log(`saved ${file}`);
     }
   } finally {

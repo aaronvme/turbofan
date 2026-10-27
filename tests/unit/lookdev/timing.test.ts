@@ -213,9 +213,7 @@ describe('pacing: vsync and back to back (D4-24)', () => {
   it('a vsync run is judged as before (D2-11 / D3-6)', () => {
     const steady = Array.from({ length: 600 }, () => 16.7);
     const frames = Array.from({ length: 600 }, () => ({ gpu: pass(8), cpu: 1 }));
-    expect(pacedValidity('vsync', steady, 16.7, 0, frames)).toEqual(
-      runValidityOf(steady, 16.7, 0),
-    );
+    expect(pacedValidity('vsync', steady, 16.7, 0, frames)).toEqual(runValidityOf(steady, 16.7, 0));
   });
 
   it('p4Verdict: PASS only if every measured pacing passes; official only under D0-1', () => {
