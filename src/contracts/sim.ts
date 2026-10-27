@@ -88,6 +88,15 @@ export type FlowRunStatus = (typeof FLOW_RUN_STATUSES)[number];
 /** The states that are failures and must say why (CLAUDE.md: surface errors, never swallow). */
 const FAILED_FLOW_STATUSES: readonly FlowRunStatus[] = ['diverged', 'lost'];
 
+/**
+ * The message a failed status gets when the solver gave none (W1F-I1): GPUDeviceLostInfo.message
+ * may be empty, and a failure must still publish (and still say it is a failure).
+ */
+export const FLOW_DEFAULT_ERRORS = {
+  diverged: 'diverged: the solver gave no reason',
+  lost: 'lost: the solver gave no reason',
+} as const satisfies Readonly<Record<'diverged' | 'lost', string>>;
+
 export interface FlowStatus {
   readonly status: FlowRunStatus;
   /** Why the solver failed; required for diverged and lost, else null or a note. */
@@ -270,6 +279,15 @@ function firstNonFinite(value: unknown, path: string): string | null {
 const finiteOrNull = (v: number | null): number | null =>
   v !== null && Number.isFinite(v) ? v : null;
 
+/** A failed status with an empty or missing message gets FLOW_DEFAULT_ERRORS (W1F-I1). */
+function withFailureMessage(flow: FlowStatus): FlowStatus {
+  const status = flow.status;
+  if (!(status === 'diverged' || status === 'lost')) return flow;
+  if (typeof flow.error === 'string' && flow.error.length > 0) return flow;
+  if (flow.error !== null && typeof flow.error !== 'string') return flow; // refused later
+  return { ...flow, error: FLOW_DEFAULT_ERRORS[status] };
+}
+
 /**
  * Maps non-finite solver output onto the failure channel (W0C-I5): the status becomes
  * diverged with the offending path in error (a solver that already reports diverged or lost
@@ -277,31 +295,42 @@ const finiteOrNull = (v: number | null): number | null =>
  * stats with a non-finite counter and a reduction with any non-finite value are dropped. A
  * status with only finite numbers is returned as is. nextSnapshot applies this, so one bad
  * solver number cannot stop snapshot publication for the cycle and the UI.
+ *
+ * W1F-I1: a non-finite GPU time alone is nulled without changing the status (a stale or
+ * backwards timestamp pair is a timing glitch, not divergence: only the residual, the counters
+ * and the reduction indicate divergence), and a failed status without a message gets a default
+ * one instead of making nextSnapshot throw.
  */
-export function sanitizeFlowStatus(flow: FlowStatus): FlowStatus {
+export function sanitizeFlowStatus(input: FlowStatus): FlowStatus {
+  const flow = withFailureMessage(input);
   const statsBad = firstNonFinite(flow.stats, 'stats');
   const reductionBad = firstNonFinite(flow.reduction, 'reduction');
   if (statsBad === null && reductionBad === null) return flow;
   let stats = flow.stats;
+  // what diverged: any non-finite stat except the GPU time, or the reduction
+  let statsDiverged: string | null = null;
   if (stats !== null && statsBad !== null) {
+    const timeNulled: FlowStepStats = { ...stats, gpuTimeMs: finiteOrNull(stats.gpuTimeMs) };
+    statsDiverged = firstNonFinite(timeNulled, 'stats');
     const nulled: FlowStepStats = {
-      ...stats,
-      gpuTimeMs: finiteOrNull(stats.gpuTimeMs),
+      ...timeNulled,
       residualDensityL2: finiteOrNull(stats.residualDensityL2),
     };
     stats = firstNonFinite(nulled, 'stats') === null ? nulled : null;
   }
+  const reduction = reductionBad === null ? flow.reduction : null;
+  const found = [statsDiverged, reductionBad].filter((b) => b !== null).join(', ');
+  if (found === '') return { ...flow, stats, reduction };
   const keepOwn =
     FAILED_FLOW_STATUSES.includes(flow.status) &&
     typeof flow.error === 'string' &&
     flow.error.length > 0;
-  const found = [statsBad, reductionBad].filter((b) => b !== null).join(', ');
   return {
     ...flow,
     status: keepOwn ? flow.status : 'diverged',
     error: keepOwn ? flow.error : `solver produced a non-finite number: ${found}`,
     stats,
-    reduction: reductionBad === null ? flow.reduction : null,
+    reduction,
   };
 }
 
