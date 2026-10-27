@@ -209,6 +209,19 @@ U^(k) = Uⁿ − α_k τ_c (R_c(U^(k−1)) ) / (1 + α_k dt_c d_c)        k = 1,
 
 **The coefficients are not the W0 spike's** (0.1918, 0.4929, 1.0; van Leer, Tai & Powell 1989). A linear (von Neumann) analysis of the 3-stage scheme G(z) = 1 + z + α₂z² + α₁α₂z³ with this MUSCL (κ = 0 in smooth regions, whose dissipation is O(θ⁴)) shows that α₂ < ½ leaves |G| > 1 near the origin of the imaginary axis: the spike's set is unstable for long waves at any CFL (growth 1.3e-4 per iteration at CFL 1, 1.5e-3 at CFL 1.5). With α₂ = ½, α₁ = 0.2 the stability limit is **CFL 1.54** for the second-order scheme and 1.86 for first order (`tests/unit/flow/rk.test.ts` repeats the analysis and pins both sets, decision D4-8). The default tracking CFL is **1.5**; the brief's range 1.5-1.8 is stable only where the limiter goes first order.
 
+**The preconditioned tracking CFL (decision D4-32).** D4-8's analysis covers advection only. The pseudo-acoustic pair of the preconditioned scheme is a different family: linearised at rest, SLAU2's velocity dissipation q̄(β⁺ + β⁻ − 1)ρ̄c̄ is second order and vanishes, so the pair is damped only by the (D4-20-scaled) mass-flux pressure diffusion, and the 3-stage set's |G(iy)|² = 1 + 0.05y⁴ + 0.01y⁶ is anti-dissipative on the imaginary axis. `tests/unit/flow/acoustic.ts` is the fully discrete von Neumann analysis of the actual scheme on that family: MUSCL with central slopes (van Albada in smooth data), face states q ± σ/2, dimension-split fluxes, the pressure increment times β², the local step CFL/λ with λ the preconditioned spectral radius summed over the two directions, and G(z) of the three stages on each eigenvalue of the step's symbol, over every wave number (θ_x, θ_r). The cell shape enters as the aspect a = (r-face area)/(x-face area) of the cell; a = 0 is the 1D limit (a cell much longer in r than in x, or the axis cells' effective width). Stability limits (`tests/unit/flow/rk.test.ts` pins them):
+
+| family (at rest) | a = 0 (1D) | 0.25 | 0.5 | 1 (square) |
+|---|---|---|---|---|
+| plain tracking (β = 1, f_a = 1) | 1.236 | 1.539 | 1.791 | 1.878 |
+| preconditioned, D4-20 matched (β = M_ref, any β ≤ 0.006) | **0.972** | 1.210 | 1.408 | **1.550** |
+| the same + AUSM+-up p_u, K_u = 0.25 | 1.231 | 1.517 | 1.691 | 1.777 |
+| the same + p_u, K_u = 0.5 | **1.413** | 1.726 | 1.885 | **1.958** |
+| the same + p_u, K_u = 0.75 | 1.254 | 1.567 | 1.880 | 2.107 |
+| preconditioned without D4-20 (machCut ≥ 1), β = 0.06 | 0.475 | 0.591 | 0.687 | |
+
+The worst cell shape is the 1D one, so the preconditioned tracking default is **`DEFAULT_CFL_PRECONDITIONED` = 0.8** (0.82 × 0.972; the 0.8 margin is the standard safety factor on a computed limit). It applies whenever `lowMachPreconditioning` is set and the caller gives no `cfl`; the plain tracking default stays 1.5. The closed-box case C-pre of §12.2 shows the limit is real: at CFL 1.5 the preconditioned pulse (engine settings, minMach = M_cut = 0.003) goes to NaN at iteration 79 (48 at a hundredth of the amplitude), while at 1.15 and 0.8 it stays bounded for 400 iterations; ladder L8's polar mode (D4-27) grows at 1.5 and 1.2, is neutral at 0.9 and decays at 0.75 (critic pass 7). Preconditioning with machCut ≥ 1 (no D4-20 scaling) has a far lower limit at small β and is a test configuration only (D4-22's measurement, the steady-state check of `precondition.test.ts`). D4-32's next step is the p_u trial (D4-30 (2)): if it keeps L2/L4 green and does not worsen L7/L8, the default becomes 1.15 with p_u (0.81 × 1.413); this paragraph then changes first.
+
 **Low-Mach preconditioning (tracking mode only; decision D4-10).** Without it the pseudo-time step is set by the acoustic speed |u| + c while the flow converges at the convective speed |u|, so the iterations to converge grow like 1/M (ladder L7: the M 0.01 sphere did not converge in 20000 iterations, the M 0.3 sphere took 3096). The option `lowMachPreconditioning: { minMach }` multiplies the pseudo-time derivative of the pressure by 1/β² (Turkel's preconditioner with α = 0 in the variables (p, u, v, rw, s, Z), equivalent for this gas to Weiss & Smith 1995). Per cell, from the stage-1 primitives and frozen for the three stages like τ:
 
 ```
@@ -260,16 +273,18 @@ The default dt is CFL_phys · min_c(b_c V_c/λ_c) with CFL_phys = 0.9 (the RK3 l
 
 ### 12.2 Tolerances for the GPU kernel against the oracle (W0G-N4)
 
-Protocol: the same mesh asset (130k, f32 metrics) and the same f32-representable initial state on both, the same options; compare after N iterations. For each primitive field q ∈ (ρ′, u, v, rw, p′, Z) and T′, the **relative error** is e_q = max_c |q_GPU − q_ref| / S_q with the perturbation scale S_q = max_c |q_ref − q∞| (velocity components share S = max |(u − u∞, v, w)|).
+Protocol: the same mesh (the row's, below; always with f32 metrics, the numbers the GPU reads) and the same f32-representable initial state on both, the same options (the oracle's defaults unless the row names one); compare after N iterations. The set-ups, the perturbation and the error metric are exported by `tests/ladder/oracle.ts` (`closedBoxMesh`, `closedBoxOptions`, `smoothPerturbation`, `sinkCase`, `relativeError`); the f32-storage experiment (`tests/ladder/cases/f32.ts`) and the GPU tests import the same module. A field the oracle leaves exactly unperturbed (S_q = 0, such as Z in the sink) must stay exactly so. For each primitive field q ∈ (ρ′, u, v, rw, p′, Z) and T′, the **relative error** is e_q = max_c |q_GPU − q_ref| / S_q with the perturbation scale S_q = max_c |q_ref − q∞| (velocity components share S = max |(u − u∞, v, w)|).
 
 | case | N | must hold |
 |---|---|---|
-| A. quiescent ambient, real mesh | 1, 100 | every state value bitwise 0 |
+| A. quiescent ambient, real mesh (the 130k asset, f32 metrics); plain and preconditioned tracking and physical time | 1, 100 | every state value bitwise 0 |
 | B. uniform M 0.5, real mesh, walls remapped to far field | 100 | max |u − u∞| ≤ 10 × the oracle's (the oracle's is a property of the f32 metrics, 12.3) |
-| C. smooth field on the real mesh (acoustic pulse + swirl + a hot fuel-air spot; `tests/ladder/oracle.ts` `smoothPerturbation`), tracking | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
+| C. smooth field (acoustic pulse + swirl + a hot fuel-air spot, `smoothPerturbation`) in the closed box (`closedBoxMesh`: three wiggled 20 × 12 blocks over 0.6 × 0.15 m with a max/max and a min/min interface, slip walls and the axis, D4-12), plain tracking (`closedBoxOptions('tracking')`, CFL 1.5) | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
+| C-pre. the same, **preconditioned tracking at the engine's settings** (`closedBoxOptions('preconditioned')`: minMach = M_cut = 0.003, so β², the δU update, the D4-20 scaling and the default CFL of §10 are all exercised) | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
 | C, physical time (SSP-RK3, the oracle's dt) | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
 | D. Sod tube (ladder L2 set-up), physical time | 100 | L1 relative error of ρ′ and p′ ≤ 1e-3 (limiter switches, 12.1) |
 | E. a blockage + source cell set (ladder L5/L8/L9 set-ups) | 10 | e_q ≤ 1e-4 |
+| S. ladder L8's sink (`sinkCase({ minMach: 0.003 }, 'f32')`: 64 × 24 polar mesh, slip wall inside, the preconditioned far field outside, the point-implicit sink source), preconditioned tracking from the ambient at rest | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
 | any | any | the residual L2 within 1e-3 relative of the oracle's |
 
 Basis: f32 has a relative step of 6e-8; one iteration rounds each face flux and cell update a few dozen times, and the gauges keep that relative to the perturbation, so one iteration lands near 1e-6 and growth is at most linear over N for a stable smooth run. The f32-storage experiment in `tests/ladder/f32.test.ts` (the oracle with its state rounded to f32 after every stage) measures the storage part of this on case C, and the table sits ≥ 10× above it. Measured (2026-10-27, closed box per D4-12: slip walls and the axis, so the pulse stays in the domain): tracking 1.9e-7 / 4.4e-7 / 1.4e-6 after 1 / 10 / 100 iterations, physical time 8.4e-8 / 2.4e-7 / 1.3e-5, so every row, the N = 100 rows included, sits 54-720× above the storage error. A tolerance changes only through an orchestrator decision.
