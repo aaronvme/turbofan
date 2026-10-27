@@ -472,6 +472,45 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
     }
   });
 
+  it('adds the power of a force source to the energy (work: s_eta = u s_x + v s_r + w s_L / r)', async () => {
+    // ladder L9b's actuator disk: a force density f along x with s_eta = f u, in a uniform stream
+    // at the free stream (every gauge flux an exact zero), so only the source moves the state
+    const box = solverMesh(
+      singleBlock(rectangle('box', 0, 1, 0.5, 1.5, 8, 8), {
+        imin: BC.FARFIELD,
+        imax: BC.FARFIELD,
+        jmin: BC.FARFIELD,
+        jmax: BC.FARFIELD,
+      }),
+    );
+    const gas = caloricallyPerfectGas(1.4, 287.05287);
+    const u0 = 40;
+    const s = await create(box, { gas, freeStream: { ...ISA, velocity: u0 }, cellSource: true });
+    s.setUniform({ rho: s.ref.rho, u: u0, v: 0, w: 0, p: s.ref.p, z: 0 });
+    const n = box.nCells;
+    const f = 50; // N/m^3
+    const rate0 = new Float64Array(6 * n);
+    const work = new Float64Array(n);
+    const inner: number[] = [];
+    for (let j = 2; j < 6; j++) for (let i = 2; i < 6; i++) inner.push(j * 8 + i);
+    for (const c of inner) {
+      rate0[6 * c + 1] = f;
+      work[c] = 1;
+    }
+    s.setCellSource({ rate0, work });
+    const before = await s.readConserved();
+    const dt = 1e-7; // short: the flux response to the forced cells is O(dt c / dx) of the increment
+    s.stepPhysical(dt);
+    const after = await s.readConserved();
+    for (const c of inner) {
+      const dm = (after[6 * c + 1] ?? NaN) - (before[6 * c + 1] ?? NaN);
+      const de = (after[6 * c + 4] ?? NaN) - (before[6 * c + 4] ?? NaN);
+      expect(dm / (f * dt)).toBeCloseTo(1, 3);
+      expect(de / (f * u0 * dt)).toBeCloseTo(1, 3);
+    }
+    s.destroy();
+  });
+
   it('applies a point-implicit sink as E(U) = U / (1 + dt k) in each SSP-RK3 stage', async () => {
     const box = solverMesh(
       singleBlock(rectangle('box', 0, 1, 0.5, 1.5, 8, 8), {
