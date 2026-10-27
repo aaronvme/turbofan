@@ -32,16 +32,30 @@ export interface Convergence {
   readonly converged: boolean;
 }
 
-/** Tracking iterations until residual <= drop x the first iteration's, or maxIterations. */
+/**
+ * Iterations the residual must stay at or below the target before a case counts as converged: an
+ * oscillating residual dips through the target long before the field is steady (ladder L8's first
+ * run stopped on such a dip at iteration 1017; the residual was 17x higher ten iterations later).
+ */
+export const CONVERGED_WINDOW = 50;
+
+/**
+ * Tracking iterations until the residual is <= drop x the first iteration's and stays there for
+ * CONVERGED_WINDOW iterations, or maxIterations. `iterations` is the first iteration of that window.
+ */
 export function converge(s: ReferenceSolver, drop: number, maxIterations: number): Convergence {
   const first = s.iterate(1).residualDensityL2;
   let it = 1;
   let last = first;
+  let start = 0;
   while (it < maxIterations) {
     last = s.iterate(1).residualDensityL2;
     it++;
     if (!Number.isFinite(last)) break;
-    if (last <= drop * first) return { iterations: it, first, last, converged: true };
+    if (last > drop * first) start = 0;
+    else if (start === 0) start = it;
+    if (start > 0 && it - start + 1 >= CONVERGED_WINDOW)
+      return { iterations: start, first, last, converged: true };
   }
   return { iterations: it, first, last, converged: false };
 }

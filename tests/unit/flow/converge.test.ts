@@ -19,12 +19,12 @@ function scripted(history: (n: number) => number): ReferenceSolver {
 
 describe('ladder convergence driver', () => {
   it('ignores a dip of an oscillating residual below the target', () => {
-    // 1e-2 relative, with one iteration (100) touching 1e-6, then monotone decay from 2000
-    const s = scripted((n) => (n === 100 ? 1e-6 : n < 2000 ? 1e-2 : 1e-2 * 0.99 ** (n - 2000)));
+    // first 1e-2, so the target is 1e-7; one iteration (100) dips to 1e-8, then decay from 2000
+    const s = scripted((n) => (n === 100 ? 1e-8 : n < 2000 ? 1e-2 : 1e-2 * 0.99 ** (n - 2000)));
     const c = converge(s, 1e-5, 10000);
     expect(c.converged).toBe(true);
-    // first below 1e-5 at 2000 + ln(1e-3)/ln(0.99) = 2688 and it stays: the count is that iteration
-    expect(c.iterations).toBe(2000 + Math.ceil(Math.log(1e-3) / Math.log(0.99)));
+    // first below 1e-7 at 2000 + ln(1e-5)/ln(0.99) = 3146 and it stays: the count is that iteration
+    expect(c.iterations).toBe(2000 + Math.ceil(Math.log(1e-5) / Math.log(0.99)));
   });
 
   it('counts the first iteration of a window that stays below the target', () => {
