@@ -2395,6 +2395,7 @@ None.
 - **W2R-N11 OPEN.** `reports/ladder/` keeps stale reports from 2026-10-26: `L6-free-vortex.json` and `L6-solid-body.json`, whose free-vortex and solid-body rows fail at 1.29 % and 0.45 %, beside the current passing `L6.json`. The directory is ignored, but it is where a reader looks for the ladder of record. Clear `reports/ladder/` at the start of `test:ladder`, or name per run.
 - **W2R-N12 OPEN.** The ladder now runs 13 forked files plus L7's seven child processes, so up to 20 solver processes run on a 16-thread machine. Fine for the CPU ladder, but the 30-minute test timeout (`vitest.ladder.config.ts:13`) now hides a hung child for half an hour. Give `sphereChild` a shorter timeout derived from the cap (it has 30 min too, `l7.ts:82`).
 - **W2R-N13 OPEN.** W2R-6's reading ("the linearisation of the switch grows") is inferred from term switches. The direct check: a power iteration with the limiter's switch pattern frozen at the steady state (the sign masks of ab and of which one-sided slope is taken). If that frozen linear operator grows, the switch's linearisation is proved; if not, the nonlinear switching is the cause. Cheap with the round-5 scratch driver; worth having before D4-36's trials so the selection rule tests the right mechanism.
+- **W2R-N14 OPEN (orchestrator's note, on its loaded merged tree).** `tests/unit/flow/solver.test.ts` "hold the radial equilibrium of a swirling annulus..." took 9.4 s against vitest's default 5 s. It passes alone in 2.9 s, so this is a load flake, but the margin is under 2×. My two unit runs (tip, and trial merge on a loaded machine) passed it. Give the oracle's iterating unit tests explicit timeouts with a reason, as the other flow suites do (`precondition.test.ts` uses 120_000), so that a merge under load does not fail on time.
 
 **Verdict w2/reference @4553ce2: MERGE.**
 - Every failing row is visible and under a decision:
@@ -2582,3 +2583,74 @@ None.
 - W2L-I1 goes to the next look-dev round with rotor AO and self-shadow.
 
 **D4-24 for the orchestrator: CONFIRMED** (above), on the three conditions under "Should P4's measure of record become back to back?".
+
+**Addendum (after the orchestrator's merge of w2/lookdev-4 into main at eefe857, with the merge fix 5311dbe).**
+- **W2L-B1 RESOLVED in 5311dbe** (my trial merge had found it).
+  - The conflict: on main's D3-6 `validity.ts`, `pacedValidity` built a `RunFrames` without `longestOcclusionMs`. Typecheck failed (TS2345 at `tools/lookdev/timing.ts:236`), `timing.test.ts:203` failed, and at runtime a stalled back-to-back run came out VALID.
+  - 5311dbe adds the field. It is the same one-line resolution I had applied: my trial tree is byte-identical to `git merge-tree 5311dbe w2/reference` except for this LOG and two probe files. eefe857 resolves the `thresholds.test.ts` conflict to 4 + 12 + 13 + 4 (C12 and P4).
+  - With it, typecheck and the unit suite pass (trial merge below).
+- **Sanity check of 5311dbe: correct, but D3-6 now applies to look-dev captures only in part (W2L-I5).**
+  - Both pacings' loop intervals now go through D3-6's `runValidity`: INVALID only on the occlusion signature (rAF intervals ≥ 500 ms sustained ≥ 1000 ms) or a hidden page. D2-11's throttle stretch becomes a warning. For vsync captures this was already so on main (`runValidityOf`, from w2/followups).
+  - Two parts of D3-6 do not reach look-dev:
+    - (a) the back-to-back rAF watcher still uses the stricter D2-11 stretch (`timing.ts:228-233`: INVALID on > 500 ms of deltas over 2.5 display intervals). A back-to-back loop that delays rAF on a busy main thread can therefore be thrown out where D3-6 would warn, while the real occlusion signature (Chrome's ~1 Hz throttle) is caught either way;
+    - (b) D3-6's blur rule (`runValidity(run, hidden, pageBlurs)`: INVALID when the page lost focus) is never fed. `timeRun` records blur and focus only as `events` strings (`src/lookdev/main.ts:229-230`), and neither `runValidityOf` nor `pacedValidity` passes a blur count. So a look-dev capture in an unfocused window stays VALID, where a bench run is INVALID.
+
+### Important (added)
+- **W2L-I5 OPEN: D3-6 applies to look-dev captures only in part** (above).
+  - The failure scenario: an official P4 capture with the Chrome window unfocused for part of a run (the governor and Chrome's scheduling both change with focus) is recorded as VALID.
+  - Fix:
+    - count blurs in `timeRun` and pass them as `pageBlurs` in `runValidityOf` and `pacedValidity`;
+    - make the watcher's INVALID the D3-6 occlusion signature (`watched.longestOcclusionMs >= OCCLUSION_MIN_STRETCH_MS`), with the stretch as a warning, unless the orchestrator wants back-to-back runs to be stricter than D3-6;
+    - unit tests for both.
+
+### Nits (added)
+- **W2L-N7 OPEN.** The first browser run on a tree with this merge fails to start. `src/render/traaResolve.ts` imports `three/addons/tsl/utils/TAAUtils.js`, which the Vite dependency cache of an older checkout does not hold. Vite optimises it mid-run and reloads ("optimized dependencies changed. reloading"), and `engineView.test.ts`'s iframe never becomes ready (60 s): 1 of 7 files ran in my trial merge. A second run passed 23 of 23. Every worktree and the orchestrator's merge check will hit this once. Add the module to `optimizeDeps.include` in `vitest.browser.config.ts`, as Vitest itself advises.
+
+**The look-dev verdict stands: MERGE** (merged by the orchestrator at eefe857 / 5311dbe). Counts with the addendum: B 1 (resolved in 5311dbe), I 5, N 7.
+
+## Critic pass 8: trial merge (w2/reference @4553ce2, then w2/lookdev-4 @ecf0765; equal to main 5311dbe + w2/reference)
+
+- **Merge.** On a detached HEAD at the critic's HEAD (main 00bc99b plus this pass's two LOG commits), I ran `git merge --no-ff --no-commit w2/reference`, a scratch commit, then `git merge --no-ff --no-commit w2/lookdev-4`.
+  - The reference step is clean (PHYSICS.md auto-merges).
+  - The look-dev step has one textual conflict, `tests/unit/contracts/thresholds.test.ts`: main's C12 against the branch's P4. I resolved it to 4 + 12 + 13 + 4.
+  - It also has one semantic conflict, W2L-B1: `pacedValidity` against main's D3-6 `RunFrames`.
+- **Before the resolution:**
+  - `npm run typecheck` failed: TS2345, `tools/lookdev/timing.ts:236`.
+  - `npm test` failed one test: `timing.test.ts:203`, a stalled back-to-back run counted VALID. 1857 passed, 9 expected fail.
+- **With the one-line resolution** (`longestOcclusionMs: h.longestOcclusionMs`, identical to the orchestrator's 5311dbe), the tested tree is byte-identical to `git merge-tree --write-tree 5311dbe w2/reference`, apart from `docs/reviews/LOG.md` and two probe files. So the numbers below are the requested trial merge of w2/reference into main 5311dbe.
+- **`npm run mesh`:** no working-tree change, so the committed manifest and outputs are byte-identical.
+- **Gates on the combined tree.** These ran with a solver builder's GPU tests on the machine.
+  - `npm test`: 1858 passed, 9 expected fail (94 files).
+  - `npm run typecheck`: clean. `npm run lint`: clean.
+  - `npm run coverage`: lines 99.60 %, statements 98.73 %, branches 88.36 %, functions 99.63 %; every threshold passes.
+    - `src/flow/reference`: lines 100 % (branches 88.67 %).
+    - `src/flow/mesh`: 98.60 %.
+    - `src/geometry`: 99.59 %.
+    - `src/cycle`: 99.58 %.
+    - `src/thermo`: 100 %.
+    - `src/contracts`: 99.67 %.
+  - `npm run test:mesh`: 29 passed.
+  - `npm run test:browser` (API port 5190):
+    - the first run broke on a mid-run Vite dependency reload (W2L-N7): 1 of 7 files;
+    - the re-run passed 23 of 23 (7 files), with 0 WebGPU errors.
+  - `npm run test:ladder`: 10 files passed, 3 failed, 573 s. These are the same rows and values as at the reference tip: L8, L9a and L9b convergence fail; L7 passes at 96 × 96 (0.0131, ratio 1.048).
+- **Restore.**
+  - `git merge --abort`, back to branch `critic` at 55f6f5b. The scratch commit is unreferenced.
+  - Removed the generated `public/mesh/*.bin`, `coverage/`, `reports/` and `test-results/`.
+  - Both builder worktrees are clean at 4553ce2 and ecf0765. Their ignored `coverage/` and `reports/` were refreshed by the gate runs.
+  - My Playwright Chrome instances closed with their runs. No dev server was started, and the shared Chrome was not used.
+
+**Orchestrator decisions needed (pass 8):**
+- **(y) D4-24:** I confirm the DVFS reading, so back to back may become P4's measure of record. It must apply on three conditions:
+  - valid runs only (W2L-I2);
+  - the OS power source AC throughout (W2L-I4);
+  - the busy fraction reported beside the number.
+
+  Please also correct the D4-24 evidence entry:
+  - the INVALID run is 23239a1 back to back rep 0, and the summary includes it. The valid pairs are −0.59 and −1.22 ms (median −0.90);
+  - the record's conditions end "not charging, 0.98";
+  - the vsync medians are not "the governor fills the frame": rep 0 ran at 56 fps and 10.4 ms, reps 1-2 at 40 fps and 16.4 ms, all at 0.65 busy.
+- **(z) W2R-I5:** delete p_u (D4-35) before the reference merge, or as the next round's first item?
+- **(aa) W2R-I6:** CFL 0.8 is below the fully discrete limit only for β ≈ M_ref; β/M_ref ≤ ~0.6 or ≥ ~4.6 is unstable at 0.8 in 1D. Which remedy goes to the next round? (a) M_ref from the face's β, (b) the scaled diffusion's eigenvalue in the local step, or (c) a stated validity range plus a shear-layer and start-from-rest case.
+- **(bb) W2R-I7:** a D4-19-style steadiness rule for the value rows taken before convergence (L8, L9a, L9b). Separately, L8 converges at CFL 0.8 by about 32500 iterations: keep the 20000 cap (row FAIL), or scale it for the CFL change by a decision?
+- **(cc) W2L-I5:** should back-to-back runs be stricter than D3-6 (the watcher's 2.5-interval stretch), or follow D3-6's occlusion signature? Either way, D3-6's blur rule should reach look-dev captures.
