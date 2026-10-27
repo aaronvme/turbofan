@@ -87,12 +87,14 @@ describe('FADEC: the loop selector and the schedules', () => {
 });
 
 describe('FADEC: the surge recovery sequence (D3-17)', () => {
-  const ACC = 3;
+  // an excess of the schedule over the steady line of 2, so that a cap times it differs from it over 2
+  const ACC = 4;
   const DEC = 1;
   const SS = 2;
 
   it('the acceleration limit: the schedule, or after a surge the capped one (cap of the excess)', () => {
-    expect(accelLimit(ACC, DEC, SS, null, null)).toEqual({ limit: 3, sequenceOver: false });
+    expect(accelLimit(ACC, DEC, SS, null, null)).toEqual({ limit: 4, sequenceOver: false });
+    expect(accelLimit(ACC, DEC, SS, 0.8, null).limit).toBeCloseTo(3.6, 15);
     expect(accelLimit(ACC, DEC, SS, 0.8, null)).toEqual({
       limit: SS + 0.8 * (ACC - SS),
       sequenceOver: false,

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { casingRadiusAt, hubRadiusAt } from '../../../src/contracts/engine';
 import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 import { gamma, gasConstant } from '../../../src/thermo/gas';
-import { REF, lazy } from './fixtures';
+import { REF } from './fixtures';
 import { compressorPoint } from '../../../src/cycle/componentMaps';
 import {
   characteristic,
@@ -49,8 +49,9 @@ const trapezoid = (f: (t: number) => number, a: number, b: number, n = 4000) => 
 };
 
 describe('W1C-I2 / D3-4: the compression system comes from the definition', () => {
-  // lazy (D2-15): built inside each test, so Stryker maps its mutants to the tests that use it
-  const sys = lazy(() => compressionSystem(def));
+  // built inside each test, not at collection and not memoized (D2-15): Stryker maps its mutants
+  // to every test that uses it, not only to the first
+  const sys = () => compressionSystem(def);
   it('duct area is the HPC inlet annulus (station 25)', () => {
     expect(sys().ductAreaM2).toBeCloseTo(coreArea(x('25')), 12);
   });
@@ -82,8 +83,9 @@ describe('W1C-I2 / D3-4: the compression system comes from the definition', () =
 });
 
 describe('W1C-I2 / D3-4: the post-surge cubic extends the scaled HPC map', () => {
-  // lazy (D2-15): built inside each test, so Stryker maps its mutants to the tests that use it
-  const sys = lazy(() => compressionSystem(def));
+  // built inside each test, not at collection and not memoized (D2-15): Stryker maps its mutants
+  // to every test that uses it, not only to the first
+  const sys = () => compressionSystem(def);
   // read inside the tests (D2-15: nothing sized at collection)
   const design = () => {
     const p = REF.design.point;
@@ -132,8 +134,9 @@ describe('W1C-I2 / D3-4: the post-surge cubic extends the scaled HPC map', () =>
 });
 
 describe('D3-17 / C12: a lowered HPC surge line (Delta PRS, SAE ARP1420)', () => {
-  // lazy (D2-15): built inside each test, so Stryker maps its mutants to the tests that use it
-  const sys = lazy(() => compressionSystem(def));
+  // built inside each test, not at collection and not memoized (D2-15): Stryker maps its mutants
+  // to every test that uses it, not only to the first
+  const sys = () => compressionSystem(def);
   const loss = THRESHOLDS.C12.values.surgePressureRatioLoss.value;
 
   it.each([1, 0.8, 0.65])(
@@ -277,5 +280,28 @@ describe('the compression-system pieces, checked independently (D3-13 mutation s
       expect(equilibrium(params).phi).toBeCloseTo(phiEq, 9);
       expect(equilibrium(params).psi).toBeCloseTo(characteristic(params, phiEq), 9);
     }
+  });
+});
+
+describe('compressionSystem rejects a definition it cannot read (D3-13 mutation survivors)', () => {
+  it('names the missing station, the missing HPC rotor and a missing core annulus', () => {
+    expect(() =>
+      compressionSystem({ ...def, stations: def.stations.filter((s) => s.id !== '3') }),
+    ).toThrow(/definition has no station 3/);
+    expect(() =>
+      compressionSystem({
+        ...def,
+        bladeRows: def.bladeRows.filter((r) => !(r.component === 'hpc' && r.kind === 'rotor')),
+      }),
+    ).toThrow(/definition has no HPC rotor/);
+    expect(() =>
+      compressionSystem({
+        ...def,
+        flowpath: {
+          ...def.flowpath,
+          components: def.flowpath.components.filter((c) => c.stream === 'bypass'),
+        },
+      }),
+    ).toThrow(/no core annulus at x = /);
   });
 });

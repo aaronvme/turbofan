@@ -112,6 +112,22 @@ describe('D4-13: the matched solve with a continuation entry', () => {
     );
   });
 
+  it('the walk ends on the target exactly, not on anchor + 1 x (target - anchor)', () => {
+    // 0.7 + (0.1 - 0.7) is 0.09999999999999998 in floating point
+    expect(0.7 + 1 * (0.1 - 0.7)).not.toBe(0.1);
+    const anchor: GasPathAnchor = { n1Rpm: 0.7, n2Rpm: 0.7, wfKgPerS: 0.7, x: idleAnchor().x };
+    let n = 0;
+    const calls: number[][] = [];
+    const solver: GasPathSolver = (_e, _c, n1, n2, wf) => {
+      calls.push([n1, n2, wf]);
+      return ++n === 1 ? lost(_e, _c, n1, n2, wf, []) : converged();
+    };
+    expect(solveMatched(solver, REF, C, anchor, 0.1, 0.1, 0.1)).not.toBeNull();
+    // the direct try, half way, then the target
+    expect(calls.length).toBe(3);
+    expect(calls[2]).toEqual([0.1, 0.1, 0.1]);
+  });
+
   it('a walk that only creeps runs out of solves: lost after MAX_CONTINUATION_SOLVES', () => {
     // converges only on steps of at most the minimum, so the step never grows past 2x the minimum
     let done = 0;
