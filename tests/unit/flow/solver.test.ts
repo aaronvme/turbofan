@@ -212,6 +212,56 @@ describe('reference solver: block interfaces', () => {
   });
 });
 
+describe('reference solver: slip walls', () => {
+  it('carry no mass, energy, angular-momentum or fuel flux in any orientation', () => {
+    // a skewed, tilted box: no wall is aligned with x or r
+    const box = singleBlock(
+      gridBlock('skew', 10, 8, (i, j) => ({
+        x: 0.03 * i + 0.012 * j,
+        r: 0.4 + 0.006 * i + 0.025 * j + 0.002 * Math.sin(i + j),
+      })),
+      { imin: BC.SLIP_WALL, imax: BC.SLIP_WALL, jmin: BC.SLIP_WALL, jmax: BC.SLIP_WALL },
+    );
+    const s = new ReferenceSolver(solverMesh(box), { gas: THERMALLY_PERFECT, freeStream: AMBIENT });
+    s.setState((x, r) => pulse(x + 0.1, r - 0.45));
+    const before = s.totals();
+    for (let k = 0; k < 20; k++) s.stepPhysical();
+    const after = s.totals();
+    const scale = s.absTotals();
+    for (const m of [0, 3, 4, 5]) {
+      expect(Math.abs((after[m] ?? NaN) - (before[m] ?? NaN))).toBeLessThan(
+        1e-13 * (scale[m] ?? NaN),
+      );
+    }
+  });
+
+  it('hold the radial equilibrium of a swirling annulus without a wall mode', () => {
+    const ring = singleBlock(rectangle('ring', 0, 0.05, 0.5, 1.0, 4, 32), {
+      imin: BC.SLIP_WALL,
+      imax: BC.SLIP_WALL,
+      jmin: BC.SLIP_WALL,
+      jmax: BC.SLIP_WALL,
+    });
+    const gas = caloricallyPerfectGas(1.4, 287.05287);
+    const s = new ReferenceSolver(solverMesh(ring), {
+      gas,
+      freeStream: { pressure: 1e5, temperature: 300, velocity: 0 },
+    });
+    const cp = (1.4 * 287.05287) / 0.4;
+    s.setState((_, r) => {
+      const w = 75 / r;
+      const T = 300 - (w * w) / (2 * cp);
+      const p = 1e5 * (T / 300) ** 3.5;
+      return { rho: p / (287.05287 * T), u: 0, v: 0, w, p, z: 0 };
+    });
+    s.iterate(300);
+    const P = s.primitives();
+    let vmax = 0;
+    for (let c = 0; c < s.mesh.nCells; c++) vmax = Math.max(vmax, Math.abs(P[NP * c + 2] ?? NaN));
+    expect(vmax).toBeLessThan(1e-2);
+  });
+});
+
 describe('reference solver: time stepping', () => {
   // a uniform state with a linear relaxation source s = -k U: no fluxes, so every cell follows
   // the scheme's amplification factor exactly

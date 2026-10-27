@@ -1,7 +1,7 @@
 // Ghost-cell boundary conditions (docs/SOLVER.md section 5).
 import { describe, expect, it } from 'vitest';
 import { BC } from '../../../tools/mesh/types';
-import { boundaryParams, ghostPrimitive } from '../../../src/flow/reference/boundary';
+import { boundaryParams, ghostPrimitive, wallGhost } from '../../../src/flow/reference/boundary';
 import {
   THERMALLY_PERFECT,
   caloricallyPerfectGas,
@@ -162,5 +162,28 @@ describe('boundary conditions', () => {
     expect(given[4]).toBeCloseTo(9e4 - ambient.p, 9);
     const sup = physicalToPrim(ambient, { rho: 1.1, u: 600, v: 0, w: 0, p: 1.1e5, z: 0 }, 1);
     expect(Array.from(ghost(ambient, BC.OUTFLOW, sup, 1, 0))).toEqual(Array.from(sup));
+  });
+});
+
+describe('slip-wall ghosts (extrapolated, docs/SOLVER.md section 5)', () => {
+  it('extrapolate scalars and tangential velocity linearly and mirror the normal velocity', () => {
+    const q0 = physicalToPrim(ambient, { rho: 1.1, u: 30, v: 4, w: 9, p: 1.02e5, z: 0.01 }, 1);
+    const q1 = physicalToPrim(ambient, { rho: 1.3, u: 20, v: -6, w: 12, p: 1.05e5, z: 0.02 }, 1.1);
+    const P = new Float64Array(2 * NP);
+    P.set(q0, 0);
+    P.set(q1, NP);
+    const [nx, nr] = [0.6, 0.8];
+    const vn = (q: ArrayLike<number>) => (q[1] ?? NaN) * nx + (q[2] ?? NaN) * nr;
+    const vt = (q: ArrayLike<number>) => -(q[1] ?? NaN) * nr + (q[2] ?? NaN) * nx;
+    for (const layer of [1, 2] as const) {
+      const g = new Float64Array(NP);
+      wallGhost(P, 0, NP, nx, nr, layer, g, 0);
+      const a = layer === 1 ? 2 : 3;
+      for (const k of [0, 3, 4, 5]) {
+        expect(g[k]).toBeCloseTo(a * (q0[k] ?? NaN) - (a - 1) * (q1[k] ?? NaN), 9);
+      }
+      expect(vn(g)).toBeCloseTo(-vn(layer === 1 ? q0 : q1), 12);
+      expect(vt(g)).toBeCloseTo(a * vt(q0) - (a - 1) * vt(q1), 12);
+    }
   });
 });
