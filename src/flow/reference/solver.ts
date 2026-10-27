@@ -53,8 +53,9 @@ export interface SolverOptions {
     readonly minMach: number;
     readonly machCut?: number;
     /**
-     * K_u of AUSM+-up's p_u velocity diffusion in SLAU2's pressure flux (section 7, D4-32's trial),
-     * applied with the D4-20 scaling (machCut < 1) only. Default 0: off.
+     * K_u of AUSM+-up's p_u velocity diffusion in SLAU2's pressure flux, applied with the D4-20
+     * scaling (machCut < 1) only. Default 0: off. D4-32's trial: NOT adopted (it worsened L7 and
+     * L8, section 7), so it is not in the contract; kept for the record.
      */
     readonly velocityDiffusion?: number;
   };
