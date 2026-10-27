@@ -148,7 +148,7 @@ Never quote personal data (emails, keys, tokens) in this file.
   - Compared with D3-7 (10.18 / 9.57 / 12.67 / 14.09 ms), cutaway and hero improved, but default and performance got worse. The default's opaque pass went from 5.59 to 6.29 ms and the rotors from 1.36 to 1.87 ms, against the builder's indicative opaque cut of 6.09 → 4.95 ms.
   - Within each run the default and cutaway are bimodal: p10 about 7.3 ms against p90 about 16.8 ms, while hero, the heaviest load, is tight at 11.9-13.7 ms. That is consistent with the clock following the load (D4-24), but it does not rule out a regression.
   - The next look-dev round must settle it: a back-to-back measurement, and an A/B of bad7ad0 against w1/lookdev-3's 23239a1 under the same mode. The critic checks this evidence before D4-24 applies.
-  - JSON: job tmp `lookdev4_official/`.
+  - Raw output: job tmp `lookdev4_official.log` (the capture exits 1 on a P4 FAIL and wrote no JSON).
 - **D4-25 (w2/reference round 3 @ca296ae, question a): the smooth van Albada limiter is adopted.** This is the ε-regularised, differentiable form, standard for steady and implicit solvers. The ab > 0 switch caused L9a's stall and D4-20's stall wherever M_cut ≤ the local Mach.
   - The ε rule and its scaling are stated in SOLVER.md.
   - L2/L4's shock rows and the positivity fallback must stay green.
