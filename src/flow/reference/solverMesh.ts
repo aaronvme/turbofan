@@ -40,6 +40,9 @@ export interface SolverMesh {
   readonly ghostBc: Uint8Array;
   readonly ghostNx: Float64Array;
   readonly ghostNr: Float64Array;
+  /** Per ghost: its layer (1 touches the face) and the other layer's ghost of the same face cell. */
+  readonly ghostLayer: Uint8Array;
+  readonly ghostPartner: Int32Array;
 }
 
 /** Ghost layers the scheme needs (MUSCL's 4-cell stencil). */
@@ -115,6 +118,8 @@ export function solverMeshFromFile(file: MeshFile): SolverMesh {
   const nGhosts = file.ghostSrc.length;
   const ghostNx = new Float64Array(nGhosts);
   const ghostNr = new Float64Array(nGhosts);
+  const ghostLayer = new Uint8Array(nGhosts);
+  const ghostPartner = new Int32Array(nGhosts);
   const blocks: SolverBlock[] = file.blocks.map((b) => ({
     name: b.name,
     ni: b.ni,
@@ -138,6 +143,8 @@ export function solverMeshFromFile(file: MeshFile): SolverMesh {
           const g = b.ghostOffset + base + layer * n + c;
           ghostNx[g] = sign * (nx[f] ?? NaN);
           ghostNr[g] = sign * (nr[f] ?? NaN);
+          ghostLayer[g] = layer + 1;
+          ghostPartner[g] = layer === 0 ? g + n : g - n;
         }
       }
     };
@@ -171,5 +178,7 @@ export function solverMeshFromFile(file: MeshFile): SolverMesh {
     ghostBc: Uint8Array.from(file.ghostBc),
     ghostNx,
     ghostNr,
+    ghostLayer,
+    ghostPartner,
   };
 }

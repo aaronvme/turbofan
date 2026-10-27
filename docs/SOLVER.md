@@ -95,7 +95,7 @@ Each stage first converts every cell to primitives, then fills every ghost from 
 | code | BC | ghost primitives |
 |---|---|---|
 | 0 | interface | q_s (a plain copy; the neighbour's cell) |
-| 1 | slip wall | (u, v) reflected about the boundary normal n: (u, v) − 2((u, v)·n) n; ρ′, rw, p′, Z copied |
+| 1 | slip wall | from the wall cell q₀ and the next cell inwards q₁ (the two layers' sources): ρ′, rw, p′, Z and the tangential velocity extrapolated linearly (layer 1: 2q₀ − q₁, layer 2: 3q₀ − 2q₁), the normal velocity mirrored (−vn₀, −vn₁); the wall face itself carries only the wall pressure (§7) |
 | 2 | axis | v → −v; everything else copied (rw is even across the axis) |
 | 3 | far field | linearised characteristics about the free stream (below) |
 | 4 | inflow | total conditions (below) |
@@ -108,6 +108,8 @@ Each stage first converts every cell to primitives, then fills every ghost from 
 **Outflow (5)**: if the source cell's outward normal velocity is below its speed of sound ((u, v)·n < c_s), p′_b = p_out − p∞ (default p_out = p∞) and everything else is copied; otherwise everything is copied (supersonic outflow).
 
 **Per-test BC remap.** `SolverOptions.bcRemap` maps a code to another before the table is applied (for example slip wall → far field for ladder L1's uniform flow, which has no wall solution). The default is the identity; the GPU kernel never needs it except for L1.
+
+**Why the wall ghost is extrapolated, not mirrored.** The W0 mirror ghost copies p, which imposes dp/dn = 0 at the wall. Wherever swirl or wall curvature sets a pressure gradient normal to the wall (ρw²/r behind every rotor, ρu²/R on every curved duct wall) that makes the wall pressure first order and leaves an odd-even wall mode: ladder L6 failed with it (radial-equilibrium error 1.3 % of q for the free vortex, 72 Pa at the inner wall), and the extrapolated ghost brings it to 3 Pa. Mirroring the Cartesian (u, v) also let mass leak through walls not aligned with x or r, because MUSCL limits u and v separately; the pressure-only wall flux makes the wall impermeable in any orientation.
 
 Blockage of a ghost: b of its source cell. Both ghost layers are filled the same way, each from its own source cell.
 
@@ -139,7 +141,9 @@ p̃ = ½(p′_L + p′_R) + ½(β⁺(M_L) − β⁻(M_R))(p′_L − p′_R) + q
 F = |S| · (ṁ⁺ + ṁ⁻,  ṁ⁺u_L + ṁ⁻u_R + p̃ n_x,  ṁ⁺v_L + ṁ⁻v_R + p̃ n_r,  ṁ⁺rw_L + ṁ⁻rw_R,  ṁ⁺dh0_L + ṁ⁻dh0_R,  ṁ⁺Z_L + ṁ⁻Z_R)
 ```
 
-The energy component is the η flux ṁ(h0 − h0∞); pressures are gauges (p′). Written this way, F(L, R, S) = −F(R, L, −S) **bitwise**, which makes the max/max interfaces (bitwise-negated face vectors) exactly conservative too. For equal states F reduces to the physical flux (ρ vn, ρu vn + p′n_x, ...), which the tests check.
+The energy component is the η flux ṁ(h0 − h0∞); pressures are gauges (p′).
+
+**Slip-wall faces** do not use SLAU2: F = |S| (0, p′_w n_x, p′_w n_r, 0, 0, 0), with p′_w the wall cell's reconstructed face value of p′ at the wall (q₀ ± ½σ₀, its slope taken with the extrapolated ghost). Mass, angular momentum, energy and fuel fluxes through a wall are exact zeros. Written this way, F(L, R, S) = −F(R, L, −S) **bitwise**, which makes the max/max interfaces (bitwise-negated face vectors) exactly conservative too. For equal states F reduces to the physical flux (ρ vn, ρu vn + p′n_x, ...), which the tests check.
 
 ## 8. Blockage and volume sources (`src/flow/reference/sources.ts`): the W3 interface
 
@@ -207,7 +211,7 @@ The default dt is CFL_phys · min_c(b_c V_c/λ_c) with CFL_phys = 0.9 (the RK3 l
 ## 12. Where f32 differs, and what w2/solver must meet
 
 ### 12.1 Expected f32 differences
-- **Exact in f32 as in f64**: the quiescent ambient (every flux, source and BC value is an exact zero, ladder L1 quiescent is bitwise) and the conservation across interfaces (bitwise-equal or negated face fluxes, §7). The wall mass flux is zero only to rounding: the reflected velocity is not bitwise the mirror image (u² + v² changes in the last bit).
+- **Exact in f32 as in f64**: the quiescent ambient (every flux, source and BC value is an exact zero, ladder L1 quiescent is bitwise) and the conservation across interfaces (bitwise-equal or negated face fluxes, §7). The wall fluxes of mass, angular momentum, energy and fuel are exact zeros too (pressure-only wall flux, §7).
 - **Rounding-level in f32**: the free stream with u∞ ≠ 0 (u = (ρu)/ρ is not bitwise u∞), the 3-step Newton (converges to about 1e-7 relative instead of 1e-15), the inflow BC (sqrt of an enthalpy difference), pow/log in the inflow isentrope.
 - **Metric rounding** (12.3): the f32 asset's Σ S_x is not zero. This affects the f64 oracle and the GPU equally, since both read the same metrics.
 - **Accumulation order**: the kernel's per-face accumulation order may differ from the oracle's; sums agree to rounding.

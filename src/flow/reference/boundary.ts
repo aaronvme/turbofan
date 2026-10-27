@@ -135,6 +135,39 @@ function inflow(
 }
 
 /**
+ * Slip-wall ghost of layer 1 or 2 from the wall cell P[s0..] and the next cell inwards P[s1..]
+ * (section 5): the scalars, rw and the tangential velocity are extrapolated linearly (layer 1:
+ * 2 q0 - q1, layer 2: 3 q0 - 2 q1), the normal velocity is mirrored (-vn0, -vn1). The mirror ghost
+ * of W0 imposed dp/dn = 0, which is wrong wherever swirl or wall curvature sets a pressure gradient
+ * normal to the wall (it left an odd-even wall mode in ladder L6). The wall face itself carries
+ * only the wall pressure (solver.ts), so these values only shape the wall cell's slope.
+ */
+export function wallGhost(
+  P: ArrayLike<number>,
+  s0: number,
+  s1: number,
+  nx: number,
+  nr: number,
+  layer: 1 | 2,
+  out: Float64Array,
+  o: number,
+): void {
+  const a = layer === 1 ? 2 : 3;
+  const b = a - 1;
+  for (const k of [0, 3, 4, 5]) out[o + k] = a * (P[s0 + k] ?? NaN) - b * (P[s1 + k] ?? NaN);
+  const u0 = P[s0 + 1] ?? NaN;
+  const v0 = P[s0 + 2] ?? NaN;
+  const u1 = P[s1 + 1] ?? NaN;
+  const v1 = P[s1 + 2] ?? NaN;
+  const vt = a * (-u0 * nr + v0 * nx) - b * (-u1 * nr + v1 * nx);
+  const vn = -(layer === 1 ? u0 * nx + v0 * nr : u1 * nx + v1 * nr);
+  out[o + 1] = vn * nx - vt * nr;
+  out[o + 2] = vn * nr + vt * nx;
+  out[o + 6] = P[s0 + 6] ?? NaN;
+  out[o + 7] = P[s0 + 7] ?? NaN;
+}
+
+/**
  * The ghost primitives for BC `code` from the source cell's record P[s..], with the boundary
  * face's unit outward normal (nx, nr), into out[o..o + 8).
  */
@@ -150,15 +183,8 @@ export function ghostPrimitive(
   o: number,
 ): void {
   switch (code) {
-    case BC_CODE.SLIP_WALL: {
-      copy(P, s, out, o);
-      const u = P[s + 1] ?? NaN;
-      const v = P[s + 2] ?? NaN;
-      const vn = u * nx + v * nr;
-      out[o + 1] = u - 2 * vn * nx;
-      out[o + 2] = v - 2 * vn * nr;
-      return;
-    }
+    case BC_CODE.SLIP_WALL:
+      throw new Error('a slip-wall ghost needs both wall cells: use wallGhost');
     case BC_CODE.AXIS:
       copy(P, s, out, o);
       out[o + 2] = -(P[s + 2] ?? NaN);

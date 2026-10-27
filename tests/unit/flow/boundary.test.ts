@@ -49,13 +49,18 @@ describe('boundary conditions', () => {
   it('slip wall: reflects the normal velocity, keeps the tangential one and the scalars', () => {
     const q = physicalToPrim(ambient, { rho: 0.9, u: 30, v: -4, w: 7, p: 9e4, z: 0.01 }, 1);
     for (const [nx, nr] of NORMALS) {
-      const g = ghost(ambient, BC.SLIP_WALL, q, nx, nr);
+      const P2 = new Float64Array(2 * NP);
+      P2.set(q, 0);
+      P2.set(q, NP);
+      const g = new Float64Array(NP);
+      wallGhost(P2, 0, NP, nx, nr, 1, g, 0);
       const vn = (q[1] ?? 0) * nx + (q[2] ?? 0) * nr;
       const vt = -(q[1] ?? 0) * nr + (q[2] ?? 0) * nx;
       expect((g[1] ?? 0) * nx + (g[2] ?? 0) * nr).toBeCloseTo(-vn, 12);
       expect(-(g[1] ?? 0) * nr + (g[2] ?? 0) * nx).toBeCloseTo(vt, 12);
-      for (const k of [0, 3, 4, 5]) expect(g[k]).toBe(q[k]);
+      for (const k of [0, 3, 4, 5]) expect(g[k]).toBeCloseTo(q[k] ?? NaN, 9);
     }
+    expect(() => ghost(ambient, BC.SLIP_WALL, q, 1, 0)).toThrow(/wallGhost/);
   });
 
   it('axis: negates the radial velocity only', () => {

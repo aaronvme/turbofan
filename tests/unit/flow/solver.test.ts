@@ -235,8 +235,8 @@ describe('reference solver: slip walls', () => {
     }
   });
 
-  it('hold the radial equilibrium of a swirling annulus without a wall mode', () => {
-    const ring = singleBlock(rectangle('ring', 0, 0.05, 0.5, 1.0, 4, 32), {
+  it('hold the radial equilibrium of a swirling annulus at the walls (no dp/dn = 0 mirror mode)', () => {
+    const ring = singleBlock(rectangle('ring', 0, 0.05, 0.5, 1.0, 4, 64), {
       imin: BC.SLIP_WALL,
       imax: BC.SLIP_WALL,
       jmin: BC.SLIP_WALL,
@@ -248,17 +248,20 @@ describe('reference solver: slip walls', () => {
       freeStream: { pressure: 1e5, temperature: 300, velocity: 0 },
     });
     const cp = (1.4 * 287.05287) / 0.4;
-    s.setState((_, r) => {
+    const vortex = (r: number) => {
       const w = 75 / r;
       const T = 300 - (w * w) / (2 * cp);
       const p = 1e5 * (T / 300) ** 3.5;
       return { rho: p / (287.05287 * T), u: 0, v: 0, w, p, z: 0 };
-    });
+    };
+    s.setState((_, r) => vortex(r));
     s.iterate(300);
     const P = s.primitives();
-    let vmax = 0;
-    for (let c = 0; c < s.mesh.nCells; c++) vmax = Math.max(vmax, Math.abs(P[NP * c + 2] ?? NaN));
-    expect(vmax).toBeLessThan(1e-2);
+    // the inner wall cell (j = 0, i = 1): the W0 mirror ghost left 72 Pa (5e-3 q) here
+    const c = 1;
+    const r = s.mesh.cellR[c] ?? NaN;
+    const q = 0.5 * vortex(0.5).rho * 150 * 150;
+    expect(Math.abs(s.ref.p + (P[NP * c + 4] ?? NaN) - vortex(r).p) / q).toBeLessThan(1e-3);
   });
 });
 

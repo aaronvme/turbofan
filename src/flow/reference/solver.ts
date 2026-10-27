@@ -2,7 +2,13 @@
 // fast, but allocation-free per iteration. One stage: conserved -> primitives (cells, then ghosts
 // with their BCs), MUSCL + SLAU2 face fluxes accumulated per cell, the pressure/swirl source, the
 // volume sources, then the RK update (tracking: 3-stage, local dt; physical: SSP-RK3, global dt).
-import { boundaryParams, ghostPrimitive, type BoundaryParams } from './boundary';
+import {
+  BC_CODE,
+  boundaryParams,
+  ghostPrimitive,
+  wallGhost,
+  type BoundaryParams,
+} from './boundary';
 import { referenceState, type GasModel, type ReferenceState } from './gas';
 import { limitedSlopes } from './muscl';
 import { slau2Flux } from './slau2';
@@ -55,6 +61,8 @@ export class ReferenceSolver {
   private readonly cfl: number;
   private readonly cflPhysical: number;
   private readonly remap: Uint8Array;
+  /** 1 for the ghosts that are slip walls (after the remap), per extended index. */
+  private readonly wall: Uint8Array;
   private readonly P: Float64Array;
   private readonly U0: Float64Array;
   private readonly R: Float64Array;
@@ -86,6 +94,11 @@ export class ReferenceSolver {
     this.cfl = opts.cfl ?? DEFAULT_CFL;
     this.cflPhysical = opts.cflPhysical ?? DEFAULT_CFL_PHYSICAL;
     this.remap = new Uint8Array(256).map((_, k) => opts.bcRemap?.[k] ?? k);
+    this.wall = new Uint8Array(mesh.nCells + mesh.nGhosts);
+    for (let g = 0; g < mesh.nGhosts; g++) {
+      const code = mesh.ghostBc[g] ?? 0;
+      if (code !== 0 && this.remap[code] === BC_CODE.SLIP_WALL) this.wall[mesh.nCells + g] = 1;
+    }
     const n = mesh.nCells;
     const nx = n + mesh.nGhosts;
     this.U = new Float64Array(NU * n);
@@ -328,6 +341,23 @@ export class ReferenceSolver {
     for (let c = 0; c < n; c++) consToPrim(ref, this.U, NU * c, m.cellR[c] ?? NaN, P, NP * c);
     for (let g = 0; g < m.nGhosts; g++) {
       const code = m.ghostBc[g] ?? 0;
+      if (this.wall[n + g] === 1) {
+        const layer = m.ghostLayer[g] === 1 ? 1 : 2;
+        const partner = m.ghostPartner[g] ?? 0;
+        const s0 = m.ghostSrc[layer === 1 ? g : partner] ?? 0;
+        const s1 = m.ghostSrc[layer === 1 ? partner : g] ?? 0;
+        wallGhost(
+          P,
+          NP * s0,
+          NP * s1,
+          m.ghostNx[g] ?? NaN,
+          m.ghostNr[g] ?? NaN,
+          layer,
+          P,
+          NP * (n + g),
+        );
+        continue;
+      }
       ghostPrimitive(
         ref,
         bc,
@@ -421,14 +451,26 @@ export class ReferenceSolver {
       qL[k] = (P[NP * l + k] ?? NaN) + 0.5 * (slope[NU * (f + 1) + k] ?? NaN);
       qR[k] = (P[NP * r + k] ?? NaN) - 0.5 * (slope[NU * (f + 2) + k] ?? NaN);
     }
+    const nx = (dir === 'i' ? m.iNx[face] : m.jNx[face]) ?? NaN;
+    const nr = (dir === 'i' ? m.iNr[face] : m.jNr[face]) ?? NaN;
+    const wallL = this.wall[l] === 1;
+    if (wallL || this.wall[r] === 1) {
+      // slip wall (section 7): only the wall pressure, the interior cell's face value
+      const pw = (wallL ? qR[4] : qL[4]) ?? NaN;
+      const F = this.F;
+      F.fill(0);
+      F[1] = area * pw * nx;
+      F[2] = area * pw * nr;
+      return area;
+    }
     slau2Flux(
       this.ref,
       qL,
       0,
       qR,
       0,
-      (dir === 'i' ? m.iNx[face] : m.jNx[face]) ?? NaN,
-      (dir === 'i' ? m.iNr[face] : m.jNr[face]) ?? NaN,
+      nx,
+      nr,
       area,
       (dir === 'i' ? m.iRf[face] : m.jRf[face]) ?? NaN,
       this.F,
