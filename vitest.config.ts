@@ -40,6 +40,8 @@ export default defineConfig({
         'src/thermo/**': CORE,
         'src/cycle/**': CORE,
         'src/flow/reference/**': CORE,
+        // the mesh-asset loader and decoder the browser app uses, and the reference solver (w2/reference)
+        'src/flow/**': { lines: 90 },
         'src/flow/coupling/**': CORE,
         'src/geometry/**': CORE,
         'tools/mesh/**': { lines: 90 },

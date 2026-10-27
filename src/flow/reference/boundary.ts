@@ -51,7 +51,7 @@ export function boundaryParams(
 }
 
 function copy(P: ArrayLike<number>, s: number, out: Float64Array, o: number): void {
-  for (let k = 0; k < NP; k++) out[o + k] = P[s + k] ?? NaN;
+  for (let k = 0; k < NP; k++) out[o + k] = P[s + k] as number;
 }
 
 /** Linearised characteristic far field about the free stream (section 5). */
@@ -65,9 +65,9 @@ function farField(
   o: number,
 ): void {
   const rhoC = ref.rho * ref.c;
-  const du = (P[s + 1] ?? NaN) - ref.u;
-  const dv = P[s + 2] ?? NaN;
-  const pP = P[s + 4] ?? NaN;
+  const du = (P[s + 1] as number) - ref.u;
+  const dv = P[s + 2] as number;
+  const pP = P[s + 4] as number;
   const dun = du * nx + dv * nr;
   const dut = -du * nr + dv * nx;
   const vnInf = ref.u * nx;
@@ -76,16 +76,16 @@ function farField(
   const pb = 0.5 * (wPlus + wMinus);
   const unb = (wPlus - wMinus) / (2 * rhoC);
   const outflow = vnInf + unb >= 0;
-  const ws = outflow ? pP - ref.c * ref.c * (P[s] ?? NaN) : 0;
+  const ws = outflow ? pP - ref.c * ref.c * (P[s] as number) : 0;
   const utb = outflow ? dut : 0;
   out[o] = (pb - ws) / (ref.c * ref.c);
   out[o + 1] = ref.u + unb * nx - utb * nr;
   out[o + 2] = unb * nr + utb * nx;
-  out[o + 3] = outflow ? (P[s + 3] ?? NaN) : 0;
+  out[o + 3] = outflow ? (P[s + 3] as number) : 0;
   out[o + 4] = pb;
-  out[o + 5] = outflow ? (P[s + 5] ?? NaN) : 0;
-  out[o + 6] = P[s + 6] ?? NaN;
-  out[o + 7] = P[s + 7] ?? NaN;
+  out[o + 5] = outflow ? (P[s + 5] as number) : 0;
+  out[o + 6] = P[s + 6] as number;
+  out[o + 7] = P[s + 7] as number;
 }
 
 /**
@@ -111,7 +111,7 @@ function inflow(
   }
   const g = ref.gas;
   const r = ref.r;
-  const pP = P[s + 4] ?? NaN;
+  const pP = P[s + 4] as number;
   // phi_s(t0 + tau) - phi_s(t0) = R ln(pb / p0), written with log1p of the small difference
   const x = (pP - (bp.p0 - ref.p)) / bp.p0;
   const target = r * Math.log1p(x);
@@ -154,17 +154,17 @@ export function wallGhost(
 ): void {
   const a = layer === 1 ? 2 : 3;
   const b = a - 1;
-  for (const k of [0, 3, 4, 5]) out[o + k] = a * (P[s0 + k] ?? NaN) - b * (P[s1 + k] ?? NaN);
-  const u0 = P[s0 + 1] ?? NaN;
-  const v0 = P[s0 + 2] ?? NaN;
-  const u1 = P[s1 + 1] ?? NaN;
-  const v1 = P[s1 + 2] ?? NaN;
+  for (const k of [0, 3, 4, 5]) out[o + k] = a * (P[s0 + k] as number) - b * (P[s1 + k] as number);
+  const u0 = P[s0 + 1] as number;
+  const v0 = P[s0 + 2] as number;
+  const u1 = P[s1 + 1] as number;
+  const v1 = P[s1 + 2] as number;
   const vt = a * (-u0 * nr + v0 * nx) - b * (-u1 * nr + v1 * nx);
   const vn = -(layer === 1 ? u0 * nx + v0 * nr : u1 * nx + v1 * nr);
   out[o + 1] = vn * nx - vt * nr;
   out[o + 2] = vn * nr + vt * nx;
-  out[o + 6] = P[s0 + 6] ?? NaN;
-  out[o + 7] = P[s0 + 7] ?? NaN;
+  out[o + 6] = P[s0 + 6] as number;
+  out[o + 7] = P[s0 + 7] as number;
 }
 
 /**
@@ -187,7 +187,7 @@ export function ghostPrimitive(
       throw new Error('a slip-wall ghost needs both wall cells: use wallGhost');
     case BC_CODE.AXIS:
       copy(P, s, out, o);
-      out[o + 2] = -(P[s + 2] ?? NaN);
+      out[o + 2] = -(P[s + 2] as number);
       return;
     case BC_CODE.FARFIELD:
       farField(ref, P, s, nx, nr, out, o);
@@ -197,8 +197,8 @@ export function ghostPrimitive(
       return;
     case BC_CODE.OUTFLOW: {
       copy(P, s, out, o);
-      const vn = (P[s + 1] ?? NaN) * nx + (P[s + 2] ?? NaN) * nr;
-      if (vn < (P[s + 7] ?? NaN)) out[o + 4] = bp.pOut - ref.p;
+      const vn = (P[s + 1] as number) * nx + (P[s + 2] as number) * nr;
+      if (vn < (P[s + 7] as number)) out[o + 4] = bp.pOut - ref.p;
       return;
     }
     default:

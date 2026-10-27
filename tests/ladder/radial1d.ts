@@ -85,9 +85,9 @@ export function radialSod(opts: {
         const s = sM >= 0 ? sL : sR;
         const us = sM >= 0 ? star(rl, ul, pl, El, sL) : star(rr, ur, pr, Er, sR);
         out = [
-          (Fs[0] ?? 0) + s * ((us[0] ?? 0) - (U0 ?? 0)),
-          (Fs[1] ?? 0) + s * ((us[1] ?? 0) - (U1 ?? 0)),
-          (Fs[2] ?? 0) + s * ((us[2] ?? 0) - (U2 ?? 0)),
+          (Fs[0] ?? 0) + s * ((us[0] ?? 0) - U0),
+          (Fs[1] ?? 0) + s * ((us[1] ?? 0) - U1),
+          (Fs[2] ?? 0) + s * ((us[2] ?? 0) - U2),
         ];
       }
       for (let m = 0; m < 3; m++) flux[3 * f + m] = (rf[f] ?? 0) * (out[m] ?? 0);

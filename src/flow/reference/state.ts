@@ -31,14 +31,14 @@ export function consToPrim(
   P: Float64Array,
   pOff: number,
 ): void {
-  const rhoP = U[uOff] ?? NaN;
+  const rhoP = U[uOff] as number;
   const rho = ref.rho + rhoP;
-  const u = (U[uOff + 1] ?? NaN) / rho;
-  const v = (U[uOff + 2] ?? NaN) / rho;
-  const rw = (U[uOff + 3] ?? NaN) / rho;
-  const z = (U[uOff + 5] ?? NaN) / rho;
+  const u = (U[uOff + 1] as number) / rho;
+  const v = (U[uOff + 2] as number) / rho;
+  const rw = (U[uOff + 3] as number) / rho;
+  const z = (U[uOff + 5] as number) / rho;
   const w = rw / rc;
-  const de = ((U[uOff + 4] ?? NaN) + rhoP * ref.r * ref.t - 0.5 * rho * dq2(ref, u, v, w)) / rho;
+  const de = ((U[uOff + 4] as number) + rhoP * ref.r * ref.t - 0.5 * rho * dq2(ref, u, v, w)) / rho;
   const phi = productsFraction(ref.gas, z);
   const tP = temperatureGauge(ref, de, phi);
   P[pOff] = rhoP;
@@ -60,12 +60,12 @@ export function primToCons(
   U: Float64Array,
   uOff: number,
 ): void {
-  const rhoP = P[pOff] ?? NaN;
-  const u = P[pOff + 1] ?? NaN;
-  const v = P[pOff + 2] ?? NaN;
-  const rw = P[pOff + 3] ?? NaN;
-  const pP = P[pOff + 4] ?? NaN;
-  const z = P[pOff + 5] ?? NaN;
+  const rhoP = P[pOff] as number;
+  const u = P[pOff + 1] as number;
+  const v = P[pOff + 2] as number;
+  const rw = P[pOff + 3] as number;
+  const pP = P[pOff + 4] as number;
+  const z = P[pOff + 5] as number;
   const rho = ref.rho + rhoP;
   const phi = productsFraction(ref.gas, z);
   const tP = temperatureFromPressure(ref, rhoP, pP, phi);

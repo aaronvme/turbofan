@@ -59,13 +59,13 @@ function faces(
   const area = new Float64Array(n);
   const rf = new Float64Array(n);
   for (let f = 0; f < n; f++) {
-    const ax = nxL[f] ?? NaN;
-    const ar = nrL[f] ?? NaN;
+    const ax = nxL[f] as number;
+    const ar = nrL[f] as number;
     const L = Math.hypot(ax, ar);
     nx[f] = ax / L;
     nr[f] = ar / L;
-    area[f] = areaR[f] ?? NaN;
-    rf[f] = (areaR[f] ?? NaN) / L;
+    area[f] = areaR[f] as number;
+    rf[f] = (areaR[f] as number) / L;
   }
   return { nx, nr, area, rf };
 }
@@ -141,8 +141,8 @@ export function solverMeshFromFile(file: MeshFile): SolverMesh {
         const nr = kind === 0 ? fi.nr : fj.nr;
         for (let layer = 0; layer < GHOST_LAYERS; layer++) {
           const g = b.ghostOffset + base + layer * n + c;
-          ghostNx[g] = sign * (nx[f] ?? NaN);
-          ghostNr[g] = sign * (nr[f] ?? NaN);
+          ghostNx[g] = sign * (nx[f] as number);
+          ghostNr[g] = sign * (nr[f] as number);
           ghostLayer[g] = layer + 1;
           ghostPartner[g] = layer === 0 ? g + n : g - n;
         }

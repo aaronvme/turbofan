@@ -25,13 +25,13 @@ export function limitedSlopes(
   oOff: number,
 ): boolean {
   for (let k = 0; k < 6; k++) {
-    const q = P[cOff + k] ?? NaN;
-    out[oOff + k] = vanAlbada(q - (P[mOff + k] ?? NaN), (P[pOff + k] ?? NaN) - q);
+    const q = P[cOff + k] as number;
+    out[oOff + k] = vanAlbada(q - (P[mOff + k] as number), (P[pOff + k] as number) - q);
   }
-  const rho = ref.rho + (P[cOff] ?? NaN);
-  const p = ref.p + (P[cOff + 4] ?? NaN);
-  const halfRho = 0.5 * Math.abs(out[oOff] ?? NaN);
-  const halfP = 0.5 * Math.abs(out[oOff + 4] ?? NaN);
+  const rho = ref.rho + (P[cOff] as number);
+  const p = ref.p + (P[cOff + 4] as number);
+  const halfRho = 0.5 * Math.abs(out[oOff] as number);
+  const halfP = 0.5 * Math.abs(out[oOff + 4] as number);
   // the lower of the two face values is q - |sigma| / 2 (written as a negated test so NaN falls back)
   if (!(rho - halfRho > 0 && p - halfP > 0)) {
     out.fill(0, oOff, oOff + 6);

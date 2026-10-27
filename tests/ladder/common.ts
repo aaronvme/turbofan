@@ -23,11 +23,6 @@ export function report(
     `reports/ladder/${id}.json`,
     `${JSON.stringify({ id, rows, ...extra }, null, 2)}\n`,
   );
-  for (const r of rows) {
-    process.stdout.write(
-      `[ladder] ${r.id} | ${r.metric} | ${r.threshold} | ${r.value.toPrecision(4)} | ${String(r.pass)}\n`,
-    );
-  }
 }
 
 export interface Convergence {
@@ -60,4 +55,31 @@ export function runTo(s: ReferenceSolver, tEnd: number): number {
     steps++;
   }
   return steps;
+}
+
+/** Growth ratio g with first spacing h0 and n cells spanning `length`: h0 (g^n - 1)/(g - 1) = length. */
+export function geometricGrowth(h0: number, length: number, n: number): number {
+  let lo = 1 + 1e-12;
+  let hi = 2;
+  for (let k = 0; k < 200; k++) {
+    const g = 0.5 * (lo + hi);
+    if ((h0 * (g ** n - 1)) / (g - 1) > length) hi = g;
+    else lo = g;
+  }
+  return 0.5 * (lo + hi);
+}
+
+/** n + 1 node positions from a to b with the first spacing h at a, growing geometrically. */
+export function graded(a: number, b: number, h: number, n: number): number[] {
+  const g = geometricGrowth(h, Math.abs(b - a), n);
+  const out = [a];
+  let x = a;
+  let step = h;
+  for (let k = 0; k < n; k++) {
+    x += Math.sign(b - a) * step;
+    out.push(x);
+    step *= g;
+  }
+  out[n] = b;
+  return out;
 }

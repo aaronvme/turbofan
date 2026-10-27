@@ -32,12 +32,12 @@ function side(
   rf: number,
   s: Side,
 ): void {
-  const rhoP = P[o] ?? NaN;
-  const u = P[o + 1] ?? NaN;
-  const v = P[o + 2] ?? NaN;
-  const w = (P[o + 3] ?? NaN) / rf;
-  const phi = productsFraction(ref.gas, P[o + 5] ?? NaN);
-  const tP = temperatureFromPressure(ref, rhoP, P[o + 4] ?? NaN, phi);
+  const rhoP = P[o] as number;
+  const u = P[o + 1] as number;
+  const v = P[o + 2] as number;
+  const w = (P[o + 3] as number) / rf;
+  const phi = productsFraction(ref.gas, P[o + 5] as number);
+  const tP = temperatureFromPressure(ref, rhoP, P[o + 4] as number, phi);
   const t = ref.t + tP;
   const cp = cpMix(ref.gas, t, phi);
   const r = gasConstantMix(ref.gas, phi);
@@ -81,8 +81,8 @@ export function slau2Flux(
   const r = sideR;
   side(ref, PL, lOff, nx, nr, rf, l);
   side(ref, PR, rOff, nx, nr, rf, r);
-  const pL = PL[lOff + 4] ?? NaN;
-  const pR = PR[rOff + 4] ?? NaN;
+  const pL = PL[lOff + 4] as number;
+  const pR = PR[rOff + 4] as number;
   const cbar = 0.5 * (l.c + r.c);
   const mL = l.vn / cbar;
   const mR = r.vn / cbar;
@@ -103,11 +103,11 @@ export function slau2Flux(
   const mp = 0.5 * (mdot + Math.abs(mdot));
   const mm = 0.5 * (mdot - Math.abs(mdot));
   out[0] = area * (mp + mm);
-  out[1] = area * (mp * (PL[lOff + 1] ?? NaN) + mm * (PR[rOff + 1] ?? NaN) + pt * nx);
-  out[2] = area * (mp * (PL[lOff + 2] ?? NaN) + mm * (PR[rOff + 2] ?? NaN) + pt * nr);
-  out[3] = area * (mp * (PL[lOff + 3] ?? NaN) + mm * (PR[rOff + 3] ?? NaN));
+  out[1] = area * (mp * (PL[lOff + 1] as number) + mm * (PR[rOff + 1] as number) + pt * nx);
+  out[2] = area * (mp * (PL[lOff + 2] as number) + mm * (PR[rOff + 2] as number) + pt * nr);
+  out[3] = area * (mp * (PL[lOff + 3] as number) + mm * (PR[rOff + 3] as number));
   out[4] = area * (mp * l.dh0 + mm * r.dh0);
-  out[5] = area * (mp * (PL[lOff + 5] ?? NaN) + mm * (PR[rOff + 5] ?? NaN));
+  out[5] = area * (mp * (PL[lOff + 5] as number) + mm * (PR[rOff + 5] as number));
 }
 
 /** The exact inviscid flux of one state through the face (for consistency checks). */
@@ -124,11 +124,11 @@ export function physicalFlux(
   const s = sideL;
   side(ref, P, o, nx, nr, rf, s);
   const m = s.rho * s.vn;
-  const pP = P[o + 4] ?? NaN;
+  const pP = P[o + 4] as number;
   out[0] = area * m;
-  out[1] = area * (m * (P[o + 1] ?? NaN) + pP * nx);
-  out[2] = area * (m * (P[o + 2] ?? NaN) + pP * nr);
-  out[3] = area * m * (P[o + 3] ?? NaN);
+  out[1] = area * (m * (P[o + 1] as number) + pP * nx);
+  out[2] = area * (m * (P[o + 2] as number) + pP * nr);
+  out[3] = area * m * (P[o + 3] as number);
   out[4] = area * m * s.dh0;
-  out[5] = area * m * (P[o + 5] ?? NaN);
+  out[5] = area * m * (P[o + 5] as number);
 }

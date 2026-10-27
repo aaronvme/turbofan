@@ -42,11 +42,11 @@ export function massSourceRates(
   out: Float64Array,
   oOff: number,
 ): void {
-  const u = P[pOff + 1] ?? NaN;
-  const v = P[pOff + 2] ?? NaN;
-  const rw = P[pOff + 3] ?? NaN;
-  const z = P[pOff + 5] ?? NaN;
-  const tP = P[pOff + 6] ?? NaN;
+  const u = P[pOff + 1] as number;
+  const v = P[pOff + 2] as number;
+  const rw = P[pOff + 3] as number;
+  const z = P[pOff + 5] as number;
+  const tP = P[pOff + 6] as number;
   const dh0 = deltaH(ref, tP, productsFraction(ref.gas, z)) + 0.5 * dq2(ref, u, v, rw / rc);
   out[oOff] = sm;
   out[oOff + 1] = sm * u;

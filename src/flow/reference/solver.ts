@@ -153,21 +153,22 @@ export class ReferenceSolver {
   setBlockage(b: ArrayLike<number>): void {
     const m = this.mesh;
     const n = m.nCells;
-    for (let c = 0; c < n; c++) this.blockage[c] = b[c] ?? NaN;
-    for (let c = 0; c < n; c++) this.bExt[c] = this.blockage[c] ?? NaN;
-    for (let g = 0; g < m.nGhosts; g++) this.bExt[n + g] = this.blockage[m.ghostSrc[g] ?? 0] ?? NaN;
+    for (let c = 0; c < n; c++) this.blockage[c] = b[c] as number;
+    for (let c = 0; c < n; c++) this.bExt[c] = this.blockage[c] as number;
+    for (let g = 0; g < m.nGhosts; g++)
+      this.bExt[n + g] = this.blockage[m.ghostSrc[g] ?? 0] as number;
     for (let c = 0; c < n; c++) {
-      const bc = this.blockage[c] ?? NaN;
+      const bc = this.blockage[c] as number;
       let sx = 0;
       let sr = 0;
       for (let k = 0; k < 4; k++) {
         const f = this.cellFace[4 * c + k] ?? 0;
-        const bf = 0.5 * (bc + (this.bExt[this.cellNbr[4 * c + k] ?? 0] ?? NaN));
+        const bf = 0.5 * (bc + (this.bExt[this.cellNbr[4 * c + k] ?? 0] as number));
         const iDir = k < 2;
         const sign = k % 2 === 0 ? -1 : 1;
-        const area = (iDir ? m.iArea[f] : m.jArea[f]) ?? NaN;
-        sx += sign * bf * area * ((iDir ? m.iNx[f] : m.jNx[f]) ?? NaN);
-        sr += sign * bf * area * ((iDir ? m.iNr[f] : m.jNr[f]) ?? NaN);
+        const area = (iDir ? m.iArea[f] : m.jArea[f]) as number;
+        sx += sign * bf * area * ((iDir ? m.iNx[f] : m.jNx[f]) as number);
+        sr += sign * bf * area * ((iDir ? m.iNr[f] : m.jNr[f]) as number);
       }
       this.bSx[c] = sx;
       this.bSr[c] = sr;
@@ -178,8 +179,8 @@ export class ReferenceSolver {
   setState(at: (x: number, r: number, cell: number) => PhysicalState): void {
     const m = this.mesh;
     for (let c = 0; c < m.nCells; c++) {
-      const rc = m.cellR[c] ?? NaN;
-      const q = physicalToPrim(this.ref, at(m.cellX[c] ?? NaN, rc, c), rc);
+      const rc = m.cellR[c] as number;
+      const q = physicalToPrim(this.ref, at(m.cellX[c] as number, rc, c), rc);
       primToCons(this.ref, q, 0, rc, this.U, NU * c);
     }
     this.roundStorage();
@@ -218,8 +219,8 @@ export class ReferenceSolver {
     this.computeLocalDt();
     let dt = Infinity;
     for (let c = 0; c < this.mesh.nCells; c++) {
-      const bv = (this.blockage[c] ?? NaN) * (this.mesh.cellVolR[c] ?? NaN);
-      dt = Math.min(dt, ((this.tau[c] ?? NaN) / this.cfl) * this.cflPhysical * bv);
+      const bv = (this.blockage[c] as number) * (this.mesh.cellVolR[c] as number);
+      dt = Math.min(dt, ((this.tau[c] as number) / this.cfl) * this.cflPhysical * bv);
     }
     return dt;
   }
@@ -235,14 +236,14 @@ export class ReferenceSolver {
         this.evaluateSources();
         this.assembleResidual();
         if (k === 0) this.recordResidual();
-        const a = RK3_ALPHA[k] ?? NaN;
+        const a = RK3_ALPHA[k] as number;
         const { U, U0, R, tau, dt } = this;
         const d = this.src.damping;
         for (let c = 0; c < N; c++) {
-          const at = a * (tau[c] ?? NaN);
-          const adt = a * (dt[c] ?? NaN);
+          const at = a * (tau[c] as number);
+          const adt = a * (dt[c] as number);
           for (let m = NU * c; m < NU * c + NU; m++) {
-            U[m] = (U0[m] ?? NaN) - (at * (R[m] ?? NaN)) / (1 + adt * (d[m] ?? NaN));
+            U[m] = (U0[m] as number) - (at * (R[m] as number)) / (1 + adt * (d[m] as number));
           }
         }
         this.roundStorage();
@@ -271,10 +272,10 @@ export class ReferenceSolver {
       const [w0, w1] = weights[k] ?? [NaN, NaN];
       const d = this.src.damping;
       for (let c = 0; c < N; c++) {
-        const tau = dtStep / ((this.blockage[c] ?? NaN) * (this.mesh.cellVolR[c] ?? NaN));
+        const tau = dtStep / ((this.blockage[c] as number) * (this.mesh.cellVolR[c] as number));
         for (let m = NU * c; m < NU * c + NU; m++) {
-          const e = (U[m] ?? NaN) - (tau * (R[m] ?? NaN)) / (1 + dtStep * (d[m] ?? NaN));
-          U[m] = k === 0 ? e : w0 * (U0[m] ?? NaN) + w1 * e;
+          const e = (U[m] as number) - (tau * (R[m] as number)) / (1 + dtStep * (d[m] as number));
+          U[m] = k === 0 ? e : w0 * (U0[m] as number) + w1 * e;
         }
       }
       this.roundStorage();
@@ -314,16 +315,17 @@ export class ReferenceSolver {
     );
     out.set(this.F);
     const bf =
-      0.5 * ((this.bExt[this.line[f + 1] ?? 0] ?? NaN) + (this.bExt[this.line[f + 2] ?? 0] ?? NaN));
-    for (let k = 0; k < NU; k++) out[k] = bf * (out[k] ?? NaN);
+      0.5 *
+      ((this.bExt[this.line[f + 1] ?? 0] as number) + (this.bExt[this.line[f + 2] ?? 0] as number));
+    for (let k = 0; k < NU; k++) out[k] = bf * (out[k] as number);
     return out;
   }
 
   private sumOver(fn: (u: number) => number): Float64Array {
     const t = new Float64Array(NU);
     for (let c = 0; c < this.mesh.nCells; c++) {
-      const bv = (this.blockage[c] ?? NaN) * (this.mesh.cellVolR[c] ?? NaN);
-      for (let k = 0; k < NU; k++) t[k] = (t[k] ?? 0) + bv * fn(this.U[NU * c + k] ?? NaN);
+      const bv = (this.blockage[c] as number) * (this.mesh.cellVolR[c] as number);
+      for (let k = 0; k < NU; k++) t[k] = (t[k] ?? 0) + bv * fn(this.U[NU * c + k] as number);
     }
     return t;
   }
@@ -331,14 +333,14 @@ export class ReferenceSolver {
   private roundStorage(): void {
     if (this.opts.storage !== 'f32') return;
     const U = this.U;
-    for (let k = 0; k < U.length; k++) U[k] = Math.fround(U[k] ?? NaN);
+    for (let k = 0; k < U.length; k++) U[k] = Math.fround(U[k] as number);
   }
 
   private updatePrimitives(): void {
     const m = this.mesh;
     const n = m.nCells;
     const { P, ref, bc } = this;
-    for (let c = 0; c < n; c++) consToPrim(ref, this.U, NU * c, m.cellR[c] ?? NaN, P, NP * c);
+    for (let c = 0; c < n; c++) consToPrim(ref, this.U, NU * c, m.cellR[c] as number, P, NP * c);
     for (let g = 0; g < m.nGhosts; g++) {
       const code = m.ghostBc[g] ?? 0;
       if (this.wall[n + g] === 1) {
@@ -350,8 +352,8 @@ export class ReferenceSolver {
           P,
           NP * s0,
           NP * s1,
-          m.ghostNx[g] ?? NaN,
-          m.ghostNr[g] ?? NaN,
+          m.ghostNx[g] as number,
+          m.ghostNr[g] as number,
           layer,
           P,
           NP * (n + g),
@@ -364,8 +366,8 @@ export class ReferenceSolver {
         code === 0 ? 0 : (this.remap[code] ?? code),
         P,
         NP * (m.ghostSrc[g] ?? 0),
-        m.ghostNx[g] ?? NaN,
-        m.ghostNr[g] ?? NaN,
+        m.ghostNx[g] as number,
+        m.ghostNr[g] as number,
         P,
         NP * (n + g),
       );
@@ -394,26 +396,26 @@ export class ReferenceSolver {
     const m = this.mesh;
     const { P, tau, dt, cellFace, cellNbr, bExt } = this;
     for (let c = 0; c < m.nCells; c++) {
-      const u = P[NP * c + 1] ?? NaN;
-      const v = P[NP * c + 2] ?? NaN;
-      const a = P[NP * c + 7] ?? NaN;
-      const bc = this.blockage[c] ?? NaN;
+      const u = P[NP * c + 1] as number;
+      const v = P[NP * c + 2] as number;
+      const a = P[NP * c + 7] as number;
+      const bc = this.blockage[c] as number;
       let lam = 0;
       for (let d = 0; d < 2; d++) {
         let best = 0;
         for (let s = 0; s < 2; s++) {
           const k = 2 * d + s;
           const f = cellFace[4 * c + k] ?? 0;
-          const nx = (d === 0 ? m.iNx[f] : m.jNx[f]) ?? NaN;
-          const nr = (d === 0 ? m.iNr[f] : m.jNr[f]) ?? NaN;
-          const area = (d === 0 ? m.iArea[f] : m.jArea[f]) ?? NaN;
-          const bf = 0.5 * (bc + (bExt[cellNbr[4 * c + k] ?? 0] ?? NaN));
+          const nx = (d === 0 ? m.iNx[f] : m.jNx[f]) as number;
+          const nr = (d === 0 ? m.iNr[f] : m.jNr[f]) as number;
+          const area = (d === 0 ? m.iArea[f] : m.jArea[f]) as number;
+          const bf = 0.5 * (bc + (bExt[cellNbr[4 * c + k] ?? 0] as number));
           best = Math.max(best, bf * area * (Math.abs(u * nx + v * nr) + a));
         }
         lam += best;
       }
       tau[c] = this.cfl / lam;
-      dt[c] = (tau[c] ?? NaN) * bc * (m.cellVolR[c] ?? NaN);
+      dt[c] = (tau[c] as number) * bc * (m.cellVolR[c] as number);
     }
   }
 
@@ -439,7 +441,7 @@ export class ReferenceSolver {
   /** The SLAU2 flux (before b_f) through face f of the loaded line (between positions f+1, f+2). */
   private faceFromLine(f: number, face: number, dir: 'i' | 'j'): number {
     const m = this.mesh;
-    const area = (dir === 'i' ? m.iArea[face] : m.jArea[face]) ?? NaN;
+    const area = (dir === 'i' ? m.iArea[face] : m.jArea[face]) as number;
     if (!(area > 0)) {
       this.F.fill(0);
       return 0;
@@ -448,15 +450,15 @@ export class ReferenceSolver {
     const l = line[f + 1] ?? 0;
     const r = line[f + 2] ?? 0;
     for (let k = 0; k < NU; k++) {
-      qL[k] = (P[NP * l + k] ?? NaN) + 0.5 * (slope[NU * (f + 1) + k] ?? NaN);
-      qR[k] = (P[NP * r + k] ?? NaN) - 0.5 * (slope[NU * (f + 2) + k] ?? NaN);
+      qL[k] = (P[NP * l + k] as number) + 0.5 * (slope[NU * (f + 1) + k] as number);
+      qR[k] = (P[NP * r + k] as number) - 0.5 * (slope[NU * (f + 2) + k] as number);
     }
-    const nx = (dir === 'i' ? m.iNx[face] : m.jNx[face]) ?? NaN;
-    const nr = (dir === 'i' ? m.iNr[face] : m.jNr[face]) ?? NaN;
+    const nx = (dir === 'i' ? m.iNx[face] : m.jNx[face]) as number;
+    const nr = (dir === 'i' ? m.iNr[face] : m.jNr[face]) as number;
     const wallL = this.wall[l] === 1;
     if (wallL || this.wall[r] === 1) {
       // slip wall (section 7): only the wall pressure, the interior cell's face value
-      const pw = (wallL ? qR[4] : qL[4]) ?? NaN;
+      const pw = (wallL ? qR[4] : qL[4]) as number;
       const F = this.F;
       F.fill(0);
       F[1] = area * pw * nx;
@@ -472,7 +474,7 @@ export class ReferenceSolver {
       nx,
       nr,
       area,
-      (dir === 'i' ? m.iRf[face] : m.jRf[face]) ?? NaN,
+      (dir === 'i' ? m.iRf[face] : m.jRf[face]) as number,
       this.F,
     );
     return area;
@@ -497,13 +499,13 @@ export class ReferenceSolver {
             if (this.faceFromLine(f, face, dir) === 0) continue;
             const l = line[f + 1] ?? 0;
             const r = line[f + 2] ?? 0;
-            const bf = 0.5 * ((bExt[l] ?? NaN) + (bExt[r] ?? NaN));
+            const bf = 0.5 * ((bExt[l] as number) + (bExt[r] as number));
             if (f >= 1)
               for (let k = 0; k < NU; k++)
-                R[NU * l + k] = (R[NU * l + k] ?? 0) + bf * (F[k] ?? NaN);
+                R[NU * l + k] = (R[NU * l + k] ?? 0) + bf * (F[k] as number);
             if (f < nAlong)
               for (let k = 0; k < NU; k++)
-                R[NU * r + k] = (R[NU * r + k] ?? 0) - bf * (F[k] ?? NaN);
+                R[NU * r + k] = (R[NU * r + k] ?? 0) - bf * (F[k] as number);
           }
         }
       }
@@ -512,15 +514,16 @@ export class ReferenceSolver {
     const { P, bSx, bSr } = this;
     const rate = this.src.rate;
     for (let c = 0; c < m.nCells; c++) {
-      const pP = P[NP * c + 4] ?? NaN;
-      const rho = this.ref.rho + (P[NP * c] ?? NaN);
-      const w = (P[NP * c + 3] ?? NaN) / (m.cellR[c] ?? NaN);
-      const bc = this.blockage[c] ?? NaN;
-      R[NU * c + 1] = (R[NU * c + 1] ?? NaN) - pP * (bSx[c] ?? NaN);
+      const pP = P[NP * c + 4] as number;
+      const rho = this.ref.rho + (P[NP * c] as number);
+      const w = (P[NP * c + 3] as number) / (m.cellR[c] as number);
+      const bc = this.blockage[c] as number;
+      R[NU * c + 1] = (R[NU * c + 1] as number) - pP * (bSx[c] as number);
       R[NU * c + 2] =
-        (R[NU * c + 2] ?? NaN) - (pP * (bSr[c] ?? NaN) + bc * rho * w * w * (m.cellArea[c] ?? NaN));
-      const bv = bc * (m.cellVolR[c] ?? NaN);
-      for (let k = NU * c; k < NU * c + NU; k++) R[k] = (R[k] ?? NaN) - bv * (rate[k] ?? NaN);
+        (R[NU * c + 2] as number) -
+        (pP * (bSr[c] as number) + bc * rho * w * w * (m.cellArea[c] as number));
+      const bv = bc * (m.cellVolR[c] as number);
+      for (let k = NU * c; k < NU * c + NU; k++) R[k] = (R[k] as number) - bv * (rate[k] as number);
     }
   }
 
@@ -528,7 +531,8 @@ export class ReferenceSolver {
     const m = this.mesh;
     let sum = 0;
     for (let c = 0; c < m.nCells; c++) {
-      const q = (this.R[NU * c] ?? NaN) / ((this.blockage[c] ?? NaN) * (m.cellVolR[c] ?? NaN));
+      const q =
+        (this.R[NU * c] as number) / ((this.blockage[c] as number) * (m.cellVolR[c] as number));
       sum += q * q;
     }
     this.stats = { residualDensityL2: Math.sqrt(sum / m.nCells) };
