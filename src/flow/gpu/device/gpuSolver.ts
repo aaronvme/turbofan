@@ -57,6 +57,8 @@ export interface CellSourceCoefficients {
   readonly aRho?: ArrayLike<number>;
   readonly kU?: ArrayLike<number>;
   readonly kMass?: ArrayLike<number>;
+  /** 1 per cell: the factor of the force power u . (rate0 + rho aRho)_(1..3) added to s_eta. */
+  readonly work?: ArrayLike<number>;
   readonly damping?: ArrayLike<number>;
 }
 
@@ -369,7 +371,8 @@ export class GpuSolver {
 
   /**
    * Coefficients of the built-in cell source (6 per cell each, kMass 1 per cell; missing: 0):
-   * rate = rate0 + rho aRho - kU U - kMass rho (1, u, v, rw, Delta h0, Z), damping d.
+   * rate = rate0 + rho aRho - kU U - kMass rho (1, u, v, rw, Delta h0, Z), damping d, and
+   * s_eta += work u . f with f = (rate0 + rho aRho) of components 1-3 (u, v, w / r_c).
    */
   setCellSource(c: CellSourceCoefficients): void {
     if (this.coef === null) throw new Error('the solver was created without cellSource');
@@ -392,6 +395,10 @@ export class GpuSolver {
     if (c.kMass !== undefined) {
       if (c.kMass.length !== n) throw new Error(`kMass needs ${n} values`);
       for (let k = 0; k < n; k++) data[4 * CELL_SOURCE_VEC4 * k + 6] = c.kMass[k] ?? NaN;
+    }
+    if (c.work !== undefined) {
+      if (c.work.length !== n) throw new Error(`work needs ${n} values`);
+      for (let k = 0; k < n; k++) data[4 * CELL_SOURCE_VEC4 * k + 7] = c.work[k] ?? NaN;
     }
     this.device.queue.writeBuffer(this.coef, 0, data);
   }

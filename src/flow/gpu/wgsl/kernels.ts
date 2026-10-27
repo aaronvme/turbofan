@@ -613,12 +613,13 @@ export const CELL_SOURCE_VEC4 = 8;
 
 /**
  * The built-in cell source model (section 8), per cell and component, from the stage's state:
- *   rate = rate0 + rho aRho - kU U + s_m (1, u, v, rw, Delta h0, Z),  s_m = -kMass rho
+ *   rate = rate0 + rho aRho - kU U + s_m (1, u, v, rw, Delta h0, Z),  s_m = -kMass rho,
+ *   rate_eta += work (u f_1 + v f_2 + (w / r_c) f_3),  f = rate0 + rho aRho (a force's power)
  *   damping = the given d
  * (the last term is massSourceRates: a mass source at the local state, carrying its h0). This
  * covers a constant source, a force density proportional to rho (ladder L9) and a point-implicit
- * sink at the local state (ladder L8). Coefficients, 8 vec4 per cell: rate0 (4), (rate0 (2),
- * kMass, 0), aRho (4), (aRho (2), 0, 0), kU (4), (kU (2), 0, 0), d (4), (d (2), 0, 0).
+ * sink at the local state (ladder L8), and an axial force with its power (ladder L9b). Coefficients,
+ * 8 vec4 per cell: rate0 (4), (rate0 (2), kMass, work), aRho (4), (aRho (2), 0, 0), kU (4), (kU (2), 0, 0), d (4), (d (2), 0, 0).
  * Bindings: 1 U_stage, 2 coefficients, 3 sources (rw), 4 prim, 5 geo.
  */
 export function cellSourceKernelWgsl(o: KernelOptions): string {
@@ -639,8 +640,15 @@ fn sourceMain(@builtin(global_invocation_id) gid: vec3u) {
   let rho = P.rhoInf + qa.x;
   // kU U on the absolute momentum: the state holds (rho u)' = rho u - rho_inf u_inf
   let ua = U[2u * c] + vec4f(0.0, P.rhoInf * P.uInf, 0.0, 0.0);
-  var ra = coef[o] + rho * coef[o + 2u] - coef[o + 4u] * ua;
+  let fa = coef[o] + rho * coef[o + 2u];
+  var ra = fa - coef[o + 4u] * ua;
   var rb = coef[o + 1u].xy + rho * coef[o + 3u].xy - coef[o + 5u].xy * U[2u * c + 1u].xy;
+  let work = coef[o + 1u].w;
+  if (work != 0.0) {
+    // the power of the force densities rate0 + rho aRho (components 1-3): s_eta += u . f
+    let rc = geo[CELL_GEO + c].x;
+    rb.x += work * ((P.uInf + qa.y) * fa.y + qa.z * fa.z + ((qa.w / rc) * fa.w) / rc);
+  }
   let kMass = coef[o + 1u].z;
   if (kMass != 0.0) {
     let sm = -kMass * rho;
