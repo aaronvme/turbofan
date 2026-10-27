@@ -22,22 +22,35 @@ export function shockCase(ni: number, nj: number, maxIterations: number) {
         : { p0: P0 * shock.p02p01, aStar: aStar2, supersonic: false },
     ),
   );
-  const conv = converge(s, 1e-5, maxIterations);
+  // D4-19: the last STEADY_WINDOW iterations of the run sample the shock position every 100
+  const conv = converge(s, 1e-5, maxIterations - STEADY_WINDOW);
   const p1 = P0 * pOverP0(M1, GAMMA);
   const mid = 0.5 * (p1 + p1 * shock.p2p1);
+  const samples: number[] = [];
+  for (let k = 0; k < STEADY_WINDOW / 100; k++) {
+    s.iterate(100);
+    samples.push(shockPosition(s, mid));
+  }
+  const xs = samples[samples.length - 1] ?? NaN;
+  const frac = Math.abs(xs - XS) / (2 * LN);
+  // max - min of the sampled position over the nozzle length (D4-19: <= 0.1 %)
+  const drift = (Math.max(...samples) - Math.min(...samples)) / (2 * LN);
+  return { conv, xs, frac, pExit, drift, samples, residualEnd: s.stats.residualDensityL2 };
+}
+
+/** D4-19's steadiness window: the last 2000 iterations of the run (PHYSICS.md 3.3). */
+export const STEADY_WINDOW = 2000;
+
+/** Where the column-averaged pressure first crosses `mid` in the diverging section. */
+function shockPosition(s: ReturnType<typeof nozzleSolver>, mid: number): number {
   const cols = columns(s);
-  let xs = NaN;
   for (let i = 1; i < cols.length; i++) {
     const a = cols[i - 1];
     const b = cols[i];
     if (a === undefined || b === undefined || a.x <= 0) continue;
-    if (a.p < mid && b.p >= mid) {
-      xs = a.x + ((mid - a.p) / (b.p - a.p)) * (b.x - a.x);
-      break;
-    }
+    if (a.p < mid && b.p >= mid) return a.x + ((mid - a.p) / (b.p - a.p)) * (b.x - a.x);
   }
-  const frac = Math.abs(xs - XS) / (2 * LN);
-  return { conv, xs, frac, pExit };
+  return NaN;
 }
 
 /**
@@ -47,9 +60,12 @@ export function shockCase(ni: number, nj: number, maxIterations: number) {
  */
 export const SHOCK_GRID = { ni: 170, nj: 17, maxIterations: 17000 } as const;
 
+/** D4-19: 0.1 % of the nozzle length (PHYSICS.md 3.3). */
+const STEADY_TOLERANCE = 1e-3;
+
 export function run() {
   const L4 = THRESHOLDS.L4.values;
-  const { conv, xs, frac, pExit } = shockCase(
+  const { conv, xs, frac, pExit, drift, residualEnd } = shockCase(
     SHOCK_GRID.ni,
     SHOCK_GRID.nj,
     SHOCK_GRID.maxIterations,
@@ -62,16 +78,30 @@ export function run() {
         metric: 'normal-shock position error / nozzle length (170 x 17)',
         threshold: `< ${L4.maxShockPositionFractionOfLength.value}`,
         value: frac,
-        pass: frac < L4.maxShockPositionFractionOfLength.value,
+        pass: frac < L4.maxShockPositionFractionOfLength.value && drift <= STEADY_TOLERANCE,
       },
       {
         id: 'L4',
-        metric: 'shock case (170 x 17): iterations to converge to 1e-5',
-        threshold: '<= 17000',
+        metric: `D4-19 steadiness: shock position max - min over the last ${STEADY_WINDOW} iterations / length`,
+        threshold: `<= ${STEADY_TOLERANCE}`,
+        value: drift,
+        pass: drift <= STEADY_TOLERANCE,
+      },
+      {
+        id: 'L4',
+        metric: `shock case (170 x 17): iterations to 1e-5 (converged: ${String(conv.converged)}; open, D4-19/D4-21)`,
+        threshold: 'reported',
         value: conv.iterations,
-        pass: conv.converged,
+        pass: 'reported' as const,
+      },
+      {
+        id: 'L4',
+        metric: 'shock case (170 x 17): final residual / first',
+        threshold: 'reported',
+        value: residualEnd / conv.first,
+        pass: 'reported' as const,
       },
     ],
-    extra: { conv, xs, pExit },
+    extra: { conv, xs, pExit, drift },
   };
 }

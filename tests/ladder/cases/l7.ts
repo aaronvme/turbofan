@@ -13,7 +13,14 @@ const RS = 0.5;
 const NR = 48;
 const NT = 48;
 
-function sphere(mach: number, precondition: boolean) {
+/** One sphere run; machCut is the D4-20 M_cut (default: minMach = the free-stream Mach). */
+export function sphere(
+  mach: number,
+  precondition: boolean,
+  machCut = mach,
+  tol = 1e-4,
+  cap = 20000,
+) {
   // square wall cells: the first radial spacing equals the polar spacing at the wall
   const g = geometricGrowth((RS * Math.PI) / NT, 10 - RS, NR);
   const mesh = solverMesh(polarMesh(RS, 10, NR, NT, g, BC.SLIP_WALL, BC.FARFIELD));
@@ -25,10 +32,10 @@ function sphere(mach: number, precondition: boolean) {
   const s = new ReferenceSolver(mesh, {
     gas: THERMALLY_PERFECT,
     freeStream: { pressure: 101325, temperature: 288.15, velocity: u },
-    ...(precondition ? { lowMachPreconditioning: { minMach: mach } } : {}),
+    ...(precondition ? { lowMachPreconditioning: { minMach: mach, machCut } } : {}),
   });
   s.setUniform({ rho: s.ref.rho, u, v: 0, w: 0, p: 101325, z: 0 });
-  const conv = converge(s, 1e-4, 20000);
+  const conv = converge(s, tol, cap);
   // wall faces: i-faces i = 0, j = 0 (theta = 0, the rear) .. NT - 1 (the front)
   const q = 0.5 * s.ref.rho * u * u;
   const cp: number[] = [];
