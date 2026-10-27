@@ -370,6 +370,38 @@ describe('reference solver: time stepping', () => {
   });
 });
 
+describe('reference solver: low-Mach inflow and outflow', () => {
+  // A blockage duct at M 0.06 between a total-pressure inflow and a static-pressure outflow. With
+  // the static pressure taken from inside, the inflow ghost's speed answered a pressure change with
+  // du = -dp / (rho u): a feedback of rate c^2 / (u dx), 1 / M times what the acoustic time step
+  // covers, and the plain scheme diverged from its own steady state at any CFL (docs/SOLVER.md 5).
+  it('converge from rest without preconditioning', () => {
+    const duct = solverMesh(
+      singleBlock(rectangle('duct', -0.3, 0.3, 0.5, 0.6, 24, 3), {
+        imin: BC.INFLOW,
+        imax: BC.OUTFLOW,
+        jmin: BC.SLIP_WALL,
+        jmax: BC.SLIP_WALL,
+      }),
+    );
+    const s = new ReferenceSolver(duct, {
+      gas: caloricallyPerfectGas(1.4, 287.05287),
+      freeStream: AMBIENT,
+      inflowTotal: { p0: 101325, t0: 288.15 },
+      outflowPressure: 101325 * 0.998,
+    });
+    s.setBlockage(
+      Float64Array.from(duct.cellX, (x) =>
+        Math.abs(x) < 0.1 ? 1 - 0.15 * Math.cos((Math.PI * x) / 0.2) ** 2 : 1,
+      ),
+    );
+    const first = s.iterate(1).residualDensityL2;
+    let last = first;
+    for (let k = 0; k < 6000 && last > 1e-10 * first; k++) last = s.iterate(1).residualDensityL2;
+    expect(last).toBeLessThanOrEqual(1e-10 * first);
+  });
+});
+
 describe('volume sources', () => {
   it('a mass source carries the local stagnation enthalpy gauge', () => {
     const s = new ReferenceSolver(solverMesh(closed), {

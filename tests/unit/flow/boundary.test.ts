@@ -119,13 +119,16 @@ describe('boundary conditions', () => {
     expect(upstream[5]).toBe(0);
   });
 
-  it('inflow: total pressure and temperature from the parameters, static pressure from inside', () => {
+  it('inflow: total pressure and temperature from the parameters, the outgoing characteristic from inside', () => {
     const gas = caloricallyPerfectGas(1.4, 287.05287);
     const ref = referenceState(gas, { pressure: 1e5, temperature: 300, velocity: 0 });
     const params = boundaryParams(ref, { inflowTotal: { p0: 1.5e5, t0: 400 } });
     const q = physicalToPrim(ref, { rho: 1, u: 10, v: 3, w: 9, p: 1.2e5, z: 0.02 }, 1);
     const g = ghost(ref, BC.INFLOW, q, -1, 0, params);
-    expect(g[4]).toBe(q[4]);
+    // p' + rho c u_n of the cell (u_n = -u along the outward normal -x) is carried to the ghost
+    const rc = (ref.rho + (q[0] ?? NaN)) * (q[7] ?? NaN);
+    const wCell = (q[4] ?? NaN) - rc * (q[1] ?? NaN);
+    expect((g[4] ?? NaN) - rc * (g[1] ?? NaN)).toBeCloseTo(wCell, 6);
     const rho = ref.rho + (g[0] ?? NaN);
     const p = ref.p + (g[4] ?? NaN);
     const T = p / (rho * 287.05287);
