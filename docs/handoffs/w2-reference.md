@@ -12,7 +12,7 @@ DONE (W2R-n IDs -> commits)
 - W2R-9 bfaf7c6 / ce41402: the f32-storage experiment runs in a closed box (D4-12). Tracking 1.9e-7 / 4.4e-7 / 1.4e-6 after 1 / 10 / 100 iterations; physical 8.4e-8 / 2.4e-7 / 1.3e-5. Every row of SOLVER.md 12.2, N = 100 included, is backed by a margin of 54x or more.
 - W2R-10 bfaf7c6: `tests/unit/flow/edges.test.ts` (faceFlux both directions, f32 storage, supersonic inflow, the beta = 1 increment, solver-mesh input checks). src/flow/reference branch coverage is 89.1 %, against the 85 % gate.
 
-LADDER (CPU; full run @6eb4a30 except the L7 and L4b-grid rows; reports/ladder/*.json)
+LADDER (CPU; full run @882333d; reports/ladder/*.json)
 | case | metric | threshold | value | |
 |---|---|---|---|---|
 | L1 | quiescent, 130k f32 asset, residual bitwise 0 | < 1e-4 m/s | 0 | PASS |
@@ -81,10 +81,10 @@ GOTCHAS
 - `python` writing docs on Windows needs encoding='utf-8' and newline='' (cp1252 otherwise).
 - Vitest's module runner slows this numeric code 3-10x; heavy cases run through tests/ladder/spawn.ts (plain Node). Node's type stripping forbids enums and parameter properties in anything the cases import.
 
-GATES @GATEHASH
-- npm test: GATETEST
+GATES @882333d (the code; the handoff commits change only this file)
+- npm test: 1698 passed + 5 expected fail (83 files)
 - npm run lint: clean. npm run typecheck: clean.
-- npm run coverage: GATECOV
+- npm run coverage: passes; lines 99.57 %, branches 88.03 % overall; src/flow/reference lines 99.48 %, branches 89.01 % (gate 85 %)
 - npm run test:mesh: 29 passed.
-- npm run test:ladder: LADDERGATE
+- npm run test:ladder: 8 files passed, 5 failed (L7, L8, and the convergence rows of L4b, L9a, L9b), 528 s. The L4b-grid study ran by hand (about 21 min).
 - No new dependencies. No GPU, browser, bench or dev server used.
