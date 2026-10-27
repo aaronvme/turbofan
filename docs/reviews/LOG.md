@@ -160,6 +160,18 @@ Never quote personal data (emails, keys, tokens) in this file.
   - Next: find the mechanism by a linear (von Neumann / eigenvalue) analysis of the scaled-dissipation scheme on the polar axis cells, with the smooth limiter. Fix it there.
   - The critic gets an independent read in pass 7. W2/solver may start on the settled scheme, but its M_cut term is not final until this closes.
 - **D4-28 (question d): the D4-23 point-implicit swirl Jacobian is dropped.** It is nilpotent here and had no effect, and the stall came from the limiter (D4-25). The source stays explicit, and SOLVER.md says why.
+- **D4-29 (critic pass 7 question v): W2R-6 is investigated, and fixed before W3.** W2R-6 is the blockage instability of the plain and physical-time scheme. Every W3 blade row carries blockage, so this is not accepted as a known limitation.
+  - First, W2R-B1 pins it as failing in both modes (a visible KNOWN-FAIL), corrects the `precondition.test.ts` comment, and documents it in the handoff and SOLVER.md. That is what lifts the FIX FIRST.
+  - Then the next reference round investigates it. The first suspect is the well-balancedness of the p∇b source: its face pressures against the cell pressures, i.e. whether uniform p with variable b produces zero residual discretely.
+- **D4-30 (question w): the L8 reframing is accepted.** The band follows minMach and the CFL: it is a fully discrete instability of the preconditioned tracking iteration, and the 1D analysis gives a CFL limit of 0.97 for the preconditioned acoustic pair. M_cut = minMach = 0.003 stays. The next reference round may:
+  - (1) amend D4-8 for preconditioned tracking, with the CFL set from a fully discrete (von Neumann / eigenvalue) amplification analysis of the actual 3-stage scheme, documented and pinned by a test;
+  - (2) add the matched velocity diffusion in the pressure flux, the AUSM+-up p_u term, as the companion to D4-20's scaled pressure diffusion. This is the established low-Mach pair.
+  
+  L2/L4 must stay green, and L7/L8 are reported. Plain SLAU2 stays in physical-time mode.
+- **D4-31 (question x): C12's recovery bias is accepted for now.** C12 passes as pre-registered, but the bias is tuned to the 6% ΔPRS case: at 7-8% it gives two surges and 95% thrust only at 11.5 s.
+  - Now: add a second pin at 4%, and state the headroom (the 7-8% failure) in the fidelity ledger.
+  - Next: the D4-18 settling round makes the recovery robust over 4-8% ΔPRS, with no case-specific bias. That acceptance range is pre-registered there.
+- **Slot plan update:** after W2R-B1 merges, slot A runs the reference round 4 (W2R-I1..I4, D4-29, D4-30). When w2/lookdev-4 finishes, slot B runs **w2/solver**, which starts on the parts the critic cleared and holds back the limiter, the preconditioned CFL/dissipation and the oracle comparisons until round 4 lands. w2/flowviz and w2/app-ui follow.
 
 
 
