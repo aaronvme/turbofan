@@ -14,6 +14,7 @@ import {
   preconditionIncrement,
   spectralRadius,
 } from '../../../src/flow/reference/precondition';
+import { boundaryParams, ghostPrimitive } from '../../../src/flow/reference/boundary';
 import { ReferenceSolver } from '../../../src/flow/reference/solver';
 import { NP, NU, consToPrim, physicalToPrim, primToCons } from '../../../src/flow/reference/state';
 import { converge } from '../../ladder/common';
@@ -88,6 +89,76 @@ describe('preconditioner (pure parts)', () => {
     };
     expect(Math.abs(ds(scaled) - ds(plain))).toBeLessThan(1e-6 * Math.abs(ds(plain)) + 1e-12);
   });
+});
+
+describe('far field under preconditioning', () => {
+  const ref = referenceState(THERMALLY_PERFECT, {
+    pressure: 101325,
+    temperature: 288.15,
+    velocity: 3.4,
+  });
+  const q = physicalToPrim(ref, { rho: 1.2251, u: 3.1, v: 0.2, w: 0, p: 101327, z: 0 }, 1);
+  const ghost = (beta2: number, nx: number) => {
+    const out = new Float64Array(NP);
+    ghostPrimitive(
+      ref,
+      boundaryParams(ref, { farFieldBeta2: beta2 }),
+      BC.FARFIELD,
+      q,
+      0,
+      nx,
+      0,
+      out,
+      0,
+    );
+    return out;
+  };
+
+  it('is the physical far field at beta^2 = 1', () => {
+    const plain = new Float64Array(NP);
+    ghostPrimitive(ref, boundaryParams(ref), BC.FARFIELD, q, 0, 1, 0, plain, 0);
+    expect(ghost(1, 1)).toEqual(plain);
+  });
+
+  it('keeps the outgoing preconditioned characteristic and zeroes the incoming one', () => {
+    const b2 = 1e-4;
+    for (const nx of [1, -1]) {
+      const g = ghost(b2, nx);
+      const vn = ref.u * nx;
+      const root = Math.sqrt((1 - b2) ** 2 * vn * vn + 4 * b2 * ref.c * ref.c);
+      const ap = ref.rho * (0.5 * ((1 + b2) * vn + root) - b2 * vn);
+      const am = ref.rho * (0.5 * ((1 + b2) * vn - root) - b2 * vn);
+      const dun = (u: number, v: number) => (u - ref.u) * nx + v * 0;
+      const wCell = (q[4] as number) + ap * dun(q[1] as number, q[2] as number);
+      expect((g[4] as number) + ap * dun(g[1] as number, g[2] as number)).toBeCloseTo(wCell, 9);
+      expect((g[4] as number) + am * dun(g[1] as number, g[2] as number)).toBeCloseTo(0, 9);
+    }
+  });
+
+  it('lets a far-field duct at M 0.01 converge (the physical far field diverged with it)', () => {
+    const duct = solverMesh(
+      singleBlock(rectangle('duct', -0.3, 0.3, 0, 0.6, 24, 8), {
+        imin: BC.FARFIELD,
+        imax: BC.FARFIELD,
+        jmin: BC.AXIS,
+        jmax: BC.SLIP_WALL,
+      }),
+    );
+    const u = 0.01 * 340.29;
+    const s = new ReferenceSolver(duct, {
+      gas: caloricallyPerfectGas(1.4, 287.05287),
+      freeStream: { pressure: 101325, temperature: 288.15, velocity: u },
+      lowMachPreconditioning: { minMach: 0.01 },
+    });
+    s.setBlockage(
+      Float64Array.from(duct.cellX, (x) =>
+        Math.abs(x) < 0.1 ? 1 - 0.15 * Math.cos((Math.PI * x) / 0.2) ** 2 : 1,
+      ),
+    );
+    s.setUniform({ rho: s.ref.rho, u, v: 0, w: 0, p: 101325, z: 0 });
+    const conv = converge(s, 1e-10, 3000);
+    expect(conv.converged).toBe(true);
+  }, 120_000);
 });
 
 describe('preconditioned tracking mode', () => {
