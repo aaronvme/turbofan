@@ -15,7 +15,11 @@ import {
   spectralRadius,
 } from '../../../src/flow/reference/precondition';
 import { boundaryParams, ghostPrimitive } from '../../../src/flow/reference/boundary';
-import { ReferenceSolver } from '../../../src/flow/reference/solver';
+import {
+  DEFAULT_CFL,
+  DEFAULT_CFL_PRECONDITIONED,
+  ReferenceSolver,
+} from '../../../src/flow/reference/solver';
 import { NP, NU, consToPrim, physicalToPrim, primToCons } from '../../../src/flow/reference/state';
 import { converge } from '../../ladder/common';
 import { BC, rectangle, singleBlock, solverMesh, threeBlockRow } from './helpers';
@@ -235,6 +239,25 @@ describe('preconditioned tracking mode', () => {
     b.iterate(3);
     expect(b.U).toEqual(a.U);
     expect(b.localDt()).toEqual(a.localDt());
+  });
+
+  // D4-32: the pseudo-acoustic pair needs its own CFL (section 10, tests/unit/flow/rk.test.ts)
+  it('takes DEFAULT_CFL_PRECONDITIONED when no CFL is given (minMach >= 1: the plain default)', () => {
+    const solver = (minMach: number, cfl?: number) => {
+      const s = new ReferenceSolver(mesh, {
+        gas: THERMALLY_PERFECT,
+        freeStream: fs,
+        lowMachPreconditioning: { minMach },
+        ...(cfl === undefined ? {} : { cfl }),
+      });
+      s.setState(pulse);
+      return s.localDt();
+    };
+    expect(DEFAULT_CFL_PRECONDITIONED).toBe(0.8);
+    expect(solver(0.01)).toEqual(solver(0.01, DEFAULT_CFL_PRECONDITIONED));
+    const ratio = solver(0.01, 1.2).map((dt, c) => dt / (solver(0.01)[c] as number));
+    for (const r of ratio) expect(r).toBeCloseTo(1.2 / DEFAULT_CFL_PRECONDITIONED, 12);
+    expect(solver(1)).toEqual(solver(1, DEFAULT_CFL));
   });
 
   it('keeps the quiescent ambient exactly', () => {

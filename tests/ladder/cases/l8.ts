@@ -2,40 +2,25 @@
 // source interface (docs/SOLVER.md section 8): a point-implicit sink s = -k U removing gas at its
 // local h0 in the cells within 0.1 m of the origin; |u| against mdot / (4 pi r^2 rho) at 0.2-1 m.
 import { THRESHOLDS } from '../../../src/contracts/thresholds';
-import { THERMALLY_PERFECT } from '../../../src/flow/reference/gas';
 import { ReferenceSolver } from '../../../src/flow/reference/solver';
-import { massSourceRates, type SourceModel } from '../../../src/flow/reference/sources';
 import { NP } from '../../../src/flow/reference/state';
-import { BC, polarMesh, solverMesh } from '../../unit/flow/helpers';
-import { converge, geometricGrowth } from '../common';
-
-const R_IN = 0.05;
-const R_OUT = 2;
-const NR = 64;
-const NT = 24;
-const K = 225;
+import { converge } from '../common';
+import { SINK, sinkCase } from '../oracle';
 
 /** minMach = M_cut of the preconditioned tracking mode (D4-20): the engine's value, SOLVER.md 7. */
 const MACH_CUT = Number(process.env.L8_MACH_CUT ?? 0.003);
 
 function sinkRun(precondition: boolean, machCut = MACH_CUT) {
-  const g = geometricGrowth((R_IN * Math.PI) / NT, R_OUT - R_IN, NR);
-  const mesh = solverMesh(polarMesh(R_IN, R_OUT, NR, NT, g, BC.SLIP_WALL, BC.FARFIELD));
+  // the set-up is shared with the SOLVER.md 12.2 rows (tests/ladder/oracle.ts)
+  const {
+    mesh,
+    options,
+    sinkCells,
+    growth: g,
+  } = sinkCase(precondition ? { minMach: machCut, machCut } : undefined);
+  const K = SINK.k;
   const radius = (c: number) => Math.hypot(mesh.cellX[c] ?? NaN, mesh.cellR[c] ?? NaN);
-  const sinkCells = Array.from({ length: mesh.nCells }, (_, c) => c).filter((c) => radius(c) < 0.1);
-  const sink: SourceModel = (ctx, out) => {
-    for (const c of sinkCells) {
-      const rho = ctx.ref.rho + (ctx.prim[NP * c] ?? NaN);
-      massSourceRates(ctx.ref, ctx.prim, NP * c, mesh.cellR[c] ?? NaN, -K * rho, out.rate, 6 * c);
-      for (let m = 0; m < 6; m++) out.damping[6 * c + m] = K;
-    }
-  };
-  const s = new ReferenceSolver(mesh, {
-    gas: THERMALLY_PERFECT,
-    freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
-    sources: sink,
-    ...(precondition ? { lowMachPreconditioning: { minMach: machCut, machCut } } : {}),
-  });
+  const s = new ReferenceSolver(mesh, options);
   const conv = converge(s, 1e-5, 20000);
   const P = s.primitives();
   let mdot = 0;

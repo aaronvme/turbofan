@@ -90,32 +90,48 @@ export function stepEigenvalues(k: AcousticCase, tx: number, tr: number): C[] {
   return cubicRoots(c2, c1, c0).map((z) => scale(tau, z));
 }
 
-/** max |G(cfl z)| over the wave numbers (n x n in 2D, n in 1D) and the eigenvalues. */
-export function maxGain(alpha: readonly number[], k: AcousticCase, cfl: number, n = 96): number {
-  const [a1, a2] = alpha as [number, number];
-  let worst = 0;
+/** Every step eigenvalue (per unit CFL) over the wave numbers: n x (n + 1) in 2D, n in 1D. */
+export function allEigenvalues(k: AcousticCase, n = 96): C[] {
+  const out: C[] = [];
   const nr = k.aspect > 0 ? n : 0;
   for (let i = 1; i <= n; i++)
-    for (let j = 0; j <= nr; j++) {
-      if (k.aspect > 0 && i === 0 && j === 0) continue;
-      for (const z1 of stepEigenvalues(k, (Math.PI * i) / n, nr > 0 ? (Math.PI * j) / n : 0)) {
-        const z = scale(cfl, z1);
-        const z2 = mul(z, z);
-        const g = add(add([1, 0], z), add(scale(a2, z2), scale(a1 * a2, mul(z2, z))));
-        worst = Math.max(worst, Math.hypot(g[0], g[1]));
-      }
-    }
+    for (let j = 0; j <= nr; j++)
+      out.push(...stepEigenvalues(k, (Math.PI * i) / n, nr > 0 ? (Math.PI * j) / n : 0));
+  // the wave numbers (0, j) of the r direction alone
+  for (let j = 1; j <= nr; j++) out.push(...stepEigenvalues(k, 0, (Math.PI * j) / n));
+  return out;
+}
+
+/** max |G(cfl z)| of the 3-stage scheme alpha = (a1, a2, 1) over the eigenvalues z. */
+export function maxGainOf(alpha: readonly number[], zs: readonly C[], cfl: number): number {
+  const [a1, a2] = alpha as [number, number];
+  let worst = 0;
+  for (const z1 of zs) {
+    const z = scale(cfl, z1);
+    const z2 = mul(z, z);
+    const g = add(add([1, 0], z), add(scale(a2, z2), scale(a1 * a2, mul(z2, z))));
+    worst = Math.max(worst, Math.hypot(g[0], g[1]));
+  }
   return worst;
 }
 
-/** The largest CFL with max |G| <= 1 + 1e-9 (bisection; 0 if unstable at CFL 0.05). */
+/** max |G(cfl z)| over the wave numbers and the eigenvalues. */
+export function maxGain(alpha: readonly number[], k: AcousticCase, cfl: number, n = 96): number {
+  return maxGainOf(alpha, allEigenvalues(k, n), cfl);
+}
+
+/**
+ * The largest CFL with max |G| <= 1 + 1e-9 (bisection to 3e-9 on [0.05, 3]; 0 if unstable at
+ * CFL 0.05). The eigenvalues are computed once.
+ */
 export function acousticLimit(alpha: readonly number[], k: AcousticCase, n = 96): number {
+  const zs = allEigenvalues(k, n);
   let lo = 0.05;
   let hi = 3;
-  if (maxGain(alpha, k, lo, n) > 1 + 1e-9) return 0;
+  if (maxGainOf(alpha, zs, lo) > 1 + 1e-9) return 0;
   for (let it = 0; it < 30; it++) {
     const mid = 0.5 * (lo + hi);
-    if (maxGain(alpha, k, mid, n) <= 1 + 1e-9) lo = mid;
+    if (maxGainOf(alpha, zs, mid) <= 1 + 1e-9) lo = mid;
     else hi = mid;
   }
   return lo;

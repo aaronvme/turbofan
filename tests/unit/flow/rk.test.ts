@@ -5,7 +5,12 @@
 // coefficients the oracle uses, (0.2, 0.5, 1), and that the W0 spike's (0.1918, 0.4929, 1) are
 // unstable for long waves at any CFL.
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CFL, RK3_ALPHA } from '../../../src/flow/reference/solver';
+import {
+  DEFAULT_CFL,
+  DEFAULT_CFL_PRECONDITIONED,
+  RK3_ALPHA,
+} from '../../../src/flow/reference/solver';
+import { acousticLimit, type AcousticCase } from './acoustic';
 
 type C = readonly [number, number];
 const mul = (a: C, b: C): C => [a[0] * b[0] - a[1] * b[1], a[0] * b[1] + a[1] * b[0]];
@@ -63,4 +68,42 @@ describe('tracking RK3: linear stability (D4-8)', () => {
     expect(maxGain(spike, 2, 1.5) - 1).toBeLessThan(2e-3);
     expect(maxGain(spike, 2, 1) - 1).toBeGreaterThan(1e-4);
   });
+});
+
+// D4-32 (docs/SOLVER.md section 10): the fully discrete limit of the same 3-stage scheme on the
+// pseudo-acoustic family at rest (tests/unit/flow/acoustic.ts), where SLAU2's velocity dissipation
+// vanishes and only the mass-flux pressure diffusion damps the pair. aspect = r-face / x-face
+// area; 0 is the 1D limit. The 1D numbers are the critic's probe w2r-l8-vonneumann's.
+describe('preconditioned tracking RK3: the acoustic family at rest (D4-32)', () => {
+  const mRef = 0.003;
+  const matched = (ku: number, aspect: number): AcousticCase => ({
+    beta: mRef,
+    fa: mRef * (2 - mRef),
+    ku,
+    aspect,
+  });
+  // 96 wave numbers in 1D; 48 x 49 in 2D (the limits agree with 96 x 97 to 1e-3)
+  const limit = (k: AcousticCase) => acousticLimit(RK3_ALPHA, k, k.aspect > 0 ? 48 : 96);
+
+  it('pins the limits: plain 1.236 (1D); matched 0.972 (1D) / 1.550 (square)', () => {
+    expect(limit({ beta: 1, fa: 1, ku: 0, aspect: 0 })).toBeCloseTo(1.236, 3);
+    expect(limit(matched(0, 0))).toBeCloseTo(0.972, 3);
+    expect(limit(matched(0, 1))).toBeCloseTo(1.55, 3);
+    // the matched limit does not depend on beta (= M_ref): 0.9727 at 0.006 against 0.9722
+    const at006 = acousticLimit(RK3_ALPHA, { ...matched(0, 0), beta: 0.006, fa: 0.006 * 1.994 });
+    expect(Math.abs(at006 - limit(matched(0, 0)))).toBeLessThan(1e-3);
+  }, 60_000);
+
+  it('pins the limits with the AUSM+-up p_u term at K_u 0.5: 1.413 (1D) / 1.958 (square)', () => {
+    expect(limit(matched(0.5, 0))).toBeCloseTo(1.413, 3);
+    expect(limit(matched(0.5, 1))).toBeCloseTo(1.958, 3);
+  }, 60_000);
+
+  it('sets the preconditioned default at 0.8-0.825 x the worst (1D) limit; 1.5 is beyond it', () => {
+    const worst = limit(matched(0, 0));
+    expect(DEFAULT_CFL_PRECONDITIONED / worst).toBeGreaterThanOrEqual(0.8);
+    expect(DEFAULT_CFL_PRECONDITIONED / worst).toBeLessThanOrEqual(0.825);
+    // the plain default would be unstable on the pseudo-acoustic pair of cells up to aspect 0.5
+    expect(DEFAULT_CFL).toBeGreaterThan(limit(matched(0, 0.5)));
+  }, 60_000);
 });
