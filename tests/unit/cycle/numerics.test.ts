@@ -122,6 +122,10 @@ describe('newton: exits without convergence', () => {
     expect(r.converged).toBe(false);
     expect(Number.isFinite(r.x[0])).toBe(true);
     expect(r.maxResidual).toBeGreaterThanOrEqual(1);
+    // from x = 0 on no step lowers |r|: it takes the smallest one each time instead of giving up,
+    // so it runs its whole budget and leaves 0
+    expect(r.iterations).toBe(8);
+    expect(r.x[0]).not.toBe(0);
   });
 });
 
