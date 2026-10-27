@@ -100,6 +100,41 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     return Math.abs(g - r) / r;
   }
 
+  /**
+   * D4-39: the density-residual difference over the flux scale instead of the residual itself.
+   * The scale is sqrt(mean_c (sum_f |b_f F_f,rho| / (b_c V_c))^2), the residual's L2 with every
+   * face flux counted positive (the oracle's, in f64, at its current state; single-block meshes).
+   */
+  async function fluxScaleError(p: Pair): Promise<number> {
+    const g = await p.gpu.readResidual();
+    const ref = p.ref;
+    const m = ref.mesh;
+    const blk = m.blocks[0];
+    if (blk === undefined || m.blocks.length !== 1) throw new Error('single-block meshes only');
+    const sum = new Float64Array(m.nCells);
+    for (let j = 0; j < blk.nj; j++) {
+      for (let i = 0; i <= blk.ni; i++) {
+        const f = Math.abs(ref.faceFlux(0, 'i', i, j)[0] ?? NaN);
+        if (i > 0) sum[j * blk.ni + i - 1] = (sum[j * blk.ni + i - 1] ?? 0) + f;
+        if (i < blk.ni) sum[j * blk.ni + i] = (sum[j * blk.ni + i] ?? 0) + f;
+      }
+    }
+    for (let j = 0; j <= blk.nj; j++) {
+      for (let i = 0; i < blk.ni; i++) {
+        const f = Math.abs(ref.faceFlux(0, 'j', i, j)[0] ?? NaN);
+        if (j > 0) sum[(j - 1) * blk.ni + i] = (sum[(j - 1) * blk.ni + i] ?? 0) + f;
+        if (j < blk.nj) sum[j * blk.ni + i] = (sum[j * blk.ni + i] ?? 0) + f;
+      }
+    }
+    let s2 = 0;
+    for (let c = 0; c < m.nCells; c++) {
+      const q = (sum[c] ?? NaN) / ((ref.blockage[c] ?? NaN) * (m.cellVolR[c] ?? NaN));
+      s2 += q * q;
+    }
+    const scale = Math.sqrt(s2 / m.nCells);
+    return Math.abs(g - ref.stats.residualDensityL2) / scale;
+  }
+
   /** Tracking iterations to each checkpoint, comparing the fields and the residual. */
   async function trackingRows(p: Pair, label: string) {
     let done = 0;
@@ -292,27 +327,27 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     process.stdout.write(`[12.2] E L5 blockage: ${e.toExponential(2)}
 `);
     expect(e).toBeLessThanOrEqual(TOL_E);
-    // Why the residual row below fails: the residual is a small difference of large fluxes, so it
-    // amplifies the state difference. The oracle itself, evaluating the GPU's state and its own
-    // state in f64, sees the same relative difference as the two solvers' own residuals.
+    // D4-39, the residual row's normalisation: it divides by the residual itself. L5 starts at
+    // its quasi-1D solution, so its residual is ~1e-4 of the face fluxes, and f32's 6e-8 on each
+    // flux is ~1e-3 of it. The oracle evaluating the GPU's state and its own in f64 shows how
+    // much of the difference is the states' (the rest is the f32 evaluation); over the flux
+    // scale (the proposal for the critic) the difference is at f32 rounding.
     const gpuState = residualOf(await p.gpu.readConserved());
     const refState = residualOf(Float64Array.from(p.ref.U));
     const ofStates = Math.abs(gpuState - refState) / refState;
     const own = await residualError(p);
+    const scaled = await fluxScaleError(p);
     process.stdout.write(
-      `[12.2] E L5 residual: solvers ${own.toExponential(2)}, the f64 residual of the two states ${ofStates.toExponential(2)}
+      `[12.2] E L5 residual: / residual ${own.toExponential(2)} (the f64 residual of the two states ${ofStates.toExponential(2)}); / flux scale ${scaled.toExponential(2)}
 `,
     );
-    expect(ofStates).toBeGreaterThan(TOL_RESIDUAL);
-    expect(own / ofStates).toBeGreaterThan(0.25);
-    expect(own / ofStates).toBeLessThan(4);
+    expect(scaled).toBeLessThanOrEqual(1e-6);
     p.gpu.destroy();
   });
 
-  // KNOWN-FAIL (handoff: decision needed): 1.5e-3 against the "any row" 1e-3 of 12.2. Not the
-  // f32 evaluation of the residual (see the test above): the f32 state, 4e-6 from the oracle's in
-  // e_q, has an f64 residual 2.5e-3 away from the oracle state's, because L5 starts at its
-  // quasi-1D solution and its residual is ~1e-4 of the face fluxes.
+  // KNOWN-FAIL (D4-39 keeps 1e-3): 1.05e-3 against the "any row" 1e-3 of 12.2, in the row's
+  // current normalisation (over the residual). The flux-scale form proposed for the critic is in
+  // the test above (1e-7).
   it.fails('E: the L5 residual within 1e-3 of the oracle (KNOWN-FAIL)', async () => {
     const { p } = await l5Pair();
     const own = await residualError(p);
@@ -368,7 +403,11 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     p.ref.iterate(10);
     p.gpu.iterate(10);
     const e = await error(p);
-    process.stdout.write(`[12.2] E L9a source: ${e.toExponential(2)}\n`);
+    const own = await residualError(p);
+    const scaled = await fluxScaleError(p);
+    process.stdout.write(
+      `[12.2] E L9a source: ${e.toExponential(2)}; residual / residual ${own.toExponential(2)}, / flux scale ${scaled.toExponential(2)}\n`,
+    );
     expect(e).toBeLessThanOrEqual(TOL_E);
     expect(await residualError(p)).toBeLessThanOrEqual(TOL_RESIDUAL);
     p.gpu.destroy();

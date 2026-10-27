@@ -6,7 +6,7 @@
 export const BOUNDARY_WGSL = /* wgsl */ `
 fn farField(s: Prim, n: vec2f) -> Prim {
   let rhoC = P.rhoInf * P.cInf;
-  let du = s.a.y - P.uInf;
+  let du = s.a.y;
   let dv = s.a.z;
   let pP = s.b.x;
   let dun = du * n.x + dv * n.y;
@@ -37,7 +37,7 @@ fn farField(s: Prim, n: vec2f) -> Prim {
   let ws = select(0.0, pP - c2 * s.a.x, outflow);
   let utb = select(0.0, dut, outflow);
   return Prim(
-    vec4f((pb - ws) / c2, P.uInf + unb * n.x - utb * n.y, unb * n.y + utb * n.x,
+    vec4f((pb - ws) / c2, unb * n.x - utb * n.y, unb * n.y + utb * n.x,
           select(0.0, s.a.w, outflow)),
     vec4f(pb, select(0.0, s.b.y, outflow), s.b.z, s.b.w));
 }
@@ -59,9 +59,9 @@ fn isentropePressure(tau: f32) -> f32 {
 
 fn inflow(s: Prim, n: vec2f) -> Prim {
   if (P.supersonicInflow == 1u) {
-    return Prim(vec4f(0.0, P.uInf, 0.0, 0.0), vec4f(0.0, 0.0, 0.0, P.cInf));
+    return Prim(vec4f(0.0), vec4f(0.0, 0.0, 0.0, P.cInf));
   }
-  let un = s.a.y * n.x + s.a.z * n.y;
+  let un = (P.uInf + s.a.y) * n.x + s.a.z * n.y;
   let rc = (P.rhoInf + s.a.x) * s.b.w;
   let w = s.b.x + rc * un;
   var sigma = max(0.0, -un);
@@ -75,7 +75,8 @@ fn inflow(s: Prim, n: vec2f) -> Prim {
   let pP = isentropePressure(tau);
   let tb = P.t0 + tau;
   let dT = P.dT0 + tau;
-  return Prim(vec4f((pP - P.rhoInf * R_AIR * dT) / (R_AIR * tb), -n.x * sigma, -n.y * sigma, 0.0),
+  return Prim(vec4f((pP - P.rhoInf * R_AIR * dT) / (R_AIR * tb), -n.x * sigma - P.uInf,
+                    -n.y * sigma, 0.0),
               vec4f(pP, 0.0, dT, soundSpeed(tb, 0.0)));
 }
 
@@ -83,14 +84,14 @@ fn inflow(s: Prim, n: vec2f) -> Prim {
 fn wallGhost(q0: Prim, q1: Prim, n: vec2f, layer: u32) -> Prim {
   let a = select(3.0, 2.0, layer == 1u);
   let b = a - 1.0;
-  let u0 = q0.a.y;
+  let u0 = P.uInf + q0.a.y;
   let v0 = q0.a.z;
-  let u1 = q1.a.y;
+  let u1 = P.uInf + q1.a.y;
   let v1 = q1.a.z;
   let vt = a * (-u0 * n.y + v0 * n.x) - b * (-u1 * n.y + v1 * n.x);
   let vn = -select(u1 * n.x + v1 * n.y, u0 * n.x + v0 * n.y, layer == 1u);
   return Prim(
-    vec4f(a * q0.a.x - b * q1.a.x, vn * n.x - vt * n.y, vn * n.y + vt * n.x,
+    vec4f(a * q0.a.x - b * q1.a.x, (vn * n.x - vt * n.y) - P.uInf, vn * n.y + vt * n.x,
           a * q0.a.w - b * q1.a.w),
     vec4f(a * q0.b.x - b * q1.b.x, a * q0.b.y - b * q1.b.y, q0.b.z, q0.b.w));
 }
@@ -109,7 +110,7 @@ fn ghostMain(@builtin(global_invocation_id) gid: vec3u) {
     case 2u: { o.a.z = -s.a.z; }
     case 3u: { o = farField(s, n); }
     case 4u: { o = inflow(s, n); }
-    case 5u: { if (s.a.y * n.x + s.a.z * n.y < s.b.w) { o.b.x = P.pOutGauge; } }
+    case 5u: { if ((P.uInf + s.a.y) * n.x + s.a.z * n.y < s.b.w) { o.b.x = P.pOutGauge; } }
     default: {}
   }
   let e = P.nCells + g;

@@ -61,6 +61,8 @@ export const PARAM_FIELDS = [
   /** Physical: U = w0 U^n + w1 E(U^(k-1)) (stage 0 takes E alone). */
   ['w0', 'f32'],
   ['w1', 'f32'],
+  /** Physical: the stage's Butcher weight (1/6, 1/6, 2/3) of the compensated update (SOLVER.md 13). */
+  ['wInc', 'f32'],
   // sizes
   ['nCells', 'u32'],
   ['nGhosts', 'u32'],
@@ -138,6 +140,12 @@ export const SSP_RK3_WEIGHTS: readonly (readonly [number, number])[] = [
   [1 / 3, 2 / 3],
 ];
 
+/**
+ * The same scheme's Butcher weights: U^n+1 = U^n + sum_k b_k dt L(U^(k-1)), the form the kernel's
+ * compensated update accumulates (SOLVER.md 13).
+ */
+export const SSP_RK3_BUTCHER: readonly number[] = [1 / 6, 1 / 6, 2 / 3];
+
 /** The six uniform blocks of a solver (3 tracking stages, 3 physical stages). */
 export function stageParams(
   opts: GpuSchemeOptions,
@@ -194,6 +202,7 @@ export function stageParams(
     alpha,
     w0: 0,
     w1: 1,
+    wInc: 0,
   }));
   const physical = SSP_RK3_WEIGHTS.map(([w0, w1], stage) => ({
     ...base(bcPhysical),
@@ -204,6 +213,7 @@ export function stageParams(
     alpha: 1,
     w0,
     w1,
+    wInc: SSP_RK3_BUTCHER[stage] ?? NaN,
   }));
   return { ref, bcTracking, bcPhysical, tracking, physical };
 }

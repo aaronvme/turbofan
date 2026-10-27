@@ -179,6 +179,7 @@ ${TILE_WGSL(t)}
 @group(0) @binding(5) var<storage, read> geo: array<vec4f>;
 @group(0) @binding(6) var<storage, read> topo: array<vec4u>;
 @group(0) @binding(7) var<storage, read_write> red: array<f32>;
+@group(0) @binding(10) var<storage, read_write> lo: array<vec4f>;
 ${src ? '@group(0) @binding(8) var<storage, read> src: array<vec4f>;' : ''}
 ${dump ? '@group(0) @binding(9) var<storage, read_write> dump: array<vec4f>;' : ''}
 
@@ -260,7 +261,7 @@ fn tileFace(f: u32, i0: i32, j0: i32, d0: vec4u, d1: vec4u) -> Flux {
 // preconditioning term is not the dominant part of the increment.
 fn preconditionIncrement(da: vec4f, db: vec2f, q: vec4f, z: f32, tP: f32, c: f32, rc: f32,
                          beta2: f32) -> Flux {
-  let u = q.y;
+  let u = P.uInf + q.y;
   let v = q.z;
   let rw = q.w;
   let w = rw / rc;
@@ -273,9 +274,29 @@ fn preconditionIncrement(da: vec4f, db: vec2f, q: vec4f, z: f32, tP: f32, c: f32
   let n = (y * dRho - db.x + u * da.y + v * da.z + (w * da.w) / rc) / (cp * t);
   let m = dRho - n;
   let k = (1.0 - beta2) * m;
-  let dh0 = deltaH(tP, phi) + 0.5 * dq2(u, v, w);
+  let dh0 = deltaH(tP, phi) + 0.5 * dq2(q.y, v, w);
   return Flux(vec4f(n + beta2 * m, da.y - k * u, da.z - k * v, da.w - k * rw),
               db - k * vec2f(dh0, z));
+}
+
+// Neumaier's compensated sum of the six residual components (a: 4, b: 2 in xy): running sums s
+// and the accumulated rounding errors c
+struct Acc6 { sa: vec4f, sb: vec4f, ca: vec4f, cb: vec4f }
+fn neumaier4(s: vec4f, x: vec4f) -> vec4f {
+  let t = s + x;
+  return select((x - t) + s, (s - t) + x, abs(s) >= abs(x));
+}
+fn acc6(a: Acc6, xa: vec4f, xb: vec4f) -> Acc6 {
+  return Acc6(a.sa + xa, a.sb + xb, a.ca + neumaier4(a.sa, xa), a.cb + neumaier4(a.sb, xb));
+}
+
+// U^n+1 = (hi + lo) + d as a compensated sum (Knuth's TwoSum): the new hi and the rounding error
+// of hi + (lo + d), carried in lo so that increments below hi's ulp accumulate (SOLVER.md 13)
+struct Sum4 { hi: vec4f, lo: vec4f }
+fn twoSum4(a: vec4f, b: vec4f) -> Sum4 {
+  let s = a + b;
+  let bb = s - a;
+  return Sum4(s, (a - (s - bb)) + (b - bb));
 }
 
 @compute @workgroup_size(TX, TY)
@@ -370,32 +391,36 @@ fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index)
     let h = (ty + 2u) * HX + tx + 2u;
     let fw = ty * (TX + 1u) + tx;
     let fs = NFI + ty * TX + tx;
-    var ra = -wsa[fw];
-    var rb = -wsb[fw];
-    ra += wsa[fw + 1u];
-    rb += wsb[fw + 1u];
-    ra -= wsa[fs];
-    rb -= wsb[fs];
-    ra += wsa[fs + TX];
-    rb += wsb[fs + TX];
     let q = wqa[h];
     let pz = prim[2u * c + 1u];       // p', Z, T', c
-    let cg = geo[CELL_GEO + c];       // r_c, A, V
+    let cg = geo[CELL_GEO + c];       // r_c, A, V, sum of b S_x over the flow faces
     let cb = geo[CELL_B + c];         // b, b S_x, b S_r, b V
     let rho = P.rhoInf + q.x;
+    let uc = P.uInf + q.y;
     let w = q.w / cg.x;
-    ra.y -= pz.x * cb.y;
-    ra.z -= pz.x * cb.z + cb.x * rho * w * w * cg.y;
+    // R = sum of the outward face fluxes - the pressure/swirl source - the volume sources, as a
+    // compensated (Neumaier) sum per component (SOLVER.md 13). The face fluxes are gauge flux
+    // differences F - F_inf(S); the free stream's part of the flow faces comes back as
+    // F_inf(sum of b S over the flow faces) = (rho_inf u_inf, rho_inf u_inf^2) cg.w.
+    let mInf = P.rhoInf * P.uInf;
+    var acc = Acc6(-wsa[fw], -vec4f(wsb[fw], 0.0, 0.0), vec4f(0.0), vec4f(0.0));
+    acc = acc6(acc, wsa[fw + 1u], vec4f(wsb[fw + 1u], 0.0, 0.0));
+    acc = acc6(acc, -wsa[fs], -vec4f(wsb[fs], 0.0, 0.0));
+    acc = acc6(acc, wsa[fs + TX], vec4f(wsb[fs + TX], 0.0, 0.0));
+    acc = acc6(acc, vec4f(mInf * cg.w, (mInf * P.uInf) * cg.w, 0.0, 0.0), vec4f(0.0));
+    acc = acc6(acc, -vec4f(0.0, pz.x * cb.y, pz.x * cb.z + cb.x * rho * w * w * cg.y, 0.0),
+               vec4f(0.0));
     var da = vec4f(0.0);
     var db = vec2f(0.0);
     ${
       src
-        ? `ra -= cb.w * src[4u * c];
-    rb -= cb.w * src[4u * c + 1u].xy;
+        ? `acc = acc6(acc, -cb.w * src[4u * c], -cb.w * vec4f(src[4u * c + 1u].xy, 0.0, 0.0));
     da = src[4u * c + 2u];
     db = src[4u * c + 3u].xy;`
         : ''
     }
+    let ra = acc.sa + acc.ca;
+    let rb = (acc.sb + acc.cb).xy;
     res0 = ra.x / cb.w;
     let ua = Uin[2u * c];
     let ub = Uin[2u * c + 1u];
@@ -410,7 +435,7 @@ fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index)
           let dpMax = max(max(abs(wqb[h - 1u].x - pz.x), abs(wqb[h + 1u].x - pz.x)),
                           max(abs(wqb[h - HX].x - pz.x), abs(wqb[h + HX].x - pz.x)));
           let c2 = pz.w * pz.w;
-          beta2 = min(1.0, max(max((q.y * q.y + q.z * q.z + w * w) / c2, P.minMach2),
+          beta2 = min(1.0, max(max((uc * uc + q.z * q.z + w * w) / c2, P.minMach2),
                                dpMax / (rho * c2)));
         }
         let bc = abs(wb[h]);
@@ -419,7 +444,7 @@ fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index)
         let iw = d1.x + u32(gj * (ni + 1) + gi);
         let js = d1.y + u32(gj * ni + gi);
         let lam = cellLambda(geo[FACE + iw], geo[FACE + iw + 1u], geo[FACE + js],
-                             geo[FACE + js + u32(ni)], bfs, q.y, q.z, pz.w, beta2);
+                             geo[FACE + js + u32(ni)], bfs, uc, q.z, pz.w, beta2);
         tau = P.cfl / lam;
       } else {
         tau = ub.z;
@@ -433,21 +458,48 @@ fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index)
       }
       let ba = U0[2u * c];
       let bb = U0[2u * c + 1u];
-      outA = ba + d.a;
-      outB = vec4f(bb.xy + d.b, tau, beta2);
+      if (P.stage == 2u) {
+        let sa = twoSum4(ba, lo[2u * c] + d.a);
+        let sb = twoSum4(vec4f(bb.xy, 0.0, 0.0), lo[2u * c + 1u] + vec4f(d.b, 0.0, 0.0));
+        lo[2u * c] = sa.lo;
+        lo[2u * c + 1u] = sb.lo;
+        outA = sa.hi;
+        outB = vec4f(sb.hi.xy, tau, beta2);
+      } else {
+        outA = ba + d.a;
+        outB = vec4f(bb.xy + d.b, tau, beta2);
+      }
     } else {
       let dt = red[SCALAR_DT];
       let tau = dt / cb.w;
-      let ea = ua - (tau * ra) / (1.0 + dt * da);
-      let eb = ub.xy - (tau * rb) / (1.0 + dt * db);
-      if (P.stage == 0u) {
-        outA = ea;
-        outB = vec4f(eb, 0.0, 1.0);
+      // dt L(U^(k-1)) with the point-implicit factor: E(U^(k-1)) = U^(k-1) + inc
+      let incA = -(tau * ra) / (1.0 + dt * da);
+      let incB = -(tau * rb) / (1.0 + dt * db);
+      let ea = ua + incA;
+      let eb = ub.xy + incB;
+      // U^n+1 = U^n + (1/6) inc_1 + (1/6) inc_2 + (2/3) inc_3 (the Butcher form of SSP-RK3): the
+      // low part collects the weighted increments, and stage 3 adds it to U^n compensated
+      let la = lo[2u * c] + P.wInc * incA;
+      let lb = lo[2u * c + 1u] + vec4f(P.wInc * incB, 0.0, 0.0);
+      if (P.stage == 2u) {
+        let sa = twoSum4(U0[2u * c], la);
+        let sb = twoSum4(vec4f(U0[2u * c + 1u].xy, 0.0, 0.0), lb);
+        lo[2u * c] = sa.lo;
+        lo[2u * c + 1u] = sb.lo;
+        outA = sa.hi;
+        outB = vec4f(sb.hi.xy, 0.0, 1.0);
       } else {
-        let ba = U0[2u * c];
-        let bb = U0[2u * c + 1u];
-        outA = P.w0 * ba + P.w1 * ea;
-        outB = vec4f(P.w0 * bb.xy + P.w1 * eb, 0.0, 1.0);
+        lo[2u * c] = la;
+        lo[2u * c + 1u] = lb;
+        if (P.stage == 0u) {
+          outA = ea;
+          outB = vec4f(eb, 0.0, 1.0);
+        } else {
+          let ba = U0[2u * c];
+          let bb = U0[2u * c + 1u];
+          outA = P.w0 * ba + P.w1 * ea;
+          outB = vec4f(P.w0 * bb.xy + P.w1 * eb, 0.0, 1.0);
+        }
       }
     }
     Uout[2u * c] = outA;
@@ -511,7 +563,7 @@ fn lambdaMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index
     let iw = d1.x + u32(gj * (ni + 1) + gi);
     let js = d1.y + u32(gj * ni + gi);
     let lam = cellLambda(geo[FACE + iw], geo[FACE + iw + 1u], geo[FACE + js],
-                         geo[FACE + js + u32(ni)], bfs, qa.y, qa.z, qb.w, 1.0);
+                         geo[FACE + js + u32(ni)], bfs, P.uInf + qa.y, qa.z, qb.w, 1.0);
     v = geo[CELL_B + c].w / lam;
   }
   wmin[lid] = v;
@@ -585,14 +637,16 @@ fn sourceMain(@builtin(global_invocation_id) gid: vec3u) {
   let qa = prim[2u * c];
   let qb = prim[2u * c + 1u];
   let rho = P.rhoInf + qa.x;
-  var ra = coef[o] + rho * coef[o + 2u] - coef[o + 4u] * U[2u * c];
+  // kU U on the absolute momentum: the state holds (rho u)' = rho u - rho_inf u_inf
+  let ua = U[2u * c] + vec4f(0.0, P.rhoInf * P.uInf, 0.0, 0.0);
+  var ra = coef[o] + rho * coef[o + 2u] - coef[o + 4u] * ua;
   var rb = coef[o + 1u].xy + rho * coef[o + 3u].xy - coef[o + 5u].xy * U[2u * c + 1u].xy;
   let kMass = coef[o + 1u].z;
   if (kMass != 0.0) {
     let sm = -kMass * rho;
     let w = qa.w / geo[CELL_GEO + c].x;
     let dh0 = deltaH(qb.z, productsFraction(qb.y)) + 0.5 * dq2(qa.y, qa.z, w);
-    ra += vec4f(sm, sm * qa.y, sm * qa.z, sm * qa.w);
+    ra += vec4f(sm, sm * (P.uInf + qa.y), sm * qa.z, sm * qa.w);
     rb += vec2f(sm * dh0, sm * qb.y);
   }
   src[4u * c] = ra;
@@ -712,7 +766,7 @@ fn resampleMain(@builtin(global_invocation_id) g: vec3u) {
     }
   }
   textureStore(outState, g.xy, vec4f(b.x / P.pInf, a.x / P.rhoInf, P.tInf + b.z, b.y));
-  textureStore(outVel, g.xy, vec4f(a.y, a.z, a.w, fluid));
+  textureStore(outVel, g.xy, vec4f(P.uInf + a.y, a.z, a.w, fluid));
 }
 `;
 }

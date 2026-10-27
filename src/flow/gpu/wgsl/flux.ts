@@ -19,6 +19,12 @@ export function fluxWgsl(limiter: LimiterKind = DEFAULT_LIMITER): string {
   return /* wgsl */ `
 fn sadd(a: f32, b: f32) -> f32 { return max(a, b) + min(a, b); }
 fn sadd4(a: vec4f, b: vec4f) -> vec4f { return max(a, b) + min(a, b); }
+// a - b, odd bitwise under the swap of a and b whatever the compiler fuses into its operands
+fn sdiff(a: f32, b: f32) -> f32 {
+  let hi = max(a, b);
+  let lo = min(a, b);
+  return select(lo - hi, hi - lo, a > b);
+}
 
 // van Albada (1982), the sharp ab > 0 switch: symmetric and odd bitwise
 fn vanAlbada4(a: vec4f, b: vec4f) -> vec4f {
@@ -44,11 +50,12 @@ fn limitedSlopes(ma: vec4f, mb: vec2f, ca: vec4f, cb: vec2f, pa: vec4f, pb: vec2
   return Slope(sa, sb4.xy);
 }
 
-struct Side { rho: f32, vn: f32, q2: f32, c: f32, dh0: f32 }
+struct Side { rho: f32, vn: f32, dvn: f32, q2: f32, c: f32, dh0: f32 }
 
 fn sideOf(a: vec4f, b: vec2f, n: vec2f, rf: f32) -> Side {
   let rhoP = a.x;
-  let u = a.y;
+  let du = a.y;
+  let u = P.uInf + du;
   let v = a.z;
   let w = a.w / rf;
   let phi = productsFraction(b.y);
@@ -58,10 +65,11 @@ fn sideOf(a: vec4f, b: vec2f, n: vec2f, rf: f32) -> Side {
   let r = gasR(phi);
   var s: Side;
   s.rho = P.rhoInf + rhoP;
-  s.vn = u * n.x + v * n.y;
+  s.dvn = du * n.x + v * n.y;
+  s.vn = P.uInf * n.x + s.dvn;
   s.q2 = u * u + v * v + w * w;
   s.c = sqrt((cp * r * t) / (cp - r));
-  s.dh0 = deltaH(tP, phi) + 0.5 * dq2(u, v, w);
+  s.dh0 = deltaH(tP, phi) + 0.5 * dq2(du, v, w);
   return s;
 }
 
@@ -73,6 +81,16 @@ fn betaPlus(m: f32) -> f32 {
 fn betaMinus(m: f32) -> f32 {
   if (abs(m) >= 1.0) { return 0.5 * (1.0 - sign(m)); }
   return 0.25 * (2.0 + m) * (m - 1.0) * (m - 1.0);
+}
+
+// beta+(mL) + beta-(mR) - 1 = beta+(mL) - beta+(mR) = (mL - mR)(3 - mL^2 - mL mR - mR^2) / 4
+// for |M| < 1, with dm = mL - mR formed from the velocity gauges (vn_L - vn_R = dvn_L - dvn_R):
+// exact zero for equal states, and no rounding of the absolute vn in it
+fn betaSumM1(mL: f32, mR: f32, dm: f32) -> f32 {
+  if (abs(mL) < 1.0 && abs(mR) < 1.0) {
+    return 0.25 * dm * (3.0 - sadd(mL * mL, mR * mR) - mL * mR);
+  }
+  return sadd(betaPlus(mL), betaMinus(mR)) - 1.0;
 }
 
 struct Flux { a: vec4f, b: vec2f }
@@ -96,20 +114,20 @@ fn slau2(la: vec4f, lb: vec2f, ra: vec4f, rb: vec2f, n: vec2f, area: f32, rf: f3
   let g = -max(min(mL, 0.0), -1.0) * min(max(mR, 0.0), 1.0);
   let rhoSum = sadd(l.rho, r.rho);
   let vbar = sadd(l.rho * abs(l.vn), r.rho * abs(r.vn)) / rhoSum;
-  let vbarP = (1.0 - g) * vbar + g * abs(l.vn);
-  let vbarM = (1.0 - g) * vbar + g * abs(r.vn);
   let mRef = min(1.0, max(qAvg / cbar, machCut));
   let fa = mRef * (2.0 - mRef);
-  let mdot = 0.5 * (sadd(l.rho * (l.vn + vbarP), r.rho * (r.vn - vbarM))
+  let vbarDiff = (1.0 - g) * vbar * (la.x - ra.x) + g * sdiff(l.rho * abs(l.vn), r.rho * abs(r.vn));
+  let gm = 0.5 * (sadd(la.x * l.vn, ra.x * r.vn) + P.rhoInf * sadd(l.dvn, r.dvn) + vbarDiff
     - (chi / (cbar * fa)) * (pR - pL));
+  let mdot = P.rhoInf * (P.uInf * n.x) + gm;
   let bp = betaPlus(mL);
   let bm = betaMinus(mR);
   let pt = 0.5 * sadd(pL, pR) + 0.5 * (bp - bm) * (pL - pR)
-    + qAvg * (bp + bm - 1.0) * 0.5 * rhoSum * cbar;
+    + qAvg * betaSumM1(mL, mR, (l.dvn - r.dvn) / cbar) * 0.5 * rhoSum * cbar;
   let mp = 0.5 * (mdot + abs(mdot));
   let mm = 0.5 * (mdot - abs(mdot));
-  let mom = sadd4(mp * vec4f(1.0, la.y, la.z, la.w), mm * vec4f(1.0, ra.y, ra.z, ra.w));
-  let fa4 = vec4f(mp + mm, mom.y + pt * n.x, mom.z + pt * n.y, mom.w);
+  let mom = sadd4(mp * vec4f(0.0, la.y, la.z, la.w), mm * vec4f(0.0, ra.y, ra.z, ra.w));
+  let fa4 = vec4f(gm, gm * P.uInf + mom.y + pt * n.x, mom.z + pt * n.y, mom.w);
   let fb = vec2f(sadd(mp * l.dh0, mm * r.dh0), sadd(mp * lb.y, mm * rb.y));
   return Flux(area * fa4, area * fb);
 }

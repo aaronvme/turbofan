@@ -4,7 +4,7 @@
 // to f32 here, so the kernel and the oracle see the same numbers to one rounding.
 //
 // geo (array<vec4f>), in vec4 units:
-//   [CELL_GEO + c]  (r_c, A_c, V_c, 0)
+//   [CELL_GEO + c]  (r_c, A_c, V_c, sum_f b_f S_f,x over the cell's flow faces: not slip walls)
 //   [CELL_B + c]    (b_c, sum_f b_f S_f,x, sum_f b_f S_f,r, b_c V_c)   (outward face vectors)
 //   [FACE + f]      (n_x, n_r, |S| = r_bar L, r_f) for the i-faces, then the j-faces
 //   [EXT_B + e/4]   b of extended index e (cell, or a ghost's source cell), 4 per vec4,
@@ -177,7 +177,7 @@ export function blockageData(
   mesh: SolverMesh,
   layout: GpuLayout,
   b: ArrayLike<number>,
-): { cellB: Float32Array; extB: Float32Array } {
+): { cellGeo: Float32Array; cellB: Float32Array; extB: Float32Array } {
   const n = mesh.nCells;
   if (b.length !== n) throw new Error(`blockage has ${b.length} values for ${n} cells`);
   const bExt = new Float64Array(n + mesh.nGhosts);
@@ -188,6 +188,7 @@ export function blockageData(
   }
   for (let g = 0; g < mesh.nGhosts; g++) bExt[n + g] = bExt[mesh.ghostSrc[g] ?? 0] ?? NaN;
   const cellB = new Float32Array(4 * n);
+  const cellGeo = new Float32Array(4 * n);
   mesh.blocks.forEach((blk, bi) => {
     for (let j = 0; j < blk.nj; j++) {
       for (let i = 0; i < blk.ni; i++) {
@@ -204,16 +205,23 @@ export function blockageData(
         const bc = bExt[c] ?? NaN;
         let sx = 0;
         let sr = 0;
+        let flowSx = 0;
         for (let k = 0; k < 4; k++) {
           const f = faces[k] ?? 0;
           const bf = 0.5 * (bc + (bExt[nbrs[k] ?? 0] ?? NaN));
           const iDir = k < 2;
           const sign = k % 2 === 0 ? -1 : 1;
           const area = (iDir ? mesh.iArea[f] : mesh.jArea[f]) ?? NaN;
-          sx += sign * bf * area * ((iDir ? mesh.iNx[f] : mesh.jNx[f]) ?? NaN);
+          const fx = sign * bf * area * ((iDir ? mesh.iNx[f] : mesh.jNx[f]) ?? NaN);
+          sx += fx;
           sr += sign * bf * area * ((iDir ? mesh.iNr[f] : mesh.jNr[f]) ?? NaN);
+          if (layout.wall[nbrs[k] ?? 0] !== 1) flowSx += fx;
         }
         cellB.set([bc, sx, sr, bc * (mesh.cellVolR[c] ?? NaN)], 4 * c);
+        cellGeo.set(
+          [mesh.cellR[c] ?? NaN, mesh.cellArea[c] ?? NaN, mesh.cellVolR[c] ?? NaN, flowSx],
+          4 * c,
+        );
       }
     }
   });
@@ -221,5 +229,5 @@ export function blockageData(
   for (let e = 0; e < n + mesh.nGhosts; e++) {
     extB[e] = layout.wall[e] === 1 ? -(bExt[e] ?? NaN) : (bExt[e] ?? NaN);
   }
-  return { cellB, extB };
+  return { cellGeo, cellB, extB };
 }

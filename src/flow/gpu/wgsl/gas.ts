@@ -209,19 +209,20 @@ fn pressureGauge(rhoP: f32, tP: f32, phi: f32) -> f32 {
   return rhoP * P.rInf * P.tInf + rho * P.rInf * tP + rho * gasRDelta(phi) * (P.tInf + tP);
 }
 
-// q^2 - q_inf^2 without cancellation
-fn dq2(u: f32, v: f32, w: f32) -> f32 {
-  return (u - P.uInf) * (u + P.uInf) + v * v + w * w;
+// q^2 - q_inf^2 from the velocity gauge du = u - u_inf: (u - u_inf)(u + u_inf) + v^2 + w^2
+fn dq2(du: f32, v: f32, w: f32) -> f32 {
+  return du * (du + 2.0 * P.uInf) + v * v + w * w;
 }
 
-// A primitive record: a = (rho', u, v, rw), b = (p', Z, T', c)
+// A primitive record: a = (rho', u - u_inf, v, rw), b = (p', Z, T', c)
 struct Prim { a: vec4f, b: vec4f }
 
-// conserved (rho', rho u, rho v, rho r w), (eta, rho Z) of a cell at radius rc -> primitives
+// conserved (rho', rho u - rho_inf u_inf, rho v, rho r w), (eta, rho Z) of a cell at radius rc ->
+// primitives. The momentum and velocity gauges: u - u_inf = ((rho u)' - rho' u_inf) / rho.
 fn consToPrim(ua: vec4f, ub: vec2f, rc: f32) -> Prim {
   let rhoP = ua.x;
   let rho = P.rhoInf + rhoP;
-  let u = ua.y / rho;
+  let u = (ua.y - rhoP * P.uInf) / rho;
   let v = ua.z / rho;
   let rw = ua.w / rho;
   let z = ub.y / rho;

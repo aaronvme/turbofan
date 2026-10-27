@@ -87,6 +87,13 @@ export class GpuSolver {
   readonly ref: ReferenceState;
   /** Iterations (tracking) or steps (physical) encoded so far. */
   iterations = 0;
+  /**
+   * The momentum gauge's offset rho_inf u_inf of the kernel's f32 reference state (exact in f64):
+   * the state holds (rho u)' = rho u - rho_inf u_inf, the primitives u - u_inf (SOLVER.md 13).
+   */
+  readonly momentumGauge: number;
+  /** The kernel's u_inf (the f32 rounding of ref.u): primitive u = uInfF32 + (u - u_inf). */
+  readonly uInfF32: number;
 
   private readonly label: string;
   private readonly copies: GPUBuffer[];
@@ -94,6 +101,8 @@ export class GpuSolver {
   private readonly geo: GPUBuffer;
   private readonly topo: GPUBuffer;
   private readonly red: GPUBuffer;
+  /** The low parts of U^n (2 vec4 per cell): U^n = copy + lo, kept by the compensated update. */
+  private readonly lo: GPUBuffer;
   private readonly uniforms: GPUBuffer;
   private readonly src: GPUBuffer | null;
   private readonly coef: GPUBuffer | null;
@@ -128,6 +137,7 @@ export class GpuSolver {
       geo: GPUBuffer;
       topo: GPUBuffer;
       red: GPUBuffer;
+      lo: GPUBuffer;
       uniforms: GPUBuffer;
       src: GPUBuffer | null;
       coef: GPUBuffer | null;
@@ -141,6 +151,8 @@ export class GpuSolver {
     this.layout = init.layout;
     this.params = init.params;
     this.ref = init.params.ref;
+    this.uInfF32 = Math.fround(this.ref.u);
+    this.momentumGauge = Math.fround(this.ref.rho) * this.uInfF32;
     this.label = init.label;
     const b = init.buffers;
     this.copies = b.copies;
@@ -148,13 +160,14 @@ export class GpuSolver {
     this.geo = b.geo;
     this.topo = b.topo;
     this.red = b.red;
+    this.lo = b.lo;
     this.uniforms = b.uniforms;
     this.src = b.src;
     this.coef = b.coef;
     this.dump = b.dump;
     this.pipes = init.pipes;
     this.sourcePipe = init.sourcePipe;
-    this.owned = [...b.copies, b.prim, b.geo, b.topo, b.red, b.uniforms];
+    this.owned = [...b.copies, b.prim, b.geo, b.topo, b.red, b.lo, b.uniforms];
     for (const x of [b.src, b.coef, b.dump]) if (x !== null) this.owned.push(x);
 
     const d = this.device;
@@ -230,6 +243,7 @@ export class GpuSolver {
             buf(5, this.geo),
             buf(6, this.topo),
             buf(7, this.red),
+            buf(10, this.lo),
           ];
           if (srcBuf !== null) entries.push(buf(8, srcBuf));
           if (this.dump !== null) entries.push(buf(9, this.dump));
@@ -302,6 +316,7 @@ export class GpuSolver {
     const topo = make(layout.topoData.byteLength, 'topo');
     device.queue.writeBuffer(topo, 0, layout.topoData);
     const red = make(4 * reductionLength(layout), 'reduction');
+    const lo = make(32 * n, 'U low parts');
     const uniforms = make(
       6 * PARAMS_STRIDE,
       'params',
@@ -323,7 +338,7 @@ export class GpuSolver {
       layout,
       params,
       label,
-      buffers: { copies, prim: primBuf, geo, topo, red, uniforms, src, coef, dump },
+      buffers: { copies, prim: primBuf, geo, topo, red, lo, uniforms, src, coef, dump },
       pipes: { prim, ghost, stage, lambda, dt, time },
       sourcePipe: source,
     });
@@ -346,7 +361,8 @@ export class GpuSolver {
 
   /** Blockage per cell (section 8), in (0, 1]. */
   setBlockage(b: ArrayLike<number>): void {
-    const { cellB, extB } = blockageData(this.mesh, this.layout, b);
+    const { cellGeo, cellB, extB } = blockageData(this.mesh, this.layout, b);
+    this.device.queue.writeBuffer(this.geo, 16 * this.layout.geo.cellGeo, cellGeo);
     this.device.queue.writeBuffer(this.geo, 16 * this.layout.geo.cellB, cellB);
     this.device.queue.writeBuffer(this.geo, 16 * this.layout.geo.extB, extB);
   }
@@ -380,17 +396,26 @@ export class GpuSolver {
     this.device.queue.writeBuffer(this.coef, 0, data);
   }
 
-  /** Sets U^n from conserved gauge values (6 per cell, rounded to f32). */
+  /**
+   * Sets U^n from conserved gauge values (6 per cell, the oracle's: rho u absolute): the f32
+   * rounding in the state copy, the rest in the low parts. The momentum is stored as the gauge
+   * rho u - momentumGauge, computed in f64 before the split.
+   */
   setConserved(U: ArrayLike<number>): void {
     const n = this.layout.nCells;
     const data = new Float32Array(8 * n);
+    const low = new Float32Array(8 * n);
     for (let c = 0; c < n; c++) {
-      for (let m = 0; m < 4; m++) data[8 * c + m] = U[NU * c + m] ?? NaN;
-      data[8 * c + 4] = U[NU * c + 4] ?? NaN;
-      data[8 * c + 5] = U[NU * c + 5] ?? NaN;
+      for (let m = 0; m < NU; m++) {
+        const v = (U[NU * c + m] ?? NaN) - (m === 1 ? this.momentumGauge : 0);
+        const hi = Math.fround(v);
+        data[8 * c + m] = hi;
+        low[8 * c + m] = v - hi;
+      }
       data[8 * c + 7] = 1;
     }
     this.device.queue.writeBuffer(this.state, 0, data);
+    this.device.queue.writeBuffer(this.lo, 0, low);
   }
 
   /** Every cell from a physical state at its centroid (f64 on the host, as the oracle). */
@@ -533,29 +558,39 @@ export class GpuSolver {
     return out;
   }
 
-  /** U^n as 8 f32 per cell: (rho', rho u, rho v, rho r w), (eta, rho Z, tau, beta^2). */
+  /**
+   * U^n's state copy as stored, 8 f32 per cell: (rho', rho u - momentumGauge, rho v, rho r w),
+   * (eta, rho Z, tau, beta^2), without the low parts.
+   */
   async readState(): Promise<Float32Array> {
     return new Float32Array(await this.readBuffer(this.state, 0, 32 * this.layout.nCells));
   }
 
-  /** U^n as 6 conserved gauge values per cell (f64 copies of the f32 values). */
+  /** U^n as the oracle's 6 conserved values per cell (rho u absolute): copy + low part, in f64. */
   async readConserved(): Promise<Float64Array> {
     const s = await this.readState();
+    const low = new Float32Array(await this.readBuffer(this.lo, 0, 32 * this.layout.nCells));
     const n = this.layout.nCells;
     const U = new Float64Array(NU * n);
     for (let c = 0; c < n; c++) {
-      for (let m = 0; m < 6; m++) U[NU * c + m] = s[8 * c + m] ?? NaN;
+      for (let m = 0; m < 6; m++) U[NU * c + m] = (s[8 * c + m] ?? NaN) + (low[8 * c + m] ?? NaN);
+      U[NU * c + 1] = (U[NU * c + 1] ?? NaN) + this.momentumGauge;
     }
     return U;
   }
 
-  /** Primitive records (8 per extended index: cells then ghosts) of U^n, after the BCs. */
-  async readPrimitives(mode: SolverModeIndex = 0): Promise<Float32Array> {
+  /**
+   * Primitive records (8 per extended index: cells then ghosts) of U^n after the BCs, in the
+   * oracle's layout (rho', u, v, rw, p', Z, T', c): u = uInfF32 + the kernel's velocity gauge, in f64.
+   */
+  async readPrimitives(mode: SolverModeIndex = 0): Promise<Float64Array> {
     this.submit((pass) => {
       this.encodeCurrentPrimitives(pass, mode);
     });
     const n = this.layout.nCells + this.layout.nGhosts;
-    return new Float32Array(await this.readBuffer(this.prim, 0, 32 * n));
+    const P = Float64Array.from(new Float32Array(await this.readBuffer(this.prim, 0, 32 * n)));
+    for (let e = 0; e < n; e++) P[8 * e + 1] = this.uInfF32 + (P[8 * e + 1] ?? NaN);
+    return P;
   }
 
   private async readReduction(): Promise<Float32Array> {
