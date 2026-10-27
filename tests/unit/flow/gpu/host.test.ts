@@ -108,6 +108,36 @@ describe('GPU layout (the static buffers the kernels index)', () => {
     expect(() => blockageData(row, L, new Float64Array(row.nCells))).toThrow(/\(0, 1\]/);
   });
 
+  it('stores the b-weighted S_x sum of the flow faces (slip walls excluded) in CELL_GEO.w', () => {
+    // a wall at imin: its face vector is -|S| x, so the flow faces of the i = 0 cells sum to +|S|
+    const duct = solverMesh(
+      singleBlock(rectangle('duct', 0, 1, 1, 2, 4, 3), {
+        imin: BC.SLIP_WALL,
+        imax: BC.FARFIELD,
+        jmin: BC.FARFIELD,
+        jmax: BC.FARFIELD,
+      }),
+    );
+    const L = buildLayout(duct);
+    const b = Float64Array.from({ length: duct.nCells }, (_, c) => 0.6 + 0.1 * (c % 4));
+    const { cellGeo, cellB } = blockageData(duct, L, b);
+    for (let j = 0; j < 3; j++) {
+      for (let i = 0; i < 4; i++) {
+        const c = j * 4 + i;
+        expect(cellGeo[4 * c]).toBe(Math.fround(duct.cellR[c] ?? NaN));
+        expect(cellGeo[4 * c + 1]).toBe(Math.fround(duct.cellArea[c] ?? NaN));
+        expect(cellGeo[4 * c + 2]).toBe(Math.fround(duct.cellVolR[c] ?? NaN));
+        const wallFace = j * 5;
+        const wallSx = i === 0 ? -(b[c] ?? NaN) * (duct.iArea[wallFace] ?? NaN) : 0;
+        expect(cellGeo[4 * c + 3]).toBeCloseTo((cellB[4 * c + 1] ?? NaN) - wallSx, 6);
+      }
+    }
+    // remapped to a far field, the wall face is a flow face: the two sums agree
+    const open = buildLayout(duct, { bcRemap: { [BC.SLIP_WALL]: BC.FARFIELD } });
+    const o = blockageData(duct, open, b);
+    for (let c = 0; c < duct.nCells; c++) expect(o.cellGeo[4 * c + 3]).toBe(o.cellB[4 * c + 1]);
+  });
+
   it('refuses tiles it cannot run', () => {
     expect(() => {
       checkTile({ x: 1, y: 8 });

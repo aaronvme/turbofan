@@ -20,13 +20,13 @@ import { GpuErrorLog, shippedMesh, solverDevice } from './helpers/solver';
 const ISA = { pressure: 101325, temperature: 288.15, velocity: 0 };
 
 /** A smooth pulse with swirl and a hot fuel-air spot on top of the ambient (every code path). */
-function pulse(x0: number, r0: number, scale: number) {
+function pulse(x0: number, r0: number, scale: number, uInf = 0) {
   return (x: number, r: number) => {
     const d2 = ((x - x0) ** 2 + (r - r0) ** 2) / (scale * scale);
     const bump = Math.exp(-d2);
     return {
       rho: 1.225 * (1 + 0.05 * bump),
-      u: 20 * bump,
+      u: uInf + 20 * bump,
       v: -8 * bump,
       w: 30 * bump,
       p: 101325 + 6000 * bump,
@@ -177,8 +177,8 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
     return Array.from(dump.subarray(o, o + 6));
   }
 
-  async function checkInterfaces(mesh: SolverMesh, label: string) {
-    const s = await create(mesh, { faceDump: true });
+  async function checkInterfaces(mesh: SolverMesh, label: string, uInf = 0) {
+    const s = await create(mesh, { faceDump: true, freeStream: { ...ISA, velocity: uInf } });
     s.setState(
       pulse(
         0.5 *
@@ -186,6 +186,7 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
             mesh.cellX.reduce((a, b) => Math.min(a, b), Infinity)),
         0.5,
         0.4,
+        uInf,
       ),
     );
     s.iterate(1);
@@ -211,6 +212,39 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
     return pairs.length;
   }
 
+  it('keeps the f32 free stream at M 0.5 bitwise zero in every gauge and face flux (130k)', async () => {
+    // SOLVER.md 13: with the momentum and velocity gauges and the gauge flux differences, the
+    // kernel's own free stream (rho u = fround(rho_inf) fround(u_inf)) is an exact zero like the
+    // quiescent ambient; only the f32 metrics' sum of S_x (the add-back) forces it (ladder L1)
+    const probe = await create(engine);
+    const u = 0.5 * probe.ref.c;
+    probe.destroy();
+    const s = await create(engine, {
+      freeStream: { ...ISA, velocity: u },
+      // the inflow BC's isentrope is rounding-level in f32 (12.1): a far field there too
+      bcRemap: { [BC.SLIP_WALL]: BC.FARFIELD, [BC.INFLOW]: BC.FARFIELD },
+      faceDump: true,
+      cfl: 0, // tau = 0: the three stages see the same state, so the dump is the free stream's
+    });
+    const U = new Float64Array(6 * engine.nCells);
+    for (let c = 0; c < engine.nCells; c++) U[6 * c + 1] = Math.fround(s.ref.rho) * Math.fround(u);
+    s.setConserved(U);
+    s.iterate(1);
+    const dump = await s.readFaceDump();
+    const bad = dump.findIndex((v) => v !== 0);
+    expect(bad, `face dump value ${bad}: ${dump[bad]}`).toBe(-1);
+    const state = await s.readState();
+    expect(Array.from(state).every((v, k) => k % 8 >= 6 || v === 0)).toBe(true);
+    const P = await s.readPrimitives();
+    for (let e = 0; e < P.length / 8; e++) {
+      for (const k of [0, 2, 3, 4, 5, 6]) {
+        if (P[8 * e + k] !== 0) throw new Error(`prim ${e}.${k} = ${P[8 * e + k]}`);
+      }
+      if (P[8 * e + 1] !== Math.fround(u)) throw new Error(`prim ${e} u = ${P[8 * e + 1]}`);
+    }
+    s.destroy();
+  });
+
   it('computes every interface face flux bitwise equal or negated on both sides', async () => {
     const row = solverMesh(
       threeBlockRow(1, 1, 20, 12, {
@@ -223,6 +257,9 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
     );
     expect(await checkInterfaces(row, 'three-block row')).toBe(24);
     expect(await checkInterfaces(engine, '130k asset')).toBeGreaterThan(1000);
+    // in a free stream (u_inf != 0) the gauge flux differences of SOLVER.md 13 are used
+    expect(await checkInterfaces(row, 'three-block row, u_inf 170 m/s', 170)).toBe(24);
+    expect(await checkInterfaces(engine, '130k asset, u_inf 170 m/s', 170)).toBeGreaterThan(1000);
   });
 
   it('gives slip-wall faces exact zeros in mass, angular momentum, energy and fuel', async () => {
@@ -383,6 +420,56 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
     // the clock is an f32 Kahan sum: good to the f32 rounding of dt (6e-8 relative)
     expect(Math.abs((await s.readTime()) / (10 * dt) - 1)).toBeLessThan(1e-7);
     s.destroy();
+  });
+
+  it('accumulates increments below the state ulp (the compensated update, both modes)', async () => {
+    // SOLVER.md 13: U^n is kept as the f32 copy plus a low part, so a source whose increment per
+    // step is 1/40 of the state's ulp still moves the state at its exact rate. The calorically
+    // perfect gas has the same R and cp for air and products, so a uniform fuel fraction in the
+    // ambient is a quiet state (every flux an exact zero) with a large rho Z
+    const box = solverMesh(
+      singleBlock(rectangle('box', 0, 1, 0.5, 1.5, 8, 8), {
+        imin: BC.SLIP_WALL,
+        imax: BC.SLIP_WALL,
+        jmin: BC.SLIP_WALL,
+        jmax: BC.SLIP_WALL,
+      }),
+    );
+    const n = box.nCells;
+    const N = 400;
+    for (const mode of ['physical', 'tracking'] as const) {
+      const s = await create(box, { gas: caloricallyPerfectGas(1.4, 287.05287), cellSource: true });
+      s.setUniform({ rho: s.ref.rho, u: 0, v: 0, w: 0, p: s.ref.p, z: 0.03 });
+      if (mode === 'tracking') s.iterate(1); // the local tau of this quiet state, in the state copy
+      const before = await s.readConserved();
+      const st = await s.readState();
+      const dt = 1e-4;
+      // per step and cell: dt rate (physical) or tau_c b V_c rate (tracking: alpha_3 = 1)
+      const perRate = Array.from({ length: n }, (_, c) =>
+        mode === 'physical' ? Math.fround(dt) : (st[8 * c + 6] ?? NaN) * (box.cellVolR[c] ?? NaN),
+      );
+      const z0 = before[5] ?? NaN;
+      const ulp = 2 ** (Math.floor(Math.log2(Math.abs(z0))) - 23);
+      const rate = ulp / 40 / Math.max(...perRate);
+      const rate0 = new Float64Array(6 * n);
+      for (let c = 0; c < n; c++) rate0[6 * c + 5] = rate;
+      s.setCellSource({ rate0 });
+      if (mode === 'physical') for (let k = 0; k < N; k++) s.stepPhysical(dt);
+      else s.iterate(N);
+      const after = await s.readConserved();
+      const hi = await s.readState();
+      for (let c = 0; c < n; c++) {
+        const want = N * rate * (perRate[c] ?? NaN);
+        const d = (after[6 * c + 5] ?? NaN) - (before[6 * c + 5] ?? NaN);
+        expect(Math.abs(d / want - 1), `${mode} cell ${c}: rho Z moved ${d}, ${want}`).toBeLessThan(
+          1e-3,
+        );
+        // the f32 copy moves by whole ulps as the low part carries: it is not stuck at U^0
+        expect(Math.abs((hi[8 * c + 5] ?? NaN) - Math.fround(z0)) / ulp, mode).toBeGreaterThan(3);
+        for (const k of [0, 1, 2, 3, 4]) expect(after[6 * c + k], `${mode} ${c}.${k}`).toBe(0);
+      }
+      s.destroy();
+    }
   });
 
   it('applies a point-implicit sink as E(U) = U / (1 + dt k) in each SSP-RK3 stage', async () => {

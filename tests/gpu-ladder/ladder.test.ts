@@ -223,14 +223,14 @@ describe('GPU ladder', () => {
       'L1-uniform',
       [
         {
-          // KNOWN-FAIL, decision needed (handoff): 2.0e-4 against 1e-4 m/s. Not the f32 metrics
-          // (12.2 B: the oracle with the same metrics has 1.5e-5 at 100 iterations, the GPU 1.1e-4
-          // at 25): f32 arithmetic on absolute momenta, 1e-4 m/s being 7 ulp of u_inf = 170 m/s.
+          // D4-37: the pre-registered 1e-4 m/s, met with the f32 forms of SOLVER.md 13 (the
+          // momentum and velocity gauges, gauge flux differences, compensated sums); before them
+          // 2.0e-4 (f32 rounding of the absolute momentum fluxes, 7 ulp of u_inf)
           id: 'L1',
-          metric: `GPU uniform M 0.5, 130k f32 asset, ${ITS} its: max |u - u_inf| (KNOWN-FAIL: f32 rounding, decision needed)`,
+          metric: `GPU uniform M 0.5, 130k f32 asset, ${ITS} its: max |u - u_inf|`,
           threshold: `< ${L1.maxSpuriousVelocityMPerS.value} m/s`,
           value: v,
-          pass: 'reported',
+          pass: v < L1.maxSpuriousVelocityMPerS.value,
         },
         {
           id: 'L1',
@@ -245,6 +245,14 @@ describe('GPU ladder', () => {
           threshold: '<= 4x',
           value: v / (history[0]?.[1] ?? NaN),
           pass: v <= 4 * (history[0]?.[1] ?? NaN),
+        },
+        {
+          // D4-37 asks whether it grows or plateaus: the change over the last 10k iterations
+          id: 'L1',
+          metric: 'GPU uniform M 0.5: plateau (|20k value / 10k value - 1|)',
+          threshold: 'reported',
+          value: Math.abs(v / (history.at(-2)?.[1] ?? NaN) - 1),
+          pass: 'reported',
         },
       ],
       { history, residual, uInf: u },
