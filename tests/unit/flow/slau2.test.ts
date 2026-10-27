@@ -1,7 +1,11 @@
 // SLAU2 (docs/SOLVER.md section 7): consistency, the bitwise antisymmetry that makes interfaces
 // conservative, wall and contact behaviour, supersonic upwinding, exact zeros in the ambient.
 import { describe, expect, it } from 'vitest';
-import { THERMALLY_PERFECT, referenceState } from '../../../src/flow/reference/gas';
+import {
+  THERMALLY_PERFECT,
+  caloricallyPerfectGas,
+  referenceState,
+} from '../../../src/flow/reference/gas';
 import { physicalFlux, slau2Flux } from '../../../src/flow/reference/slau2';
 import { NP, physicalToPrim } from '../../../src/flow/reference/state';
 
@@ -193,5 +197,260 @@ describe('SLAU2', () => {
       const Z = flux(q, q, 0.3, -0.95, 1, 1, 0.003);
       for (let m = 0; m < 6; m++) expect(Z[m] === 0).toBe(true);
     });
+  });
+});
+
+// W2R-I4: flux VALUES for unequal states. The property tests above (consistency, antisymmetry,
+// the D4-20 ratio) pass for many wrong fluxes (critic pass 7: a wrong face swirl, a wrong face
+// density, a wrong dh0 or chi or g or Vbar or p-tilde term all survived), so the expected values
+// here are computed outside the module, straight from the paper's formulas (Kitamura & Shima
+// 2013 eqs. for SLAU2, Shima & Kitamura 2011 for the SLAU mass flux), in ABSOLUTE variables of
+// a calorically perfect gas: c = sqrt(gamma p / rho), h0 = gamma/(gamma - 1) p/rho + q^2/2. None
+// of the module's gauge machinery (secant cp, T' from (p', rho'), dq2) is used.
+describe('SLAU2 values against an independent evaluation of the paper formulas (W2R-I4)', () => {
+  const GAMMA = 1.4;
+  const R_GAS = 287.05287;
+  // a moving free stream, so that h0_inf includes u_inf^2/2 and the eta flux m (h0 - h0_inf)
+  // is checked with q_inf != 0
+  const INF = { p: 101325, t: 288.15, u: 40 };
+  const cref = referenceState(caloricallyPerfectGas(GAMMA, R_GAS), {
+    pressure: INF.p,
+    temperature: INF.t,
+    velocity: INF.u,
+  });
+  const RHO_INF = INF.p / (R_GAS * INF.t);
+
+  /** A face state as gauges of the free stream: rho' and p' added to rho_inf and p_inf. */
+  interface Gauge {
+    readonly drho: number;
+    readonly u: number;
+    readonly v: number;
+    readonly w: number;
+    readonly dp: number;
+    readonly z: number;
+  }
+
+  /** The primitive record the module reads (rw = w r_f; T' and c are not read by the flux). */
+  function record(g: Gauge, rf: number): Float64Array {
+    return Float64Array.from([g.drho, g.u, g.v, g.w * rf, g.dp, g.z, 0, 0]);
+  }
+
+  function absolute(g: Gauge, nx: number, nr: number) {
+    const rho = RHO_INF + g.drho;
+    const p = INF.p + g.dp;
+    const q2 = g.u * g.u + g.v * g.v + g.w * g.w;
+    return {
+      rho,
+      c: Math.sqrt((GAMMA * p) / rho),
+      vn: g.u * nx + g.v * nr,
+      q2,
+      // total enthalpy minus the free stream's, both absolute
+      dh0:
+        (GAMMA / (GAMMA - 1)) * (p / rho) +
+        q2 / 2 -
+        ((GAMMA / (GAMMA - 1)) * (INF.p / RHO_INF) + (INF.u * INF.u) / 2),
+    };
+  }
+
+  /** beta+- of SLAU2 (the AUSM+ fifth-order pressure split). */
+  function split(m: number, sign: 1 | -1): number {
+    if (Math.abs(m) >= 1) return m * sign > 0 ? 1 : 0;
+    return ((m + sign) * (m + sign) * (2 - sign * m)) / 4;
+  }
+
+  function expected(
+    L: Gauge,
+    R: Gauge,
+    nx: number,
+    nr: number,
+    area: number,
+    rf: number,
+    machCut = 1,
+  ): number[] {
+    const a = absolute(L, nx, nr);
+    const b = absolute(R, nx, nr);
+    const cBar = (a.c + b.c) / 2;
+    const mL = a.vn / cBar;
+    const mR = b.vn / cBar;
+    const qBar = Math.sqrt((a.q2 + b.q2) / 2);
+    const mHat = Math.min(1, qBar / cBar);
+    const chi = (1 - mHat) ** 2;
+    // g in [-1, 0] only when the two sides move apart (an expansion)
+    const g = -Math.max(Math.min(mL, 0), -1) * Math.min(Math.max(mR, 0), 1);
+    const vBar = (a.rho * Math.abs(a.vn) + b.rho * Math.abs(b.vn)) / (a.rho + b.rho);
+    const vPlus = (1 - g) * vBar + g * Math.abs(a.vn);
+    const vMinus = (1 - g) * vBar + g * Math.abs(b.vn);
+    const mRef = Math.min(1, Math.max(qBar / cBar, machCut));
+    const dp = R.dp - L.dp;
+    const mdot =
+      (a.rho * (a.vn + vPlus) + b.rho * (b.vn - vMinus)) / 2 -
+      (chi * dp) / (2 * cBar * mRef * (2 - mRef));
+    const bPlus = split(mL, 1);
+    const bMinus = split(mR, -1);
+    const pTilde =
+      (L.dp + R.dp) / 2 -
+      ((bPlus - bMinus) * dp) / 2 +
+      qBar * (bPlus + bMinus - 1) * ((a.rho + b.rho) / 2) * cBar;
+    const up = mdot > 0 ? mdot : 0;
+    const dn = mdot > 0 ? 0 : mdot;
+    return [
+      mdot,
+      up * L.u + dn * R.u + pTilde * nx,
+      up * L.v + dn * R.v + pTilde * nr,
+      up * L.w * rf + dn * R.w * rf,
+      up * a.dh0 + dn * b.dh0,
+      up * L.z + dn * R.z,
+    ].map((f) => f * area);
+  }
+
+  function moduleFlux(
+    L: Gauge,
+    R: Gauge,
+    nx: number,
+    nr: number,
+    area: number,
+    rf: number,
+    machCut?: number,
+  ): Float64Array {
+    const out = new Float64Array(6).fill(NaN);
+    slau2Flux(cref, record(L, rf), 0, record(R, rf), 0, nx, nr, area, rf, out, machCut);
+    return out;
+  }
+
+  /** Every component to 1e-12 relative; every expected component is nonzero, so none is vacuous. */
+  function expectClose(F: Float64Array, E: readonly number[]): void {
+    for (let m = 0; m < 6; m++) {
+      const e = E[m] ?? NaN;
+      expect(Math.abs(e)).toBeGreaterThan(0);
+      expect(Math.abs((F[m] ?? NaN) - e)).toBeLessThanOrEqual(1e-12 * Math.abs(e));
+    }
+  }
+
+  const unit = (a: number) => [Math.cos(a), Math.sin(a)] as const;
+
+  const CASES: {
+    name: string;
+    L: Gauge;
+    R: Gauge;
+    angle: number;
+    area: number;
+    rf: number;
+    machCut?: number;
+    check: (k: { mL: number; mR: number; mHat: number; mdot: number }) => boolean;
+  }[] = [
+    {
+      // both sides move towards -n, the left pressure is higher: m < 0 (the m- branch), chi > 0
+      name: 'a subsonic jump with the mass flux against n',
+      L: { drho: 0.075, u: -60, v: 25, w: 12, dp: 9000, z: 0.004 },
+      R: { drho: -0.125, u: -45, v: -10, w: -8, dp: -4000, z: 0.012 },
+      angle: Math.atan2(0.6, 0.8),
+      area: 0.37,
+      rf: 0.61,
+      check: (k) => k.mdot < 0 && k.mL < 0 && k.mR < 0 && k.mHat > 0.1,
+    },
+    {
+      // the sides move apart (M_L < 0 < M_R): g != 0
+      name: 'a subsonic expansion (g != 0)',
+      L: { drho: -0.075, u: -90, v: -20, w: 30, dp: -2500, z: 0.02 },
+      R: { drho: -0.175, u: 120, v: 35, w: -25, dp: -6000, z: 0.005 },
+      angle: Math.atan2(0.28, 0.96),
+      area: 1.3,
+      rf: 0.23,
+      check: (k) => k.mL < -0.2 && k.mR > 0.3,
+    },
+    {
+      // strong swirl and large rho' at r_f != 1 (the face swirl w = rw / r_f enters q^2 and dh0)
+      name: 'a swirling face with large rho and p gauges',
+      L: { drho: 0.675, u: 35, v: 5, w: 160, dp: 60000, z: 0.03 },
+      R: { drho: -0.375, u: 50, v: -12, w: 210, dp: 15000, z: 0.05 },
+      angle: 2.2,
+      area: 0.55,
+      rf: 0.37,
+      check: (k) => k.mHat > 0.4 && k.mHat < 1,
+    },
+    {
+      // supersonic left, subsonic right: both branches of beta+- and the clamp M-hat = 1 (chi = 0)
+      name: 'a transonic face',
+      L: { drho: 0.175, u: 520, v: 40, w: 60, dp: 40000, z: 0.01 },
+      R: { drho: -0.025, u: 300, v: 10, w: 50, dp: 30000, z: 0.002 },
+      angle: 0.1,
+      area: 0.9,
+      rf: 1.7,
+      check: (k) => k.mL > 1 && k.mR > 0 && k.mR < 1 && k.mHat === 1,
+    },
+    {
+      // D4-20: q-bar/c-bar ~ 2e-3 is below the cut, so M_ref = M_cut = 0.003
+      name: 'a low-Mach face below M_cut (D4-20)',
+      L: { drho: 0.002, u: 0.6, v: 0.2, w: 0.1, dp: 3, z: 0.001 },
+      R: { drho: -0.001, u: 0.5, v: -0.3, w: 0.2, dp: -2, z: 0.002 },
+      angle: 0.4,
+      area: 0.8,
+      rf: 0.45,
+      machCut: 0.003,
+      check: (k) => k.mHat < 0.003,
+    },
+    {
+      // D4-20: q-bar/c-bar ~ 0.04 is above the cut, so M_ref is the local Mach number
+      name: 'a low-Mach face above M_cut (D4-20)',
+      L: { drho: 0.01, u: 14, v: 3, w: 2, dp: 120, z: 0.001 },
+      R: { drho: -0.004, u: 12, v: -2, w: 4, dp: -60, z: 0.003 },
+      angle: -0.3,
+      area: 0.25,
+      rf: 0.8,
+      machCut: 0.003,
+      check: (k) => k.mHat > 0.003 && k.mHat < 0.1,
+    },
+  ];
+
+  for (const c of CASES) {
+    it(`matches on ${c.name}`, () => {
+      const [nx, nr] = unit(c.angle);
+      const a = absolute(c.L, nx, nr);
+      const b = absolute(c.R, nx, nr);
+      const cBar = (a.c + b.c) / 2;
+      const E = expected(c.L, c.R, nx, nr, c.area, c.rf, c.machCut);
+      // the case exercises what its name says
+      expect(
+        c.check({
+          mL: a.vn / cBar,
+          mR: b.vn / cBar,
+          mHat: Math.min(1, Math.sqrt((a.q2 + b.q2) / 2) / cBar),
+          mdot: (E[0] ?? NaN) / c.area,
+        }),
+      ).toBe(true);
+      expectClose(moduleFlux(c.L, c.R, nx, nr, c.area, c.rf, c.machCut), E);
+      // and through the reversed face, F(R, L, -S) = -F(L, R, S)
+      expectClose(
+        moduleFlux(c.R, c.L, -nx, -nr, c.area, c.rf, c.machCut),
+        E.map((f) => -f),
+      );
+    });
+  }
+
+  it('gives the physical flux of one state, whatever flux was evaluated before', () => {
+    const s: Gauge = { drho: 0.3, u: 80, v: -30, w: 110, dp: 25000, z: 0.02 };
+    const [nx, nr] = unit(1.1);
+    const area = 0.6;
+    const rf = 0.42;
+    // an unrelated face first: a physical flux must not read anything that evaluation left behind
+    moduleFlux(CASES[3]?.L ?? s, CASES[3]?.R ?? s, 1, 0, 1, 1.7);
+    const out = new Float64Array(6).fill(NaN);
+    physicalFlux(cref, record(s, rf), 0, nx, nr, area, rf, out);
+    const a = absolute(s, nx, nr);
+    const m = a.rho * a.vn;
+    expectClose(
+      out,
+      [m, m * s.u + s.dp * nx, m * s.v + s.dp * nr, m * s.w * rf, m * a.dh0, m * s.z].map(
+        (f) => f * area,
+      ),
+    );
+  });
+
+  it('writes six zeros through a zero-area face (over whatever the output held)', () => {
+    const out = new Float64Array(7).fill(NaN);
+    const L = record(CASES[0]?.L ?? { drho: 0, u: 0, v: 0, w: 0, dp: 0, z: 0 }, 0);
+    slau2Flux(cref, L, 0, L, 0, 0, 1, 0, 0, out);
+    for (let m = 0; m < 6; m++) expect(out[m] === 0).toBe(true);
+    expect(Number.isNaN(out[6])).toBe(true);
   });
 });

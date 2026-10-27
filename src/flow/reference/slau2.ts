@@ -20,8 +20,9 @@ interface Side {
   dh0: number;
 }
 
-const sideL: Side = { rho: 0, vn: 0, q2: 0, c: 0, dh0: 0 };
-const sideR: Side = { rho: 0, vn: 0, q2: 0, c: 0, dh0: 0 };
+// The side records are locals of each call (W2R-N6): module-level scratch shared by slau2Flux and
+// physicalFlux let one read what the other left behind.
+const newSide = (): Side => ({ rho: 0, vn: 0, q2: 0, c: 0, dh0: 0 });
 
 function side(
   ref: ReferenceState,
@@ -81,8 +82,8 @@ export function slau2Flux(
     out.fill(0, 0, 6);
     return;
   }
-  const l = sideL;
-  const r = sideR;
+  const l = newSide();
+  const r = newSide();
   side(ref, PL, lOff, nx, nr, rf, l);
   side(ref, PR, rOff, nx, nr, rf, r);
   const pL = PL[lOff + 4] as number;
@@ -128,7 +129,7 @@ export function physicalFlux(
   rf: number,
   out: Float64Array,
 ): void {
-  const s = sideL;
+  const s = newSide();
   side(ref, P, o, nx, nr, rf, s);
   const m = s.rho * s.vn;
   const pP = P[o + 4] as number;
