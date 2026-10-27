@@ -1,0 +1,35 @@
+// Critic pass 8, w2/reference @4553ce2 (W2R-I7): ladder L8's set-up (tests/ladder/oracle.ts sinkCase,
+// minMach = M_cut = 0.003, the preconditioned default CFL 0.8) run to 40000 iterations, printing the
+// L8 velocity metric and the density residual over the first every 2500 iterations.
+//   ROOT=<checkout> node --import file:///<checkout>/tools/mesh/ts-resolve.mjs w2r-l8-steady.ts
+import { pathToFileURL } from 'node:url';
+const R = process.env.ROOT ?? '.';
+const imp = (p: string) => import(pathToFileURL(`${R}/${p}`).href);
+const { ReferenceSolver } = await imp('src/flow/reference/solver.ts');
+const { NP } = await imp('src/flow/reference/state.ts');
+const { SINK, sinkCase } = await imp('tests/ladder/oracle.ts');
+const { mesh, options, sinkCells } = sinkCase({ minMach: 0.003, machCut: 0.003 });
+const s = new ReferenceSolver(mesh, options);
+const radius = (c: number) => Math.hypot(mesh.cellX[c], mesh.cellR[c]);
+const metric = () => {
+  const P = s.primitives();
+  let mdot = 0;
+  for (const c of sinkCells) mdot += 2 * Math.PI * SINK.k * (s.ref.rho + P[NP * c]) * mesh.cellVolR[c];
+  let worst = 0;
+  for (let c = 0; c < mesh.nCells; c++) {
+    const r = radius(c);
+    if (r < 0.2 || r > 1.0) continue;
+    const rho = s.ref.rho + P[NP * c];
+    worst = Math.max(worst, Math.abs(Math.hypot(P[NP * c + 1], P[NP * c + 2]) / (mdot / (4 * Math.PI * r * r * rho)) - 1));
+  }
+  return worst;
+};
+s.iterate(1);
+const r0 = s.stats.residualDensityL2;
+const out: string[] = [];
+for (let it = 1; it < 40000; ) {
+  s.iterate(2500 - (it % 2500));
+  it = s.iterations;
+  out.push(`${it}: err ${(100 * metric()).toFixed(3)} %, res ${(s.stats.residualDensityL2 / r0).toExponential(2)}`);
+}
+console.log(out.join('\n'));
