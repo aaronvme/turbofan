@@ -241,7 +241,11 @@ describe('preconditioned tracking mode', () => {
       inflowTotal: { p0: 101325, t0: 288.15 },
       outflowPressure: 101325 * 0.998,
     };
-    const pre = new ReferenceSolver(duct, { ...opts, lowMachPreconditioning: { minMach: 0.01 } });
+    // machCut 1: the D4-20 dissipation scaling off, so this checks the preconditioner alone
+    const pre = new ReferenceSolver(duct, {
+      ...opts,
+      lowMachPreconditioning: { minMach: 0.01, machCut: 1 },
+    });
     pre.setBlockage(b);
     // M 0.06 at the throat; the plain scheme is still at 6e2 x its first residual after 20000
     // iterations from rest (acoustic waves between the reflecting inflow and outflow)
@@ -277,3 +281,51 @@ describe('preconditioned tracking mode', () => {
     }
   }, 120_000);
 });
+
+describe('low-Mach dissipation scaling in the solver (D4-20)', () => {
+  const mesh = solverMesh(
+    threeBlockRow(0.2, 0.15, 6, 5, {
+      left: BC.FARFIELD,
+      right: BC.FARFIELD,
+      bottom: BC.AXIS,
+      top: BC.FARFIELD,
+    }),
+  );
+  const fs = { pressure: 101325, temperature: 288.15, velocity: 3 } as const;
+  const bump = (x: number, r: number) => {
+    const g = Math.exp(-((x - 0.25) ** 2 + (r - 0.07) ** 2) / 0.003);
+    return { rho: 1.225, u: 3 + g, v: -0.5 * g, w: g, p: 101325 + 20 * g, z: 0 };
+  };
+  const make = (pre?: { minMach: number; machCut?: number }) => {
+    const s = new ReferenceSolver(mesh, {
+      gas: THERMALLY_PERFECT,
+      freeStream: fs,
+      ...(pre === undefined ? {} : { lowMachPreconditioning: pre }),
+    });
+    s.setState(bump);
+    return s;
+  };
+
+  it('changes the tracking residual (default M_cut = minMach), not with machCut >= 1', () => {
+    const off = make({ minMach: 0.01, machCut: 1 }).residual();
+    const on = make({ minMach: 0.01 }).residual();
+    const plain = make().residual();
+    expect(off).toEqual(plain);
+    let diff = 0;
+    for (let k = 0; k < on.length; k += NU)
+      diff = Math.max(diff, Math.abs((on[k] as number) - (off[k] as number)));
+    expect(diff).toBeGreaterThan(0);
+    // the default cut is minMach: the same residual as machCut = minMach given explicitly
+    expect(make({ minMach: 0.01, machCut: 0.01 }).residual()).toEqual(on);
+  });
+
+  it('leaves the physical-time mode unscaled', () => {
+    const a = make({ minMach: 0.01 });
+    const b = make();
+    const dt = b.globalDt();
+    a.stepPhysical(dt);
+    b.stepPhysical(dt);
+    expect(a.U).toEqual(b.U);
+  });
+});
+

@@ -15,8 +15,10 @@ const NR = 64;
 const NT = 24;
 const K = 225;
 
-export function run() {
-  const L8 = THRESHOLDS.L8.values;
+/** minMach = M_cut of the preconditioned tracking mode (D4-20): the engine's value, SOLVER.md 7. */
+const MACH_CUT = Number(process.env.L8_MACH_CUT ?? 0.003);
+
+function sinkRun(precondition: boolean, machCut = MACH_CUT) {
   const g = geometricGrowth((R_IN * Math.PI) / NT, R_OUT - R_IN, NR);
   const mesh = solverMesh(polarMesh(R_IN, R_OUT, NR, NT, g, BC.SLIP_WALL, BC.FARFIELD));
   const radius = (c: number) => Math.hypot(mesh.cellX[c] ?? NaN, mesh.cellR[c] ?? NaN);
@@ -32,6 +34,7 @@ export function run() {
     gas: THERMALLY_PERFECT,
     freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
     sources: sink,
+    ...(precondition ? { lowMachPreconditioning: { minMach: machCut, machCut } } : {}),
   });
   const conv = converge(s, 1e-5, 20000);
   const P = s.primitives();
@@ -48,6 +51,13 @@ export function run() {
     worst = Math.max(worst, Math.abs(speed / (mdot / (4 * Math.PI * r * r * rho)) - 1));
     count++;
   }
+  return { conv, mdot, worst, count, g };
+}
+
+export function run() {
+  const L8 = THRESHOLDS.L8.values;
+  const { conv, mdot, worst, count, g } = sinkRun(true);
+  const plain = sinkRun(false);
   return {
     id: 'L8',
     rows: [
@@ -65,7 +75,14 @@ export function run() {
         value: conv.iterations,
         pass: conv.converged,
       },
+      {
+        id: 'L8',
+        metric: `plain tracking (no preconditioning, unscaled SLAU2): max velocity error (converged: ${String(plain.conv.converged)})`,
+        threshold: 'reported',
+        value: plain.worst,
+        pass: 'reported' as const,
+      },
     ],
-    extra: { conv, mdot, cells: count, growth: g },
+    extra: { conv, mdot, cells: count, growth: g, machCut: MACH_CUT, plain },
   };
 }

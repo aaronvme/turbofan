@@ -39,9 +39,17 @@ function randomPrim(next: () => number, rf: number): Float64Array {
   );
 }
 
-function flux(L: Float64Array, R: Float64Array, nx: number, nr: number, area: number, rf: number) {
+function flux(
+  L: Float64Array,
+  R: Float64Array,
+  nx: number,
+  nr: number,
+  area: number,
+  rf: number,
+  machCut?: number,
+) {
   const out = new Float64Array(6);
-  slau2Flux(ref, L, 0, R, 0, nx, nr, area, rf, out);
+  slau2Flux(ref, L, 0, R, 0, nx, nr, area, rf, out, machCut);
   return out;
 }
 
@@ -128,5 +136,62 @@ describe('SLAU2', () => {
     const next = rng(5);
     const G = flux(randomPrim(next, 1), randomPrim(next, 1), 0, 1, 0, 0);
     for (let m = 0; m < 6; m++) expect(G[m] === 0).toBe(true);
+  });
+
+  describe('low-Mach dissipation scaling (D4-20)', () => {
+    const fa = (m: number) => m * (2 - m);
+    const low = (p: number, u: number) =>
+      physicalToPrim(ref, { rho: 1.2, u, v: 0.4, w: 0.3, p, z: 0 }, 1);
+
+    it('divides only the mass flux pressure diffusion by f_a(M_ref), M_ref = max(qbar/cbar, M_cut)', () => {
+      // qbar/cbar ~ 3e-3, below both cuts: the diffusion part is (1/f_a(M_cut)) x the plain one
+      const L = low(101325 + 40, 1.0);
+      const R = low(101325 - 25, 1.1);
+      const plain = flux(L, R, 1, 0, 0.7, 1);
+      const unit = flux(L, R, 1, 0, 0.7, 1, 1);
+      for (let m = 0; m < 6; m++) expect(unit[m]).toBe(plain[m]);
+      const a = flux(L, R, 1, 0, 0.7, 1, 0.01);
+      const b = flux(L, R, 1, 0, 0.7, 1, 0.04);
+      const ratio = ((a[0] ?? NaN) - (plain[0] ?? NaN)) / ((b[0] ?? NaN) - (plain[0] ?? NaN));
+      expect(ratio).toBeCloseTo((1 / fa(0.01) - 1) / (1 / fa(0.04) - 1), 9);
+      // with p_L > p_R the extra diffusion pushes mass from L to R
+      expect((a[0] ?? NaN) - (plain[0] ?? NaN)).toBeGreaterThan(0);
+      // the pressure flux and the velocity weights are untouched: the momentum flux changes only
+      // through the mass flux it carries
+      const dm = (a[0] ?? NaN) - (plain[0] ?? NaN);
+      expect((a[1] ?? NaN) - (plain[1] ?? NaN)).toBeCloseTo(dm * 1.0, 6);
+    });
+
+    it('uses the local Mach number above M_cut and leaves transonic faces unchanged', () => {
+      const L = low(101325 + 40, 30);
+      const R = low(101325 - 25, 31);
+      const plain = flux(L, R, 1, 0, 0.7, 1);
+      const a = flux(L, R, 1, 0, 0.7, 1, 1e-3);
+      const b = flux(L, R, 1, 0, 0.7, 1, 1e-4);
+      // M_local ~ 0.09 > both cuts: the same scaled flux
+      for (let m = 0; m < 6; m++) expect(a[m]).toBe(b[m]);
+      expect(Math.abs((a[0] ?? NaN) - (plain[0] ?? NaN))).toBeGreaterThan(0);
+      const S = physicalToPrim(ref, { rho: 1.1, u: 420, v: 30, w: 40, p: 9e4, z: 0 }, 1);
+      const T = physicalToPrim(ref, { rho: 0.9, u: 400, v: -20, w: 0, p: 8.5e4, z: 0 }, 1);
+      const sp = flux(S, T, 1, 0, 1.5, 1);
+      const ss = flux(S, T, 1, 0, 1.5, 1, 0.003);
+      for (let m = 0; m < 6; m++) expect(ss[m]).toBe(sp[m]);
+    });
+
+    it('stays antisymmetric bitwise and exactly zero in the ambient', () => {
+      const next = rng(19);
+      for (let k = 0; k < 300; k++) {
+        const rf = 0.05 + next();
+        const L = randomPrim(next, rf);
+        const R = randomPrim(next, rf);
+        const a = 2 * Math.PI * next();
+        const F = flux(L, R, Math.cos(a), Math.sin(a), 0.3, rf, 0.003);
+        const G = flux(R, L, -Math.cos(a), -Math.sin(a), 0.3, rf, 0.003);
+        for (let m = 0; m < 6; m++) expect(F[m]).toBe(-(G[m] ?? NaN));
+      }
+      const q = new Float64Array(NP);
+      const Z = flux(q, q, 0.3, -0.95, 1, 1, 0.003);
+      for (let m = 0; m < 6; m++) expect(Z[m] === 0).toBe(true);
+    });
   });
 });
