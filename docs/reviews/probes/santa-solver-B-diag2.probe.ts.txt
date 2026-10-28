@@ -1,0 +1,61 @@
+// Reviewer B diagnostic (not a gate): gauge invariance. The closed box is the same physical problem
+// for any u_inf (slip walls and the axis do not see the reference velocity), so each solver's run at
+// u_inf = 30 m/s should match its own run at u_inf = 0 to its rounding.
+import { afterAll, beforeAll, it } from 'vitest';
+import type { SimDevice } from '../../../src/gpu/device';
+import { GpuSolver } from '../../../src/flow/gpu/device/gpuSolver';
+import { ReferenceSolver, type SolverOptions } from '../../../src/flow/reference/solver';
+import { NP } from '../../../src/flow/reference/state';
+import { closedBoxMesh, closedBoxOptions, smoothPerturbation } from '../../../tests/ladder/oracle';
+import { GpuErrorLog, solverDevice } from '../../../tests/gpu/helpers/solver';
+
+let sim: SimDevice;
+beforeAll(async () => {
+  sim = await solverDevice(new GpuErrorLog());
+});
+afterAll(() => {
+  sim.destroy();
+});
+
+it('gauge invariance of plain tracking in the closed box (u_inf 0 vs 30)', async () => {
+  const mesh = closedBoxMesh('f32');
+  const run = async (uInf: number) => {
+    const base = closedBoxOptions('tracking');
+    const options: SolverOptions = { ...base, freeStream: { ...base.freeStream, velocity: uInf } };
+    const ref = new ReferenceSolver(mesh, options);
+    ref.setState(smoothPerturbation);
+    for (let k = 0; k < ref.U.length; k++) ref.U[k] = Math.fround(ref.U[k] ?? NaN);
+    const gpu = await GpuSolver.create(sim.device, mesh, { ...options });
+    gpu.setConserved(ref.U);
+    const out: { n: number; g: Float64Array; r: Float64Array }[] = [];
+    let done = 0;
+    for (const n of [10, 30, 100]) {
+      ref.iterate(n - done);
+      gpu.iterate(n - done);
+      done = n;
+      out.push({ n, g: await gpu.readPrimitives(), r: Float64Array.from(ref.primitives()) });
+    }
+    gpu.destroy();
+    return out;
+  };
+  const a = await run(0);
+  const b = await run(30);
+  for (let k = 0; k < a.length; k++) {
+    const A = a[k];
+    const B = b[k];
+    if (A === undefined || B === undefined) continue;
+    let gpuDiff = 0;
+    let refDiff = 0;
+    let scale = 0;
+    for (let c = 0; c < mesh.nCells; c++) {
+      for (const m of [1, 2]) {
+        gpuDiff = Math.max(gpuDiff, Math.abs((A.g[NP * c + m] ?? NaN) - (B.g[NP * c + m] ?? NaN)));
+        refDiff = Math.max(refDiff, Math.abs((A.r[NP * c + m] ?? NaN) - (B.r[NP * c + m] ?? NaN)));
+        scale = Math.max(scale, Math.abs(A.r[NP * c + m] ?? NaN));
+      }
+    }
+    process.stdout.write(
+      `[diag2] n ${A.n}: max |u,v (u_inf 30) - u,v (u_inf 0)| / max|u,v|: GPU ${(gpuDiff / scale).toExponential(2)}, oracle ${(refDiff / scale).toExponential(2)} (scale ${scale.toFixed(2)} m/s)\n`,
+    );
+  }
+});
