@@ -422,55 +422,81 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
     s.destroy();
   });
 
-  it('accumulates increments below the state ulp (the compensated update, both modes)', async () => {
-    // SOLVER.md 14: U^n is kept as the f32 copy plus a low part, so a source whose increment per
-    // step is 1/40 of the state's ulp still moves the state at its exact rate. The calorically
-    // perfect gas has the same R and cp for air and products, so a uniform fuel fraction in the
-    // ambient is a quiet state (every flux an exact zero) with a large rho Z
-    const box = solverMesh(
-      singleBlock(rectangle('box', 0, 1, 0.5, 1.5, 8, 8), {
-        imin: BC.SLIP_WALL,
-        imax: BC.SLIP_WALL,
-        jmin: BC.SLIP_WALL,
-        jmax: BC.SLIP_WALL,
-      }),
-    );
-    const n = box.nCells;
-    const N = 400;
-    for (const mode of ['physical', 'tracking'] as const) {
-      const s = await create(box, { gas: caloricallyPerfectGas(1.4, 287.05287), cellSource: true });
-      s.setUniform({ rho: s.ref.rho, u: 0, v: 0, w: 0, p: s.ref.p, z: 0.03 });
-      if (mode === 'tracking') s.iterate(1); // the local tau of this quiet state, in the state copy
-      const before = await s.readConserved();
-      const st = await s.readState();
-      const dt = 1e-4;
-      // per step and cell: dt rate (physical) or tau_c b V_c rate (tracking: alpha_3 = 1)
-      const perRate = Array.from({ length: n }, (_, c) =>
-        mode === 'physical' ? Math.fround(dt) : (st[8 * c + 6] ?? NaN) * (box.cellVolR[c] ?? NaN),
+  // SOLVER.md 14.6(b): U^n is kept as the f32 copy plus a low part, so a source whose increment
+  // per step is 1/40 of the state's ulp still moves the state at its exact rate. Both records of
+  // the state (W2S-A-I5): rho Z in (eta, rho Z) and rho' in (rho', (rho u)', rho v, rho r w). The
+  // calorically perfect gas has the same R and cp for air and products, so a uniform fuel
+  // fraction in the ambient is a quiet state (every flux an exact zero) with a large rho Z; a
+  // uniform rho' at p_inf is one with a large rho', and a mass source at u = 0 keeps rho e = p /
+  // (gamma - 1), so p stays p_inf while rho' grows.
+  for (const comp of [5, 0] as const) {
+    it(`accumulates increments below the state ulp (compensated update, both modes, component ${comp})`, async () => {
+      const box = solverMesh(
+        singleBlock(rectangle('box', 0, 1, 0.5, 1.5, 8, 8), {
+          imin: BC.SLIP_WALL,
+          imax: BC.SLIP_WALL,
+          jmin: BC.SLIP_WALL,
+          jmax: BC.SLIP_WALL,
+        }),
       );
-      const z0 = before[5] ?? NaN;
-      const ulp = 2 ** (Math.floor(Math.log2(Math.abs(z0))) - 23);
-      const rate = ulp / 40 / Math.max(...perRate);
-      const rate0 = new Float64Array(6 * n);
-      for (let c = 0; c < n; c++) rate0[6 * c + 5] = rate;
-      s.setCellSource({ rate0 });
-      if (mode === 'physical') for (let k = 0; k < N; k++) s.stepPhysical(dt);
-      else s.iterate(N);
-      const after = await s.readConserved();
-      const hi = await s.readState();
-      for (let c = 0; c < n; c++) {
-        const want = N * rate * (perRate[c] ?? NaN);
-        const d = (after[6 * c + 5] ?? NaN) - (before[6 * c + 5] ?? NaN);
-        expect(Math.abs(d / want - 1), `${mode} cell ${c}: rho Z moved ${d}, ${want}`).toBeLessThan(
-          1e-3,
+      const n = box.nCells;
+      const N = 400;
+      for (const mode of ['physical', 'tracking'] as const) {
+        const s = await create(box, {
+          gas: caloricallyPerfectGas(1.4, 287.05287),
+          cellSource: true,
+        });
+        s.setUniform(
+          comp === 5
+            ? { rho: s.ref.rho, u: 0, v: 0, w: 0, p: s.ref.p, z: 0.03 }
+            : { rho: 1.1 * s.ref.rho, u: 0, v: 0, w: 0, p: s.ref.p, z: 0 },
         );
-        // the f32 copy moves by whole ulps as the low part carries: it is not stuck at U^0
-        expect(Math.abs((hi[8 * c + 5] ?? NaN) - Math.fround(z0)) / ulp, mode).toBeGreaterThan(3);
-        for (const k of [0, 1, 2, 3, 4]) expect(after[6 * c + k], `${mode} ${c}.${k}`).toBe(0);
+        if (mode === 'tracking') s.iterate(1); // the local tau of this quiet state, in the copy
+        const before = await s.readConserved();
+        const st = await s.readState();
+        const dt = 1e-4;
+        // per step and cell: dt rate (physical) or tau_c b V_c rate (tracking: alpha_3 = 1)
+        const perRate = Array.from({ length: n }, (_, c) =>
+          mode === 'physical' ? Math.fround(dt) : (st[8 * c + 6] ?? NaN) * (box.cellVolR[c] ?? NaN),
+        );
+        const q0 = before[comp] ?? NaN;
+        const ulp = 2 ** (Math.floor(Math.log2(Math.abs(q0))) - 23);
+        // increments of 1/40 ulp (rho Z) or 1/4 ulp (rho': its 1e-9 flow noise below stays ~1 %
+        // of the 100 ulps it then moves); either rounds away without the low part
+        const rate = ulp / (comp === 5 ? 40 : 4) / Math.max(...perRate);
+        const rate0 = new Float64Array(6 * n);
+        for (let c = 0; c < n; c++) rate0[6 * c + comp] = rate;
+        s.setCellSource({ rate0 });
+        if (mode === 'physical') for (let k = 0; k < N; k++) s.stepPhysical(dt);
+        else s.iterate(N);
+        const after = await s.readConserved();
+        const hi = await s.readState();
+        for (let c = 0; c < n; c++) {
+          const want = N * rate * (perRate[c] ?? NaN);
+          const d = (after[6 * c + comp] ?? NaN) - (before[6 * c + comp] ?? NaN);
+          // rho' (tracking): the f32 rounding of p' (a few ulp) leaves the walls' pressure and
+          // the pressure source unbalanced by an ulp, a flow of ~1e-6 m/s whose mass flux moves
+          // rho' by ~1e-9; without the low part the state would move 1/400 of the increments
+          const tol = comp === 0 && mode === 'tracking' ? 0.05 : 1e-3;
+          expect(Math.abs(d / want - 1), `${mode} cell ${c}: moved ${d}, ${want}`).toBeLessThan(
+            tol,
+          );
+          // the f32 copy moves by whole ulps as the low part carries: it is not stuck at U^0
+          expect(Math.abs((hi[8 * c + comp] ?? NaN) - Math.fround(q0)) / ulp, mode).toBeGreaterThan(
+            3,
+          );
+          for (const k of [0, 1, 2, 3, 4, 5]) {
+            if (k === comp) continue;
+            const dk = (after[6 * c + k] ?? NaN) - (before[6 * c + k] ?? NaN);
+            // rho Z: every other component an exact zero; rho': that ~1e-6 m/s flow only
+            if (comp === 5) expect(after[6 * c + k], `${mode} ${c}.${k}`).toBe(0);
+            else expect(Math.abs(dk), `${mode} ${c}.${k}`).toBeLessThan(k === 4 ? 1e-3 : 1e-5);
+          }
+        }
+        s.destroy();
       }
-      s.destroy();
-    }
-  });
+    });
+  }
 
   it('adds the power of a force source to the energy (work: s_eta = u s_x + v s_r + w s_L / r)', async () => {
     // ladder L9b's actuator disk: a force density f along x with s_eta = f u, in a uniform stream
