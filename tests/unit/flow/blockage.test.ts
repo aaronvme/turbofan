@@ -108,17 +108,25 @@ const STAY = 1e-8;
 const ITERATING = 600_000;
 
 describe('W2R-6: the plain scheme about a steady state with blockage', () => {
-  it('the preconditioned steady states of the three set-ups converge to 1e-11', () => {
-    expect(steady(open, 0.94).converged).toBe(true);
-    expect(steady(blocked, 0.998).converged).toBe(true);
-    expect(steady(blocked, 0.94).converged).toBe(true);
-  }, ITERATING);
+  it(
+    'the preconditioned steady states of the three set-ups converge to 1e-11',
+    () => {
+      expect(steady(open, 0.94).converged).toBe(true);
+      expect(steady(blocked, 0.998).converged).toBe(true);
+      expect(steady(blocked, 0.94).converged).toBe(true);
+    },
+    ITERATING,
+  );
 
-  it('control, b = 1: the plain scheme stays at its steady state in both modes', () => {
-    const U0 = steady(open, 0.94).U;
-    expect(drift(open, 0.94, U0, 'tracking', 1000)).toBeLessThan(STAY);
-    expect(drift(open, 0.94, U0, 'physical', 2000)).toBeLessThan(STAY);
-  }, ITERATING);
+  it(
+    'control, b = 1: the plain scheme stays at its steady state in both modes',
+    () => {
+      const U0 = steady(open, 0.94).U;
+      expect(drift(open, 0.94, U0, 'tracking', 1000)).toBeLessThan(STAY);
+      expect(drift(open, 0.94, U0, 'physical', 2000)).toBeLessThan(STAY);
+    },
+    ITERATING,
+  );
 
   it.fails(
     'KNOWN-FAIL W2R-6 (D4-29): plain tracking leaves the steady state of a blockage duct ' +
