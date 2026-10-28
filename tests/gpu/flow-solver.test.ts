@@ -4,7 +4,7 @@
 // zero validation errors (P3).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { fromHalfBits } from '../../src/contracts/half';
-import { FIELD_EXTENTS, type FieldTexturePair } from '../../src/contracts/flow';
+import { FIELD_EXTENTS, type FieldTexturePair, type FlowSolver } from '../../src/contracts/flow';
 import { nextSnapshot } from '../../src/contracts/sim';
 import type { SimDevice } from '../../src/gpu/device';
 import { GpuFlowSolver } from '../../src/flow/gpu/device/flowSolver';
@@ -235,9 +235,11 @@ describe('GpuFlowSolver (the FlowSolver contract)', () => {
     const { asset } = await shippedAsset();
     await s2.init({ device: other.device, mesh: asset, definition: ENGINE_DEFINITION });
     s2.step({ gpuTimeBudgetMs: 5, maxIterations: 2 });
-    // what a lost device with an empty message looks like (the spec allows an empty message)
-    s2.reportGpuError('');
-    const status = s2.status();
+    // what a lost device with an empty message looks like (the spec allows an empty message),
+    // through the contract (W2S-A-I10: the app holds a FlowSolver, not the class)
+    const contract: FlowSolver = s2;
+    contract.reportGpuError('');
+    const status = contract.status();
     expect(status.status).toBe('lost');
     expect(status.error?.length).toBeGreaterThan(0);
     const snap = nextSnapshot(null, { ...sampleSnapshotParts(), flow: status });
