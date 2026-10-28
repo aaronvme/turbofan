@@ -16,7 +16,7 @@ import {
 } from '../../../../src/flow/gpu/params';
 import { snapshotSources, solverFlowStatus } from '../../../../src/flow/gpu/status';
 import { f32Lit, gasWgsl } from '../../../../src/flow/gpu/wgsl/gas';
-import { fluxWgsl } from '../../../../src/flow/gpu/wgsl/flux';
+import { DEFAULT_LIMITER, fluxWgsl } from '../../../../src/flow/gpu/wgsl/flux';
 import {
   CELL_SOURCE_VEC4,
   SCALAR,
@@ -253,6 +253,11 @@ describe('WGSL generation', () => {
     expect(full).toContain('binding(9) var<storage, read_write> dump');
     expect(cellSourceKernelWgsl(ko)).toContain(`${CELL_SOURCE_VEC4}u * c`);
     expect(() => fluxWgsl('smooth' as never)).toThrow(/not implemented/);
+    // W2S-B-B1: the oracle's limiter vocabulary ('sharp' | 'smooth', w2/reference round 4), so
+    // an oracle option forwarded to the kernel names the same limiter
+    expect(DEFAULT_LIMITER).toBe('sharp');
+    expect(fluxWgsl('sharp')).toBe(fluxWgsl());
+    expect(() => fluxWgsl('vanAlbadaSharp' as never)).toThrow(/not implemented/);
   });
 
   it('sizes the tile memory under the 16 KiB default and the face-dump stride', () => {
