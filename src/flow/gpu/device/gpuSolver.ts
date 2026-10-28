@@ -8,7 +8,10 @@
 // (tau and beta^2 are the tracking mode's stage-1 values, carried to stages 2 and 3). An
 // iteration with U^n in copy N and the free copies X, Y:
 //   stage 1: in N, base N -> X;  stage 2: in X, base N -> Y;  stage 3: in Y, base N -> X
-// so U^n alternates between C0 and C1 and C2 holds the middle stage (as W0's spike).
+// so U^n alternates between C0 and C1 and C2 holds the middle stage (as W0's spike). With
+// preconditioning, the beta pass writes beta^2 of U^n per cell before stage 1 (kernels.ts; D4-44:
+// the face's M_ref takes it): the stage kernel reads it for its cells and, at its faces, for the
+// tile's first ring and its ghosts (a ghost: its source cell's).
 import { primToCons, physicalToPrim, NU, type PhysicalState } from '../../reference/state';
 import type { ReferenceState } from '../../reference/gas';
 import type { SolverMesh } from '../../reference/solverMesh';
@@ -30,6 +33,7 @@ import {
 import type { LimiterKind } from '../wgsl/flux';
 import {
   SCALAR,
+  betaKernelWgsl,
   dtKernelWgsl,
   ghostKernelWgsl,
   lambdaKernelWgsl,
@@ -113,14 +117,20 @@ export class GpuSolver {
   private readonly red: GPUBuffer;
   /** The low parts of U^n (2 vec4 per cell): U^n = copy + lo, kept by the compensated update. */
   private readonly lo: GPUBuffer;
+  /** beta^2 per cell of U^n (the beta pass, preconditioned tracking; 1 until it first runs). */
+  private readonly beta: GPUBuffer;
   private readonly uniforms: GPUBuffer;
   private readonly src: GPUBuffer | null;
   private readonly coef: GPUBuffer | null;
   private readonly dump: GPUBuffer | null;
   private readonly pipes: Record<
-    'prim' | 'ghost' | 'stage' | 'lambda' | 'dt' | 'time',
+    'prim' | 'ghost' | 'stage' | 'lambda' | 'dt' | 'time' | 'beta',
     GPUComputePipeline
   >;
+  /** The beta pass runs (tracking with low-Mach preconditioning). */
+  private readonly preconditioned: boolean;
+  /** [copy] */
+  private readonly betaGroups: GPUBindGroup[];
   private readonly sourcePipe: GPUComputePipeline | null;
   /** [copy] */
   private readonly primGroups: GPUBindGroup[];
@@ -150,6 +160,7 @@ export class GpuSolver {
       topo: GPUBuffer;
       red: GPUBuffer;
       lo: GPUBuffer;
+      beta: GPUBuffer;
       uniforms: GPUBuffer;
       src: GPUBuffer | null;
       coef: GPUBuffer | null;
@@ -175,13 +186,15 @@ export class GpuSolver {
     this.topo = b.topo;
     this.red = b.red;
     this.lo = b.lo;
+    this.beta = b.beta;
     this.uniforms = b.uniforms;
     this.src = b.src;
     this.coef = b.coef;
     this.dump = b.dump;
     this.pipes = init.pipes;
     this.sourcePipe = init.sourcePipe;
-    this.owned = [...b.copies, b.prim, b.geo, b.red, b.lo, b.uniforms];
+    this.owned = [...b.copies, b.prim, b.geo, b.red, b.lo, b.beta, b.uniforms];
+    this.preconditioned = (init.params.tracking[0]?.precondition ?? 0) === 1;
     if (b.topo !== b.geo) this.owned.push(b.topo);
     for (const x of [b.src, b.coef, b.dump]) if (x !== null) this.owned.push(x);
 
@@ -258,12 +271,22 @@ export class GpuSolver {
             ...(this.packed ? [] : [buf(6, this.topo)]),
             buf(7, this.red),
             buf(10, this.lo),
+            buf(11, this.beta),
           ];
           if (srcBuf !== null) entries.push(buf(8, srcBuf));
           if (this.dump !== null) entries.push(buf(9, this.dump));
           return group(this.pipes.stage, `stage m${mode} p${n} s${stage + 1}`, entries);
         }),
       ),
+    );
+    this.betaGroups = this.copies.map((c, k) =>
+      group(this.pipes.beta, `beta C${k}`, [
+        uni(0),
+        buf(1, c),
+        buf(5, this.geo),
+        ...(this.packed ? [] : [buf(6, this.topo)]),
+        buf(11, this.beta),
+      ]),
     );
     this.lambdaGroup = group(this.pipes.lambda, 'lambda', [
       uni(3),
@@ -314,13 +337,14 @@ export class GpuSolver {
       });
     };
     const dtCode = dtKernelWgsl(ko);
-    const [prim, ghost, stage, lambda, dt, time, source] = await Promise.all([
+    const [prim, ghost, stage, lambda, dt, time, beta, source] = await Promise.all([
       pipe(primKernelWgsl(ko), 'prim', 'primMain'),
       pipe(ghostKernelWgsl(ko), 'ghost', 'ghostMain'),
       pipe(stageKernelWgsl(ko), 'stage', 'stageMain'),
       pipe(lambdaKernelWgsl(ko), 'lambda', 'lambdaMain'),
       pipe(dtCode, 'dt', 'dtMain'),
       pipe(dtCode, 'time', 'advanceTime'),
+      pipe(betaKernelWgsl(ko), 'beta', 'betaMain'),
       opts.cellSource === true
         ? pipe(cellSourceKernelWgsl(ko), 'source', 'sourceMain')
         : Promise.resolve(null),
@@ -344,6 +368,8 @@ export class GpuSolver {
     }
     const red = make(4 * reductionLength(layout), 'reduction');
     const lo = make(32 * n, 'U low parts');
+    const betaBuf = make(4 * n, 'beta^2');
+    device.queue.writeBuffer(betaBuf, 0, new Float32Array(Math.max(4, n)).fill(1));
     const uniforms = make(
       6 * PARAMS_STRIDE,
       'params',
@@ -365,8 +391,20 @@ export class GpuSolver {
       layout,
       params,
       label,
-      buffers: { copies, prim: primBuf, geo, topo, red, lo, uniforms, src, coef, dump },
-      pipes: { prim, ghost, stage, lambda, dt, time },
+      buffers: {
+        copies,
+        prim: primBuf,
+        geo,
+        topo,
+        red,
+        lo,
+        beta: betaBuf,
+        uniforms,
+        src,
+        coef,
+        dump,
+      },
+      pipes: { prim, ghost, stage, lambda, dt, time, beta },
       sourcePipe: source,
       packed: plan.packed,
     });
@@ -497,6 +535,14 @@ export class GpuSolver {
   private encodeStep(pass: GPUComputePassEncoder, mode: SolverModeIndex): void {
     const roles = this.parity === 0 ? [0, 1, 2] : [1, 0, 2];
     const inputs = [roles[0], roles[1], roles[2]];
+    if (mode === 0 && this.preconditioned) {
+      // beta^2 of U^n, frozen for the iteration's three stages (D4-44)
+      const bg = this.betaGroups[roles[0] ?? 0];
+      if (bg === undefined) throw new Error('bad beta group');
+      pass.setPipeline(this.pipes.beta);
+      pass.setBindGroup(0, bg);
+      pass.dispatchWorkgroups(this.layout.workgroups);
+    }
     for (let k = 0; k < 3; k++) {
       const copy = inputs[k] ?? 0;
       if (this.sourcePipe !== null) {

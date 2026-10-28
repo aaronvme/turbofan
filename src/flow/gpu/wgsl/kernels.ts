@@ -1,15 +1,23 @@
 // The GPU solver's WGSL modules (docs/SOLVER.md), generated per solver from its layout (buffer
 // section offsets and the tile are compile-time constants) and its gas model.
 //
+// Per tracking iteration with low-Mach preconditioning, before stage 1:
+//   0. beta: beta^2 of every cell from U^n (section 10: its own Mach number and its four face
+//      neighbours' p', a ghost's after its BC), into a per-cell buffer. It is frozen for the
+//      iteration, like tau. The face's M_ref takes it (D4-44, section 7), so every tile needs the
+//      beta of its halo's cells and ghosts at stage 1, before its fluxes: a cell next to a tile's
+//      halo needs p' one cell further out, and a ghost has its source cell's beta, whose
+//      neighbours may be in another block. Hence a pass of its own, not the stage kernel's halo.
 // Per RK stage, in one compute pass:
 //   1. (sources, if the solver has a source model: the prim pass, conserved -> primitive record per
 //      cell (section 4), then the rates and damping per cell, section 8)
 //   2. stage: the fused per-tile kernel: the tile + 2-cell halo of primitives in workgroup memory,
 //      each computed from the stage's U (section 4) and, for a ghost, from its source cell(s) and
-//      BC (section 5), MUSCL slopes (section 6), SLAU2 or wall face fluxes x b_f (section 7), the
-//      residual with the pressure/swirl source and the volume sources (sections 8-9), the local
-//      time step and beta^2 at stage 1 (section 10), the RK update (tracking or SSP-RK3), and the
-//      stage-1 density-residual partial sums (section 11).
+//      BC (section 5), and the beta of the tile and its first ring (a ghost: its source cell's),
+//      MUSCL slopes (section 6), SLAU2 or wall face fluxes x b_f (section 7), the residual with the
+//      pressure/swirl source and the volume sources (sections 8-9), the local time step at stage 1
+//      (section 10), the RK update (tracking or SSP-RK3), and the stage-1 density-residual partial
+//      sums (section 11).
 // The prim pass (primKernelWgsl) and the ghost pass (ghostKernelWgsl) remain for the render
 // resample (cells only), the physical-time step's lambda and the read-back of the primitives.
 // Physical time adds a global-dt reduction before the step (lambda, dtFinal) and a clock update
@@ -56,7 +64,8 @@ fn topoAt(k: u32) -> vec4u { return topo[k]; }`;
 export function stageWorkgroupBytes(t: Tile): number {
   const nt = (t.x + 4) * (t.y + 4);
   const ns = (t.x + 2) * t.y + t.x * (t.y + 2);
-  return nt * (16 + 8 + 4) + ns * (16 + 8) + (4 + 8) * t.x * t.y;
+  const nr = (t.x + 2) * (t.y + 2);
+  return nt * (16 + 8 + 4) + ns * (16 + 8) + (4 + 8) * t.x * t.y + 4 * nr;
 }
 
 /** Face slots of one tile (i-faces then j-faces): the face-dump stride. */
@@ -116,6 +125,21 @@ const NS: u32 = NSI + TX * (TY + 2u);
 const NFI: u32 = (TX + 1u) * TY;
 const NF: u32 = NFI + TX * (TY + 1u);
 const FPT: u32 = (NF + NTH - 1u) / NTH;
+// the tile and its first ring of cells, (TX + 2) x (TY + 2) (the corners unused): the cells a face
+// of the tile touches and a cell's four face neighbours
+const RX: u32 = TX + 2u;
+const NR: u32 = RX * (TY + 2u);
+
+// the ring index of halo position t (valid for t on the tile or its first ring)
+fn ringOf(t: u32) -> u32 { return (t / HX - 1u) * RX + (t % HX - 1u); }
+
+// the cell whose beta an extended index has: the cell, or the ghost's source cell (the oracle's
+// ghostSrc: layout.ts stores it as source 0, or as source 1 for a slip wall's layer-2 ghost)
+fn betaSource(e: u32) -> u32 {
+  if (e < P.nCells) { return e; }
+  let r0 = topoAt(GHOSTS + 2u * (e - P.nCells));
+  return select(r0.x, r0.y, r0.w == 2u);
+}
 
 // extended index of block-local (gi, gj): the cell, or the ghost there (section 2's table)
 fn extIndex(gi: i32, gj: i32, d0: vec4u) -> u32 {
@@ -178,6 +202,96 @@ export function ghostKernelWgsl(o: KernelOptions): string {
 ${o.packedTopo === true ? '@group(0) @binding(2) var<storage, read> geo: array<vec4f>;' : ''}
 ${topoWgsl(o, 2)}
 ${BOUNDARY_WGSL}`;
+}
+
+/**
+ * A halo's primitives from the state Uin (the stage kernel and the beta pass): a cell's (section 4),
+ * or a ghost's from its source cell(s) and BC (section 5). Needs Uin, geo and topoAt.
+ */
+const HALO_PRIM_WGSL = /* wgsl */ `${BOUNDARY_FNS}
+// the primitives of cell c of the stage's state (section 4)
+fn cellPrim(c: u32) -> Prim {
+  return consToPrim(Uin[2u * c], Uin[2u * c + 1u].xy, geo[CELL_GEO + c].x);
+}
+
+// the primitives of extended index e: a cell, or a ghost from its source cell(s) and BC (section 5)
+fn haloPrim(e: u32) -> Prim {
+  if (e < P.nCells) { return cellPrim(e); }
+  let g = e - P.nCells;
+  let r0 = topoAt(GHOSTS + 2u * g);
+  let r1 = topoAt(GHOSTS + 2u * g + 1u);
+  let s = cellPrim(r0.x);
+  var s1 = s;
+  if (r0.z == 1u) { s1 = cellPrim(r0.y); }
+  return ghostPrim(r0, r1, s, s1);
+}
+`;
+
+/**
+ * Tracking with preconditioning, before stage 1 of each iteration: beta^2 of every cell of U^n
+ * (SOLVER.md 10; the oracle's computeBeta) into cellBeta2, frozen for the three stages. Per tile:
+ * the p' of the tile and its first ring (a ghost's after its BC), then each cell's
+ * beta^2 = min(1, max(M^2, minMach^2, dpMax / (rho c^2))), dpMax the largest |p'| difference to
+ * its four face neighbours. Bindings: 1 U^n, 5 geo, 6 topo, 11 cellBeta2 (rw).
+ */
+export function betaKernelWgsl(o: KernelOptions): string {
+  const t = o.layout.tile;
+  return `${header(o)}
+${TILE_WGSL(t)}
+@group(0) @binding(1) var<storage, read> Uin: array<vec4f>;
+@group(0) @binding(5) var<storage, read> geo: array<vec4f>;
+${topoWgsl(o, 6)}
+@group(0) @binding(11) var<storage, read_write> cellBeta2: array<f32>;
+
+var<workgroup> wp: array<f32, NR>;     // p' of the tile and its first ring
+var<workgroup> wm: array<vec2f, NTH>;  // the tile's cells: q^2 / c^2, rho c^2
+
+${HALO_PRIM_WGSL}
+@compute @workgroup_size(TX, TY)
+fn betaMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index) lid: u32) {
+  let info = topoAt(TILES + wid.x);
+  let d0 = topoAt(BLOCKS + 2u * info.x);
+  let ni = i32(d0.y);
+  let nj = i32(d0.z);
+  let i0 = i32(info.y * TX);
+  let j0 = i32(info.z * TY);
+  for (var k = lid; k < NR; k += NTH) {
+    let rx = i32(k % RX) - 1;
+    let ry = i32(k / RX) - 1;
+    let gi = i0 + rx;
+    let gj = j0 + ry;
+    let inI = gi >= 0 && gi < ni;
+    let inJ = gj >= 0 && gj < nj;
+    if ((inI && inJ) || (inJ && gi >= -1 && gi <= ni) || (inI && gj >= -1 && gj <= nj)) {
+      let e = extIndex(gi, gj, d0);
+      let pr = haloPrim(e);
+      wp[k] = pr.b.x;
+      if (inI && inJ && rx >= 0 && rx < i32(TX) && ry >= 0 && ry < i32(TY)) {
+        let u = P.uInf + pr.a.y;
+        let v = pr.a.z;
+        let w = pr.a.w / geo[CELL_GEO + e].x;
+        let c2 = pr.b.w * pr.b.w;
+        wm[u32(ry) * TX + u32(rx)] = vec2f((u * u + v * v + w * w) / c2, (P.rhoInf + pr.a.x) * c2);
+      }
+    } else {
+      wp[k] = 0.0;
+    }
+  }
+  workgroupBarrier();
+  let tx = lid % TX;
+  let ty = lid / TX;
+  let gi = i0 + i32(tx);
+  let gj = j0 + i32(ty);
+  if (gi < ni && gj < nj) {
+    let h = (ty + 1u) * RX + tx + 1u;
+    let pc = wp[h];
+    let dpMax = max(max(abs(wp[h - 1u] - pc), abs(wp[h + 1u] - pc)),
+                    max(abs(wp[h - RX] - pc), abs(wp[h + RX] - pc)));
+    let m = wm[lid];
+    cellBeta2[d0.x + u32(gj * ni + gi)] = min(1.0, max(max(m.x, P.minMach2), dpMax / m.y));
+  }
+}
+`;
 }
 
 /**
@@ -256,7 +370,8 @@ fn twoSum4(a: vec4f, b: vec4f) -> Sum4 {
 
 /**
  * The fused stage kernel. Bindings: 1 U_in, 2 U^n, 3 U_out (rw), 5 geo, 6 topo, 7 reduction (rw),
- * 8 sources (optional), 9 face dump (optional, rw), 10 the low parts (rw).
+ * 8 sources (optional), 9 face dump (optional, rw), 10 the low parts (rw), 11 beta^2 per cell (the
+ * beta pass's, frozen for the iteration).
  */
 export function stageKernelWgsl(o: KernelOptions): string {
   const t = o.layout.tile;
@@ -272,6 +387,7 @@ ${TILE_WGSL(t)}
 ${topoWgsl(o, 6)}
 @group(0) @binding(7) var<storage, read_write> red: array<f32>;
 @group(0) @binding(10) var<storage, read_write> lo: array<vec4f>;
+@group(0) @binding(11) var<storage, read> cellBeta2: array<f32>;
 ${src ? '@group(0) @binding(8) var<storage, read> src: array<vec4f>;' : ''}
 ${dump ? '@group(0) @binding(9) var<storage, read_write> dump: array<vec4f>;' : ''}
 
@@ -282,24 +398,9 @@ var<workgroup> wsa: array<vec4f, NS>;  // slopes, then face fluxes (mass, x-mom,
 var<workgroup> wsb: array<vec2f, NS>;  // slopes, then face fluxes (eta, rho Z)
 var<workgroup> wred: array<f32, NTH>;
 var<workgroup> wtc: array<vec2f, NTH>; // T', c of the tile's own cells
+var<workgroup> wbeta: array<f32, NR>;  // beta of the tile and its first ring (a ghost: its source's)
 
-${BOUNDARY_FNS}
-// the primitives of cell c of the stage's state (section 4)
-fn cellPrim(c: u32) -> Prim {
-  return consToPrim(Uin[2u * c], Uin[2u * c + 1u].xy, geo[CELL_GEO + c].x);
-}
-
-// the primitives of extended index e: a cell, or a ghost from its source cell(s) and BC (section 5)
-fn haloPrim(e: u32) -> Prim {
-  if (e < P.nCells) { return cellPrim(e); }
-  let g = e - P.nCells;
-  let r0 = topoAt(GHOSTS + 2u * g);
-  let r1 = topoAt(GHOSTS + 2u * g + 1u);
-  let s = cellPrim(r0.x);
-  var s1 = s;
-  if (r0.z == 1u) { s1 = cellPrim(r0.y); }
-  return ghostPrim(r0, r1, s, s1);
-}
+${HALO_PRIM_WGSL}
 
 // the face states and flux of tile face f (i-faces first): the one call site of SLAU2
 fn tileFace(f: u32, i0: i32, j0: i32, d0: vec4u, d1: vec4u) -> Flux {
@@ -355,7 +456,9 @@ fn tileFace(f: u32, i0: i32, j0: i32, d0: vec4u, d1: vec4u) -> Flux {
     let pw = select(qLb.x, qRb.x, bl < 0.0);
     F = Flux(area * vec4f(0.0, pw * n.x, pw * n.y, 0.0), vec2f(0.0));
   } else {
-    F = slau2(qLa, qLb, qRa, qRb, n, area, fd.w, P.machCut);
+    // D4-44: the face's beta, the mean of its two cells' (symmetric bitwise, like b_f)
+    let betaFace = 0.5 * sadd(wbeta[ringOf(l)], wbeta[ringOf(r)]);
+    F = slau2(qLa, qLb, qRa, qRb, n, area, fd.w, P.machCut, betaFace);
   }
   return Flux(bf * F.a, bf * F.b);
 }
@@ -380,6 +483,7 @@ fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index)
     let inI = gi >= 0 && gi < ni;
     let inJ = gj >= 0 && gj < nj;
     let ok = (inI && inJ) || (inJ && gi >= -2 && gi <= ni + 1) || (inI && gj >= -2 && gj <= nj + 1);
+    let ring = hx >= -1 && hx <= i32(TX) && hy >= -1 && hy <= i32(TY);
     if (ok) {
       let e = extIndex(gi, gj, d0);
       let pr = haloPrim(e);
@@ -387,10 +491,12 @@ fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index)
       wqb[t] = pr.b.xy;
       wb[t] = extB(e);
       if (hx >= 0 && hx < i32(TX) && hy >= 0 && hy < i32(TY)) { wtc[u32(hy) * TX + u32(hx)] = pr.b.zw; }
+      if (ring) { wbeta[ringOf(t)] = sqrt(cellBeta2[betaSource(e)]); }
     } else {
       wqa[t] = vec4f(0.0);
       wqb[t] = vec2f(0.0);
       wb[t] = 1.0;
+      if (ring) { wbeta[ringOf(t)] = 1.0; }
     }
   }
   workgroupBarrier();
@@ -491,14 +597,8 @@ fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index)
       var tau: f32;
       var beta2: f32;
       if (P.stage == 0u) {
-        beta2 = 1.0;
-        if (P.precondition == 1u) {
-          let dpMax = max(max(abs(wqb[h - 1u].x - pz.x), abs(wqb[h + 1u].x - pz.x)),
-                          max(abs(wqb[h - HX].x - pz.x), abs(wqb[h + HX].x - pz.x)));
-          let c2 = pz.w * pz.w;
-          beta2 = min(1.0, max(max((uc * uc + q.z * q.z + w * w) / c2, P.minMach2),
-                               dpMax / (rho * c2)));
-        }
+        // beta^2 of U^n from the beta pass (section 10), frozen with tau for stages 2 and 3
+        beta2 = select(1.0, cellBeta2[c], P.precondition == 1u);
         let bc = abs(wb[h]);
         let bfs = 0.5 * vec4f(bc + abs(wb[h - 1u]), bc + abs(wb[h + 1u]),
                               bc + abs(wb[h - HX]), bc + abs(wb[h + HX]));
@@ -728,7 +828,7 @@ fn sourceMain(@builtin(global_invocation_id) gid: vec3u) {
 
 /** The test probes' entry points and their records' size in vec4 (in and out). */
 export const PROBE_STRIDE = {
-  probeFlux: 4,
+  probeFlux: 5,
   probeGas: 4,
   probeSlope: 4,
   probePrecondition: 4,
@@ -738,7 +838,8 @@ export type ProbeEntry = keyof typeof PROBE_STRIDE;
 
 /**
  * Test probes of the device functions (no solver state), PROBE_STRIDE vec4 in and out per record:
- * - probeFlux: in (L.a), (L.p', L.Z, n_x, n_r), (R.a), (R.p', R.Z, area, r_f); out SLAU2 (a), (b).
+ * - probeFlux: in (L.a), (L.p', L.Z, n_x, n_r), (R.a), (R.p', R.Z, area, r_f), (beta_face, 0, 0,
+ *   0); out SLAU2 (a), (b).
  * - probeGas: in (U.a), (eta, rho Z, r_c, T'), (Z, 0, 0, 0), (x, y, tau, 0); out the primitive
  *   record (a), (b); (temperatureGauge(deltaE(T')), deltaE(T'), deltaH(T'), cp(T_inf + T'));
  *   (log1p x, expm1 y, entropyDelta(T_inf, tau), enthalpyDelta(T_inf, tau)).
@@ -760,14 +861,14 @@ ${UPDATE_WGSL(true)}
 @compute @workgroup_size(64)
 fn probeFlux(@builtin(global_invocation_id) gid: vec3u) {
   let k = gid.x;
-  if (k >= arrayLength(&pin) / 4u) { return; }
-  let la = pin[4u * k];
-  let lb = pin[4u * k + 1u];
-  let ra = pin[4u * k + 2u];
-  let rb = pin[4u * k + 3u];
-  let F = slau2(la, lb.xy, ra, rb.xy, lb.zw, rb.z, rb.w, P.machCut);
-  pout[4u * k] = F.a;
-  pout[4u * k + 1u] = vec4f(F.b, 0.0, 0.0);
+  if (k >= arrayLength(&pin) / 5u) { return; }
+  let la = pin[5u * k];
+  let lb = pin[5u * k + 1u];
+  let ra = pin[5u * k + 2u];
+  let rb = pin[5u * k + 3u];
+  let F = slau2(la, lb.xy, ra, rb.xy, lb.zw, rb.z, rb.w, P.machCut, pin[5u * k + 4u].x);
+  pout[5u * k] = F.a;
+  pout[5u * k + 1u] = vec4f(F.b, 0.0, 0.0);
 }
 
 @compute @workgroup_size(64)
