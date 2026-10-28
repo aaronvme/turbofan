@@ -90,9 +90,7 @@ describe('the engine default on the 130k mesh (the w2/solver-perf NaN)', () => {
       const now = scan(await s.readState());
       trace.push(`${done}: ${now.finite ? (now.maxRho / first.maxRho).toFixed(3) : 'NaN'}`);
       expect(now.finite, `finite after ${done} iterations (${trace.join(', ')})`).toBe(true);
-      expect(now.maxRho, `max |rho'| after ${done} iterations`).toBeLessThan(
-        GROWTH * first.maxRho,
-      );
+      expect(now.maxRho, `max |rho'| after ${done} iterations`).toBeLessThan(GROWTH * first.maxRho);
     }
     process.stdout.write(`[engine-stability] max |rho'| / first: ${trace.join(', ')}\n`);
   });
