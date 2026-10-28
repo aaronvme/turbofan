@@ -3,10 +3,14 @@
 // `tools/perf/dawn.ts soak --amp 0,0,0,0,0.001,0`). GpuFlowSolver's default is preconditioned
 // tracking at minMach = M_cut = 0.003 and the preconditioned CFL 0.8 (SOLVER.md 10). Before the
 // kernel took M_ref from the face's beta (D4-44, SOLVER.md 7), a 0.1 % pressure wave went NaN
-// within 10 iterations at the inflow-axis corner, where the wave's jump to the inflow ghost lifts
-// beta^2 by its dp term while the flow is at rest: beta / M_ref about 9 there, whose 1D acoustic
-// limit (SOLVER.md 10, before D4-44) is below 0.8. The same wave stayed finite at CFL 0.5 and
-// below, so the cause is the step limit of the mismatched family, as W2R-I6 found.
+// within 10 iterations, first at cell 0, the inflow-axis corner: there the wave's jump to the
+// inflow ghost lifts beta^2 by its dp term while the flow is at rest, so beta / M_ref was 8.9
+// (M_ref = M_cut at rest; 94 cells above 8), where SOLVER.md 10's 1D limit before D4-44 is about
+// 0.47. The same wave stayed finite at CFL 0.5 and below, and the f64 oracle with the face-Mach
+// M_ref put back also went NaN within 10 iterations: the step limit of the mismatched family
+// (W2R-I6), not f32. With D4-44 the oracle's max |rho'| over its first is 0.998, 0.991, 0.984,
+// 0.979, 0.974, 0.970, 0.966, 1.145, 1.343, 1.510 every 10 iterations to 100, and the kernel's
+// the same to 3 digits (w2-solver-int handoff).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { SimDevice } from '../../src/gpu/device';
 import { GpuFlowSolver } from '../../src/flow/gpu/device/flowSolver';
@@ -21,9 +25,10 @@ const AMPLITUDE = 1e-3;
 const ITERATIONS = 100;
 const EVERY = 10;
 /**
- * A pseudo-time march toward rest must not amplify the wave. The bound is loose on purpose (a
- * divergence grows geometrically, so 2x is crossed within a few iterations of the onset), and the
- * oracle with D4-44 stays within 1.3x of its first max |p'| over the same iterations (handoff).
+ * A divergence grows geometrically, so it crosses 2x within a few iterations of its onset. The
+ * oracle's own trajectory (above) stays below 1.52x to 100 iterations. It is not a bound for
+ * longer runs: the scheme's pseudo-time transient lifts the oracle's max |p'| to 20x near the
+ * inlet by 270 iterations, and it falls back by 300.
  */
 const GROWTH = 2;
 
