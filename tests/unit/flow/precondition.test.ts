@@ -436,10 +436,12 @@ describe('D4-44 (c): preconditioned tracking where beta varies between cells', (
   const gas = caloricallyPerfectGas(1.4, 287.05287);
   const ENGINE = { minMach: 0.003, machCut: 0.003 } as const;
 
-  // KNOWN-FAIL (round 6, WIP): with D4-44 (a) R stalls at 4.2e-4 of its peak, the same absolute
-  // floor as before (0.03 kg/(m^3 s)), and at CFL 0.4 too (4.0e-4), so it is not the acoustic
-  // limit; the smooth limiter converges it to 1e-6 in 1763 iterations (D4-36). J wanders at 0.2-0.3
-  // of its peak with (a), at CFL 0.4 and with the smooth limiter. SOLVER.md 10 has the numbers.
+  // KNOWN-FAIL (D4-51): with D4-44 (a) R stalls at 4.2e-4 of its peak, the same absolute floor as
+  // before (0.03 kg/(m^3 s)), and at CFL 0.4 too, so it is not the acoustic limit but the sharp
+  // limiter's floor: D4-36's variants (a) and (b) converge it to 1e-6 in 1566 / 1390 iterations,
+  // and neither met D4-36's rule (round 7, SOLVER.md 6). J (W2R-I8) wanders at 0.2-0.6 of its peak
+  // with (a), at CFL 0.4, with either limiter variant and with the pressure-difference cutoff at
+  // K = 1-100; a global M_cut >= 0.02 converges it (round 7, SOLVER.md 10).
   it.fails(
     'R: converges a blockage duct started from rest (the dp term lifts beta)',
     () => {
