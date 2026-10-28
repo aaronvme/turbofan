@@ -2863,6 +2863,150 @@ I reviewed `4553ce2..0c87da8` (rounds 6-8) against main c661d5c on 2026-10-28. N
 
 ## Critic pass 10: w2/solver-int @f07f57e
 
-**IN PROGRESS (partial commit).** Reviewed as one merge unit against main 8790669 (merge base c661d5c): w2/solver-perf @5e23c56 (unreviewed), w2/reference rounds 6-8 @0c87da8 (pass 9), and the int round f875e7a..f07f57e. The builder worktree's tracked files are unchanged.
+I reviewed w2/solver-int @f07f57e on 2026-10-28 as one merge unit against main 8790669. The merge base is c661d5c; since then main has changed only LOG.md. The unit holds:
+- w2/solver-perf @5e23c56, never reviewed before;
+- w2/reference rounds 6-8 @0c87da8 (pass 9). They are merged unchanged: `git diff 0c87da8 f07f57e -- src/flow/reference tests/ladder` is empty;
+- the int round f875e7a..f07f57e: the D4-44 mirror, the NaN test, and I9, I11, I14-I16.
 
-**Gates so far, at f07f57e, one suite at a time in the builder worktree:** typecheck clean (15 s); lint clean (53 s); `npm run coverage` 98 files, 1901 passed + 11 expected fail (757 s), lines 99.59 %, statements 98.70 %, functions 99.64 %, branches 87.68 % (src/flow/reference 100, thermo 100, cycle 99.58, geometry 99.59, flow/gpu 99.74); `test:mesh` 29 passed; `test:gpu` 11 files, 60 passed, 0 expected fail (42 s). Remaining: test:gpu-ladder, test:browser, test:ladder, probes.
+The builder worktree's tracked files are unchanged. I ran the probes in my own worktree, detached at f07f57e, and it is back on `critic`. The new probes, each run from `git archive` exports of the refs:
+- `w2i-bitwise.probe.ts.txt` with `w2i-compare.py.txt`: the app's GpuFlowSolver from one ref's `src/` on the 130k asset, from solver-perf's perfState. It dumps every state word, and the compare script diffs two dumps word by word and counts non-finite words. Two refs' solvers in one process segfaulted dawn.node at the second init, so each ref runs in its own process.
+- `w2i-nan-oracle.probe.ts.txt`: a ref's f64 oracle on the 130k asset at GpuFlowSolver's defaults, from the 0.1 % wave. It prints the oracle's own β of the first state and the max |ρ′| trajectory.
+- `w2i-mutants.py.txt`: five mutants of kernels.ts, each run against the full `test:gpu`.
+- `w2i-precond-bitwise.py.txt`: solver-exact's three bitwise tests with the engine's preconditioning switched on (tile shapes, interface faces, D4-50 packing).
+
+**Gates at f07f57e, one suite at a time in the builder worktree, on a quiet but RAM-short machine (0.7-2.8 GB free).** No gate showed memory-pressure symptoms.
+- typecheck: clean (15 s). lint (ESLint + Prettier): clean (53 s).
+- `npm run coverage`: 98 files, 1901 passed + 11 expected fail (757 s).
+  - Lines 99.59 %, statements 98.70 %, functions 99.64 %, branches 87.68 %.
+  - By directory (lines): src/flow/reference 100, thermo 100, cycle 99.58, geometry 99.59, flow/gpu 99.74.
+  - This includes `f32forms.test.ts` 14.3-14.5 with the face's β.
+- `test:mesh`: 29 passed.
+- `test:gpu`: 11 files, **60 passed, 0 expected fail** (42 s). Main's kernel on this oracle failed 5 (pass 9).
+  - 12.2 rows: C 4.84e-7 / 1.90e-6 / 3.18e-6; **C-pre 5.13e-7 / 4.51e-7 / 1.72e-6**; C physical 2.34e-7 / 3.23e-7 / 1.58e-5; D 3.66e-8 / 4.56e-8; E-L5 6.19e-6 (flux scale 2.67e-8); E-L9a 5.10e-6 (2.46e-12); **S 4.59e-7 / 2.90e-7 / 1.20e-6**.
+  - Moving rows: duct, preconditioned, 3.04e-7 / 3.43e-7 / 3.65e-6; S at u∞ 20 m/s 2.07e-6 / 4.31e-7 / 5.05e-7.
+  - Forms 14.3-14.5 at machCut 0.003 with a random face β: ≤ 4.49e-8.
+  - Engine stability: 0.998 … 1.510 at 100 iterations.
+  - C, C physical, D and E are the santa-A numbers of main's kernel to every printed digit, as expected for the paths D4-44 does not touch.
+- `test:gpu-ladder`: 12 tests, **11 passed, 1 FAILED** (311 s). The failure is L9a's value row on D4-57's steadiness: spread 1.31e-5 against 1e-5, value 3.56e-6 against 1e-4 (D4-61, W2I-I1).
+  - L1: 2.13e-5 m/s.
+  - L7: 0.0131 (0.135 / 0.0437 / 0.0131), Cd 0.00159, ratio 1.048. These equal the D4-44 oracle's values (pass 9), so the GPU's preconditioned sphere follows the new oracle.
+  - L8: 0.449 %, spread 1.96e-5. L9b: 0.80 %, spread 3.43e-5.
+  - B: 1.95e-5 against the oracle's 1.49e-5; residual over r_flux 1.27e-11, r_flux/r_ref 1.15e10.
+  - L4a/L5 stay KNOWN-FAIL at 3.64e-4 / 4.91e-3, and their companions pass.
+- `test:browser`: 9 files, 25 passed (212 s, port 5190, strictPort). Nothing is left listening.
+- `test:ladder` (CPU): RUNNING at this commit (pending, see the next commit).
+
+**The solver-perf kernel (5e23c56, D4-54): correct, and bitwise main's.**
+- *Reading:* the stage kernel loads its tile plus a 2-cell halo. Each entry is `haloPrim(e)`: consToPrim of the stage's U for a cell, or the ghost pass's own `ghostPrim` (now `BOUNDARY_FNS`) on its source cells for a ghost. That covers a slip wall's second source and the per-mode BC uniforms (P is the stage's).
+  - The validity masks are the old ones: layer 2 is loaded, never a face, and corners are never read.
+  - T′ and c of the tile's own cells go to `wtc`, so `pz` no longer reads prim.
+  - Every workgroup array is written before the one `workgroupBarrier()`, in uniform control flow.
+  - The resample's map holds cells only (an interface texel takes `ghostSrc`), so dropping its ghost pass is safe.
+  - The physical-time `lambda` reads its own cell's prim and the ghosts' b from geo only, so `encodeGlobalDt` without a ghost pass is safe.
+  - readPrimitives keeps prim + ghost.
+- *Workgroup memory:* the WGSL declarations sum to 16272 B at 16×8 (wqa 3840 + wqb 1920 + wb 960 + wsa 4864 + wsb 2432 + wred 512 + wtc 1024 + wbeta 720), each a multiple of 16. That matches `stageWorkgroupBytes`. A real device validates it: solver-exact's D4-50 test builds the stage pipeline on a default-limits Dawn device (16384 B).
+- *Bitwise (my probe, main c661d5c against 5e23c56, 130k, perfState, separate processes): 0 of 1,040,272 state words differ, all finite,* in:
+  - preconditioned tracking after 50 and 120 iterations;
+  - plain tracking after 200;
+  - physical time after 50 steps.
+  
+  And 5e23c56 against f07f57e: plain and physical are bitwise equal, so D4-44 leaves those paths alone, while preconditioned differs (759,283 words, as it should).
+- *Mutants of the fused halo, against `test:gpu`:* both killed.
+  - M1, the i-max layer-2 ghost not loaded: killed by 7 tests (C, C-pre, C physical, both moving ducts, the interface and block-split bitwise tests).
+  - M2, a slip wall's layer-2 second source taken as the first: killed by 8.
+- Indicative cost (builder, not re-measured; I ran no timing): Chrome 2.25 → 1.29 ms/it alone, 2.87 → 2.49 ms/it inside the 1080p scene. The β pass adds about 0.11 ms/it on Dawn.
+
+**The D4-44 mirror (57687e4): matches SOLVER.md 7/10 and the oracle.**
+- *β² frozen per iteration:* one β pass per preconditioned tracking iteration, from U^n (`roles[0]`, stage 1's input), before stage 1 (`gpuSolver.ts:538-546`).
+  - Stage 1's cell update reads `cellBeta2[c]` and stores it in U_B.w, which stages 2-3 read. The faces read the same buffer at every stage.
+  - Physical time and the plain scheme have machCut 1, so `select(..., 1, machCut >= 1)` gives M_ref = 1 bitwise, whatever the buffer holds (it is initialised to 1).
+  - `preconditioned` is fixed at create, as the params are.
+- *The cell β²:* the face neighbours' p′ includes ghosts after their BC, as the oracle's `cellNbr` (extended indices) does. `min(1, max(M², minMach², dpMax/(ρc²)))` with u∞ + u′ and w = rw/r_c is term for term the oracle's.
+- *The face mean:* `0.5 * sadd(β_L, β_R)` is symmetric under any operand fusion (`flux.ts:23`). It is formed only on SLAU2 faces: slip walls carry pressure only, as in the oracle.
+- *A ghost's β:* `betaSource` returns ghostSrc[g] for every ghost. For a non-wall ghost, layout packs s1 = s0, and a layer-2 wall ghost's own source is s1. So the oracle's `betaExt[n + g] = betaExt[ghostSrc[g]]` holds. Layer-2 ghosts sit outside the faces' ring anyway, which is the builder's equivalent mutant.
+- *D4-50:* the stage binds 8 storage buffers (9 with sources, 10 with the dump), packed 7/8/9. `FLOW_SOLVER_LIMITS` stays 9, and is now needed for sources. The 8-limit packed fallback passes bitwise.
+- *Mutants (mine, against `test:gpu`):* all killed.
+  - M3, the j-max ghost left out of the β pass's ring: killed by 3 (C-pre, S, S at 20 m/s).
+  - M4, every ghost taking cell 0's β (W2R-I10's mutant, in WGSL): **killed by C-pre alone**.
+  - M5, Δp from the j-neighbours only: killed by 3.
+  - The builder's 7 of 8 add to these.
+- *Preconditioned bitwise invariants (my probe):* all 13 solver-exact tests pass with preconditioning on:
+  - interface faces bitwise equal or negated, on the three-block row and the 130k asset;
+  - tile shapes 16×8 / 8×8 / 32×4 / 5×3 on a 37×21 row with inflow, outflow, axis and far field;
+  - D4-50 packed against unpacked, and the 8-limit device.
+  
+  The suite runs these three tests plain only (W2I-N4).
+- *The NaN and its cause: the cause analysis is sound, and the test is a real regression test.*
+  - My oracle probe at main c661d5c finds cell 0 (x −8.21 m, r 0.015 m) at β = 2.671e-2, which is β/M_cut **8.90**, with 157 cells above 4 and 94 above 8. Main's f64 oracle goes to **NaN by iteration 10** (1.139 at 5). So it is the scheme, not f32.
+  - The tip's oracle stays finite to 300: 0.984 / 0.970 / 1.343 / 1.807 / 2.367 / 2.934 / 3.978 / 6.103 / **13.69** / 4.65 every 30. That is D4-63's transient, and the GPU's 1.343 at 90 equals it.
+  - `engine-stability.test.ts` against f875e7a's `src/flow/gpu` (the fused kernel without the mirror) FAILS: "finite after 10 iterations (10: NaN)". At the tip it passes.
+  - The quoted 1D limit "about 0.47" is the table's value at β/M_ref 8. At 8.9 it is about 0.42 (W2I-N5). Either way it is below 0.8.
+
+**Reference rounds 6-8 (pass 9's FIX FIRST, W2R-B2): resolved.** The kernel now follows D4-44, so the merged tree's `test:gpu` (60/60) and `npm test` (f32forms 14.3-14.5) pass against the new oracle. That is option (1) of question (dd). Pass 9's own items:
+- **I9 is partly done:** the GPU L4a/L5 pins gained finite, within-10×-of-the-floor companions (`ladder.test.ts:422-425, 491-494`), and `it.fails` is gone from them. The CPU R/J pins (`precondition.test.ts:447-500`, pass 9; unchanged) still assert only `converged`. Carried to the reference round.
+- **I10 is carried:** no b ≡ 1 R and no multi-block β-jump test in the unit suite. On the GPU, C-pre is the only test that kills M4.
+- I11 → D4-62. I12 is carried.
+- **I13-I16 are done:** I14 imports `GPU_CONVERGENCE_FLOOR` and states the gaps; I15 uses `residualFluxScale()`, retires the `it.fails` and gives B its residual row; I16's `steadyWindowGpu` is the oracle's max − min over the 2000 iterations after the stop, with L9 labelled at 20000.
+- N15-N19 stay with the reference round. On N18, the kernel copies the guard, but SOLVER.md 7's code order still omits it.
+- Pass 9's owed items: the merged coverage numbers are above. Its oracle mutant M3 was not re-run; the kernel mutants above cover the mirror.
+
+**D4-61 (GPU L9a pinned): not in the merge unit, and the wording needs care (W2I-I1).** At f07f57e the row is not pinned, and `test:gpu-ladder` is red (as the handoff says).
+- The CPU ladder has no `it.fails` at all (`tests/ladder`). Its L9a row is a visible FAIL under D4-57, so "the same as the oracle's" holds for the verdict, not for the handling.
+- A pin is honest only if it pins the steadiness alone. An `it.fails` over the whole L9a test would also pass on a value regression, a NaN or a timeout (W2R-I9's pattern).
+
+**`bench:p1`: it implements D0-1, but it is not ready for the quiet run (W2I-I2).** D0-1 is in place, through the shared harness:
+- a 10 s warm-up per repetition, 3 × 60 s, rotation with a recorded seed;
+- D3-6 validity, the conditions JSON, and an INVALID row with no number.
+
+P1's arithmetic is right: `THRESHOLDS.P1` ≥ 150 it/s on the production row, from D4-2's `solverBudgetMs` with the resample inside the frame, and "a miss counts only after a quiet re-run". What is missing:
+- the verdict ignores the finite-state and GPU-error checks;
+- the scene is open (D4-54 against PHYSICS P1);
+- the README entry does not exist.
+
+### Blocking
+None.
+
+### Important
+- **W2I-I1: D4-61 is decided but not implemented, and `it.fails` over the L9a test would hide more than the steadiness row.**
+  - *Where:* `tests/gpu-ladder/l7-l9.test.ts:207-285` (one `it` reports the value row and the settle row together). `test:gpu-ladder` is 11/12 at f07f57e.
+  - *Failure scenario:* wrapping the test in `it.fails` passes on a value regression (above 1e-4), a NaN state or a timeout, because each of those fails the body too. The GPU's only L9a value check would then be gone.
+  - *Fix:* either keep the row visible red, as D4-57 and the CPU ladder do, or split it:
+    - a passing row: finite, value < 1e-4, spread finite (run the 3 s case once and share it);
+    - an `it.fails` row whose body asserts only spread ≤ tol/10, citing D4-57/D4-61.
+  - In the merge commit or before it.
+- **W2I-I2: `bench:p1` can print "P1: PASS" from a broken run, and its scene question is open.**
+  - (a) `spikes/bench/run.ts:691-700` judges P1 on `aggregate.itPerSec` alone. `stateFinite` and `gpuErrors` (`spikes/scene/productionRun.ts:110-137`) go into the JSON but never make an attempt INVALID. So a run with WebGPU validation errors, or a non-finite state, still yields a number and a verdict. The smoke test asserts both (`tests/browser/p1Bench.test.ts:35-36`); the harness does not. *Fix:* the production attempt is INVALID with a reason when `gpuErrors.length > 0 || !stateFinite`.
+  - (b) PHYSICS P1 says "inside a 1080p three.js scene (W0 spike a)", while D4-54 says "inside the app's 1080p scene". bench:p1 runs the W0 bench scene. Meanwhile `BenchConfig.scene: 'bench' | 'app'` (`spikes/scene/benchApp.ts:51`) is declared and silently ignored, and `productionRun.ts:2` cites an `appBench.ts` that does not exist. A config asking for 'app' would measure the bench scene without saying so. *Fix:* delete the option, or wire it and make an unknown scene throw. Orchestrator question (jj).
+  - (c) `run.ts:2` sends the operator to spikes/README.md for "the commands, durations and the checklist". README has no bench:p1 entry (solver-perf NEXT 3, still owed). *Fix:* add the row (about 7 min for 2 configs, per the solver-perf handoff) before the quiet run.
+  - (d) `RESET_ITERATIONS` (`productionRun.ts:18-25`) still says perfState "goes non-finite after about 150 iterations … on main's kernel too". With D4-44 the soak keeps it finite for 1000. The 4 MB re-upload every ~25 frames is not app behaviour, and it is the only thing that would hide a divergence from (a). *Fix:* keep it, with the D4-63 reason, or drop it once (a) gates finiteness.
+
+### Nits
+- **W2I-N1: an interface's bitwise symmetry now rests on the compiler.**
+  - *Where:* `kernels.ts:218-223`. `haloPrim` calls `cellPrim` at two sites: a cell's own (`:219`) and a ghost's source (`:223`). An interface face is then formed from site-1 bits on one side and site-2 bits on the other.
+  - The header (`:27-29`) and `sadd`/`sdiff` (`flux.ts:23-30`, "whatever the compiler fuses") show the design does not trust fusion to be identical. The solver-exact interface test would catch a mismatch on a device that runs it, but not on users' GPUs.
+  - *Fix:* one call site. Take g = select(0, e − nCells, e ≥ nCells), load r0 from it, take c = select(e, r0.x, e ≥ nCells), then one `cellPrim(c)`.
+- **W2I-N2: a throwing `onFrameTiming` callback marks the solver lost.**
+  - `flowSolver.ts:281-286` calls it inside the readback promise, before the solver's own updates. If it throws, `scheduler.observe` is skipped and `readFailed` (`:322-325`) sets `lost`, so status reports a device problem.
+  - *Fix:* call it after the updates, in its own try/catch, and report its error without marking the solver lost.
+- **W2I-N3: the solver-perf bitwise evidence cannot see a NaN.** `tools/perf/solverPerf.ts:451-458` compares uint words, so two NaN states compare equal, and `compareSides` (`:465-513`) checks no finiteness after its 50 preconditioned iterations. My probe confirms the claim with finiteness in four modes. *Fix:* count non-finite words beside the differing ones.
+- **W2I-N4: the bitwise invariants of the β pass are untested in the suite.** `solver-exact.test.ts`'s interface, tile-shape and D4-50 packed tests run plain only, and only C-pre kills M4. They all pass with preconditioning (probe). *Fix:* add the three preconditioned variants. Consider an oracle comparison over 10 iterations in `engine-stability.test.ts`: the oracle runs it in about a second on 130k, and it would reach the real mesh's inflow/axis ghosts.
+- **W2I-N5: the quoted 1D limit is the β/M_ref 8 value.** "About 0.47" (handoff, `engine-stability.test.ts:8-9`) is SOLVER.md 10's value at 8. At 8.9 it is about 0.42 (0.469 at 8, 0.234 at 16). The conclusion stands.
+- **W2I-N6: `frameAt` keeps untimed frames.** `productionRun.ts:90` stores every frame, while `:64` deletes only the frames whose timing resolves, so untimed frames stay (a few thousand per official run). *Fix:* drop the keys at or below each resolved frame.
+- **W2I-N7: the P1 render-timestamp promises have no catch.** `benchApp.ts:361, 366` (`runProduction`) copy `:261-262`'s `void resolveTimestampsAsync(...).then(...)`, so a rejection goes unhandled. *Fix:* add a `.catch` that records it.
+- **W2I-N8: the `onFrameTiming` test can pass vacuously.** It returns early on a device without timestamps (`flow-solver.test.ts:108`). *Fix:* use `it.skipIf(!hasTimestamps)`, so a vacuous pass is visible.
+
+**Verdict w2/solver-int @f07f57e: MERGE.**
+- The solver-perf kernel is correct and bitwise main's, in all four modes.
+- The D4-44 mirror is term for term the oracle's: every mutant is killed, and the preconditioned bitwise invariants hold.
+- The NaN's cause (W2R-I6, β/M_cut 8.90 at the inflow-axis corner) is confirmed in f64, and its test fails on the old kernel.
+- W2R-B2 is resolved by this merge order.
+
+**Conditions:**
+- If D4-61's pin goes in, it goes in the split form of W2I-I1, in the merge commit. Otherwise `test:gpu-ladder` stays visibly red on L9a, as the CPU ladder does under D4-57.
+- W2I-I2 (a)-(c) is fixed before the orchestrator's quiet P1 run, not before the merge.
+
+**Orchestrator questions:**
+- (jj) P1's scene. bench:p1 measures the W0 bench scene, which is PHYSICS P1's wording and M34's calibration. D4-54 says the app's 1080p scene. Which is of record? The `scene: 'app'` option is unwired either way.
+- (kk) D4-61: the split pin of W2I-I1, or the row kept red like the CPU ladder?
+- (ll) Expectation for the quiet run. The builder's indicative in-scene figure is 2.49 ms/it before the β pass (about +0.1 ms/it), which is 2 it/frame, about 120 it/s. A P1 miss under D0-1 then goes to D4-54's logged decision (about 80k cells or a half-rate solver). The scene's after-allocation slowdown (solver-perf FINDINGS 2) may be part of it.
+- Carried to the next solver round: W2I-N1 (one `cellPrim` call site), N4 (preconditioned bitwise tests and an oracle comparison on the real mesh), and N2/N3/N6-N8.

@@ -1,0 +1,14 @@
+# Critic pass 10: compares two state dumps of w2i-bitwise.probe.ts (OUT=...) word by word.
+#   python -I w2i-compare.py a.bin b.bin
+import array
+import math
+import sys
+
+a = array.array('I', open(sys.argv[1], 'rb').read())
+b = array.array('I', open(sys.argv[2], 'rb').read())
+fa = array.array('f', a.tobytes())
+fb = array.array('f', b.tobytes())
+diff = sum(1 for x, y in zip(a, b) if x != y)
+nonfinite = sum(1 for x in fa if not math.isfinite(x)), sum(1 for x in fb if not math.isfinite(x))
+mx = max((abs(x - y) for x, y in zip(fa, fb) if math.isfinite(x) and math.isfinite(y)), default=0.0)
+print(f'words {len(a)} / {len(b)}, differing {diff}, non-finite {nonfinite}, max |diff| {mx:.3e}')
