@@ -5,7 +5,13 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { expect } from 'vitest';
 import { GpuSolver, type GpuSolverOptions } from '../../src/flow/gpu/device/gpuSolver';
 import type { ReferenceSolver, SolverOptions } from '../../src/flow/reference/solver';
-import { CONVERGED_WINDOW, type LadderRow } from '../ladder/common';
+import {
+  CONVERGED_WINDOW,
+  STEADY_EVERY,
+  STEADY_WINDOW,
+  type LadderRow,
+  type Steadiness,
+} from '../ladder/common';
 
 export function report(
   id: string,
@@ -133,15 +139,29 @@ function windowChange(hist: readonly Sample[], it: number): number {
 }
 
 /**
- * D4-45's steadiness of a value row: the largest |value(m) - value(m_end)| over the window's
- * samples (NaN for a run shorter than the window). A value is of record within a tenth of its
+ * D4-45's steadiness of a value row, as the oracle's ladder measures it (tests/ladder/common.ts
+ * steadyWindow, W2R-I16): STEADY_WINDOW more iterations after the stop, the value sampled at the
+ * start and every STEADY_EVERY iterations (on the oracle shell), the spread max - min of the
+ * samples and the value of record the last one. A value is of record within a tenth of its
  * tolerance.
  */
-export function steadiness(c: Settled, value: (m: readonly number[]) => number): number {
-  const end = c.window.at(-1);
-  if (end === undefined || c.window.length < 2) return NaN;
-  const v = value(end);
-  return Math.max(...c.window.map((m) => Math.abs(value(m) - v)));
+export async function steadyWindowGpu(
+  g: GpuSolver,
+  s: ReferenceSolver,
+  value: () => number,
+): Promise<Steadiness> {
+  await back(g, s);
+  const samples = [value()];
+  for (let k = 0; k < STEADY_WINDOW / STEADY_EVERY; k++) {
+    g.iterate(STEADY_EVERY);
+    await back(g, s);
+    samples.push(value());
+  }
+  return {
+    samples,
+    spread: Math.max(...samples) - Math.min(...samples),
+    value: samples[samples.length - 1] ?? NaN,
+  };
 }
 
 /** A residual that fell by less than this over SETTLE_WINDOW iterations has stopped (B-I5). */
@@ -165,8 +185,8 @@ function detect(hist: readonly Sample[], it: number): number | null {
 /**
  * D4-38's GPU stopping rule: the density residual (over the first, or the peak, residual) is at
  * its f32 plateau and every accuracy metric changes by less than 1e-4 relative over the last 2000
- * iterations. The plateau is stated per case (L4a 4e-5, L5 1.7e-4: the oracle's converged state
- * rounded to f32), or, for a case without one, detected: the smallest residual of the last 2000
+ * iterations. The plateau is stated per case (L4a 1.6e-4, L5 1.1e-3: GPU_CONVERGENCE_FLOOR, the
+ * oracle's own with f32 storage, D4-58), or, for a case without one, detected: the smallest residual of the last 2000
  * iterations is at least 90 % of that of the 2000 before (it has stopped falling). The metric is
  * evaluated every 250 iterations on the oracle shell, and its change is the largest over every
  * sample of the window (W2S-A-I6, W2S-B-N6).

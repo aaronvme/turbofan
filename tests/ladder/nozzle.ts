@@ -46,12 +46,18 @@ export function quasi1d(
   return { rho: p / (RGAS * T), u, v: u * slope, w: 0, p, z: 0 };
 }
 
-export function nozzleSolver(outflowPressure: number, ni = NI, nj = NJ): ReferenceSolver {
+export function nozzleSolver(
+  outflowPressure: number,
+  ni = NI,
+  nj = NJ,
+  storage: 'f64' | 'f32' = 'f64',
+): ReferenceSolver {
   return new ReferenceSolver(solverMesh(nozzleMesh(ni, nj)), {
     gas: caloricallyPerfectGas(GAMMA, RGAS),
     freeStream: { pressure: 1e5, temperature: T0, velocity: 0 },
     inflowTotal: { p0: P0, t0: T0 },
     outflowPressure,
+    storage,
   });
 }
 

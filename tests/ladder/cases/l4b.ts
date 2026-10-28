@@ -7,8 +7,12 @@ import { machFromArea, normalShock, pOverP0 } from '../theory';
 
 const XS = 0.2;
 
-/** The L4b set-up on ni x nj cells: converged state, shock position and its error / length. */
-export function shockCase(ni: number, nj: number, maxIterations: number) {
+/**
+ * The L4b set-up on ni x nj cells: converged state, shock position and its error / length. The run
+ * starts from the quasi-1D answer with its shock at x0 (default: the target XS); the back pressure
+ * is always XS's.
+ */
+export function shockCase(ni: number, nj: number, maxIterations: number, x0 = XS) {
   const M1 = machFromArea(areaRatioAt(XS), GAMMA, true);
   const shock = normalShock(M1, GAMMA);
   const aStar2 = 1 / shock.p02p01;
@@ -17,7 +21,7 @@ export function shockCase(ni: number, nj: number, maxIterations: number) {
   const s = nozzleSolver(pExit, ni, nj);
   s.setState((x, r) =>
     quasi1d(x, r, (xx) =>
-      xx < XS
+      xx < x0
         ? { p0: P0, aStar: 1, supersonic: xx > 0 }
         : { p0: P0 * shock.p02p01, aStar: aStar2, supersonic: false },
     ),
@@ -60,16 +64,32 @@ function shockPosition(s: ReturnType<typeof nozzleSolver>, mid: number): number 
  */
 export const SHOCK_GRID = { ni: 170, nj: 17, maxIterations: 17000 } as const;
 
+/** W2R-N4: the reported offset starts, x_s -+ 5 % of the nozzle length. */
+const OFFSET = 0.05 * 2 * LN;
+
 /** D4-19: 0.1 % of the nozzle length (PHYSICS.md 3.3). */
 const STEADY_TOLERANCE = 1e-3;
 
 export function run() {
   const L4 = THRESHOLDS.L4.values;
-  const { conv, xs, frac, pExit, drift, residualEnd } = shockCase(
+  const { conv, xs, frac, pExit, drift, samples, residualEnd } = shockCase(
     SHOCK_GRID.ni,
     SHOCK_GRID.nj,
     SHOCK_GRID.maxIterations,
   );
+  // W2R-N4: the same case started with the shock 5 % of the length upstream and downstream of the
+  // target, to show the equilibrium is reached from both sides (reported)
+  const offsets = [-OFFSET, OFFSET].map((d) => {
+    const r = shockCase(SHOCK_GRID.ni, SHOCK_GRID.nj, SHOCK_GRID.maxIterations, XS + d);
+    return { x0: XS + d, xs: r.xs, frac: r.frac, drift: r.drift, samples: r.samples };
+  });
+  const offsetRows = offsets.map((o) => ({
+    id: 'L4',
+    metric: `started with the shock at x = ${o.x0.toFixed(3)} m: position error / length (final x_s ${o.xs.toFixed(4)} m; from the target start ${xs.toFixed(4)} m)`,
+    threshold: 'reported (W2R-N4)',
+    value: o.frac,
+    pass: 'reported' as const,
+  }));
   return {
     id: 'L4b',
     rows: [
@@ -101,7 +121,9 @@ export function run() {
         value: residualEnd / conv.first,
         pass: 'reported' as const,
       },
+      ...offsetRows,
     ],
-    extra: { conv, xs, pExit, drift },
+    // W2R-N4: the 20 position samples of the D4-19 window (oscillation against drift)
+    extra: { conv, xs, pExit, drift, samples, offsets },
   };
 }

@@ -8,6 +8,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['tests/ladder/**/*.test.ts'],
+    // W2R-N11: clears reports/ladder before the run
+    globalSetup: ['tests/ladder/globalSetup.ts'],
     environment: 'node',
     pool: 'forks',
     testTimeout: 1_800_000,

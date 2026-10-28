@@ -45,10 +45,10 @@ describe('WGSL device functions', () => {
     sim.destroy();
   });
 
-  const records = (rows: readonly (readonly number[])[]) => {
-    const a = new Float32Array(16 * rows.length);
+  const records = (rows: readonly (readonly number[])[], width = 16) => {
+    const a = new Float32Array(width * rows.length);
     rows.forEach((r, k) => {
-      a.set(r, 16 * k);
+      a.set(r, width * k);
     });
     return a;
   };
@@ -151,13 +151,18 @@ describe('WGSL device functions', () => {
           b[5] ?? 0,
           0.37,
           0.9,
+          // the face's beta (D4-44; machCut 1 here, so M_ref = 1 whatever it is)
+          0.05,
+          0,
+          0,
+          0,
         ];
         rows.push(f(L, R, 1), f(R, L, -1), f(L, L, 1));
       }
     }
-    rows.push([0.1, 10, 0, 0, 100, 0, 1, 0, 0.2, 0, 0, 0, 0, 0, 0, 0.5]);
-    const out = await runProbe(sim.device, MESH, OPTS, 'probeFlux', records(rows));
-    const flux = (k: number) => [0, 1, 2, 3, 4, 5].map((m) => out[16 * k + m] ?? NaN);
+    rows.push([0.1, 10, 0, 0, 100, 0, 1, 0, 0.2, 0, 0, 0, 0, 0, 0, 0.5, 0.05, 0, 0, 0]);
+    const out = await runProbe(sim.device, MESH, OPTS, 'probeFlux', records(rows, 20));
+    const flux = (k: number) => [0, 1, 2, 3, 4, 5].map((m) => out[20 * k + m] ?? NaN);
     let k = 0;
     for (const [L] of states) {
       for (const [nx, nr] of normals) {

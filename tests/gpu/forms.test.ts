@@ -127,7 +127,9 @@ describe('the kernel WGSL against the f64 oracle on unequal states (SOLVER.md 14
         area: number;
         rf: number;
       }[] = [];
-      const input = new Float32Array(16 * N);
+      const input = new Float32Array(20 * N);
+      // the face's beta (D4-44), log-uniform over 1e-3..1 (below machCut 0.003, between, and 1)
+      const betas: number[] = [];
       for (let k = 0; k < N; k++) {
         const rf = f(0.2 + next());
         const a = 2 * Math.PI * next();
@@ -138,6 +140,8 @@ describe('the kernel WGSL against the f64 oracle on unequal states (SOLVER.md 14
         const L = randomState(next, du, rf);
         const R = randomState(next, du, rf);
         faces.push({ L, R, nx, nr, area, rf });
+        const betaFace = f(k % 5 === 0 ? 1 : 10 ** (-3 + 3 * next()));
+        betas.push(betaFace);
         const rec = (P: Float64Array) => [
           P[0] ?? NaN,
           (P[1] ?? NaN) - REF_F.u,
@@ -156,8 +160,12 @@ describe('the kernel WGSL against the f64 oracle on unequal states (SOLVER.md 14
             R[5] ?? NaN,
             area,
             rf,
+            betaFace,
+            0,
+            0,
+            0,
           ],
-          16 * k,
+          20 * k,
         );
       }
       const out = await runProbe(sim.device, MESH, OPTS, 'probeFlux', input, { machCut });
@@ -167,16 +175,16 @@ describe('the kernel WGSL against the f64 oracle on unequal states (SOLVER.md 14
       let transonic = 0;
       const faMin = machCut < 1 ? machCut * (2 - machCut) : 1;
       faces.forEach(({ L, R, nx, nr, area, rf }, k) => {
-        slau2Flux(REF_F, L, 0, R, 0, nx, nr, area, rf, F, machCut);
+        slau2Flux(REF_F, L, 0, R, 0, nx, nr, area, rf, F, machCut, betas[k] ?? NaN);
         // the kernel returns G = F - F_inf(S): add the free stream's flux back (14.4)
         const fInf = REF_F.rho * REF_F.u * nx;
         const g = [
-          (out[16 * k] ?? NaN) + area * fInf,
-          (out[16 * k + 1] ?? NaN) + area * fInf * REF_F.u,
-          out[16 * k + 2] ?? NaN,
-          out[16 * k + 3] ?? NaN,
-          out[16 * k + 4] ?? NaN,
-          out[16 * k + 5] ?? NaN,
+          (out[20 * k] ?? NaN) + area * fInf,
+          (out[20 * k + 1] ?? NaN) + area * fInf * REF_F.u,
+          out[20 * k + 2] ?? NaN,
+          out[20 * k + 3] ?? NaN,
+          out[20 * k + 4] ?? NaN,
+          out[20 * k + 5] ?? NaN,
         ];
         const rho = REF_F.rho + 0.5 * ((L[0] ?? NaN) + (R[0] ?? NaN));
         const q = Math.max(...[L, R].map((P) => Math.hypot(P[1] ?? NaN, P[2] ?? NaN))) + 400;

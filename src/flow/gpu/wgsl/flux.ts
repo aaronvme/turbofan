@@ -100,9 +100,12 @@ struct Flux { a: vec4f, b: vec2f }
 
 // SLAU2 (Kitamura & Shima 2013) through a face of unit normal n, per-radian area, radius rf,
 // between face states L = (la, lb) and R = (ra, rb); already times the area. machCut < 1: the
-// D4-20 low-Mach scaling of the mass-flux pressure diffusion (fa = 1 bitwise at machCut = 1).
+// D4-20 low-Mach scaling of the mass-flux pressure diffusion, with M_ref from betaFace, the mean
+// of the preconditioner's beta of the face's two cells (D4-44, SOLVER.md 7: the same reference
+// velocity as the pseudo-time derivative). machCut >= 1 gives M_ref = 1, fa = 1 bitwise, as the
+// oracle's guard (slau2.ts) does, whatever betaFace holds.
 fn slau2(la: vec4f, lb: vec2f, ra: vec4f, rb: vec2f, n: vec2f, area: f32, rf: f32,
-         machCut: f32) -> Flux {
+         machCut: f32, betaFace: f32) -> Flux {
   if (!(area > 0.0)) { return Flux(vec4f(0.0), vec2f(0.0)); }
   let l = sideOf(la, lb, n, rf);
   let r = sideOf(ra, rb, n, rf);
@@ -117,7 +120,7 @@ fn slau2(la: vec4f, lb: vec2f, ra: vec4f, rb: vec2f, n: vec2f, area: f32, rf: f3
   let g = -max(min(mL, 0.0), -1.0) * min(max(mR, 0.0), 1.0);
   let rhoSum = sadd(l.rho, r.rho);
   let vbar = sadd(l.rho * abs(l.vn), r.rho * abs(r.vn)) / rhoSum;
-  let mRef = min(1.0, max(qAvg / cbar, machCut));
+  let mRef = select(min(1.0, max(betaFace, machCut)), 1.0, machCut >= 1.0);
   let fa = mRef * (2.0 - mRef);
   let vbarDiff = (1.0 - g) * vbar * (la.x - ra.x) + g * sdiff(l.rho * abs(l.vn), r.rho * abs(r.vn));
   let gm = 0.5 * (sadd(la.x * l.vn, ra.x * r.vn) + P.rhoInf * sadd(l.dvn, r.dvn) + vbarDiff

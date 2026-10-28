@@ -7,19 +7,20 @@ import { BC, rectangle, singleBlock, solverMesh } from '../../unit/flow/helpers'
 import { converge } from '../common';
 import { chokedMassFlow, machFromArea, pOverP0, tOverT0 } from '../theory';
 
-export function run() {
-  const L5 = THRESHOLDS.L5.values;
-  const GAMMA = 1.4;
-  const RGAS = 287.05287;
-  const P0 = 1e5;
-  const T0 = 288.15;
-  const B_MIN = 0.8;
-  const blockage = (x: number): number =>
-    Math.abs(x) < 0.1 ? 1 - (1 - B_MIN) * Math.cos((Math.PI * x) / 0.2) ** 2 : 1;
-  const ni = 90;
-  const nj = 4;
+const GAMMA = 1.4;
+const RGAS = 287.05287;
+const P0 = 1e5;
+const T0 = 288.15;
+const B_MIN = 0.8;
+const NI = 90;
+const NJ = 4;
+const blockage = (x: number): number =>
+  Math.abs(x) < 0.1 ? 1 - (1 - B_MIN) * Math.cos((Math.PI * x) / 0.2) ** 2 : 1;
+
+/** L5's set-up: the blockage row at 0.2 p0 from the area-theory state (also the D4-58 floor run). */
+export function l5Solver(storage: 'f64' | 'f32' = 'f64') {
   const mesh = solverMesh(
-    singleBlock(rectangle('duct', -0.3, 0.3, 0.5, 0.6, ni, nj), {
+    singleBlock(rectangle('duct', -0.3, 0.3, 0.5, 0.6, NI, NJ), {
       imin: BC.INFLOW,
       imax: BC.OUTFLOW,
       jmin: BC.SLIP_WALL,
@@ -31,6 +32,7 @@ export function run() {
     freeStream: { pressure: P0, temperature: T0, velocity: 0 },
     inflowTotal: { p0: P0, t0: T0 },
     outflowPressure: 0.2 * P0,
+    storage,
   });
   s.setBlockage(Float64Array.from(mesh.cellX, blockage));
   s.setState((x) => {
@@ -39,6 +41,14 @@ export function run() {
     const p = P0 * pOverP0(M, GAMMA);
     return { rho: p / (RGAS * T), u: M * Math.sqrt(GAMMA * RGAS * T), v: 0, w: 0, p, z: 0 };
   });
+  return s;
+}
+
+export function run() {
+  const L5 = THRESHOLDS.L5.values;
+  const ni = NI;
+  const nj = NJ;
+  const s = l5Solver();
   const conv = converge(s, 1e-5, 8000);
   let mdot = 0;
   for (let j = 0; j < nj; j++) mdot += 2 * Math.PI * (s.faceFlux(0, 'i', ni / 2, j)[0] ?? NaN);

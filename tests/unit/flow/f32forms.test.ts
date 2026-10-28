@@ -59,6 +59,7 @@ function gaugeSlau2(
   area: number,
   rf: number,
   machCut: number,
+  betaFace = 1,
 ): number[] {
   const side = (P: Float64Array) => {
     const rhoP = P[0] ?? NaN;
@@ -96,7 +97,8 @@ function gaugeSlau2(
   const g = -Math.max(Math.min(mL, 0), -1) * Math.min(Math.max(mR, 0), 1);
   const rhoSum = l.rho + rr.rho;
   const vbar = (l.rho * Math.abs(l.vn) + rr.rho * Math.abs(rr.vn)) / rhoSum;
-  const mRef = Math.min(1, Math.max(qAvg / cbar, machCut));
+  // D4-44: M_ref from the face's beta (wgsl/flux.ts slau2), with the oracle's machCut >= 1 guard
+  const mRef = machCut >= 1 ? 1 : Math.min(1, Math.max(betaFace, machCut));
   const fa = mRef * (2 - mRef);
   const vbarDiff =
     (1 - g) * vbar * (l.rhoP - rr.rhoP) + g * (l.rho * Math.abs(l.vn) - rr.rho * Math.abs(rr.vn));
@@ -209,8 +211,10 @@ describe('SOLVER.md 14: the f32 implementation forms agree with the oracle to f6
       const L = randomPrim(next, du, 0.05, rf);
       const R = randomPrim(next, du, 0.05, rf);
       const machCut = k % 3 === 0 ? 0.01 : 1;
-      slau2Flux(ref, L, 0, R, 0, nx, nr, area, rf, F, machCut);
-      const G = gaugeSlau2(ref, L, R, nx, nr, area, rf, machCut);
+      // the face's beta (D4-44), log-uniform over 1e-3..1: below machCut, between, and at 1
+      const betaFace = k % 5 === 0 ? 1 : 10 ** (-3 + 3 * next());
+      slau2Flux(ref, L, 0, R, 0, nx, nr, area, rf, F, machCut, betaFace);
+      const G = gaugeSlau2(ref, L, R, nx, nr, area, rf, machCut, betaFace);
       const fInf = [ref.rho * ref.u * nx, ref.rho * ref.u * ref.u * nx, 0, 0, 0, 0];
       for (let m = 0; m < 6; m++) {
         const want = (F[m] ?? NaN) - area * (fInf[m] ?? NaN);

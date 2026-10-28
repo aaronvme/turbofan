@@ -22,6 +22,7 @@ import { DEFAULT_LIMITER, fluxWgsl } from '../../../../src/flow/gpu/wgsl/flux';
 import {
   CELL_SOURCE_VEC4,
   SCALAR,
+  betaKernelWgsl,
   cellSourceKernelWgsl,
   dtKernelWgsl,
   ghostKernelWgsl,
@@ -255,6 +256,9 @@ describe('WGSL generation', () => {
     const full = stageKernelWgsl({ ...ko, sources: true, faceDump: true });
     expect(full).toContain('binding(8) var<storage, read> src');
     expect(full).toContain('binding(9) var<storage, read_write> dump');
+    // D4-44: the stage kernel reads the beta pass's beta^2; the beta pass writes it
+    expect(full).toContain('binding(11) var<storage, read> cellBeta2');
+    expect(betaKernelWgsl(ko)).toContain('binding(11) var<storage, read_write> cellBeta2');
     expect(cellSourceKernelWgsl(ko)).toContain(`${CELL_SOURCE_VEC4}u * c`);
     expect(() => fluxWgsl('smooth' as never)).toThrow(/not implemented/);
     // W2S-B-B1: the oracle's limiter vocabulary ('sharp' | 'smooth', w2/reference round 4), so
@@ -341,18 +345,23 @@ describe('solver status (W1F-I1) and provenance (W1F-N1)', () => {
 });
 
 describe('D4-50: the stage kernel storage buffers against the device limit', () => {
-  it('binds 8, 9 with sources, 10 with the face dump; packs geo and topo when the device is short', () => {
+  it('binds 8, 9 with sources, 10 with the face dump (no prim since D4-54; beta^2 since D4-44); packs geo and topo when the device is short', () => {
     expect(stageStorageBuffers({ sources: false, faceDump: false }, 8)).toEqual({
       buffers: 8,
       packed: false,
     });
-    expect(stageStorageBuffers({ sources: true, faceDump: false }, 16)).toEqual({
+    // the engine with sources needs D4-50's 9 (FLOW_SOLVER_LIMITS)
+    expect(stageStorageBuffers({ sources: true, faceDump: false }, 9)).toEqual({
       buffers: 9,
       packed: false,
     });
-    // an adapter with WebGPU's default 8: the two read-only static buffers share one binding
+    // short by one (WebGPU's default 8): the two read-only static buffers share one binding
     expect(stageStorageBuffers({ sources: true, faceDump: false }, 8)).toEqual({
       buffers: 8,
+      packed: true,
+    });
+    expect(stageStorageBuffers({ sources: true, faceDump: true }, 9)).toEqual({
+      buffers: 9,
       packed: true,
     });
     expect(stageStorageBuffers({ sources: true, faceDump: false }, 16, true)).toEqual({
@@ -362,7 +371,8 @@ describe('D4-50: the stage kernel storage buffers against the device limit', () 
     expect(() => stageStorageBuffers({ sources: true, faceDump: true }, 8)).toThrow(
       /needs 10 storage buffers \(9 packed\).*allows 8.*maxStorageBuffersPerShaderStage/,
     );
-    expect(FLOW_SOLVER_LIMITS.maxStorageBuffersPerShaderStage).toBe(
+    // the device asks for at least what the engine with sources binds
+    expect(FLOW_SOLVER_LIMITS.maxStorageBuffersPerShaderStage).toBeGreaterThanOrEqual(
       stageStorageBuffers({ sources: true, faceDump: false }, 99).buffers,
     );
   });

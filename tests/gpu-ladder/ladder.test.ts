@@ -31,6 +31,7 @@ import {
   nozzleMesh,
   quasi1d,
 } from '../ladder/nozzle';
+import { GPU_CONVERGENCE_FLOOR } from '../ladder/oracle';
 import { radialSod } from '../ladder/radial1d';
 import { chokedMassFlow, exactRiemann, machFromArea, pOverP0, tOverT0 } from '../ladder/theory';
 import { BC, rectangle, singleBlock, solverMesh } from '../unit/flow/helpers';
@@ -40,10 +41,16 @@ const GAMMA = 1.4;
 const RGAS = 287.05287;
 
 /**
- * D4-38: the stated f32 residual plateaus (over the first residual): the oracle's converged state
- * of each case rounded to f32, its residual evaluated in f64 (round 1, @8883b02).
+ * D4-38's stopping floors as D4-58 restates them (SOLVER.md 12.4): the oracle's own residual
+ * plateau with f32 storage, over the first residual (tests/ladder/floor.test.ts re-measures them).
  */
-const PLATEAU = { L4a: 4e-5, L5: 1.7e-4 } as const;
+const PLATEAU = GPU_CONVERGENCE_FLOOR;
+/**
+ * W2R-I9: a KNOWN-FAIL convergence row must still see a divergence. Its companion checks the
+ * known signature: a finite residual within this factor of the floor (the measured gaps are 2.5x
+ * on L4a and 6.9x on L5, D4-58); beyond it the plateau itself has moved, not the f32 arithmetic.
+ */
+const KNOWN_GAP = 10;
 
 describe('GPU ladder', () => {
   const log = new GpuErrorLog();
@@ -189,18 +196,36 @@ describe('GPU ladder', () => {
     const g = await onGpu(s, options);
     g.iterate(100);
     const gpu = spurious(await g.readPrimitives(), mesh, g.ref.u);
+    const rGpu = await g.readResidual();
     g.destroy();
     s.iterate(100);
     const oracle = spurious(s.primitives(), mesh, s.ref.u);
-    report('12.2-B', [
-      {
-        id: '12.2 B',
-        metric: `uniform M 0.5, 130k f32 asset, 100 its: GPU max |u - u_inf| (oracle ${oracle.toExponential(2)})`,
-        threshold: '<= 10 x the oracle',
-        value: gpu,
-        pass: gpu <= 10 * oracle,
-      },
-    ]);
+    // D4-48 (SOLVER.md 12.2): B's residual is the f32 metric defect F_inf sum S_x, a small
+    // difference of large face fluxes, so the row divides by the flux scale r_flux (the oracle's,
+    // f64, at its state after the 100 iterations), not by the residual itself
+    const rRef = s.stats.residualDensityL2;
+    const rFlux = s.residualFluxScale();
+    const overFlux = Math.abs(rGpu - rRef) / rFlux;
+    report(
+      '12.2-B',
+      [
+        {
+          id: '12.2 B',
+          metric: `uniform M 0.5, 130k f32 asset, 100 its: GPU max |u - u_inf| (oracle ${oracle.toExponential(2)})`,
+          threshold: '<= 10 x the oracle',
+          value: gpu,
+          pass: gpu <= 10 * oracle,
+        },
+        {
+          id: '12.2 B',
+          metric: `residual: |r_GPU - r_ref| / r_flux (r_GPU ${rGpu.toExponential(3)}, r_ref ${rRef.toExponential(3)}, r_flux / r_ref ${(rFlux / rRef).toExponential(2)}; over r_ref ${(Math.abs(rGpu - rRef) / rRef).toExponential(2)})`,
+          threshold: '<= 1e-3',
+          value: overFlux,
+          pass: overFlux <= 1e-3,
+        },
+      ],
+      { rGpu, rRef, rFlux },
+    );
   }, 1_800_000);
 
   it('L2: axial Sod, 400 cells, physical time', async () => {
@@ -386,13 +411,18 @@ describe('GPU ladder', () => {
           value: mErr,
           pass: mErr < L4.maxChokedMassFlowRelativeError.value,
         },
-        // KNOWN-FAIL (data for the critic, D4-38): the GPU residual stops above the stated
-        // plateau (round 2: it stops falling at 3.99e-4, the last value 3.64e-4, against 4e-5; D4-47) while the accuracy metrics settle
+        // KNOWN-FAIL (D4-58): the GPU residual stops falling at 3.99e-4 (round 2; the last value
+        // 3.64e-4), 2.5x above the restated floor 1.6e-4, the oracle's own with f32 storage: the
+        // gap is f32 arithmetic beyond storage, while the accuracy metrics settle
         { ...settleRow('L4', conv, 8000), pass: 'reported' },
       ],
       { conv },
     );
     expect(conv.converged).toBe(false);
+    expect(Number.isFinite(conv.last), 'L4a residual finite').toBe(true);
+    expect(conv.last / conv.first, 'L4a residual within the known gap').toBeLessThan(
+      KNOWN_GAP * PLATEAU.L4a,
+    );
   });
 
   it('L5: choking through a blockage-only row', async () => {
@@ -451,12 +481,17 @@ describe('GPU ladder', () => {
           value: err,
           pass: err < L5.maxMassFlowRelativeError.value,
         },
-        // KNOWN-FAIL (D4-47): it stops falling at 7.54e-3 (the last value 4.9e-3) against the stated 1.7e-4
+        // KNOWN-FAIL (D4-58): it stops falling at 7.54e-3 (the last value 4.9e-3), 6.9x above the
+        // restated floor 1.1e-3 (the oracle's own with f32 storage)
         { ...settleRow('L5', conv, 8000), pass: 'reported' },
       ],
       { conv },
     );
     expect(conv.converged).toBe(false);
+    expect(Number.isFinite(conv.last), 'L5 residual finite').toBe(true);
+    expect(conv.last / conv.first, 'L5 residual within the known gap').toBeLessThan(
+      KNOWN_GAP * PLATEAU.L5,
+    );
   });
 
   it('L6: free vortex and solid-body rotation in a closed annulus', async () => {

@@ -26,6 +26,7 @@
     "test:browser": "vitest run -c vitest.browser.config.ts",
     "bench:throughput": "node spikes/bench/run.ts throughput",
     "bench:worker": "node spikes/bench/run.ts worker",
+    "bench:p1": "node spikes/bench/run.ts p1",
     "gpu:info": "node spikes/dawn/adapter-info.ts",
     "e2e": "playwright test",
     "mutate": "stryker run",

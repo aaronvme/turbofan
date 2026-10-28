@@ -46,18 +46,14 @@ export interface SolverOptions {
   /**
    * Low-Mach preconditioning of the tracking mode's pseudo-time derivative (section 10, D4-10):
    * beta^2 = min(1, max(M^2, minMach^2, dp / (rho c^2))), with SLAU2's pressure diffusion scaled by
-   * 1 / f_a(max(M, machCut)) (section 7, D4-20; machCut defaults to minMach, >= 1 turns it off).
-   * Physical time ignores both.
+   * 1 / f_a(max(beta_f, machCut)), beta_f the face's mean beta (section 7, D4-20 and D4-44;
+   * machCut defaults to minMach, >= 1 turns it off). Physical time ignores both.
+   * machCut >= 1 with minMach < 1 is a test configuration only: its acoustic limit at small beta
+   * (0.475 at beta 0.06, 0.176 at 0.003; section 10) is below the default CFL 0.8.
    */
   readonly lowMachPreconditioning?: {
     readonly minMach: number;
     readonly machCut?: number;
-    /**
-     * K_u of AUSM+-up's p_u velocity diffusion in SLAU2's pressure flux, applied with the D4-20
-     * scaling (machCut < 1) only. Default 0: off. D4-32's trial: NOT adopted (it worsened L7 and
-     * L8, section 7), so it is not in the contract; kept for the record.
-     */
-    readonly velocityDiffusion?: number;
   };
   /**
    * The limiter (section 6): 'sharp' van Albada (default) or the 'smooth' eps form, the D4-25
@@ -95,10 +91,6 @@ export class ReferenceSolver {
   private readonly machCut: number;
   /** The M_cut of the residual being assembled. */
   private fluxMachCut = 1;
-  /** K_u of the tracking mode's p_u (0: off); physical time and machCut >= 1 always use 0. */
-  private readonly velocityDiffusion: number;
-  /** The K_u of the residual being assembled. */
-  private fluxKu = 0;
   private readonly remap: Uint8Array;
   /** 1 for the ghosts that are slip walls (after the remap), per extended index. */
   private readonly wall: Uint8Array;
@@ -114,6 +106,8 @@ export class ReferenceSolver {
   private readonly dt: Float64Array;
   /** Per cell beta^2 of the preconditioner, frozen at stage 1 like tau (1 without it). */
   private readonly beta2: Float64Array;
+  /** beta per extended index (a ghost: its source cell's), for the face's M_ref (D4-44). */
+  private readonly betaExt: Float64Array;
   private readonly dU = new Float64Array(NU);
   private readonly src: SourceRates;
   /** Per cell: i-face west, i-face east, j-face south, j-face north; ext index of each neighbour. */
@@ -146,7 +140,6 @@ export class ReferenceSolver {
             farFieldBeta2: Math.min(1, Math.max(mInf2, pre.minMach * pre.minMach)),
           });
     this.machCut = pre === undefined ? 1 : (pre.machCut ?? pre.minMach);
-    this.velocityDiffusion = pre?.velocityDiffusion ?? 0;
     // minMach >= 1 is the plain scheme (beta = 1, f_a = 1) and keeps the plain default
     this.cfl =
       opts.cfl ?? (pre !== undefined && pre.minMach < 1 ? DEFAULT_CFL_PRECONDITIONED : DEFAULT_CFL);
@@ -174,6 +167,7 @@ export class ReferenceSolver {
     this.tau = new Float64Array(n);
     this.dt = new Float64Array(n);
     this.beta2 = new Float64Array(n).fill(1);
+    this.betaExt = new Float64Array(nx).fill(1);
     this.src = { rate: new Float64Array(NU * n), damping: new Float64Array(NU * n) };
     this.cellFace = new Int32Array(4 * n);
     this.cellNbr = new Int32Array(4 * n);
@@ -210,6 +204,11 @@ export class ReferenceSolver {
     });
     this.slope = new Float64Array(NU * maxLine);
     this.setBlockage(this.blockage);
+  }
+
+  /** The tracking mode's CFL: the option, or the default of section 10 for the scheme in use. */
+  get trackingCfl(): number {
+    return this.cfl;
   }
 
   /** Sets the blockage field (per cell, in (0, 1]) and the b-weighted face-vector sums. */
@@ -268,9 +267,31 @@ export class ReferenceSolver {
   /** The residual R (section 9) of the current state; a copy. */
   residual(): Float64Array {
     this.updatePrimitives();
+    this.computeBeta(true);
     this.evaluateSources();
     this.assembleResidual(this.machCut);
     return Float64Array.from(this.R);
+  }
+
+  /**
+   * The flux scale of the tracking density residual at the current state (decision D4-48),
+   * sqrt(mean_c (sum_f |b_f F_f,rho| / (b_c V_c))^2): the residual's L2 with every face's mass flux
+   * counted positive. SOLVER.md 12.2's residual check on rows B and E divides by it, because there
+   * the residual is a small difference of large fluxes.
+   */
+  residualFluxScale(): number {
+    this.updatePrimitives();
+    this.computeBeta(true);
+    this.evaluateSources();
+    const m = this.mesh;
+    const abs = new Float64Array(m.nCells);
+    this.assembleResidual(this.machCut, abs);
+    let sum = 0;
+    for (let c = 0; c < m.nCells; c++) {
+      const q = (abs[c] as number) / ((this.blockage[c] as number) * (m.cellVolR[c] as number));
+      sum += q * q;
+    }
+    return Math.sqrt(sum / m.nCells);
   }
 
   /** Local time step dt_c of the last tracking iteration (or of the current state if none). */
@@ -383,9 +404,9 @@ export class ReferenceSolver {
     const L = dir === 'i' ? blk.ni + 4 : blk.nj + 4;
     const fixed = dir === 'i' ? j : i;
     const f = dir === 'i' ? i : j;
+    this.computeBeta(true);
     this.loadLine(b, dir, fixed, L);
     this.fluxMachCut = this.machCut;
-    this.fluxKu = this.machCut < 1 ? this.velocityDiffusion : 0;
     this.faceFromLine(
       f,
       dir === 'i' ? blk.iFaceOffset + j * (blk.ni + 1) + i : blk.jFaceOffset + j * blk.ni + i,
@@ -472,16 +493,16 @@ export class ReferenceSolver {
     );
   }
 
-  /** tau and dt per cell; `tracking` applies the low-Mach preconditioner's beta^2 if it is on. */
-  private computeLocalDt(tracking: boolean): void {
+  /**
+   * beta^2 per cell of the current primitives (1 unless `tracking` and preconditioned) and beta per
+   * extended index, a ghost taking its source cell's (section 7, D4-44).
+   */
+  private computeBeta(tracking: boolean): void {
     const m = this.mesh;
-    const { P, tau, dt, cellFace, cellNbr, bExt, beta2 } = this;
+    const n = m.nCells;
+    const { P, cellNbr, beta2, betaExt } = this;
     const pre = tracking ? this.opts.lowMachPreconditioning : undefined;
-    for (let c = 0; c < m.nCells; c++) {
-      const u = P[NP * c + 1] as number;
-      const v = P[NP * c + 2] as number;
-      const a = P[NP * c + 7] as number;
-      const bc = this.blockage[c] as number;
+    for (let c = 0; c < n; c++) {
       let b2 = 1;
       if (pre !== undefined) {
         let dpMax = 0;
@@ -492,6 +513,22 @@ export class ReferenceSolver {
         b2 = lowMachBeta2(P, NP * c, m.cellR[c] as number, pre.minMach, dpMax, rho);
       }
       beta2[c] = b2;
+      betaExt[c] = Math.sqrt(b2);
+    }
+    for (let g = 0; g < m.nGhosts; g++) betaExt[n + g] = betaExt[m.ghostSrc[g] ?? 0] as number;
+  }
+
+  /** tau and dt per cell; `tracking` applies the low-Mach preconditioner's beta^2 if it is on. */
+  private computeLocalDt(tracking: boolean): void {
+    const m = this.mesh;
+    const { P, tau, dt, cellFace, cellNbr, bExt, beta2 } = this;
+    this.computeBeta(tracking);
+    for (let c = 0; c < m.nCells; c++) {
+      const u = P[NP * c + 1] as number;
+      const v = P[NP * c + 2] as number;
+      const a = P[NP * c + 7] as number;
+      const bc = this.blockage[c] as number;
+      const b2 = beta2[c] as number;
       let lam = 0;
       for (let d = 0; d < 2; d++) {
         let best = 0;
@@ -571,17 +608,19 @@ export class ReferenceSolver {
       (dir === 'i' ? m.iRf[face] : m.jRf[face]) as number,
       this.F,
       this.fluxMachCut,
-      this.fluxKu,
+      0.5 * ((this.betaExt[l] as number) + (this.betaExt[r] as number)),
     );
     return area;
   }
 
-  /** The residual of section 9; machCut < 1 scales SLAU2's pressure diffusion (tracking, D4-20). */
-  private assembleResidual(machCut: number): void {
+  /**
+   * The residual of section 9; machCut < 1 scales SLAU2's pressure diffusion (tracking, D4-20).
+   * `absMass` (per cell) accumulates sum_f |b_f F_f,rho| as well (residualFluxScale).
+   */
+  private assembleResidual(machCut: number, absMass?: Float64Array): void {
     const m = this.mesh;
     const { R, F, line, bExt } = this;
     this.fluxMachCut = machCut;
-    this.fluxKu = machCut < 1 ? this.velocityDiffusion : 0;
     R.fill(0);
     m.blocks.forEach((b, bi) => {
       for (const dir of ['i', 'j'] as const) {
@@ -605,6 +644,11 @@ export class ReferenceSolver {
             if (f < nAlong)
               for (let k = 0; k < NU; k++)
                 R[NU * r + k] = (R[NU * r + k] ?? 0) - bf * (F[k] as number);
+            if (absMass !== undefined) {
+              const a = Math.abs(bf * (F[0] as number));
+              if (f >= 1) absMass[l] = (absMass[l] as number) + a;
+              if (f < nAlong) absMass[r] = (absMass[r] as number) + a;
+            }
           }
         }
       }
