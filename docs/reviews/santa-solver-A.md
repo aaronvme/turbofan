@@ -369,3 +369,77 @@ None.
 | M6 | β² without the Δp term (`kernels.ts:439`) | oracle | **killed** (2 tests fail: C-pre and S) |
 
 M1 failed C, C-pre, C physical, D, E-L5, E-L9a and S: a wrong flux cannot pass the 12.2 rows at u∞ = 0.
+
+## Re-verification @22ba7ac (fix round, 2026-10-28)
+
+Re-verified against the builder's ID → commit table (`docs/handoffs/w2-solver.md` at 22ba7ac). I read the fix diffs (`81e9508..22ba7ac`, 18 commits) and re-ran the gates and my own mutants. The builder's worktree is still clean. This time there is **no directory junction**: the exports live in the critic worktree's git-ignored `test-results/`, so Node resolves the critic's own `node_modules`. The dependencies are identical; only a script line differs.
+
+**Gates, mine:**
+- `npm run typecheck` and `npm run lint` at the tip: clean.
+- `npm run test:gpu` at the tip: **57 passed + 1 expected fail** (10 files). The 12.2 rows are bit-identical to 81e9508's. The new rows give: moving duct plain 4.34e-7 / 5.48e-7 / 1.04e-6, moving duct preconditioned 3.68e-7 / 3.86e-7 / 3.71e-6, E-L5 at 60 m/s 3.34e-6, S at 20 m/s 1.91e-6 / 4.35e-7 / 5.87e-7. The forms rows: SLAU2 ≤ 5e-8, the 14.2 form ≤ 7.6e-7, 14.6(a) 0 ulp.
+- I take the orchestrator's quiet-window figures for the rest: npm test 1849 + 9 expected fail, coverage lines 99.59 %, ladder 12 passed.
+
+**Mutants** (`probes/santa-solver-A-mutants3.sh.txt`, a 22ba7ac export):
+- The unmutated baseline of the 5 target files passes: 38 + 1 expected fail.
+- **Killed:**
+  - M1: 9 tests;
+  - **M2b, M2c**: the new resample-values test;
+  - **M3**: 5 tests, in oracle-moving and forms;
+  - **M4**: the new component-0 sub-ulp test;
+  - M6: 3 tests.
+- Every kill came from a value check; 0 validation-error lines.
+- **M5 survives.** It is equivalent, as I said in round 1, and accepted.
+
+**Chrome (A-I3).** `probes/santa-solver-A-chrome-exact.sh.txt` rewrites three imports of `tests/gpu/solver-exact.test.ts` (navigator.gpu, the fetched asset, an inline `closedBoxMesh`) and runs it in Playwright's Chrome on port 5190. **12/12 pass in Chrome (D3D12, Arc 140T)**, including:
+- the bitwise interface fluxes at u∞ 0 and 170 m/s, on the three-block row and on 130k;
+- the M 0.5 free stream, bitwise zero;
+- tile-shape and block-split independence, bitwise;
+- the sub-ulp compensated update on both records, in both modes;
+- D4-50's packed binding, bitwise equal to the unpacked form, on a default-limits Chrome device.
+
+So the compiler-dependent properties hold in the production browser.
+
+**Trial merge (new, Blocking).** `git merge-tree --write-tree main 22ba7ac` (main at aedddfc) is textually clean, but **the merged tree does not typecheck**:
+
+```
+tests/gpu/forms.test.ts(339,20): error TS2554: Expected 8-9 arguments, but got 7.
+```
+
+- **The cause.** fc1cca5's new forms test calls the oracle's `limitedSlopes(REF_F, all, 0, NP, 2 * NP, S, 0)` with the branch-point signature. Main's round-5 oracle inserted `rc` before `out` (8-9 arguments).
+- **What breaks at run time.** The call would pass `S` as `rc` and `0` as `out`, so the forms test would also fail with a TypeError.
+- **The handoff is wrong here.** It says "B1 fixed: the trial merge ... typechecked is clean". That was true after d874978, and fc1cca5 reintroduced the problem.
+- **My miss.** In round 1 I checked only that the merge was textually clean and that no test then imported a changed oracle API. That check did not catch this class of break, which reviewer B's B-B1 had found at 81e9508.
+- **The fix.** It cannot be made at the tip, because the tip's oracle still has the old signature. It belongs in the merge commit, as with 5311dbe: `limitedSlopes(REF_F, all, 0, NP, 2 * NP, 1, S, 0)`. The sharp form ignores `rc`.
+- **Verified.** With that one-line change, the merged tree **typechecks clean** and runs **`test:gpu` 57 + 1 expected fail** against main's oracle, with the 12.2 numbers unchanged.
+
+| ID | status | evidence |
+|---|---|---|
+| **W2S-A-B1** (new) | **OPEN, needs a one-line merge fix** | `tests/gpu/forms.test.ts:339`, the TS2554 above; the fix is verified on the merged tree |
+| A-I1 resample values | **FIXED** | b081663: every texel and channel of both extents against the host map at u∞ 40 with swirl and fuel; M2b and M2c killed |
+| A-I2 u∞ ≠ 0 rows | **FIXED** | 9387657 (oracle-moving: the BC ghosts at 100 m/s, the moving duct plain and preconditioned, E-L5 at 60, S at 20); fc1cca5 (`probeFlux` values at u∞ 170, machCut 1 and 0.003); M3 killed in `test:gpu` |
+| A-I3 Chrome numbers | **ACCEPTED-SKIP** for this merge | The builder's reason (node:fs) blocks only the 12.2 oracle row. The exactness checks need no oracle, and my probe shows they pass in Chrome (above), so the risk behind the finding has evidence against it. Next round: adopt the probe as a permanent `tests/browser` file (a three-import change), add a browser-safe oracle shell for one 12.2 row, and record Chrome's adapter `maxStorageBuffersPerShaderStage` in GPU_FACTS. Not a merge blocker. |
+| A-I4 resample in budget/ceiling | **FIXED** | d785f93 / 1be863f: `observe(n, solverMs, resampleMs)`, budget − resample, ceiling 7 − resample; unit tests and the Dawn formula check |
+| A-I5 TwoSum half | **FIXED** | 77bed04: the sub-ulp test also on ρ′, both modes; M4 killed |
+| A-I6 settle window | **FIXED** | db3c57f: the largest change over every sample of the window |
+| A-I7 D4-45 | **FIXED** for L8 (cap 37500, value rows of record only when steady to a tenth of tolerance). **Follow-up:** my round-1 text "L9a/L9b likewise" was wrong, and D4-56 (decided after this tip) keeps the L9 caps at 20000, so `MAX_D445` should apply to L8 only. Likewise D4-58 restates the D4-38 floors as 1.6e-4 / 1.1e-3 (`ladder.test.ts` `PLATEAU` still says 4e-5 / 1.7e-4). The KNOWN-FAIL pins stay valid either way (3.99e-4 and 7.5e-3 are above both). | db3c57f |
+| A-I8 (a) D4-48 E/B rows | **ACCEPTED** | owned by the reference's 12.2 rewrite; the E-L5 pin stays visible |
+| A-I8 (b) D4-50 | **FIXED** | a3bfa83 / 837e7ab: `FLOW_SOLVER_LIMITS` and `preferredLimits`, packed geo + topo with a bitwise-equal test, a clear throw when short by more. I also ran the packing in Chrome. |
+| A-I8 (c) D4-51 M_ref | **ACCEPTED** | follows the reference round 6 merge |
+| A-I9 throughput | **ACCEPTED** | D4-54: the post-merge performance round and the official P1 measurement |
+| A-I10 status channel | **FIXED** | 5c3a5b3: `FlowSolver.status()` and `reportGpuError()`, a minimal flagged contract edit; typecheck clean; the W1F-I1 test goes through the contract |
+| A-N1 | **FIXED** (comments, 196954c) / **ACCEPTED** (import main's `DEFAULT_CFL_PRECONDITIONED` after the merge) | |
+| A-N2 | ACCEPTED-SKIP | cosmetic: the comments say KNOWN-FAIL, the JSON row text does not |
+| A-N3 | **FIXED** | fc1cca5 / 141639c: `probePrecondition`, all six components against the oracle |
+| A-N4 | ACCEPTED-SKIP | a short `setConserved` array surfaces as `diverged`, though with the wrong cause |
+| A-N5 | ACCEPTED-SKIP | next round |
+| A-N6 | **FIXED** | b081663: a real `device.destroy()` gives `lost`, 0 iterations, and the snapshot publishes |
+| A-N7 | ACCEPTED | for the merge note |
+| A-N8 | ACCEPTED-SKIP | with D4-54's tile sweep |
+| A-N9 | ACCEPTED-SKIP | Record it in GPU_FACTS when A-I3's browser test lands. My Chrome probe is the Measured evidence for both facts. |
+
+**Updated verdict: CHANGES REQUIRED, narrowly on W2S-A-B1.**
+- Every round-1 finding is fixed or acceptably deferred.
+- Every real mutant survivor is now killed.
+- The fidelity verdict stands: the fix round changed no scheme term, and the 12.2 rows are bit-identical.
+- The one thing preventing a green merge is the one-line merge fix at `tests/gpu/forms.test.ts:339`. With it applied in the merge commit (verified above: tsc clean, test:gpu 57 + 1 expected fail), **my verdict is APPROVE, with no further builder round needed.**
+- Follow-ups for the next solver round: A-I3's browser test, the D4-56 L9 caps and the D4-58 floors.
