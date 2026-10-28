@@ -156,8 +156,8 @@ export function stageParams(
     ['cfl', opts.cfl],
     ['cflPhysical', opts.cflPhysical],
   ] as const) {
-    if (v !== undefined && !(v > 0 && Number.isFinite(v)))
-      throw new Error(`${name} ${v} must be > 0`);
+    if (v !== undefined && !(v >= 0 && Number.isFinite(v)))
+      throw new Error(`${name} ${v} must be >= 0`);
   }
   const ref = referenceState(opts.gas, opts.freeStream);
   const bcOpts = {
