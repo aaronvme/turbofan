@@ -32,6 +32,21 @@ export interface KernelOptions {
   readonly sources?: boolean;
   /** Test only: the stage kernel writes every face flux it computes (2 vec4 per tile face). */
   readonly faceDump?: boolean;
+  /**
+   * D4-50's fallback for a device with 8 storage buffers: topo lives after geo in the geo buffer
+   * (layout.ts stageStorageBuffers), read through topoAt as bitcasts.
+   */
+  readonly packedTopo?: boolean;
+}
+
+/** topo's binding (or none, packed) and its accessor topoAt. */
+function topoWgsl(o: KernelOptions, binding: number): string {
+  if (o.packedTopo === true) {
+    return `const TOPO_BASE: u32 = ${o.layout.geoData.length / 4}u;
+fn topoAt(k: u32) -> vec4u { return bitcast<vec4u>(geo[TOPO_BASE + k]); }`;
+  }
+  return `@group(0) @binding(${binding}) var<storage, read> topo: array<vec4u>;
+fn topoAt(k: u32) -> vec4u { return topo[k]; }`;
 }
 
 /** Workgroup memory of the stage kernel, bytes (WebGPU's default limit is 16384). */
@@ -157,7 +172,8 @@ fn primMain(@builtin(global_invocation_id) gid: vec3u) {
 export function ghostKernelWgsl(o: KernelOptions): string {
   return `${header(o)}
 @group(0) @binding(1) var<storage, read_write> prim: array<vec4f>;
-@group(0) @binding(2) var<storage, read> topo: array<vec4u>;
+${o.packedTopo === true ? '@group(0) @binding(2) var<storage, read> geo: array<vec4f>;' : ''}
+${topoWgsl(o, 2)}
 ${BOUNDARY_WGSL}`;
 }
 
@@ -251,7 +267,7 @@ ${TILE_WGSL(t)}
 @group(0) @binding(3) var<storage, read_write> Uout: array<vec4f>;
 @group(0) @binding(4) var<storage, read> prim: array<vec4f>;
 @group(0) @binding(5) var<storage, read> geo: array<vec4f>;
-@group(0) @binding(6) var<storage, read> topo: array<vec4u>;
+${topoWgsl(o, 6)}
 @group(0) @binding(7) var<storage, read_write> red: array<f32>;
 @group(0) @binding(10) var<storage, read_write> lo: array<vec4f>;
 ${src ? '@group(0) @binding(8) var<storage, read> src: array<vec4f>;' : ''}
@@ -326,9 +342,9 @@ fn tileFace(f: u32, i0: i32, j0: i32, d0: vec4u, d1: vec4u) -> Flux {
 ${UPDATE_WGSL(src)}
 @compute @workgroup_size(TX, TY)
 fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index) lid: u32) {
-  let info = topo[TILES + wid.x];
-  let d0 = topo[BLOCKS + 2u * info.x];      // cell offset, ni, nj, ghost offset
-  let d1 = topo[BLOCKS + 2u * info.x + 1u]; // i-face base, j-face base (in FACE units)
+  let info = topoAt(TILES + wid.x);
+  let d0 = topoAt(BLOCKS + 2u * info.x);      // cell offset, ni, nj, ghost offset
+  let d1 = topoAt(BLOCKS + 2u * info.x + 1u); // i-face base, j-face base (in FACE units)
   let ni = i32(d0.y);
   let nj = i32(d0.z);
   let i0 = i32(info.y * TX);
@@ -556,16 +572,16 @@ export function lambdaKernelWgsl(o: KernelOptions): string {
 ${TILE_WGSL(t)}
 @group(0) @binding(4) var<storage, read> prim: array<vec4f>;
 @group(0) @binding(5) var<storage, read> geo: array<vec4f>;
-@group(0) @binding(6) var<storage, read> topo: array<vec4u>;
+${topoWgsl(o, 6)}
 @group(0) @binding(7) var<storage, read_write> red: array<f32>;
 
 var<workgroup> wmin: array<f32, NTH>;
 
 @compute @workgroup_size(TX, TY)
 fn lambdaMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index) lid: u32) {
-  let info = topo[TILES + wid.x];
-  let d0 = topo[BLOCKS + 2u * info.x];
-  let d1 = topo[BLOCKS + 2u * info.x + 1u];
+  let info = topoAt(TILES + wid.x);
+  let d0 = topoAt(BLOCKS + 2u * info.x);
+  let d1 = topoAt(BLOCKS + 2u * info.x + 1u);
   let ni = i32(d0.y);
   let nj = i32(d0.z);
   let gi = i32(info.y * TX + lid % TX);

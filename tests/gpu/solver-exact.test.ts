@@ -16,6 +16,9 @@ import { BC, rectangle, singleBlock, solverMesh, threeBlockRow } from '../unit/f
 import { connect } from '../../tools/mesh/topology';
 import type { MultiBlockMesh, Patch } from '../../tools/mesh/types';
 import { GpuErrorLog, shippedMesh, solverDevice } from './helpers/solver';
+import { createDawnGpu } from './helpers/dawn';
+import { requestSimDevice } from '../../src/gpu/device';
+import { closedBoxMesh } from '../ladder/oracle';
 
 const ISA = { pressure: 101325, temperature: 288.15, velocity: 0 };
 
@@ -497,6 +500,47 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
       }
     });
   }
+
+  it('D4-50: packs geo and topo for a device with 8 storage buffers, bitwise equal to unpacked', async () => {
+    const mesh = closedBoxMesh('f32');
+    const run = async (device: GPUDevice, packStatic: boolean) => {
+      const s = await GpuSolver.create(device, mesh, {
+        gas: THERMALLY_PERFECT,
+        freeStream: { ...ISA, velocity: 30 },
+        cellSource: true,
+        packStatic,
+      });
+      s.setState(pulse(0.3, 0.08, 0.05, 30));
+      const rate0 = new Float64Array(6 * mesh.nCells).fill(1e-3);
+      s.setCellSource({ rate0 });
+      s.iterate(20);
+      const out = { packed: s.packed, state: await s.readState() };
+      s.destroy();
+      return out;
+    };
+    const plain = await run(sim.device, false);
+    const packed = await run(sim.device, true);
+    expect([plain.packed, packed.packed]).toEqual([false, true]);
+    expect(packed.state.every((v, k) => Object.is(v, plain.state[k]))).toBe(true);
+    // a device at WebGPU's default limits (8): the solver with sources packs on its own
+    const small = await requestSimDevice(createDawnGpu(), { onError: log.sink });
+    try {
+      expect(small.device.limits.maxStorageBuffersPerShaderStage).toBe(8);
+      const own = await run(small.device, false);
+      expect(own.packed).toBe(true);
+      expect(own.state.every((v, k) => Object.is(v, plain.state[k]))).toBe(true);
+      await expect(
+        GpuSolver.create(small.device, mesh, {
+          gas: THERMALLY_PERFECT,
+          freeStream: ISA,
+          cellSource: true,
+          faceDump: true,
+        }),
+      ).rejects.toThrow(/needs 10 storage buffers/);
+    } finally {
+      small.destroy();
+    }
+  });
 
   it('adds the power of a force source to the energy (work: s_eta = u s_x + v s_r + w s_L / r)', async () => {
     // ladder L9b's actuator disk: a force density f along x with s_eta = f u, in a uniform stream

@@ -100,8 +100,8 @@ fn wallGhost(q0: Prim, q1: Prim, n: vec2f, layer: u32) -> Prim {
 fn ghostMain(@builtin(global_invocation_id) gid: vec3u) {
   let g = gid.x;
   if (g >= P.nGhosts) { return; }
-  let r0 = topo[GHOSTS + 2u * g];
-  let r1 = topo[GHOSTS + 2u * g + 1u];
+  let r0 = topoAt(GHOSTS + 2u * g);
+  let r1 = topoAt(GHOSTS + 2u * g + 1u);
   let n = vec2f(bitcast<f32>(r1.x), bitcast<f32>(r1.y));
   let s = Prim(prim[2u * r0.x], prim[2u * r0.x + 1u]);
   var o = s;

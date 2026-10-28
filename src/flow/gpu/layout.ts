@@ -231,3 +231,22 @@ export function blockageData(
   }
   return { cellGeo, cellB, extB };
 }
+
+/**
+ * D4-50: the stage kernel's storage buffers (U_in, U^n, U_out, prim, geo, topo, reduction, the
+ * low parts; + the cell sources, + the test face dump) against the device's
+ * maxStorageBuffersPerShaderStage. A device short by one gets the packed form: the two read-only
+ * static buffers (geo, topo) share one binding. Short by more: an error that says what to request.
+ */
+export function stageStorageBuffers(
+  o: { readonly sources: boolean; readonly faceDump: boolean },
+  deviceLimit: number,
+  forcePacked = false,
+): { buffers: number; packed: boolean } {
+  const need = 8 + (o.sources ? 1 : 0) + (o.faceDump ? 1 : 0);
+  if (!forcePacked && need <= deviceLimit) return { buffers: need, packed: false };
+  if (need - 1 <= deviceLimit) return { buffers: need - 1, packed: true };
+  throw new Error(
+    `the flow solver's stage kernel needs ${need} storage buffers (${need - 1} packed) and the device allows ${deviceLimit}: request maxStorageBuffersPerShaderStage (src/gpu/device.ts FLOW_SOLVER_LIMITS, D4-50)`,
+  );
+}

@@ -12,7 +12,13 @@
 import { primToCons, physicalToPrim, NU, type PhysicalState } from '../../reference/state';
 import type { ReferenceState } from '../../reference/gas';
 import type { SolverMesh } from '../../reference/solverMesh';
-import { blockageData, buildLayout, type GpuLayout, type Tile } from '../layout';
+import {
+  blockageData,
+  buildLayout,
+  stageStorageBuffers,
+  type GpuLayout,
+  type Tile,
+} from '../layout';
 import {
   PARAMS_BYTES,
   PARAMS_STRIDE,
@@ -47,6 +53,8 @@ export interface GpuSolverOptions extends GpuSchemeOptions {
   readonly cellSource?: boolean;
   /** Test only: keep every face flux of the last stage (readFaceDump). */
   readonly faceDump?: boolean;
+  /** Test only: D4-50's packed form (geo and topo in one buffer) even when the device has room. */
+  readonly packStatic?: boolean;
   readonly label?: string;
 }
 
@@ -126,6 +134,8 @@ export class GpuSolver {
   private readonly timeGroup: GPUBindGroup;
   private parity = 0;
   private readonly owned: GPUBuffer[];
+  /** D4-50: topo is packed after geo in the geo buffer (one binding fewer). */
+  readonly packed: boolean;
 
   private constructor(init: {
     device: GPUDevice;
@@ -147,7 +157,9 @@ export class GpuSolver {
     };
     pipes: GpuSolver['pipes'];
     sourcePipe: GPUComputePipeline | null;
+    packed: boolean;
   }) {
+    this.packed = init.packed;
     this.device = init.device;
     this.mesh = init.mesh;
     this.layout = init.layout;
@@ -169,7 +181,8 @@ export class GpuSolver {
     this.dump = b.dump;
     this.pipes = init.pipes;
     this.sourcePipe = init.sourcePipe;
-    this.owned = [...b.copies, b.prim, b.geo, b.topo, b.red, b.lo, b.uniforms];
+    this.owned = [...b.copies, b.prim, b.geo, b.red, b.lo, b.uniforms];
+    if (b.topo !== b.geo) this.owned.push(b.topo);
     for (const x of [b.src, b.coef, b.dump]) if (x !== null) this.owned.push(x);
 
     const d = this.device;
@@ -215,7 +228,7 @@ export class GpuSolver {
       group(this.pipes.ghost, `ghost ${block === 0 ? 'tracking' : 'physical'}`, [
         uni(block),
         buf(1, this.prim),
-        buf(2, this.topo),
+        buf(2, this.packed ? this.geo : this.topo),
       ]),
     );
     // parity 0: N = C0, X = C1, Y = C2; parity 1: N = C1, X = C0, Y = C2
@@ -243,7 +256,7 @@ export class GpuSolver {
             buf(3, cout),
             buf(4, this.prim),
             buf(5, this.geo),
-            buf(6, this.topo),
+            ...(this.packed ? [] : [buf(6, this.topo)]),
             buf(7, this.red),
             buf(10, this.lo),
           ];
@@ -257,7 +270,7 @@ export class GpuSolver {
       uni(3),
       buf(4, this.prim),
       buf(5, this.geo),
-      buf(6, this.topo),
+      ...(this.packed ? [] : [buf(6, this.topo)]),
       buf(7, this.red),
     ]);
     this.dtGroup = group(this.pipes.dt, 'dt', [uni(3), buf(7, this.red)]);
@@ -279,9 +292,16 @@ export class GpuSolver {
       nGhosts: layout.nGhosts,
       nWorkgroups: layout.workgroups,
     });
+    // D4-50: 9 storage buffers with sources; a device with 8 gets geo and topo in one
+    const plan = stageStorageBuffers(
+      { sources: opts.cellSource === true, faceDump: opts.faceDump === true },
+      device.limits.maxStorageBuffersPerShaderStage,
+      opts.packStatic === true,
+    );
     const ko: KernelOptions = {
       gas: opts.gas,
       layout,
+      packedTopo: plan.packed,
       ...(opts.limiter === undefined ? {} : { limiter: opts.limiter }),
       sources: opts.cellSource === true,
       faceDump: opts.faceDump === true,
@@ -313,10 +333,16 @@ export class GpuSolver {
       device.createBuffer({ label: `${label} ${name}`, size: Math.max(16, size), usage });
     const copies = [0, 1, 2].map((k) => make(32 * n, `U${k}`));
     const primBuf = make(32 * nExt, 'prim');
-    const geo = make(layout.geoData.byteLength, 'geo');
+    const geoBytes = layout.geoData.byteLength;
+    const geo = make(geoBytes + (plan.packed ? layout.topoData.byteLength : 0), 'geo');
     device.queue.writeBuffer(geo, 0, layout.geoData);
-    const topo = make(layout.topoData.byteLength, 'topo');
-    device.queue.writeBuffer(topo, 0, layout.topoData);
+    let topo = geo;
+    if (plan.packed) {
+      device.queue.writeBuffer(geo, geoBytes, layout.topoData);
+    } else {
+      topo = make(layout.topoData.byteLength, 'topo');
+      device.queue.writeBuffer(topo, 0, layout.topoData);
+    }
     const red = make(4 * reductionLength(layout), 'reduction');
     const lo = make(32 * n, 'U low parts');
     const uniforms = make(
@@ -343,6 +369,7 @@ export class GpuSolver {
       buffers: { copies, prim: primBuf, geo, topo, red, lo, uniforms, src, coef, dump },
       pipes: { prim, ghost, stage, lambda, dt, time },
       sourcePipe: source,
+      packed: plan.packed,
     });
     solver.setBlockage(new Float64Array(n).fill(1));
     solver.setUniform({ rho: params.ref.rho, u: params.ref.u, v: 0, w: 0, p: params.ref.p, z: 0 });

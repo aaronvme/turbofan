@@ -35,6 +35,11 @@ export interface SimDeviceOptions {
   readonly optionalFeatures?: readonly GPUFeatureName[] | 'all';
   /** Limits to request at the adapter's maximum (the defaults are lower). */
   readonly maxLimits?: readonly LimitName[];
+  /**
+   * Limits wanted at these values, each requested at min(value, the adapter's), so the request
+   * never fails; a consumer whose need is not met falls back (FLOW_SOLVER_LIMITS, D4-50).
+   */
+  readonly preferredLimits?: Readonly<Partial<Record<LimitName, number>>>;
   readonly powerPreference?: GPUPowerPreference;
   readonly label?: string;
   readonly onError: GpuErrorSink;
@@ -94,6 +99,27 @@ export function selectLimits(
   }
   return out;
 }
+
+/** Each preferred limit at min(value, the adapter's) (SimDeviceOptions.preferredLimits). */
+export function selectPreferredLimits(
+  adapterLimits: GPUSupportedLimits,
+  preferred: Readonly<Partial<Record<LimitName, number>>>,
+): Record<string, number> {
+  const names = Object.keys(preferred) as LimitName[];
+  const max = selectLimits(adapterLimits, names);
+  const out: Record<string, number> = {};
+  for (const name of names) out[name] = Math.min(preferred[name] ?? 0, max[name] ?? 0);
+  return out;
+}
+
+/**
+ * D4-50: the limits the flow solver wants. Its stage kernel binds 9 storage buffers with the cell
+ * sources (WebGPU's default is 8); a device that has only 8 gets the packed form
+ * (src/flow/gpu/layout.ts stageStorageBuffers). The Arc 140T's adapter offers 16 (GPU_FACTS M1).
+ */
+export const FLOW_SOLVER_LIMITS: Readonly<Partial<Record<LimitName, number>>> = {
+  maxStorageBuffersPerShaderStage: 9,
+};
 
 /** Error class by constructor name, which works for Chrome's and Dawn's error objects. */
 export function classifyError(error: GPUError): GpuErrorKind {
@@ -165,7 +191,10 @@ export async function requestSimDevice(gpu: GPU, options: SimDeviceOptions): Pro
     options.requiredFeatures ?? [],
     options.optionalFeatures ?? [],
   );
-  const requiredLimits = selectLimits(adapter.limits, options.maxLimits ?? []);
+  const requiredLimits = {
+    ...selectPreferredLimits(adapter.limits, options.preferredLimits ?? {}),
+    ...selectLimits(adapter.limits, options.maxLimits ?? []),
+  };
   const device = await adapter.requestDevice({
     ...(options.label ? { label: options.label } : {}),
     requiredFeatures,
