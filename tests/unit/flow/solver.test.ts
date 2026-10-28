@@ -141,6 +141,64 @@ describe('reference solver: exactness', () => {
   });
 });
 
+// D4-48 (SOLVER.md 12.2, rows B and E): the residual check divides by the flux scale, the density
+// residual's L2 with every face's mass flux counted positive, not by the residual itself
+describe('reference solver: the residual flux scale', () => {
+  /** sqrt(mean_c (sum_f |b_f F_f,rho| / (b_c V_c))^2) from faceFlux, face by face, every block. */
+  function bruteForce(s: ReferenceSolver): number {
+    const m = s.mesh;
+    const sum = new Float64Array(m.nCells);
+    const add = (c: number, f: number) => {
+      sum[c] = (sum[c] ?? NaN) + f;
+    };
+    m.blocks.forEach((b, bi) => {
+      for (let j = 0; j < b.nj; j++)
+        for (let i = 0; i <= b.ni; i++) {
+          const f = Math.abs(s.faceFlux(bi, 'i', i, j)[0] ?? NaN);
+          if (i > 0) add(b.cellOffset + j * b.ni + i - 1, f);
+          if (i < b.ni) add(b.cellOffset + j * b.ni + i, f);
+        }
+      for (let j = 0; j <= b.nj; j++)
+        for (let i = 0; i < b.ni; i++) {
+          const f = Math.abs(s.faceFlux(bi, 'j', i, j)[0] ?? NaN);
+          if (j > 0) add(b.cellOffset + (j - 1) * b.ni + i, f);
+          if (j < b.nj) add(b.cellOffset + j * b.ni + i, f);
+        }
+    });
+    let s2 = 0;
+    for (let c = 0; c < m.nCells; c++) {
+      const q = (sum[c] ?? NaN) / ((s.blockage[c] ?? NaN) * (m.cellVolR[c] ?? NaN));
+      s2 += q * q;
+    }
+    return Math.sqrt(s2 / m.nCells);
+  }
+
+  it('is the face-by-face sum over every block, bounds the residual, and is 0 at rest', () => {
+    for (const pre of [undefined, { minMach: 0.003 }]) {
+      const s = new ReferenceSolver(solverMesh(allBcs), {
+        gas: THERMALLY_PERFECT,
+        freeStream: AMBIENT,
+        ...(pre === undefined ? {} : { lowMachPreconditioning: pre }),
+      });
+      expect(s.residualFluxScale()).toBe(0);
+      s.setState((x, r) => pulse(x, r));
+      s.setBlockage(Float64Array.from(s.mesh.cellX, (x) => 1 - 0.2 * Math.exp(-(x ** 2) / 0.01)));
+      s.iterate(2);
+      const scale = s.residualFluxScale();
+      expect(scale).toBeGreaterThan(0);
+      expect(Math.abs(scale - bruteForce(s)) / scale).toBeLessThan(1e-14);
+      // without volume sources |sum_f F| <= sum_f |F| per cell (the blockage source has no mass)
+      const R = s.residual();
+      let r2 = 0;
+      for (let c = 0; c < s.mesh.nCells; c++) {
+        const q = (R[6 * c] ?? NaN) / ((s.blockage[c] ?? NaN) * (s.mesh.cellVolR[c] ?? NaN));
+        r2 += q * q;
+      }
+      expect(Math.sqrt(r2 / s.mesh.nCells)).toBeLessThanOrEqual(scale);
+    }
+  }, 60_000);
+});
+
 describe('reference solver: block interfaces', () => {
   it('conserves mass, energy, angular momentum and fuel across min/max, max/max and min/min interfaces', () => {
     const s = new ReferenceSolver(solverMesh(closed), {
