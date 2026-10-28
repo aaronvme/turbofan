@@ -1,0 +1,46 @@
+# Critic pass 10, w2/solver-int @f07f57e: solver-exact.test.ts's bitwise tests run the plain scheme,
+# so the D4-44 beta pass (tile + first ring, ghosts after their BCs, partial tiles, the ghost's
+# source beta) is never checked for tile-shape independence, interface symmetry or the D4-50 packed
+# binding. This turns preconditioning on (the engine's minMach = M_cut = 0.003) in three of them,
+# runs solver-exact.test.ts, and restores the file. Run from a checkout of f07f57e.
+#   python -I w2i-precond-bitwise.py <checkout>
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
+T = 'tests/gpu/solver-exact.test.ts'
+PRE = 'lowMachPreconditioning: { minMach: 0.003 }'
+EDITS = [
+    # interface faces bitwise equal or negated (three-block row and the 130k asset)
+    ('const s = await create(mesh, { faceDump: true, freeStream: { ...ISA, velocity: uInf } });',
+     f'const s = await create(mesh, {{ faceDump: true, freeStream: {{ ...ISA, velocity: uInf }}, {PRE} }});'),
+    # tile shapes 16x8, 8x8, 32x4, 5x3 on a 37 x 21 row with inflow, outflow, axis and far field
+    ('        freeStream: { ...ISA, velocity: 60 },\n',
+     f'        freeStream: {{ ...ISA, velocity: 60 }},\n        {PRE},\n'),
+    # D4-50: packed (geo + topo in one binding) against unpacked, and an 8-buffer device
+    ('        packStatic,\n', f'        packStatic,\n        {PRE},\n'),
+]
+
+root = sys.argv[1]
+path = f'{root}/{T}'
+with open(path, encoding='utf8', newline='') as f:
+    src = f.read()
+for old, new in EDITS:
+    if src.count(old) != 1:
+        raise SystemExit(f'pattern occurs {src.count(old)} times: {old!r}')
+    src = src.replace(old, new)
+with open(path, 'w', encoding='utf8', newline='') as f:
+    f.write(src)
+try:
+    r = subprocess.run(f'npx vitest run -c vitest.gpu.config.ts --reporter=verbose {T}', cwd=root, shell=True,
+                       capture_output=True, text=True, encoding='utf8', errors='replace',
+                       timeout=1200)
+    out = r.stdout + r.stderr
+    print(f'exit {r.returncode}')
+    for ln in out.splitlines():
+        s = ln.strip()
+        if s.startswith(('✓', '×', 'Test Files', 'Tests', 'FAIL', 'Error', 'AssertionError')) or 'interface face' in s:
+            print(f'  {s[:220]}')
+finally:
+    subprocess.run(['git', 'checkout', '--', T], cwd=root, check=True)

@@ -1,0 +1,47 @@
+// Critic pass 9, w2/reference @0c87da8 (D4-44 (c)): case R of precondition.test.ts (a duct started
+// from rest at the engine settings minMach = M_cut = 0.003, CFL 0.8, outflow 0.998 p_inf, so the dp
+// term lifts beta at the outflow) with the blockage as stated (B=1, b_min 0.85, W2R-6's duct, where
+// the sharp limiter has its floor) and with b = 1 (B=0: a uniform steady state, which W2R-6 does not
+// touch). Run against a checkout before D4-44 (ROOT = main) and after it (ROOT = the tip): R with
+// b = 1 tests the start-from-rest regime without the limiter's confound.
+//   ROOT=<checkout> B=0 node --import file:///<checkout>/tools/mesh/ts-resolve.mjs w2r-rest-uniform.ts
+import { pathToFileURL } from 'node:url';
+
+const ROOT = process.env.ROOT ?? '.';
+const imp = (p: string) => import(pathToFileURL(`${ROOT}/${p}`).href);
+const { ReferenceSolver } = await imp('src/flow/reference/solver.ts');
+const { caloricallyPerfectGas } = await imp('src/flow/reference/gas.ts');
+const { BC, rectangle, singleBlock, solverMesh } = await imp('tests/unit/flow/helpers.ts');
+const { converge } = await imp('tests/ladder/common.ts');
+
+const BLOCK = process.env.B !== '0';
+const CFL = process.env.CFL === undefined ? undefined : Number(process.env.CFL);
+const duct = solverMesh(
+  singleBlock(rectangle('duct', -0.3, 0.3, 0.5, 0.6, 24, 6), {
+    imin: BC.INFLOW,
+    imax: BC.OUTFLOW,
+    jmin: BC.SLIP_WALL,
+    jmax: BC.SLIP_WALL,
+  }),
+);
+const s = new ReferenceSolver(duct, {
+  gas: caloricallyPerfectGas(1.4, 287.05287),
+  freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
+  inflowTotal: { p0: 101325, t0: 288.15 },
+  outflowPressure: 101325 * 0.998,
+  lowMachPreconditioning: { minMach: 0.003, machCut: 0.003 },
+  ...(CFL === undefined ? {} : { cfl: CFL }),
+});
+s.setBlockage(
+  Float64Array.from(duct.cellX as Float64Array, (x: number) =>
+    BLOCK && Math.abs(x) < 0.1 ? 1 - 0.15 * Math.cos((Math.PI * x) / 0.2) ** 2 : 1,
+  ),
+);
+s.setUniform({ rho: s.ref.rho, u: 0, v: 0, w: 0, p: 101325, z: 0 });
+const c = converge(s, 1e-5, 20000, 'peak');
+let worstU = 0;
+const P = s.primitives();
+for (let k = 0; k < duct.nCells; k++) worstU = Math.max(worstU, Math.abs(P[8 * k + 1] ?? NaN));
+console.log(
+  `R blockage ${BLOCK} CFL ${CFL ?? 'default'}: converged ${c.converged} at ${c.iterations}, residual / peak ${(c.last / c.first).toExponential(2)}, max |u| ${worstU.toFixed(3)} m/s`,
+);

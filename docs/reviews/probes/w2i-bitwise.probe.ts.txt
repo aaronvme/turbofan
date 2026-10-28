@@ -1,0 +1,104 @@
+// Critic pass 10, w2/solver-int @f07f57e: is the 3-dispatch kernel (w2/solver-perf @5e23c56)
+// bitwise the 9-dispatch one (main c661d5c), and where does the D4-44 mirror (f07f57e) differ?
+// Each ROOT is a `git archive` of src/ + tools/perf/ (+ tools/mesh/ts-resolve.mjs) of one ref,
+// extracted under the critic worktree (test-results/critic10/src-<sha>, so bare imports resolve).
+// The app's GpuFlowSolver on the shipped 130k asset (axis, inflow, outflow, slip walls, block
+// interfaces, partial tiles), from w2/solver-perf's perfState (jet, swirl, pressure wave, hot
+// plume), then N iterations of the chosen mode on the kernel directly; every state word is
+// compared with the first ROOT's, and each side is checked finite (a uint compare alone calls two
+// NaN states equal).
+//   ROOTS=a[,b] MODE=pre|plain|physical N=50 [OUT=state.bin] node --import file:///<checkout>/tools/mesh/ts-resolve.mjs w2i-bitwise.probe.ts
+import { readFileSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+import { create, globals } from 'webgpu';
+
+Object.assign(globalThis, globals);
+const roots = (process.env.ROOTS ?? '').split(',').filter((s) => s.length > 0);
+const mode = process.env.MODE ?? 'pre';
+const N = Number(process.env.N ?? '50');
+const MESH_DIR = process.env.MESH ?? 'public/mesh';
+if (roots.length < 1) throw new Error('ROOTS=a,b');
+const imp = (root: string, p: string) => import(pathToFileURL(`${root}/${p}`).href);
+
+const gpu = create([]);
+const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
+if (adapter === null) throw new Error('no adapter');
+const device = await adapter.requestDevice({
+  requiredLimits: {
+    maxStorageBuffersPerShaderStage: adapter.limits.maxStorageBuffersPerShaderStage,
+    maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+    maxBufferSize: adapter.limits.maxBufferSize,
+  },
+});
+const errors: string[] = [];
+device.addEventListener('uncapturederror', (e) => {
+  errors.push(String((e as unknown as { error: { message: string } }).error.message));
+});
+
+const flows: { dispose(): void }[] = [];
+const results: { root: string; state: Float32Array; finite: boolean; maxRho: number }[] = [];
+for (const root of roots) {
+  const { GpuFlowSolver } = await imp(root, 'src/flow/gpu/device/flowSolver.ts');
+  const { loadMeshAsset, parseMeshManifest } = await imp(root, 'src/flow/mesh/loader.ts');
+  const { solverMeshFromFile } = await imp(root, 'src/flow/reference/solverMesh.ts');
+  const { ENGINE_DEFINITION } = await imp(root, 'src/engine/definition.ts');
+  // the same initial state on every side: perfState of the first root that has it
+  // PERF: a root with tools/perf (main has none)
+  const perfRoot = [process.env.PERF ?? '', ...roots].filter((r) => r.length > 0).find((r) => {
+    try {
+      readFileSync(`${r}/tools/perf/solverPerf.ts`);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (perfRoot === undefined) throw new Error('no root has tools/perf/solverPerf.ts');
+  const { perfState } = await imp(perfRoot, 'tools/perf/solverPerf.ts');
+  const manifest = parseMeshManifest(JSON.parse(readFileSync(`${MESH_DIR}/manifest.json`, 'utf8')));
+  const entry = manifest.specs['130k'];
+  const { asset, file } = await loadMeshAsset(readFileSync(`${MESH_DIR}/${entry.file}`), entry);
+  const mesh = solverMeshFromFile(file);
+  const flow = new GpuFlowSolver(mode === 'plain' ? { lowMachPreconditioning: null } : {});
+  await flow.init({ device, mesh: asset, definition: ENGINE_DEFINITION });
+  const k = flow.kernel;
+  if (k === null) throw new Error(`no kernel at ${root}`);
+  process.stderr.write(`init ${root.split(/[\/]/).at(-1)}
+`);
+  k.setConserved(perfState(mesh, k.ref));
+  for (let s = 0; s < N; s++) {
+    if (mode === 'physical') k.stepPhysical();
+    else k.iterate(1);
+  }
+  const state = await k.readState();
+  let finite = true;
+  let maxRho = 0;
+  for (let q = 0; q < state.length; q++) if (!Number.isFinite(state[q] ?? NaN)) finite = false;
+  for (let q = 0; q < state.length; q += 8) maxRho = Math.max(maxRho, Math.abs(state[q] ?? NaN));
+  results.push({ root, state, finite, maxRho });
+  // OUT: the state words, for a comparison across processes (two refs' solvers in one process
+  // segfaulted dawn.node at the second init)
+  if (process.env.OUT !== undefined) writeFileSync(process.env.OUT, new Uint8Array(state.buffer));
+  process.stderr.write(`done ${root.split(/[\/]/).at(-1)}
+`);
+  // kept alive to the end: disposing one solver before the next init segfaulted dawn.node here
+  flows.push(flow);
+}
+const a = results[0];
+if (a === undefined) throw new Error('no result');
+const xa = new Uint32Array(a.state.buffer);
+for (const r of results) {
+  const xb = new Uint32Array(r.state.buffer);
+  let diff = 0;
+  let maxAbs = 0;
+  for (let q = 0; q < xa.length; q++) {
+    if (xa[q] !== xb[q]) {
+      diff++;
+      maxAbs = Math.max(maxAbs, Math.abs((a.state[q] ?? NaN) - (r.state[q] ?? NaN)));
+    }
+  }
+  process.stdout.write(
+    `${mode} N=${N} ${r.root.split(/[\\/]/).at(-1)}: finite ${r.finite}, max|rho'| ${r.maxRho.toExponential(4)}, words differing from ${a.root.split(/[\\/]/).at(-1)}: ${diff} of ${xa.length} (max |diff| ${maxAbs.toExponential(2)})\n`,
+  );
+}
+process.stdout.write(`GPU errors: ${errors.length === 0 ? 'none' : errors.join(' | ')}\n`);
+device.destroy();

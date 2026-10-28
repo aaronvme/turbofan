@@ -1,0 +1,52 @@
+# Critic pass 10, w2/solver-int @f07f57e: mutants of the fused halo (w2/solver-perf) and of the
+# D4-44 mirror (beta pass, ghost beta) in src/flow/gpu/wgsl/kernels.ts. Run from a checkout of
+# f07f57e (the critic worktree, detached): one exact replacement, `npm run test:gpu`, then
+# `git checkout -- src/flow/gpu/wgsl/kernels.ts`. One suite at a time (the machine is short of RAM).
+#   python -I w2i-mutants.py <checkout> M1 [M2 ...]
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
+K = 'src/flow/gpu/wgsl/kernels.ts'
+MUTANTS = {
+    # fused halo: the i-max boundary's layer-2 ghost is not loaded (zeros, b = 1)
+    'M1': ('(inJ && gi >= -2 && gi <= ni + 1)', '(inJ && gi >= -2 && gi <= ni)'),
+    # fused halo: a slip wall's second source cell is the first (layer-2 wall ghosts)
+    'M2': ('if (r0.z == 1u) { s1 = cellPrim(r0.y); }', 'if (r0.z == 7u) { s1 = cellPrim(r0.y); }'),
+    # beta pass: the j-max ghost is not in the ring (its p' reads 0)
+    'M3': ('(inI && gj >= -1 && gj <= nj)) {', '(inI && gj >= -1 && gj < nj)) {'),
+    # stage: every ghost takes cell 0's beta (W2R-I10's oracle mutant, in WGSL)
+    'M4': ('return select(r0.x, r0.y, r0.w == 2u);', 'return 0u;'),
+    # beta pass: dp from the j-neighbours only (the i-neighbours dropped)
+    'M5': ('max(max(abs(wp[h - 1u] - pc), abs(wp[h + 1u] - pc)),',
+           'max(max(abs(wp[h - RX] - pc), abs(wp[h - RX] - pc)),'),
+}
+
+
+def run(root: str, mid: str) -> None:
+    old, new = MUTANTS[mid]
+    path = f'{root}/{K}'
+    with open(path, encoding='utf8', newline='') as f:
+        src = f.read()
+    if src.count(old) != 1:
+        print(f'{mid}: the pattern occurs {src.count(old)} times, skipped', flush=True)
+        return
+    with open(path, 'w', encoding='utf8', newline='') as f:
+        f.write(src.replace(old, new))
+    try:
+        r = subprocess.run('npm run test:gpu', cwd=root, shell=True, capture_output=True,
+                           text=True, encoding='utf8', errors='replace', timeout=1500)
+        out = r.stdout + r.stderr
+        lines = [ln for ln in out.splitlines()
+                 if ('Tests ' in ln or 'Test Files' in ln or ' FAIL ' in ln or '×' in ln)]
+        print(f'{mid}: exit {r.returncode}', flush=True)
+        for ln in lines[:40]:
+            print(f'  {ln.strip()}', flush=True)
+    finally:
+        subprocess.run(['git', 'checkout', '--', K], cwd=root, check=True)
+
+
+if __name__ == '__main__':
+    for m in sys.argv[2:]:
+        run(sys.argv[1], m)

@@ -1,0 +1,57 @@
+// Critic pass 9, w2/reference @0c87da8 (D4-44 (c), W2R-I8): case J of precondition.test.ts (a M 0.05
+// jet into dead air, 32 x 16, minMach = M_cut = MC) run at a stated tracking CFL, with the cap scaled
+// as 20000 x 0.8 / CFL (pseudo-time iterations go as 1 / CFL). If J's stall were a fully discrete
+// (step) instability, a small enough CFL would converge it; if it stalls at every CFL, the stall is
+// in the semi-discrete operator (spatial scheme + limiter), and D4-44's step analysis does not
+// reach it. Prints residual / peak every cap/20 iterations and the min / max over the last quarter.
+//   ROOT=<checkout> CFL=0.2 MC=0.003 node --import file:///<checkout>/tools/mesh/ts-resolve.mjs w2r-jet-cfl.ts
+import { pathToFileURL } from 'node:url';
+
+const ROOT = process.env.ROOT ?? '.';
+const imp = (p: string) => import(pathToFileURL(`${ROOT}/${p}`).href);
+const { ReferenceSolver } = await imp('src/flow/reference/solver.ts');
+const { caloricallyPerfectGas } = await imp('src/flow/reference/gas.ts');
+const { BC, facePatches, rectangle, solverMesh } = await imp('tests/unit/flow/helpers.ts');
+
+const CFL = Number(process.env.CFL ?? 0.8);
+const MC = Number(process.env.MC ?? 0.003);
+const CAP = Math.round((20000 * 0.8) / CFL);
+const AMBIENT = { pressure: 101325, temperature: 288.15, velocity: 0 };
+const b = rectangle('jet', 0, 0.8, 0, 0.4, 32, 16);
+const mesh = solverMesh({
+  blocks: [b],
+  patches: [
+    { block: 0, face: 'imin', start: 0, end: 4, bc: BC.INFLOW, label: 'nozzle' },
+    { block: 0, face: 'imin', start: 4, end: 16, bc: BC.SLIP_WALL, label: 'base' },
+    ...facePatches(b, 0, { imax: BC.OUTFLOW, jmin: BC.AXIS, jmax: BC.FARFIELD }),
+  ],
+});
+const M = 0.05;
+const s = new ReferenceSolver(mesh, {
+  gas: caloricallyPerfectGas(1.4, 287.05287),
+  freeStream: AMBIENT,
+  inflowTotal: { p0: 101325 * (1 + 0.2 * M * M) ** 3.5, t0: 288.15 * (1 + 0.2 * M * M) },
+  lowMachPreconditioning: { minMach: MC, machCut: MC },
+  cfl: CFL,
+});
+s.setUniform({ rho: s.ref.rho, u: 0, v: 0, w: 0, p: 101325, z: 0 });
+let peak = 0;
+let lo = Infinity;
+let hi = 0;
+const out: string[] = [];
+for (let it = 1; it <= CAP; it++) {
+  const r = s.iterate(1).residualDensityL2 as number;
+  if (!Number.isFinite(r)) {
+    out.push(`NaN at ${it}`);
+    break;
+  }
+  peak = Math.max(peak, r);
+  if (it > (3 * CAP) / 4) {
+    lo = Math.min(lo, r / peak);
+    hi = Math.max(hi, r / peak);
+  }
+  if (it % (CAP / 20) === 0) out.push(`${it}: ${(r / peak).toExponential(2)}`);
+}
+console.log(`J CFL ${CFL} M_cut ${MC} cap ${CAP} (peak ${peak.toExponential(3)})`);
+console.log(out.join(' | '));
+console.log(`last quarter: residual / peak in [${lo.toExponential(2)}, ${hi.toExponential(2)}]`);

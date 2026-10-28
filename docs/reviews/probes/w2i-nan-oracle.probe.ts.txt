@@ -1,0 +1,84 @@
+// Critic pass 10, w2/solver-int @f07f57e: the w2/solver-perf NaN in f64. The f64 oracle of ROOT on
+// the shipped 130k asset at GpuFlowSolver's defaults (THERMALLY_PERFECT, ISA SLS at rest, minMach =
+// M_cut = 0.003, the preconditioned CFL 0.8), from engine-stability.test.ts's 0.1 % pressure wave.
+// Prints max |rho'| over its first every EVERY iterations and, from the first state, cell 0's
+// beta (the oracle's own beta2 after one computeBeta) over the pre-D4-44 M_ref of its inflow face
+// (max(face Mach, M_cut) = M_cut at rest), and how many cells have beta / M_cut above 4 and 8.
+// ROOT = main c661d5c (pre-D4-44 M_ref) should go NaN within ~10; ROOT = the int tip should not.
+//   ROOT=<src-archive> N=30 EVERY=5 node --import file:///<checkout>/tools/mesh/ts-resolve.mjs w2i-nan-oracle.probe.ts
+import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+
+const ROOT = process.env.ROOT ?? '.';
+const N = Number(process.env.N ?? '30');
+const EVERY = Number(process.env.EVERY ?? '5');
+const MESH_DIR = process.env.MESH ?? 'public/mesh';
+const imp = (p: string) => import(pathToFileURL(`${ROOT}/${p}`).href);
+const { ReferenceSolver } = await imp('src/flow/reference/solver.ts');
+const { THERMALLY_PERFECT } = await imp('src/flow/reference/gas.ts');
+const { ISA_SLS } = await imp('src/contracts/ambient.ts');
+const { loadMeshAsset, parseMeshManifest } = await imp('src/flow/mesh/loader.ts');
+const { solverMeshFromFile } = await imp('src/flow/reference/solverMesh.ts');
+
+const manifest = parseMeshManifest(JSON.parse(readFileSync(`${MESH_DIR}/manifest.json`, 'utf8')));
+const entry = manifest.specs['130k'];
+const { file } = await loadMeshAsset(readFileSync(`${MESH_DIR}/${entry.file}`), entry);
+const mesh = solverMeshFromFile(file);
+const isa = ISA_SLS;
+const s = new ReferenceSolver(mesh, {
+  gas: THERMALLY_PERFECT,
+  freeStream: { pressure: isa.pressurePa, temperature: isa.temperatureK, velocity: 0 },
+  lowMachPreconditioning: { minMach: 0.003 },
+});
+let x0 = Infinity;
+let x1 = -Infinity;
+let r1 = 0;
+for (let c = 0; c < mesh.nCells; c++) {
+  x0 = Math.min(x0, mesh.cellX[c]);
+  x1 = Math.max(x1, mesh.cellX[c]);
+  r1 = Math.max(r1, mesh.cellR[c]);
+}
+const { p, t, r } = s.ref;
+s.setState((x: number, rc: number) => {
+  const xn = (x - x0) / (x1 - x0);
+  const pc = p * (1 + 1e-3 * Math.cos(6 * Math.PI * xn) * Math.exp(-((rc / r1 / 0.3) ** 2)));
+  return { rho: pc / (r * t), u: s.ref.u, v: 0, w: 0, p: pc, z: 0 };
+});
+// the oracle's own beta^2 of the first state (private members, used at run time)
+const priv = s as unknown as { computeLocalDt(t: boolean): void; beta2: Float64Array };
+s.primitives();
+// computeLocalDt(true) sets beta2 on both refs (main inline, the tip through computeBeta)
+priv.computeLocalDt(true);
+const b0 = Math.sqrt(priv.beta2[0]);
+let over4 = 0;
+let over8 = 0;
+let worst = 0;
+let worstC = -1;
+for (let c = 0; c < mesh.nCells; c++) {
+  const ratio = Math.sqrt(priv.beta2[c]) / 0.003;
+  if (ratio > 4) over4++;
+  if (ratio > 8) over8++;
+  if (ratio > worst) {
+    worst = ratio;
+    worstC = c;
+  }
+}
+process.stdout.write(
+  `first state: cell 0 (x ${mesh.cellX[0].toFixed(2)}, r ${mesh.cellR[0].toFixed(3)}) beta ${b0.toExponential(3)}, beta / M_cut ${(b0 / 0.003).toFixed(2)}; cells > 4: ${over4}, > 8: ${over8}; worst ${worst.toFixed(2)} at cell ${worstC}\n`,
+);
+const rho = (): number => {
+  let m = 0;
+  for (let c = 0; c < mesh.nCells; c++) m = Math.max(m, Math.abs(s.U[6 * c] ?? NaN));
+  return m;
+};
+const first = rho();
+const trace: string[] = [];
+for (let done = EVERY; done <= N; done += EVERY) {
+  s.iterate(EVERY);
+  const m = rho();
+  trace.push(`${done}: ${Number.isFinite(m) ? (m / first).toFixed(3) : 'NaN'}`);
+  if (!Number.isFinite(m)) break;
+}
+process.stdout.write(
+  `ROOT ${ROOT.split(/[\\/]/).at(-1)}: max |rho'| / first: ${trace.join(', ')}\n`,
+);
