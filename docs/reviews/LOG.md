@@ -2860,3 +2860,9 @@ I reviewed `4553ce2..0c87da8` (rounds 6-8) against main c661d5c on 2026-10-28. N
 - **D4-63 (question ii), HIGH before W3: slow growth from rest on the engine mesh.** A 0.1% pressure wave on the real mesh grows 13.6× by 2000 iterations, and the oracle shows the same through 300. That is the scheme, not the kernel. In the app the field must not grow from rest.
   - The next reference round finds the growing mode on the real mesh: its location (axis, block interfaces, lips), the sharp limiter (the W2R-6 family), and the preconditioning.
   - Fix it under a pre-stated rule.
+
+## Critic pass 10: w2/solver-int @f07f57e
+
+**IN PROGRESS (partial commit).** Reviewed as one merge unit against main 8790669 (merge base c661d5c): w2/solver-perf @5e23c56 (unreviewed), w2/reference rounds 6-8 @0c87da8 (pass 9), and the int round f875e7a..f07f57e. The builder worktree's tracked files are unchanged.
+
+**Gates so far, at f07f57e, one suite at a time in the builder worktree:** typecheck clean (15 s); lint clean (53 s); `npm run coverage` 98 files, 1901 passed + 11 expected fail (757 s), lines 99.59 %, statements 98.70 %, functions 99.64 %, branches 87.68 % (src/flow/reference 100, thermo 100, cycle 99.58, geometry 99.59, flow/gpu 99.74); `test:mesh` 29 passed; `test:gpu` 11 files, 60 passed, 0 expected fail (42 s). Remaining: test:gpu-ladder, test:browser, test:ladder, probes.
