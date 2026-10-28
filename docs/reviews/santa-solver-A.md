@@ -17,9 +17,37 @@ Independent reviewer A of the two-reviewer merge rule for the GPU flow solver (D
   - `santa-solver-A-cost.probe.ts.txt`: a static traffic count from the layout;
   - `santa-solver-A-mutants.sh.txt` and `santa-solver-A-mutants2.sh.txt`: WGSL mutants. They run in a `git archive` export, never in the builder's worktree. That worktree's tracked files are unchanged (`git status` is clean).
 
-## Verdict: [[VERDICT]]
+## Verdict: APPROVE (0 Blocking, 10 Important, 9 Nits)
 
-[[SUMMARY]]
+**The kernel implements SOLVER.md term for term.**
+- I walked every entry of the term → WGSL map against §3-§11 and the oracle.
+- I re-derived the 14.2, 14.4 and 14.5 identities by hand.
+- I checked the bitwise (L, R, S) → (R, L, −S) argument for every L/R sum.
+- I found no wrong term, sign or order.
+
+**Every gate is green**, except one load timeout per coverage run in tests outside this branch's code.
+- My GPU ladder run reproduces the handoff's table row for row.
+- L7 matches the oracle's round-5 numbers digit for digit, which is end-to-end evidence for the u∞ ≠ 0 gauge forms.
+- There are zero WebGPU validation errors on Dawn and in Chrome.
+- The W1F-I1 contract edit is minimal and tested.
+- The scheduler implements D4-2.
+- The L4a/L5 KNOWN-FAILs are pinned as D4-47 says.
+
+**What keeps this from being a clean pass is test strength, not a defect found.** Four of my eight WGSL mutants survive `test:gpu`:
+- the resample's values (M2b, M2c), which the renderer will read: W2S-A-I1;
+- the free stream's add-back (M3), because every term-for-term oracle row runs at u∞ = 0: W2S-A-I2;
+- the low part of half the tracking TwoSum (M4): W2S-A-I5;
+- the M_ref clamp (M5): W2S-A-I2.
+
+**Other Important items:**
+- The Chrome path has no numerical check (W2S-A-I3).
+- The scheduler leaves the resample's 0.7 ms out of D4-2's budget and L13's ceiling (W2S-A-I4).
+- D4-38's window check is end-to-end (W2S-A-I6).
+- Items owed by decisions taken at or after this tip: D4-45, D4-48, D4-50, D4-44/D4-51 (W2S-A-I7, W2S-A-I8).
+- Performance: D4-2's 3 iterations per frame does not hold at 2.2-2.3 ms/it (W2S-A-I9).
+- The FlowSolver contract has no status channel for w2/app-ui (W2S-A-I10).
+
+**Recommendation:** merge. I1-I5 are small, test-and-one-line changes, and belong in the next solver round, before w2/flowviz reads the solver's textures or W3 runs a free stream. The orchestrator may prefer I1 and I4 before the merge. I9 needs an official D0-1 measurement and, if P1's 150 it/s is missed, the logged decision P1 asks for.
 
 ## Gates at 81e9508 (run in the builder's worktree)
 
@@ -28,11 +56,11 @@ Independent reviewer A of the two-reviewer merge rule for the GPU flow solver (D
 | `npm test` | **1844 passed + 9 expected fail** (96 files), 128 s |
 | `npm run lint` | clean (ESLint `--max-warnings 0` + Prettier) |
 | `npm run typecheck` | clean |
-| `npm run coverage` | [[COVERAGE]] |
+| `npm run coverage` | **thresholds met**, with lines 99.60 %, branches 87.67 %, statements 98.69 % and functions 99.64 %. `src/flow` lines are at 99.71 % (gate 90). Every `src/flow/gpu` file has 100 % lines; branches range from 67-100 %, mostly the `?? NaN` fallbacks. Each of the two runs hit one load timeout in a test outside this branch's code, because other agents' CPU tests ran in parallel: run 1 the reference's 5 s annulus test (W2R-N14), run 2 `surgeRecovery.test.ts` at 600 s. Both pass in the `npm test` run above. The numbers come from run 2 with `--coverage.reportOnFailure` |
 | `npm run test:mesh` | 29 passed (2 files) |
 | `npm run test:gpu` | **41 passed + 1 expected fail** (8 files). The 12.2 rows are identical to the handoff's: C 4.84e-7 / 1.90e-6 / 3.18e-6, C-pre 4.82e-7 / 3.21e-7 / 1.62e-6, C physical 2.34e-7 / 3.23e-7 / 1.58e-5, D 3.66e-8 / 4.56e-8, E-L5 6.19e-6 (residual over the residual 1.05e-3, over the flux scale 2.67e-8), E-L9a 5.10e-6, S 4.59e-7 / 3.97e-7 / 1.03e-6. Indicative Dawn time under load: 2.055 ms/it, resample 0.655 ms |
-| `npm run test:gpu-ladder` | [[LADDER]] |
-| `npm run test:browser` | [[BROWSER]] |
+| `npm run test:gpu-ladder` | **12 passed** (2 files). Every accuracy row passes, and the L4a/L5 D4-38 rows are pinned KNOWN-FAIL (see "The ladder rows") |
+| `npm run test:browser` | **22 passed** (6 files), on port 5190 with Playwright's own Chrome. `flowSolver.test.ts`: 0 WebGPU errors, status running. Indicative times, with GPU contention from a mutant run: 2.255 ms/it, resample 0.701 ms, and back to back 2.91 ms of wall time per iteration including the resample |
 
 ## Fidelity: the term → WGSL map against SOLVER.md and the oracle
 
@@ -143,7 +171,7 @@ The f32forms tests are f64 *transcriptions* of the WGSL. They prove the algebra,
   - The `sanitizeFlowStatus` contract edit is **minimal and validated**: `withFailureMessage`, plus the time-only branch. Unit tests cover both W1F-I1 cases and the combinations (lost + NaN residual, NaN time + NaN residual), and the healthy status is returned by identity.
   - The Dawn test fakes the loss through `reportGpuError('')` rather than a real `device.lost` (W2S-A-N6).
 - **Provenance (W1F-N1).** `snapshotSources` copies `field.source` ('solver') and `cycle.source`. It is tested.
-- **Validation errors:** zero in every Dawn file (`assertNone` after each test) and in the browser run [[BROWSER-ERRORS]].
+- **Validation errors:** zero in every Dawn file (`assertNone` after each test) and in the browser run (0 reports in 300 frames plus the back-to-back stretch).
 
 ## Scheduler (D4-2)
 
@@ -190,7 +218,34 @@ That is consistent with the handoff's own ablation: the §14 forms, the compensa
 
 ## The ladder rows
 
-[[LADDER-ROWS]]
+My run reproduces every row of the handoff's table, with the same numbers.
+- L1:
+  - quiescent: bitwise 0;
+  - uniform: 2.132e-5 m/s, plateau |20k/10k − 1| = 6.8e-5.
+- 12.2 row B: 1.954e-5 against the oracle's 1.49e-5.
+- L2: 0.277 % / 0.228 cells. L3: 0.211 %.
+- L4a: 0.278 % / 0.0996 %. L5: 0.0843 %.
+- L6: 0.0301 % / 4.9e-8 and 0.00289 % / 8.6e-8.
+- L7, digit for digit with the oracle's round 5:
+  - asymmetry 0.135 / 0.0437 / 0.0131;
+  - Cd 0.0569 / 0.00961 / 0.00159;
+  - 8675 / 8280 iterations, ratio 1.048.
+- L8: 0.360 %. L9a: 7.17e-6. L9b: 0.799 %.
+
+**Honest and pre-registered.**
+- Each threshold comes from `THRESHOLDS` (PHYSICS.md), unchanged.
+- The CPU ladder's set-ups and metrics are reused through the oracle shell, which evaluates the GPU's own state in f64.
+- The L1 uniform row is gated at the pre-registered 1e-4 (D4-37), not relaxed.
+- The plateau numbers 4e-5 and 1.7e-4 are D4-38's, written down before the round-2 runs (8883b02).
+
+**Pinned correctly (D4-38/D4-47).** L4a and L5 report the D4-38 row as "reported" and `expect(conv.converged).toBe(false)`. Each is a visible KNOWN-FAIL that fails loudly once the limiter fixes it.
+- L4a: the residual is 3.64e-4 at the end, and the detector sees a plateau at 3.99e-4 against the stated 4e-5. The metrics settle at 7.1e-5.
+- L5: the residual is 4.91e-3 at the end, plateau seen at 7.54e-3, against the stated 1.7e-4. The metrics settle at 5.5e-5.
+- The accuracy rows, which D4-47 keeps as the checks of record, pass.
+
+**Two weaknesses**, both in rows that are reported, not gated:
+- **The window check.** The "metric change" is an end-to-end difference (W2S-A-I6).
+- **The detected plateau certifies states that are not converging.** L9b's D4-38 rule "settles" at 0.77 of the peak residual, and L9a's at 3.0e-2. L8's metric still moves 17.6 % per 2000 iterations while its velocity row passes at 0.36 % (W2S-A-I7, D4-45).
 
 ## Findings
 
@@ -210,7 +265,7 @@ None.
   - T∞ + T′;
   - u∞ + u′.
 
-  Mutant M2b (u_θ = rw·r_c) [[M2b]], and M2c (the p and ρ gauge ratios swapped) [[M2c]]. M2, which drops the `/ r_c`, was killed only by a bind-group validation error: `geo` became unused, so the 'auto' layout dropped binding 2. It was not killed by a value check.
+  Mutant M2b (u_θ = rw·r_c) **survived**, and M2c (the p and ρ gauge ratios swapped) **survived**. M2, which drops the `/ r_c`, was killed only by a bind-group validation error: `geo` became unused, so the 'auto' layout dropped binding 2. It was not killed by a value check.
 - *Fix:* a Dawn test that sets a smooth non-ambient state, including swirl, fuel and u∞ ≠ 0, then resamples. It reads both textures and compares each texel with the host map applied to `readPrimitives()` in f64, to f16 rounding.
 
 **W2S-A-I2. The term-for-term oracle rows in `test:gpu` all run at u∞ = 0, so the u∞-dependent parts of 14.3-14.5 and the add-back are untested there.**
@@ -274,8 +329,8 @@ None.
 
 ### Nits
 
-- **W2S-A-N1. Stale comments and docs.**
-  - `ladder.test.ts:390` says "3.6e-4" and `:454` says "4.9e-3"; the handoff and the run give 3.99e-4 and 7.5e-3.
+- **W2S-A-N1. Stale or ambiguous comments and docs.**
+  - `ladder.test.ts:390` ("3.6e-4") and `:454` ("4.9e-3") quote the *final* residual, while the handoff quotes the *detected plateau* (3.99e-4, 7.5e-3). Say which one each is.
   - `params.ts:11-17` duplicates `DEFAULT_CFL_PRECONDITIONED`, which main's oracle now exports: import it after the merge.
   - `params.ts:118-123` and `flowSolver.ts:38-41` still say "not final (D4-30, D4-32)", although D4-35/D4-40 decided 0.8 and 0.003.
   - The branch's SOLVER.md 12.2 still calls case C "the real mesh". Main's text (W2R-I2) has the closed box, and the merge takes it.
@@ -303,9 +358,9 @@ None.
 |---|---|---|---|
 | M1 | SLAU2's χ pressure diffusion with the wrong sign (`flux.ts:121`) | oracle, functions | **killed** (7 tests fail): a wrong flux fails the Dawn rows |
 | M2 | resample u_θ = rw, `/ r_c` dropped | flow-solver | killed, but by a bind-group validation error (binding 2 unused), not by a value |
-| M2b | resample u_θ = rw · r_c | flow-solver | [[M2b]] |
-| M2c | the state texture's p and ρ gauge ratios swapped | flow-solver | [[M2c]] |
+| M2b | resample u_θ = rw · r_c | flow-solver | **survived** |
+| M2c | the state texture's p and ρ gauge ratios swapped | flow-solver | **survived** |
 | M3 | the free stream's add-back with the wrong sign (`kernels.ts:410`) | oracle, solver-exact | **survived**; ladder: [[M3-LADDER]] |
 | M4 | the tracking TwoSum drops the low part of components 0-3 (`kernels.ts:462`) | solver-exact | **survived** |
 | M5 | D4-20's M_ref without min(1, ·) (`flux.ts:117`) | oracle, functions | **survived** |
-| M6 | β² without the Δp term (`kernels.ts:439`) | oracle | [[M6]] |
+| M6 | β² without the Δp term (`kernels.ts:439`) | oracle | **killed** (2 tests fail: C-pre and S) |
