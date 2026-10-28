@@ -19,10 +19,16 @@ import {
 } from '../nozzle';
 import { chokedMassFlow, machFromArea } from '../theory';
 
+/** L4 (a)'s set-up: the nozzle at 0.05 p0 from the quasi-1D state (also the D4-58 floor run). */
+export function l4aSolver(storage: 'f64' | 'f32' = 'f64') {
+  const s = nozzleSolver(0.05 * P0, NI, NJ, storage);
+  s.setState((x, r) => quasi1d(x, r, (xx) => ({ p0: P0, aStar: 1, supersonic: xx > 0 })));
+  return s;
+}
+
 export function run() {
   const L4 = THRESHOLDS.L4.values;
-  const s = nozzleSolver(0.05 * P0);
-  s.setState((x, r) => quasi1d(x, r, (xx) => ({ p0: P0, aStar: 1, supersonic: xx > 0 })));
+  const s = l4aSolver();
   const conv = converge(s, 1e-5, 8000);
   let worst = 0;
   for (const col of columns(s)) {

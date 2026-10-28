@@ -59,7 +59,8 @@ export function run() {
     p: 0.95e5,
     z: 0,
   });
-  // D4-45: the cap scales as 1.5 / CFL (plain tracking at the default 1.5 keeps 20000)
+  // D4-45/D4-56: the cap scales as 1.5 / CFL only where the CFL changed (L8); L9 runs plain
+  // tracking at the default 1.5, so its cap stays 20000
   const cap = scaledCap(20000, s.trackingCfl);
   const conv = converge(s, 1e-6, cap, 'peak');
   const plane = (i: number) => {
@@ -81,7 +82,8 @@ export function run() {
     const euler = OMEGA * (down.rw - up.rw);
     return { up, down, dh0, err: Math.abs(dh0 - euler) / Math.abs(euler) };
   };
-  // D4-45: the row is read at the end of a 2000-iteration steadiness window
+  // D4-45: the row is read at the end of a 2000-iteration steadiness window. D4-57 keeps the rule
+  // as written (max - min <= tol / 10), not loosened after round 7 measured 1.06e-5 against 1e-5
   const steady = steadyWindow(s, () => measure().err);
   const { up, down, dh0, err } = measure();
   const tol = L9.maxEulerWorkRelativeError.value;
@@ -104,7 +106,8 @@ export function run() {
       },
       {
         id: 'L9',
-        metric: 'Euler-work case: iterations to converge to 1e-6 (cap 20000 x 1.5 / CFL, D4-45)',
+        metric:
+          'Euler-work case: iterations to converge to 1e-6 (cap 20000 at the plain CFL 1.5, D4-56)',
         threshold: `<= ${cap}`,
         value: conv.iterations,
         pass: conv.converged,

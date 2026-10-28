@@ -56,7 +56,8 @@ export function run() {
     sources: force,
   });
   s.setUniform({ rho: s.ref.rho, u, v: 0, w: 0, p: 1e5, z: 0 });
-  // D4-45: the cap scales as 1.5 / CFL (plain tracking at the default 1.5 keeps 20000)
+  // D4-45/D4-56: the cap scales as 1.5 / CFL only where the CFL changed (L8); L9 runs plain
+  // tracking at the default 1.5, so its cap stays 20000
   const cap = scaledCap(20000, s.trackingCfl);
   const conv = converge(s, 1e-5, cap, 'peak');
   const a = (-1 + Math.sqrt(1 + CT)) / 2;
@@ -95,7 +96,8 @@ export function run() {
       },
       {
         id: 'L9',
-        metric: 'actuator-disk case: iterations to converge to 1e-5 (cap 20000 x 1.5 / CFL, D4-45)',
+        metric:
+          'actuator-disk case: iterations to converge to 1e-5 (cap 20000 at the plain CFL 1.5, D4-56)',
         threshold: `<= ${cap}`,
         value: conv.iterations,
         pass: conv.converged,
