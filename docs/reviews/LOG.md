@@ -2894,7 +2894,12 @@ The builder worktree's tracked files are unchanged. I ran the probes in my own w
   - B: 1.95e-5 against the oracle's 1.49e-5; residual over r_flux 1.27e-11, r_flux/r_ref 1.15e10.
   - L4a/L5 stay KNOWN-FAIL at 3.64e-4 / 4.91e-3, and their companions pass.
 - `test:browser`: 9 files, 25 passed (212 s, port 5190, strictPort). Nothing is left listening.
-- `test:ladder` (CPU): RUNNING at this commit (pending, see the next commit).
+- `test:ladder` (CPU, last, run alone): 14 files, **11 passed, 3 failed** (922 s), the same as pass 9 and the handoff.
+  - L8, L9a and L9b fail on their convergence rows (all at their caps), and L9a also on D4-57: value 8.86e-6, spread 1.062e-5.
+  - L7: 0.0131, Cd 0.00159, ratio 1.048. Its iteration counts 2053 / 3901 / 8675 are the GPU's exactly.
+  - L8: 0.449 %, spread 1.96e-5. L9b: 0.80 %, spread 2.49e-5.
+  - floor.test.ts: 1.590e-4 / 1.096e-3, f64 6.4e-13 / 5.9e-12.
+  - Every 12.2 storage row passes, among them C-pre 1.43e-7 / 1.80e-7 / 2.26e-6 and S 7.3e-8 / 1.6e-7 / 4.7e-7.
 
 **The solver-perf kernel (5e23c56, D4-54): correct, and bitwise main's.**
 - *Reading:* the stage kernel loads its tile plus a 2-cell halo. Each entry is `haloPrim(e)`: consToPrim of the stage's U for a cell, or the ghost pass's own `ghostPrim` (now `BOUNDARY_FNS`) on its source cells for a ghost. That covers a slip wall's second source and the per-mode BC uniforms (P is the stage's).
