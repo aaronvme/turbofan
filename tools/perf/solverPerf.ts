@@ -24,6 +24,8 @@ export interface KernelLike {
 /** The parts of GpuFlowSolver the frame A/B uses. */
 export interface FlowLike {
   readonly kernel: KernelLike | null;
+  /** The latest resolved GPU time of the frame's resample pass, ms. */
+  readonly resampleGpuMs: number | null;
   step(budget: { gpuTimeBudgetMs: number; maxIterations: number }): {
     readonly iterationsThisStep: number;
   };
@@ -347,13 +349,14 @@ export async function pairedAb(
       kernel.setConserved(U);
       for (let w = 0; w < o.warmup; w++) side.flow.step(budget(o.perFrame));
       await device.queue.onSubmittedWorkDone();
-      const itMs = await bracket(device, marker, q, () => {
-        const enc = device.createCommandEncoder();
-        const pass = enc.beginComputePass();
-        kernel.encodeIterations(pass, o.iterations);
-        pass.end();
-        device.queue.submit([enc.finish()]);
-      });
+      // the iterations' own pass timestamps (GPU time, as the FlowSolver's scheduler sees it)
+      q.reset();
+      const enc = device.createCommandEncoder();
+      const pass = enc.beginComputePass({ timestampWrites: q.next() });
+      kernel.encodeIterations(pass, o.iterations);
+      pass.end();
+      device.queue.submit([enc.finish()]);
+      const itMs = (await q.read())[0] ?? NaN;
       out.it.push(itMs / o.iterations);
       kernel.setConserved(U);
       let its = 0;
@@ -363,11 +366,15 @@ export async function pairedAb(
       });
       // a frame the scheduler cut short (its 7 ms ceiling on a noisy average) is not comparable
       out.frame.push(its === o.frames * o.perFrame ? frameMs / o.frames : NaN);
-      const rsMs = await bracket(device, marker, q, () => {
-        for (let f = 0; f < o.frames; f++) side.flow.step(budget(0));
-      });
-      out.resample.push(rsMs / o.frames);
-      await device.queue.onSubmittedWorkDone();
+      // the resample pass's own timestamps (the FlowSolver's ring), a frame at a time
+      const rs: number[] = [];
+      for (let f = 0; f < 6; f++) {
+        side.flow.step(budget(0));
+        await device.queue.onSubmittedWorkDone();
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        rs.push(side.flow.resampleGpuMs ?? NaN);
+      }
+      out.resample.push(median(rs));
     }
   }
   q.destroy();
@@ -432,12 +439,20 @@ export async function compareSides(
     const k = f.kernel;
     if (k === null) throw new Error('no kernel');
     k.setConserved(U);
-    for (let s = 0; s < frames; s++) f.step({ gpuTimeBudgetMs: 1000, maxIterations: perFrame });
+    // the iterations straight on the kernel (the scheduler may cut a frame short, which would make
+    // the two runs different computations), then a frame of 0 iterations for the resample
+    for (let s = 0; s < frames; s++) {
+      const enc = device.createCommandEncoder();
+      const pass = enc.beginComputePass();
+      k.encodeIterations(pass, perFrame);
+      pass.end();
+      device.queue.submit([enc.finish()]);
+    }
+    f.step({ gpuTimeBudgetMs: 1000, maxIterations: 0 });
     await device.queue.onSubmittedWorkDone();
     const fl = f.fields();
     return {
       state: await k.readState(),
-      conserved: new Float32Array(Float64Array.from(await k.readConserved())),
       conservedF64: await k.readConserved(),
       nearState: await readTexture(device, fl.near.state),
       nearVelocity: await readTexture(device, fl.near.velocity),

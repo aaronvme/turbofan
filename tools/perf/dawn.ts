@@ -4,10 +4,10 @@
 //     the GPU time of every dispatch of one tracking iteration at 130k (each in its own pass), the
 //     sum, the same iteration in one pass, and the static bytes per dispatch
 //   node --import ./tools/mesh/ts-resolve.mjs tools/perf/dawn.ts ab --refs c661d5c,WORKTREE [--reps 12]
-//     paired, interleaved A/B of two builds on one device (ms/it, ms per frame of 2 iterations +
-//     the resample, the resample frame alone), then the bitwise comparison of their results.
-//     A ref is a commit (its src/ is exported with `git archive` under test-results/perf-ab/) or
-//     WORKTREE (this checkout's files).
+//     paired, interleaved A/B (or A/B/C...) of builds on one device (ms/it, ms per frame of 2
+//     iterations + the resample, the resample frame alone), then the bitwise comparison of each
+//     side's results with the first's. A side is REF or REF@TXxTY (a tile): REF is a commit (its
+//     src/ is exported with `git archive` under test-results/perf-ab/) or WORKTREE (this checkout).
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -66,19 +66,24 @@ if (entry === undefined) throw new Error('no 130k mesh');
 const { asset, file } = await loadMeshAsset(readFileSync(`public/mesh/${entry.file}`), entry);
 const mesh = solverMeshFromFile(file);
 
-async function flowFrom(root: string): Promise<FlowLike> {
-  const url = pathToFileURL(join(root, 'src', 'flow', 'gpu', 'device', 'flowSolver.ts')).href;
+/** A side REF[@TXxTY]: the ref's GpuFlowSolver at that tile (default: the ref's default tile). */
+async function flowFrom(side: string): Promise<FlowLike> {
+  const [ref = 'WORKTREE', tileSpec] = side.split('@');
+  const url = pathToFileURL(
+    join(sourceRoot(ref), 'src', 'flow', 'gpu', 'device', 'flowSolver.ts'),
+  ).href;
   const mod = (await import(url)) as {
-    GpuFlowSolver: new () => FlowLike & { init(p: unknown): Promise<void> };
+    GpuFlowSolver: new (o: object) => FlowLike & { init(p: unknown): Promise<void> };
   };
-  const f = new mod.GpuFlowSolver();
+  const [x, y] = (tileSpec ?? '').split('x').map(Number);
+  const f = new mod.GpuFlowSolver(tileSpec === undefined ? {} : { tile: { x, y } });
   await f.init({ device: sim.device, mesh: asset, definition: ENGINE_DEFINITION });
   return f;
 }
 
 try {
   if (mode === 'profile') {
-    const flow = await flowFrom(sourceRoot(arg('--ref', 'WORKTREE')));
+    const flow = await flowFrom(arg('--ref', 'WORKTREE'));
     const kernel = flow.kernel;
     if (kernel === null) throw new Error('no kernel');
     const U = perfState(mesh, kernel.ref);
@@ -89,23 +94,33 @@ try {
     flow.dispose();
   } else if (mode === 'ab') {
     const refs = arg('--refs', 'c661d5c,WORKTREE').split(',');
-    if (refs.length !== 2) throw new Error('--refs takes two refs: a,b');
+    if (refs.length < 2) throw new Error('--refs takes two or more sides: a,b[,c...]');
     const sides = [];
-    for (const ref of refs) sides.push({ label: ref, flow: await flowFrom(sourceRoot(ref)) });
+    for (const ref of refs) sides.push({ label: ref, flow: await flowFrom(ref) });
     const k0 = sides[0]?.flow.kernel;
     if (k0 === null || k0 === undefined) throw new Error('no kernel');
     const U = perfState(mesh, k0.ref);
     const reps = Number(arg('--reps', '12'));
     const r = await pairedAb(sim.device, sides, U, {
       reps,
-      iterations: 30,
+      iterations: 60,
       frames: 20,
       perFrame: 2,
       warmup: 10,
     });
-    const [a, b] = sides;
-    if (a === undefined || b === undefined) throw new Error('two sides');
-    const same = await compareSides(sim.device, a.flow, b.flow, U, 25, 2);
+    const [a, ...rest] = sides;
+    if (a === undefined) throw new Error('no sides');
+    const bitwise: Record<string, Record<string, number>> = {};
+    for (const b of rest) {
+      bitwise[`${a.label} vs ${b.label}`] = await compareSides(
+        sim.device,
+        a.flow,
+        b.flow,
+        U,
+        25,
+        2,
+      );
+    }
     out(
       JSON.stringify(
         {
@@ -118,7 +133,7 @@ try {
             msPerResampleFrame: +x.msPerResampleFrame.toFixed(4),
             it: x.samples.it.map((v) => +v.toFixed(4)),
           })),
-          bitwise: same,
+          bitwise,
         },
         null,
         2,

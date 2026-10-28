@@ -10,8 +10,10 @@ import { playwright } from '@vitest/browser-playwright';
 //   PERF_MODE=ab PERF_REFS=c661d5c,WORKTREE npx vitest run -c vitest.perf.config.ts --browser.api.port=5189
 // A ref other than WORKTREE has its src/ exported once under test-results/perf-ab/<sha7> (git
 // archive), which the page imports.
-const refs = (process.env.PERF_REFS ?? 'c661d5c,WORKTREE').split(',').map((ref) => {
-  if (ref === 'WORKTREE') return { ref, path: '' };
+const refs = (process.env.PERF_REFS ?? 'c661d5c,WORKTREE').split(',').map((side) => {
+  // a side is REF or REF@TXxTY (a tile)
+  const ref = side.split('@')[0] ?? 'WORKTREE';
+  if (ref === 'WORKTREE') return { ref: side, path: '' };
   const sha = execFileSync('git', ['rev-parse', '--short=7', ref], { encoding: 'utf8' }).trim();
   const dir = resolve('test-results', 'perf-ab', sha);
   if (!existsSync(join(dir, 'src'))) {
@@ -20,7 +22,7 @@ const refs = (process.env.PERF_REFS ?? 'c661d5c,WORKTREE').split(',').map((ref) 
     // relative to cwd: GNU tar reads "C:..." as a remote host
     execFileSync('tar', ['-xf', 'src.tar'], { cwd: dir });
   }
-  return { ref, path: `/test-results/perf-ab/${sha}` };
+  return { ref: side, path: `/test-results/perf-ab/${sha}` };
 });
 
 export default defineConfig({

@@ -35,24 +35,25 @@ it(`solver perf (${__PERF_MODE__})`, async ({ annotate }) => {
   const bytes = await (await fetch(`/mesh/${entry.file}`)).arrayBuffer();
   const { asset, file } = await loadMeshAsset(bytes, entry);
   const mesh = solverMeshFromFile(file);
-  const flowFrom = async (path: string): Promise<FlowLike> => {
-    let Ctor: new () => FlowLike & { init(p: unknown): Promise<void> } = GpuFlowSolver;
-    if (path !== '') {
+  // a side REF[@TXxTY]: the ref's GpuFlowSolver (exported under test-results/perf-ab) at that tile
+  const flowFrom = async (side: { ref: string; path: string }): Promise<FlowLike> => {
+    let Ctor: new (o: object) => FlowLike & { init(p: unknown): Promise<void> } = GpuFlowSolver;
+    if (side.path !== '') {
       const mod = (await import(
-        /* @vite-ignore */ `${path}/src/flow/gpu/device/flowSolver.ts`
-      )) as {
-        GpuFlowSolver: typeof Ctor;
-      };
+        /* @vite-ignore */ `${side.path}/src/flow/gpu/device/flowSolver.ts`
+      )) as { GpuFlowSolver: typeof Ctor };
       Ctor = mod.GpuFlowSolver;
     }
-    const f = new Ctor();
+    const tileSpec = side.ref.split('@')[1];
+    const [x, y] = (tileSpec ?? '').split('x').map(Number);
+    const f = new Ctor(tileSpec === undefined ? {} : { tile: { x, y } });
     await f.init({ device: sim.device, mesh: asset, definition: ENGINE_DEFINITION });
     return f;
   };
   let result: unknown;
   try {
     if (__PERF_MODE__ === 'profile') {
-      const flow = await flowFrom(__PERF_REFS__.at(-1)?.path ?? '');
+      const flow = await flowFrom(__PERF_REFS__.at(-1) ?? { ref: 'WORKTREE', path: '' });
       const kernel = flow.kernel;
       if (kernel === null) throw new Error('no kernel');
       const p = await profileIteration(
@@ -65,20 +66,29 @@ it(`solver perf (${__PERF_MODE__})`, async ({ annotate }) => {
       flow.dispose();
     } else {
       const sides = [];
-      for (const r of __PERF_REFS__) sides.push({ label: r.ref, flow: await flowFrom(r.path) });
-      const [a, b] = sides;
+      for (const r of __PERF_REFS__) sides.push({ label: r.ref, flow: await flowFrom(r) });
+      const [a, ...rest] = sides;
       const k0 = a?.flow.kernel;
-      if (a === undefined || b === undefined || k0 === null || k0 === undefined) {
-        throw new Error('two sides');
-      }
+      if (a === undefined || k0 === null || k0 === undefined) throw new Error('no sides');
       const U = perfState(mesh, k0.ref);
       const r = await pairedAb(sim.device, sides, U, {
         reps: __PERF_REPS__,
-        iterations: 30,
+        iterations: 60,
         frames: 20,
         perFrame: 2,
         warmup: 10,
       });
+      const bitwise: Record<string, Record<string, number>> = {};
+      for (const b of rest) {
+        bitwise[`${a.label} vs ${b.label}`] = await compareSides(
+          sim.device,
+          a.flow,
+          b.flow,
+          U,
+          25,
+          2,
+        );
+      }
       result = {
         backend: 'chrome',
         results: r.map((x) => ({
@@ -88,7 +98,7 @@ it(`solver perf (${__PERF_MODE__})`, async ({ annotate }) => {
           msPerResampleFrame: +x.msPerResampleFrame.toFixed(4),
           it: x.samples.it.map((v) => +v.toFixed(4)),
         })),
-        bitwise: await compareSides(sim.device, a.flow, b.flow, U, 25, 2),
+        bitwise,
       };
       for (const s of sides) s.flow.dispose();
     }
