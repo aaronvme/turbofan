@@ -1,9 +1,12 @@
-// WGSL of the ghost fill (docs/SOLVER.md section 5; the oracle's src/flow/reference/boundary.ts):
-// one thread per ghost, from the primitive records of its source cell(s), written after the cells
-// in the same buffer (extended index nCells + g). An interface ghost is a bitwise copy of the
-// neighbour block's cell, so both sides of an interface reconstruct from the same bits.
+// WGSL of the ghost fill (docs/SOLVER.md section 5; the oracle's src/flow/reference/boundary.ts).
+// BOUNDARY_FNS: a ghost's primitives from its source cell(s) and its BC (ghostPrim). The stage
+// kernel calls it in its halo load on primitives it computes from U itself (D4-54: no prim or
+// ghost pass per stage); BOUNDARY_WGSL adds the ghost pass, one thread per ghost from the primitive
+// records of the prim pass, written after the cells (extended index nCells + g), which the read-back
+// of the primitives (readPrimitives) still uses. An interface ghost is the neighbour block's cell,
+// computed by the same code from the same bits, so both sides of an interface reconstruct alike.
 
-export const BOUNDARY_WGSL = /* wgsl */ `
+export const BOUNDARY_FNS = /* wgsl */ `
 fn farField(s: Prim, n: vec2f) -> Prim {
   let rhoC = P.rhoInf * P.cInf;
   let du = s.a.y;
@@ -96,23 +99,34 @@ fn wallGhost(q0: Prim, q1: Prim, n: vec2f, layer: u32) -> Prim {
     vec4f(a * q0.b.x - b * q1.b.x, a * q0.b.y - b * q1.b.y, q0.b.z, q0.b.w));
 }
 
-@compute @workgroup_size(64)
-fn ghostMain(@builtin(global_invocation_id) gid: vec3u) {
-  let g = gid.x;
-  if (g >= P.nGhosts) { return; }
-  let r0 = topoAt(GHOSTS + 2u * g);
-  let r1 = topoAt(GHOSTS + 2u * g + 1u);
+// the ghost of record (r0, r1) (layout.ts GHOSTS: sources, BC code, layer; the normal's bits) from
+// its source cell's primitives s and, for a slip wall, the next cell inwards s1
+fn ghostPrim(r0: vec4u, r1: vec4u, s: Prim, s1: Prim) -> Prim {
   let n = vec2f(bitcast<f32>(r1.x), bitcast<f32>(r1.y));
-  let s = Prim(prim[2u * r0.x], prim[2u * r0.x + 1u]);
   var o = s;
   switch r0.z {
-    case 1u: { o = wallGhost(s, Prim(prim[2u * r0.y], prim[2u * r0.y + 1u]), n, r0.w); }
+    case 1u: { o = wallGhost(s, s1, n, r0.w); }
     case 2u: { o.a.z = -s.a.z; }
     case 3u: { o = farField(s, n); }
     case 4u: { o = inflow(s, n); }
     case 5u: { if ((P.uInf + s.a.y) * n.x + s.a.z * n.y < s.b.w) { o.b.x = P.pOutGauge; } }
     default: {}
   }
+  return o;
+}
+`;
+
+export const BOUNDARY_WGSL = /* wgsl */ `${BOUNDARY_FNS}
+@compute @workgroup_size(64)
+fn ghostMain(@builtin(global_invocation_id) gid: vec3u) {
+  let g = gid.x;
+  if (g >= P.nGhosts) { return; }
+  let r0 = topoAt(GHOSTS + 2u * g);
+  let r1 = topoAt(GHOSTS + 2u * g + 1u);
+  let s = Prim(prim[2u * r0.x], prim[2u * r0.x + 1u]);
+  var s1 = s;
+  if (r0.z == 1u) { s1 = Prim(prim[2u * r0.y], prim[2u * r0.y + 1u]); }
+  let o = ghostPrim(r0, r1, s, s1);
   let e = P.nCells + g;
   prim[2u * e] = o.a;
   prim[2u * e + 1u] = o.b;

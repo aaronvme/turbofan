@@ -242,7 +242,8 @@ export class GpuFlowSolver implements FlowSolver {
       label: 'flow resample',
       ...(slot === null ? {} : { timestampWrites: slot.writes(1) }),
     });
-    solver.encodeCurrentPrimitives(rpass);
+    // the resample reads cells only: no ghost pass (D4-54)
+    solver.encodeCellPrimitives(rpass);
     rpass.setPipeline(rs.pipeline);
     rs.groups.forEach((g, k) => {
       const [w, h] = rs.sizes[k] ?? [0, 0];

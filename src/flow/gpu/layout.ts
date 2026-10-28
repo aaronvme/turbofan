@@ -233,8 +233,9 @@ export function blockageData(
 }
 
 /**
- * D4-50: the stage kernel's storage buffers (U_in, U^n, U_out, prim, geo, topo, reduction, the
- * low parts; + the cell sources, + the test face dump) against the device's
+ * D4-50: the stage kernel's storage buffers (U_in, U^n, U_out, geo, topo, reduction, the low parts;
+ * + the cell sources, + the test face dump; since D4-54 it computes its primitives itself and no
+ * longer binds prim) against the device's
  * maxStorageBuffersPerShaderStage. A device short by one gets the packed form: the two read-only
  * static buffers (geo, topo) share one binding. Short by more: an error that says what to request.
  */
@@ -243,7 +244,7 @@ export function stageStorageBuffers(
   deviceLimit: number,
   forcePacked = false,
 ): { buffers: number; packed: boolean } {
-  const need = 8 + (o.sources ? 1 : 0) + (o.faceDump ? 1 : 0);
+  const need = 7 + (o.sources ? 1 : 0) + (o.faceDump ? 1 : 0);
   if (!forcePacked && need <= deviceLimit) return { buffers: need, packed: false };
   if (need - 1 <= deviceLimit) return { buffers: need - 1, packed: true };
   throw new Error(

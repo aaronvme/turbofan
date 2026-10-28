@@ -254,7 +254,6 @@ export class GpuSolver {
             buf(1, cin),
             buf(2, cbase),
             buf(3, cout),
-            buf(4, this.prim),
             buf(5, this.geo),
             ...(this.packed ? [] : [buf(6, this.topo)]),
             buf(7, this.red),
@@ -292,7 +291,7 @@ export class GpuSolver {
       nGhosts: layout.nGhosts,
       nWorkgroups: layout.workgroups,
     });
-    // D4-50: 9 storage buffers with sources; a device with 8 gets geo and topo in one
+    // D4-50: 8 storage buffers with sources; a device with 7 gets geo and topo in one
     const plan = stageStorageBuffers(
       { sources: opts.cellSource === true, faceDump: opts.faceDump === true },
       device.limits.maxStorageBuffersPerShaderStage,
@@ -472,14 +471,20 @@ export class GpuSolver {
     pass.dispatchWorkgroups(Math.ceil(count / 64));
   }
 
-  /** prim + ghost passes for the copy `copy` in `mode` (0 tracking BCs, 1 physical BCs). */
-  private encodePrimGhost(pass: GPUComputePassEncoder, copy: number, mode: SolverModeIndex): void {
+  /** The prim pass of the copy `copy`: the primitive records of the cells. */
+  private encodePrim(pass: GPUComputePassEncoder, copy: number): void {
     const g = this.primGroups[copy];
-    const gg = this.ghostGroups[mode];
-    if (g === undefined || gg === undefined) throw new Error('bad copy or mode');
+    if (g === undefined) throw new Error('bad copy');
     pass.setPipeline(this.pipes.prim);
     pass.setBindGroup(0, g);
     this.dispatchCells(pass, this.layout.nCells);
+  }
+
+  /** prim + ghost passes for the copy `copy` in `mode` (0 tracking BCs, 1 physical BCs). */
+  private encodePrimGhost(pass: GPUComputePassEncoder, copy: number, mode: SolverModeIndex): void {
+    const gg = this.ghostGroups[mode];
+    if (gg === undefined) throw new Error('bad mode');
+    this.encodePrim(pass, copy);
     if (this.layout.nGhosts > 0) {
       pass.setPipeline(this.pipes.ghost);
       pass.setBindGroup(0, gg);
@@ -487,13 +492,15 @@ export class GpuSolver {
     }
   }
 
+  // One dispatch per stage: the stage kernel computes its halo's primitives and ghosts itself
+  // (D4-54). Only a source model reads the prim pass (its cells).
   private encodeStep(pass: GPUComputePassEncoder, mode: SolverModeIndex): void {
     const roles = this.parity === 0 ? [0, 1, 2] : [1, 0, 2];
     const inputs = [roles[0], roles[1], roles[2]];
     for (let k = 0; k < 3; k++) {
       const copy = inputs[k] ?? 0;
-      this.encodePrimGhost(pass, copy, mode);
       if (this.sourcePipe !== null) {
+        this.encodePrim(pass, copy);
         const sg = this.sourceGroups[copy];
         if (sg === undefined) throw new Error('bad source group');
         pass.setPipeline(this.sourcePipe);
@@ -517,7 +524,8 @@ export class GpuSolver {
 
   /** The physical-time global dt (section 10) of U^n into the dt scalar, on the GPU. */
   encodeGlobalDt(pass: GPUComputePassEncoder): void {
-    this.encodePrimGhost(pass, this.parity, 1);
+    // lambda reads the cells' primitives only (and the ghosts' b, from geo)
+    this.encodePrim(pass, this.parity);
     pass.setPipeline(this.pipes.lambda);
     pass.setBindGroup(0, this.lambdaGroup);
     pass.dispatchWorkgroups(this.layout.workgroups);
@@ -540,9 +548,14 @@ export class GpuSolver {
     }
   }
 
-  /** Records the prim + ghost passes of U^n (for the resample or a readback). */
+  /** Records the prim + ghost passes of U^n (for a readback). */
   encodeCurrentPrimitives(pass: GPUComputePassEncoder, mode: SolverModeIndex = 0): void {
     this.encodePrimGhost(pass, this.parity, mode);
+  }
+
+  /** Records the prim pass of U^n: the cells' primitive records (the render resample reads them). */
+  encodeCellPrimitives(pass: GPUComputePassEncoder): void {
+    this.encodePrim(pass, this.parity);
   }
 
   private submit(record: (pass: GPUComputePassEncoder) => void): void {
