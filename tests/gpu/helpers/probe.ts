@@ -1,5 +1,5 @@
-// Runs one probe entry point of src/flow/gpu/wgsl/kernels.ts probeKernelWgsl: 4 vec4 in and 4 vec4
-// out per record, with the uniform block of a solver's first tracking stage.
+// Runs one probe entry point of src/flow/gpu/wgsl/kernels.ts probeKernelWgsl: `PROBE_STRIDE` vec4 in
+// and as many out per record, with the uniform block of a solver's first tracking stage.
 import { buildLayout } from '../../../src/flow/gpu/layout';
 import {
   PARAMS_BYTES,
@@ -8,14 +8,14 @@ import {
   type GpuSchemeOptions,
 } from '../../../src/flow/gpu/params';
 import { compileWgsl } from '../../../src/flow/gpu/device/gpuSolver';
-import { probeKernelWgsl } from '../../../src/flow/gpu/wgsl/kernels';
+import { PROBE_STRIDE, probeKernelWgsl, type ProbeEntry } from '../../../src/flow/gpu/wgsl/kernels';
 import type { SolverMesh } from '../../../src/flow/reference/solverMesh';
 
 export async function runProbe(
   device: GPUDevice,
   mesh: SolverMesh,
   opts: GpuSchemeOptions,
-  entryPoint: 'probeFlux' | 'probeGas' | 'probeSlope',
+  entryPoint: ProbeEntry,
   input: Float32Array,
   overrides: Partial<Record<'machCut', number>> = {},
 ): Promise<Float32Array> {
@@ -64,7 +64,10 @@ export async function runProbe(
       ],
     }),
   );
-  pass.dispatchWorkgroups(Math.ceil(input.length / 16 / 64));
+  const stride = 4 * PROBE_STRIDE[entryPoint];
+  if (input.length % stride !== 0)
+    throw new Error(`${entryPoint} takes ${stride} floats per record`);
+  pass.dispatchWorkgroups(Math.ceil(input.length / stride / 64));
   pass.end();
   encoder.copyBufferToBuffer(out, 0, staging, 0, input.byteLength);
   device.queue.submit([encoder.finish()]);
