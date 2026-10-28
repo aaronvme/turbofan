@@ -41,6 +41,11 @@ export interface GpuFlowSolverOptions {
    */
   readonly lowMachPreconditioning?: { readonly minMach: number; readonly machCut?: number } | null;
   readonly cfl?: number;
+  /**
+   * The free stream's axial velocity, m/s (default 0: SLS). Flight conditions are W3's; this lets
+   * the resample's u = u_inf + u' be tested at u_inf != 0 (W2S-A-I1).
+   */
+  readonly freeStreamVelocity?: number;
 }
 
 const READBACK_SLOTS = 3;
@@ -91,7 +96,8 @@ export class GpuFlowSolver implements FlowSolver {
   private async build({ device, mesh }: FlowSolverInit): Promise<void> {
     this.device = device;
     void device.lost.then((info) => {
-      if (!this.disposed) this.lost = { message: info.message };
+      // an earlier, more informative failure (a failed readback) is kept (W2S-B-N3)
+      if (!this.disposed) this.lost ??= { message: info.message };
     });
     for (const e of Object.values(FIELD_EXTENTS)) {
       const problems = fieldExtentDomainProblems(e, mesh.domain);
@@ -105,7 +111,11 @@ export class GpuFlowSolver implements FlowSolver {
         : this.opts.lowMachPreconditioning;
     const solver = await GpuSolver.create(device, solverMesh, {
       gas: this.opts.gas ?? THERMALLY_PERFECT,
-      freeStream: { pressure: ISA_SLS.pressurePa, temperature: ISA_SLS.temperatureK, velocity: 0 },
+      freeStream: {
+        pressure: ISA_SLS.pressurePa,
+        temperature: ISA_SLS.temperatureK,
+        velocity: this.opts.freeStreamVelocity ?? 0,
+      },
       ...(pre === null ? {} : { lowMachPreconditioning: pre }),
       ...(this.opts.cfl === undefined ? {} : { cfl: this.opts.cfl }),
       ...(this.opts.tile === undefined ? {} : { tile: this.opts.tile }),
@@ -339,7 +349,9 @@ export class GpuFlowSolver implements FlowSolver {
   }
 
   fields(): FlowField {
-    if (this.field === null) throw new Error('fields() before init()');
+    if (this.field === null) {
+      throw new Error(this.disposed ? 'fields() after dispose()' : 'fields() before init()');
+    }
     return this.field;
   }
 
