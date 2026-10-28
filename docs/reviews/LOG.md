@@ -2721,3 +2721,13 @@ None.
   - Indicative Chrome cost is 2.09-2.4 ms/it, about 2 iterations per frame at D4-2's 5 ms, roughly 120 it/s against P1's 150. The cause is memory and dispatch: about 161 MB per iteration over 9 dispatches.
   - After the fix round's merge, a performance round targets ≤ 1.6 ms/it, from the reviewers' list: merge the ghost pass into the prim pass, reuse the resample's prim pass, and slim the halo record.
   - It is then measured officially under D0-1 inside the app's 1080p scene. P1 is judged on that number. A miss there needs a logged decision under P1's own rule: about 80k cells, or a half-rate solver.
+- **D4-55 (w2/reference round 7 @9a0f31a, question 1): the sharp van Albada limiter stays the contract,** and W2R-6 stays pinned. That is D4-36's pre-stated rule at work: (a) and (b) both fail L8's velocity row (28.3% and 32.7%, against the sharp limiter's 0.37%).
+- **D4-56 (question 2): the L9a/L9b caps stay at 20000.** They run plain tracking at CFL 1.5, so there was no CFL change, and D4-45's 1.5/0.8 scaling applies only where the CFL changed (L8). D4-45's wording is corrected.
+- **D4-57 (question 3): L9a's steadiness rule is kept as written,** so L9a's value row stays FAIL on steadiness. The spread is 1.06e-5 against the 1e-5 rule, although every sample is about 9× inside its tolerance. The rule is not loosened after seeing the data. The row is visible, it does not block, and it is revisited with the convergence work.
+- **D4-58 (question 4): D4-47 is corrected.** The L4a/L5 GPU plateau is f32, not the limiter: in f64 the sharp oracle converges both cases to 1e-12, while with f32 storage it plateaus at 1.6e-4 and 1.1e-3.
+  - The D4-38 floors are restated from those f32-storage runs: 1.6e-4 and 1.1e-3.
+  - The GPU's 3.99e-4 and 7.5e-3 are still above them. That gap is f32 arithmetic beyond storage, so the GPU convergence rows stay KNOWN-FAIL with the measured gap. The accuracy rows remain the checks of record.
+- **D4-59 (question 5): J's stall, with a global cutoff tried next.**
+  - Round 7's results: the pressure-difference cutoff (K up to 100) and local velocity cutoffs do not converge J; only a global M_cut ≥ 0.02 does. A global cutoff tied to the domain's peak velocity is standard practice, and for this engine (inlet Mach about 0.5) 0.02 is about 4% of it.
+  - **The pre-stated rule:** adopt M_cut = 0.02 only if every row passing now still passes (L1-L7, including L7's iteration ratio of at most 3×, L8 velocity, L9 values, §12.2) and J and R converge. Otherwise keep 0.003, with J pinned.
+  - The kernel's adapter default (D4-40) follows the outcome.
