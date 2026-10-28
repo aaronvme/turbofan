@@ -252,10 +252,12 @@ export class GpuFlowSolver implements FlowSolver {
       void slot
         .read()
         .then(([solverMs, resampleMs]) => {
-          this.gpuTimeMs = solverMs !== undefined && Number.isFinite(solverMs) ? solverMs : null;
-          this.resampleMs =
-            resampleMs !== undefined && Number.isFinite(resampleMs) ? resampleMs : null;
-          if (this.gpuTimeMs !== null) this.scheduler.observe(n, this.gpuTimeMs);
+          const sOk = solverMs !== undefined && Number.isFinite(solverMs);
+          const rOk = resampleMs !== undefined && Number.isFinite(resampleMs);
+          this.resampleMs = rOk ? resampleMs : null;
+          // the frame's GPU time, the resample included (W2S-B-I3: the app's 15 ms split sees it)
+          this.gpuTimeMs = sOk && rOk ? solverMs + resampleMs : null;
+          if (sOk) this.scheduler.observe(n, solverMs, rOk ? resampleMs : undefined);
         })
         .catch((e: unknown) => {
           this.readFailed(e);
@@ -310,6 +312,11 @@ export class GpuFlowSolver implements FlowSolver {
   /** The latest measured GPU time of the resample pass, ms (null before one resolves). */
   get resampleGpuMs(): number | null {
     return this.resampleMs;
+  }
+
+  /** The moving average of the resample's GPU time the scheduler plans with, ms. */
+  get resampleAverageMs(): number | null {
+    return this.scheduler.resampleMs;
   }
 
   /** The measured cost per iteration the scheduler uses, ms. */

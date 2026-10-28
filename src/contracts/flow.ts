@@ -118,7 +118,10 @@ export interface StepBudget {
 export interface FlowStepStats {
   readonly iterationsThisStep: number;
   readonly totalIterations: number;
-  /** Latest resolved timestamp-query GPU time, ms; null until one resolves or if unsupported. */
+  /**
+   * Latest resolved timestamp-query GPU time of a whole solver frame (the iterations and the
+   * render resample), ms; null until one resolves or if unsupported.
+   */
   readonly gpuTimeMs: number | null;
   /** L2 norm of the density residual from the latest readback; null before the first one. */
   readonly residualDensityL2: number | null;

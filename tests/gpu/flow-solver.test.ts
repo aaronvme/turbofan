@@ -67,9 +67,14 @@ describe('GpuFlowSolver (the FlowSolver contract)', () => {
     if (sim.hasTimestamps) {
       expect(solver.msPerIteration).not.toBeNull();
       const ms = solver.msPerIteration ?? NaN;
+      // the resample is counted in the budget and the ceiling (W2S-A-I4, W2S-B-I3)
+      const r = solver.resampleAverageMs ?? NaN;
+      expect(r).toBeGreaterThan(0);
       expect(s.iterationsThisStep).toBe(
-        Math.min(Math.max(2, Math.floor(5 / ms)), Math.max(1, Math.floor(7 / ms))),
+        Math.min(Math.max(2, Math.floor((5 - r) / ms)), Math.max(1, Math.floor((7 - r) / ms))),
       );
+      // the frame's GPU time is the iterations' and the resample's
+      expect(s.gpuTimeMs ?? NaN).toBeGreaterThan(solver.resampleGpuMs ?? NaN);
       process.stdout.write(
         `[timing] indicative Dawn ms/iteration at 130k: ${ms.toFixed(3)}; resample ${solver.resampleGpuMs?.toFixed(3)} ms\n`,
       );

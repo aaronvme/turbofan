@@ -1,7 +1,10 @@
 // How many solver iterations a frame gets (decision D4-2 (b), docs/reviews/LOG.md): the solver's
 // per-frame GPU budget is min(5 ms, 15 ms - measured render - measured flow visuals), with a floor
 // of 2 iterations per frame, and L13's 7 ms is the hard ceiling. The cost per iteration comes from
-// timestamp queries, which resolve a few frames late, so it is a moving average.
+// timestamp queries, which resolve a few frames late, so it is a moving average. The frame's own
+// resample pass (prim + ghost + the texture resample, ~0.64 ms on the Arc 140T) is part of the
+// solver's GPU time per frame: the iterations get the budget and the ceiling less its measured
+// average (W2S-A-I4, W2S-B-I3).
 import type { StepBudget } from '../../contracts/flow';
 import { THRESHOLDS } from '../../contracts/thresholds';
 
@@ -40,6 +43,7 @@ export interface SchedulerOptions {
 export class IterationScheduler {
   private readonly smoothing: number;
   private average: number | null = null;
+  private resample: number | null = null;
 
   constructor(opts: SchedulerOptions = {}) {
     const a = opts.smoothing ?? 0.2;
@@ -52,19 +56,31 @@ export class IterationScheduler {
     return this.average;
   }
 
-  /** A measured frame: `iterations` iterations took `gpuMs` of GPU time (bad samples ignored). */
-  observe(iterations: number, gpuMs: number): void {
-    if (!(iterations > 0) || !(gpuMs > 0) || !Number.isFinite(gpuMs)) return;
-    const sample = gpuMs / iterations;
-    const a = this.smoothing;
-    this.average = this.average === null ? sample : (1 - a) * this.average + a * sample;
+  /** The moving average of the frame's resample pass, ms (null before a sample). */
+  get resampleMs(): number | null {
+    return this.resample;
   }
 
   /**
-   * Iterations for a frame with this budget: as many as fit gpuTimeBudgetMs (a non-finite
-   * budget counts as the D4-2 cap), at least the floor of 2, never more than fit the 7 ms
-   * ceiling (the ceiling wins over the floor) but at least 1, and at most maxIterations (0
-   * pauses the solver). Before any measurement: the floor.
+   * A measured frame: `iterations` iterations took `gpuMs` of GPU time and the frame's resample
+   * `resampleMs` (bad samples of either are ignored; a frame of 0 iterations still measures the
+   * resample).
+   */
+  observe(iterations: number, gpuMs: number, resampleMs?: number): void {
+    const a = this.smoothing;
+    const blend = (old: number | null, x: number) => (old === null ? x : (1 - a) * old + a * x);
+    if (resampleMs !== undefined && resampleMs >= 0 && Number.isFinite(resampleMs)) {
+      this.resample = blend(this.resample, resampleMs);
+    }
+    if (!(iterations > 0) || !(gpuMs > 0) || !Number.isFinite(gpuMs)) return;
+    this.average = blend(this.average, gpuMs / iterations);
+  }
+
+  /**
+   * Iterations for a frame with this budget: as many as fit gpuTimeBudgetMs less the measured
+   * resample (a non-finite budget counts as the D4-2 cap), at least the floor of 2, never more
+   * than fit the 7 ms ceiling less the resample (the ceiling wins over the floor) but at least
+   * 1, and at most maxIterations (0 pauses the solver). Before any measurement: the floor.
    */
   iterationsFor(budget: StepBudget): number {
     const max = Math.max(0, Math.floor(budget.maxIterations));
@@ -73,8 +89,9 @@ export class IterationScheduler {
     const want = Number.isFinite(budget.gpuTimeBudgetMs)
       ? Math.max(0, budget.gpuTimeBudgetMs)
       : SOLVER_BUDGET.capMs;
-    const fit = Math.floor(want / ms);
-    const ceiling = Math.max(1, Math.floor(SOLVER_BUDGET.hardCeilingMs / ms));
+    const overhead = this.resample ?? 0;
+    const fit = Math.floor(Math.max(0, want - overhead) / ms);
+    const ceiling = Math.max(1, Math.floor((SOLVER_BUDGET.hardCeilingMs - overhead) / ms));
     const n = Math.min(ceiling, Math.max(SOLVER_BUDGET.floorIterations, fit));
     return Math.min(max, n);
   }
