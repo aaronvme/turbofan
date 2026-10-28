@@ -212,3 +212,66 @@ I read every WGSL term against SOLVER.md and the oracle, through the handoff's m
 ## Ladder rows
 
 The table is honest, and every accuracy row reproduces on my run. The L4a/L5 KNOWN-FAIL pins are correct as data (D4-47): `expect(converged).toBe(false)` turns red when the limiter fix lets them converge. The weak spots are I5 (D4-45 caps and steadiness rule, the "detected plateau" wording) and N2 (stale numbers in the comments).
+
+## Re-verification @22ba7ac (2026-10-28)
+
+Scope: the fix round 81e9508..22ba7ac (18 commits), checked against the builder's ID → commit table in `docs/handoffs/w2-solver.md`.
+
+**Updated verdict: CHANGES REQUIRED, for one new merge-level item (B2).** It is a one-argument fix. Every round-1 finding is FIXED or an accepted skip/deferral.
+- I approve as soon as the merge carries that fix, either on the branch (in a form that works with both oracle signatures) or as the orchestrator's merge-fix commit.
+- In both cases, the merged tree's typecheck and test:gpu must be green.
+
+### What I re-ran
+
+**Builder's worktree, in place.** Its tracked files are unchanged afterwards.
+- typecheck: clean.
+- test:gpu: 10 files, **57 passed + 1 expected fail**. The 12.2 numbers are unchanged from round 1.
+- `tests/browser/flowSolver.test.ts` (own Chrome, port 5191): 0 WebGPU errors. 2.078 ms/it; resample 0.632 ms per frame; back to back 2.629 ms wall per iteration. With the new scheduler, a frame plans 2 × 2.08 + 0.63 = 4.79 ms ≤ 5.
+- I did not re-run npm test, coverage or the ladder: the orchestrator's 1849 + 9 / 99.59 % / 12 passed stand. The latest `reports/gpu-ladder` JSON shows L8 at 37500 iterations: 0.447 %, steady (it moved 6.1e-5 against 1e-3), against the oracle's 0.449 %.
+
+**Mutants, in my scratch branch at 22ba7ac, against the whole test:gpu.**
+- All 13 of my round-1 mutants are **killed by the branch's own tests**:
+  - g-term, β-sum, positivity-p, the 14.6(a) Neumaier sum, precond-u, farfield-a, inflow-u∞, wall-u∞, β²-Δp, swirl source, TwoSum on both records, the outflow switch.
+  - 14.6(a) is now killed by its own test ("the Neumaier sum is the exact sum of its f32 terms"), not only by the E-L5 pin.
+- Mutants of the round's new code:
+  - **Killed:** the scheduler's budget − resample and ceiling − resample (`scheduler.test.ts`); the 8-buffer packing threshold (`host.test.ts`); `TOPO_BASE + 1` in the packed accessor (the Dawn bitwise packed-vs-unpacked test).
+  - **Survive** (see N11): `gpuTimeMs = solver` instead of solver + resample, and `lost =` instead of `lost ??=`.
+
+**Fresh trial merge** of main aedddfc (it differs from 0c52acf only in LOG.md) with 22ba7ac, in my worktree.
+- Textual merge is clean; lint is clean.
+- **typecheck fails at `tests/gpu/forms.test.ts:339`** (TS2554), and **test:gpu fails 1 test** with "TypeError: Cannot create property 'NaN' on number '0'". This is B2.
+- With the one-argument fix applied: tsc clean; test:gpu 10 files, 57 passed + 1 xfail; `npm test` 98 files, **1901 passed + 9 xfail**.
+
+### Findings
+
+| ID | status | evidence |
+|---|---|---|
+| B1 merge typecheck (limiter vocabulary) | **FIXED** | `LimiterKind = 'sharp'`; row A names its options. The TS2345 is gone from the trial merge. |
+| I1 surviving mutants | **FIXED** | forms.test.ts (my probe, moved in) and oracle-moving.test.ts (every BC's ghosts at u∞ 100 m/s, a duct moving with u∞, E-L5 at 60, S at 20). All 13 mutants killed. |
+| I2 §14 tests on the WGSL; 14.6(a) | **FIXED** | The probes call the kernel's own functions. `cellResidual` is shared by the stage kernel and `probeResidual`, with the 12.2 numbers bitwise unchanged. 14.2 is tested in all six components. 14.6(a) has a dedicated test. The E-L5 pin stays until reference round 7 (D4-48): accepted. |
+| I3 resample in the budget | **FIXED** | The plan uses budget − resample and the ceiling uses 7 ms − resample; both are tested. `gpuTimeMs` is the whole frame (a flagged contract-doc edit). Residual gap: N11. |
+| I4 throughput / P1 | **ACCEPTED (deferred)** | D4-54: the post-merge performance round with an official P1. |
+| I5 D4-45 and plateau wording | **FIXED** | L8 cap 37500; value rows of record only when steady; a detected plateau needs < 10 % fall per 2000 its. L9a now genuinely stalls (3.0e-2 of the peak, < 10 % fall); see N12. |
+| I6 D4-50 | **FIXED** | `FLOW_SOLVER_LIMITS` / `preferredLimits` (min of the wanted value and the adapter's, so the request never fails). `stageStorageBuffers` checks `device.limits`; an 8-buffer device gets geo + topo packed into one binding (bitwise equal to unpacked, on Dawn at default limits); short by more, it throws with what to request. Wiring w2/app-ui's device to `FLOW_SOLVER_LIMITS` is that branch's job. |
+| N1 duplicate `DEFAULT_CFL_PRECONDITIONED` | **ACCEPTED-SKIP** | The branch's oracle has no such export. Do it in the merge fix or right after. |
+| N2 stale KNOWN-FAIL comments | **FIXED** | 196954c. |
+| N3 real device loss | **FIXED** | b081663: `device.destroy()` gives lost, 0 iterations, and the snapshot publishes. The "earlier message kept" part is untested (N11). |
+| N4 fields() after dispose | **FIXED** | |
+| N5 physical mode's double prim + ghost | **ACCEPTED-SKIP** | It belongs to D4-54's prim-reuse item. |
+| N6 settle window | **FIXED** | The largest change over every sample of the window. |
+| N7 CFL ≤ 0 | **FIXED** | A negative or non-finite CFL throws. 0 stays legal (solver-exact freezes τ with it), which is acceptable. |
+| N8 source stage time | **ACCEPTED (W3)** | Noted in the handoff. |
+| N9 face-β M_ref | **ACCEPTED (deferred)** | Follows reference round 6 (D4-51). |
+| N10 moving-reference rows | **FIXED** | The rows use flows that move with u∞. |
+
+### New items
+
+- **W2S-B-B2 (Blocking, merge-level).** At `tests/gpu/forms.test.ts:339`, the test calls the oracle's `limitedSlopes(ref, P, m, c, p, out, oOff)`, the 7-argument form of the branch's 7fd5f95 oracle. Main's oracle (w2/reference round 4) is `limitedSlopes(ref, P, mOff, cOff, pOff, rc, out, oOff, smooth?)`.
+  - *Scenario:* the merge fails `npm run typecheck`, and test:gpu fails with a TypeError, because `out` becomes the number 0.
+  - *Why the handoff's clean merge check missed it:* it was run at d874978, before this test existed.
+  - *Fix:* either of these.
+    - The orchestrator's merge fix inserts `rc` (any value: the sharp limiter ignores it). I verified this gives tsc clean, test:gpu 57 + 1 and npm test 1901 + 9 on the merged tree.
+    - Or the branch uses a form valid against both oracles, such as `vanAlbada` (same signature in both) plus the test's own fallback rule.
+  - Either way, re-run the trial merge's typecheck before merging.
+- **W2S-B-N11.** Two of the round's claims are not pinned (their mutants survive): `FlowStepStats.gpuTimeMs` = solver + resample (flowSolver.ts:269), and `device.lost` keeping an earlier message (`??=`, flowSolver.ts:100). Assert the frame time in flow-solver.test.ts, and fail a readback before the loss.
+- **W2S-B-N12 (data).** The GPU's L9a residual stalls at 3.0e-2 of the peak, now under the < 10 % rule. SOLVER.md §10 reports the oracle's L9a at 3.0e-4 of the peak by 6000 iterations at the same CFL. The value row passes and is steady (7.09e-6 moved against 1e-5), but the 100× floor gap is unexplained; the row is reported only. Worth one line in the D4-36/D4-55 limiter data.
