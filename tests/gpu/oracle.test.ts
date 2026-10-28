@@ -159,8 +159,15 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
 
   it('A: keeps the quiescent 130k ambient bitwise zero with preconditioned tracking', async () => {
     const mesh = await shippedMesh();
+    // the GPU options named one by one (W2S-B-B1): the oracle's SolverOptions carries options
+    // the kernel does not take (main's limiter, sources), so it is never spread into them
+    const o = closedBoxOptions('preconditioned');
     const gpu = await GpuSolver.create(sim.device, mesh, {
-      ...closedBoxOptions('preconditioned'),
+      gas: o.gas,
+      freeStream: o.freeStream,
+      ...(o.lowMachPreconditioning === undefined
+        ? {}
+        : { lowMachPreconditioning: o.lowMachPreconditioning }),
     });
     for (const n of [1, 99]) {
       gpu.iterate(n);

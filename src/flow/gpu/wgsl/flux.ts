@@ -8,13 +8,16 @@
 // nothing can be fused into it. The limiter's denominator sorts the magnitudes for the same reason.
 import { f32Lit } from './gas';
 
-/** The limiter (section 6). Only the sharp van Albada switch exists until D4-33 is decided. */
-export type LimiterKind = 'vanAlbadaSharp';
-export const DEFAULT_LIMITER: LimiterKind = 'vanAlbadaSharp';
+/**
+ * The limiter (section 6), in the oracle's vocabulary (SolverOptions.limiter: 'sharp' | 'smooth',
+ * W2S-B-B1). Only the sharp van Albada switch exists here until D4-36 decides; 'smooth' is added
+ * then, and fluxWgsl throws for a kind it does not implement.
+ */
+export type LimiterKind = 'sharp';
+export const DEFAULT_LIMITER: LimiterKind = 'sharp';
 
 export function fluxWgsl(limiter: LimiterKind = DEFAULT_LIMITER): string {
-  // the smooth form (D4-25, an oracle option, not the contract: D4-33) is the next LimiterKind
-  const known: readonly string[] = ['vanAlbadaSharp'];
+  const known: readonly string[] = ['sharp'];
   if (!known.includes(limiter)) throw new Error(`limiter ${limiter} is not implemented`);
   return /* wgsl */ `
 fn sadd(a: f32, b: f32) -> f32 { return max(a, b) + min(a, b); }
