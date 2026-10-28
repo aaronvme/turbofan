@@ -2681,3 +2681,13 @@ None.
   - Gates on the merged tree: 1857 passed + 9 expected fail. One failure is the known annulus load-timeout flake: 9.4 s against 5 s, it passes alone, and round 6 fixes the timeout. Mesh 29 passed.
   - `test:ladder` under a heavy load (two agents' suites running) gave 8 passed / 5 failed. L8 and L9a fail as expected, on their convergence rows. L4b, L7 and L9b hit the 30-minute vitest timeout from CPU contention, not an assertion.
   - The critic's quieter trial merge of the same tree gave the tip's 10 passed / 3 failed. The orchestrator owes a quiet-window rerun of the ladder on main.
+- **P4 official at main a337d4e (D4-42 measure of record), 2026-10-27 20:12-20:41.** AC at the start and at the end, plan Balanced, no agents, the display awake; D0-1: 10 s warm-up + 3 × 60 s, seed 1. All 8 configs were VALID, with 0 errors.
+  - **Back to back:**
+    - **default 8.50 ms**: opaque 3.96, rotors 1.15, GTAO 0.85, composite 0.85, TRAA 1.06, output 0.29; GPU busy about 71%;
+    - performance profile 6.76 ms;
+    - cutaway 10.00 ms;
+    - hero 13.07 ms.
+  - **Vsync:** default 11.22, performance 10.35, cutaway 11.43, hero 13.59 ms.
+  - **P4 FAIL by 0.50 ms** (default ≤ 8.0). Cutaway meets its 10 ms target; hero does not.
+  - The next look-dev round finds the 0.5 ms. Candidates are the critic's pass-8 notes, the rotor pass (1.15 ms) and TRAA (1.06 ms).
+- **The ladder rerun owed on main a337d4e (quiet, same window, 20:41-20:47): 10 files passed / 3 failed.** L8, L9a and L9b fail on their convergence rows, under D4-45. This matches the critic's trial merge, which settles the load-timeout question.
