@@ -386,7 +386,7 @@ describe('the kernel WGSL against the f64 oracle on unequal states (SOLVER.md 14
         REF_F,
         {
           rho: REF_F.rho + (P[0] ?? NaN),
-          u: P[1] ?? NaN,
+          u: P[1],
           v: P[2] ?? NaN,
           w: (P[3] ?? NaN) / rc,
           p: REF_F.p + (P[4] ?? NaN),
@@ -421,12 +421,12 @@ describe('the kernel WGSL against the f64 oracle on unequal states (SOLVER.md 14
           dU[4] ?? NaN,
           dU[5] ?? NaN,
           P[5] ?? NaN,
-          P[6] ?? NaN,
+          P[6],
           P[0] ?? NaN,
-          (P[1] ?? NaN) - REF_F.u,
+          P[1] - REF_F.u,
           P[2] ?? NaN,
           P[3] ?? NaN,
-          P[7] ?? NaN,
+          P[7],
           rc,
           beta2,
           0,
@@ -502,7 +502,8 @@ describe('the kernel WGSL against the f64 oracle on unequal states (SOLVER.md 14
         if (row !== undefined) row[m] = north;
         // the exact sum of the f32 terms: f64 holds it exactly (|terms| in [1, 1e3]: 36 bits)
         R.push(others + north);
-        termScale.push(max);
+        // the scale of the terms, the add-back's included (rho_inf u_inf^2 flowSx, up to 3.5e4)
+        termScale.push(Math.max(max, Math.abs(add[m] ?? 0)));
       }
       want.push(R);
       const t = (i: number, m: number) => T[i]?.[m] ?? NaN;
@@ -558,7 +559,7 @@ describe('the kernel WGSL against the f64 oracle on unequal states (SOLVER.md 14
       }
     }
     process.stdout.write(
-      `[forms] 14.6(a) residual: cancelling to 1e-6 of the terms, worst ${worstCancel.toFixed(2)} ulp of the result; with the add-back ${worstAdd.toExponential(2)} of the terms\n`,
+      `[forms] 14.6(a) residual: cancelling to 1e-6 of the terms, worst ${worstCancel.toFixed(2)} ulp of the result; with the add-back ${worstAdd.toExponential(2)} of the largest term\n`,
     );
     expect(worstCancel).toBeLessThan(8);
     expect(worstAdd).toBeLessThan(1e-6);

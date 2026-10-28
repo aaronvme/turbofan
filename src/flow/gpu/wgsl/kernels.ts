@@ -162,6 +162,80 @@ ${BOUNDARY_WGSL}`;
 }
 
 /**
+ * The cell update's device functions (sections 9-10, SOLVER.md 14.2, 14.6), shared by the stage
+ * kernel and the probes: the preconditioned increment, the compensated residual sum and TwoSum.
+ * withSources: the residual takes the volume sources (the stage kernel with a source model).
+ */
+const UPDATE_WGSL = (withSources: boolean) => /* wgsl */ `
+// SOLVER.md 10's increment update, dU <- dU - (1 - beta^2) (dp / c^2) (1, u, v, rw, Dh0, Z), in an
+// algebraically identical but cancellation-free order. With c^2 = cp R T / cv (soundSpeed) and
+// cv = cp - R, dp / c^2 = dRho - n with the non-acoustic density increment
+//   n = (Y dRho - d eta + u d(rho u) + v d(rho v) + w d(rho r w) / r_c) / (cp T),
+//   Y = R T - (R_inf T_inf + (u_inf^2 + q^2) / 2 - De) = R_inf T' + dR T - (u_inf^2 + q^2) / 2 + De,
+// and the density increment becomes n + beta^2 (dRho - n). The literal order computes it as
+// dRho - (1 - beta^2) dp / c^2, the difference of two numbers equal to within beta^2, which in f32
+// leaves a relative error ~1e-7 / beta^2 (2.7e-2 on ladder L8's sink at beta^2 = minMach^2 = 9e-6;
+// found by the 12.2 oracle comparison). The other components keep the literal form: their
+// preconditioning term is not the dominant part of the increment.
+fn preconditionIncrement(da: vec4f, db: vec2f, q: vec4f, z: f32, tP: f32, c: f32, rc: f32,
+                         beta2: f32) -> Flux {
+  let u = P.uInf + q.y;
+  let v = q.z;
+  let rw = q.w;
+  let w = rw / rc;
+  let phi = productsFraction(z);
+  let t = P.tInf + tP;
+  let cp = cpMix(t, phi);
+  let q2 = u * u + v * v + w * w;
+  let dRho = da.x;
+  let y = P.rInf * tP + gasRDelta(phi) * t - 0.5 * (P.uInf * P.uInf + q2) + deltaE(tP, phi);
+  let n = (y * dRho - db.x + u * da.y + v * da.z + (w * da.w) / rc) / (cp * t);
+  let m = dRho - n;
+  let k = (1.0 - beta2) * m;
+  let dh0 = deltaH(tP, phi) + 0.5 * dq2(q.y, v, w);
+  return Flux(vec4f(n + beta2 * m, da.y - k * u, da.z - k * v, da.w - k * rw),
+              db - k * vec2f(dh0, z));
+}
+
+// Neumaier's compensated sum of the six residual components (a: 4, b: 2 in xy): running sums s
+// and the accumulated rounding errors c
+struct Acc6 { sa: vec4f, sb: vec4f, ca: vec4f, cb: vec4f }
+fn neumaier4(s: vec4f, x: vec4f) -> vec4f {
+  let t = s + x;
+  return select((x - t) + s, (s - t) + x, abs(s) >= abs(x));
+}
+fn acc6(a: Acc6, xa: vec4f, xb: vec4f) -> Acc6 {
+  return Acc6(a.sa + xa, a.sb + xb, a.ca + neumaier4(a.sa, xa), a.cb + neumaier4(a.sb, xb));
+}
+
+// R of one cell (sections 8-9) as a compensated (Neumaier) sum per component (SOLVER.md 14.6a):
+// the outward face fluxes w, e, s, n (gauge flux differences F - F_inf(S), 14.4), the free
+// stream's part of the flow faces added back as F_inf(sum of b S_x over them) =
+// (rho_inf u_inf, rho_inf u_inf^2) flowSx, minus the pressure/swirl source and the volume source
+// b V s. The stage kernel and probeResidual both call it.
+fn cellResidual(w: Flux, e: Flux, s: Flux, n: Flux, flowSx: f32, pSrc: vec4f, vSrc: Flux) -> Flux {
+  let mInf = P.rhoInf * P.uInf;
+  var acc = Acc6(-w.a, -vec4f(w.b, 0.0, 0.0), vec4f(0.0), vec4f(0.0));
+  acc = acc6(acc, e.a, vec4f(e.b, 0.0, 0.0));
+  acc = acc6(acc, -s.a, -vec4f(s.b, 0.0, 0.0));
+  acc = acc6(acc, n.a, vec4f(n.b, 0.0, 0.0));
+  acc = acc6(acc, vec4f(mInf * flowSx, (mInf * P.uInf) * flowSx, 0.0, 0.0), vec4f(0.0));
+  acc = acc6(acc, -pSrc, vec4f(0.0));
+  ${withSources ? 'acc = acc6(acc, -vSrc.a, -vec4f(vSrc.b, 0.0, 0.0));' : ''}
+  return Flux(acc.sa + acc.ca, (acc.sb + acc.cb).xy);
+}
+
+// U^n+1 = (hi + lo) + d as a compensated sum (Knuth's TwoSum): the new hi and the rounding error
+// of hi + (lo + d), carried in lo so that increments below hi's ulp accumulate (SOLVER.md 14)
+struct Sum4 { hi: vec4f, lo: vec4f }
+fn twoSum4(a: vec4f, b: vec4f) -> Sum4 {
+  let s = a + b;
+  let bb = s - a;
+  return Sum4(s, (a - (s - bb)) + (b - bb));
+}
+`;
+
+/**
  * Pass 4: the fused stage kernel. Bindings: 1 U_in, 2 U^n, 3 U_out (rw), 4 prim, 5 geo, 6 topo,
  * 7 reduction (rw), 8 sources (optional), 9 face dump (optional, rw).
  */
@@ -249,56 +323,7 @@ fn tileFace(f: u32, i0: i32, j0: i32, d0: vec4u, d1: vec4u) -> Flux {
   return Flux(bf * F.a, bf * F.b);
 }
 
-// SOLVER.md 10's increment update, dU <- dU - (1 - beta^2) (dp / c^2) (1, u, v, rw, Dh0, Z), in an
-// algebraically identical but cancellation-free order. With c^2 = cp R T / cv (soundSpeed) and
-// cv = cp - R, dp / c^2 = dRho - n with the non-acoustic density increment
-//   n = (Y dRho - d eta + u d(rho u) + v d(rho v) + w d(rho r w) / r_c) / (cp T),
-//   Y = R T - (R_inf T_inf + (u_inf^2 + q^2) / 2 - De) = R_inf T' + dR T - (u_inf^2 + q^2) / 2 + De,
-// and the density increment becomes n + beta^2 (dRho - n). The literal order computes it as
-// dRho - (1 - beta^2) dp / c^2, the difference of two numbers equal to within beta^2, which in f32
-// leaves a relative error ~1e-7 / beta^2 (2.7e-2 on ladder L8's sink at beta^2 = minMach^2 = 9e-6;
-// found by the 12.2 oracle comparison). The other components keep the literal form: their
-// preconditioning term is not the dominant part of the increment.
-fn preconditionIncrement(da: vec4f, db: vec2f, q: vec4f, z: f32, tP: f32, c: f32, rc: f32,
-                         beta2: f32) -> Flux {
-  let u = P.uInf + q.y;
-  let v = q.z;
-  let rw = q.w;
-  let w = rw / rc;
-  let phi = productsFraction(z);
-  let t = P.tInf + tP;
-  let cp = cpMix(t, phi);
-  let q2 = u * u + v * v + w * w;
-  let dRho = da.x;
-  let y = P.rInf * tP + gasRDelta(phi) * t - 0.5 * (P.uInf * P.uInf + q2) + deltaE(tP, phi);
-  let n = (y * dRho - db.x + u * da.y + v * da.z + (w * da.w) / rc) / (cp * t);
-  let m = dRho - n;
-  let k = (1.0 - beta2) * m;
-  let dh0 = deltaH(tP, phi) + 0.5 * dq2(q.y, v, w);
-  return Flux(vec4f(n + beta2 * m, da.y - k * u, da.z - k * v, da.w - k * rw),
-              db - k * vec2f(dh0, z));
-}
-
-// Neumaier's compensated sum of the six residual components (a: 4, b: 2 in xy): running sums s
-// and the accumulated rounding errors c
-struct Acc6 { sa: vec4f, sb: vec4f, ca: vec4f, cb: vec4f }
-fn neumaier4(s: vec4f, x: vec4f) -> vec4f {
-  let t = s + x;
-  return select((x - t) + s, (s - t) + x, abs(s) >= abs(x));
-}
-fn acc6(a: Acc6, xa: vec4f, xb: vec4f) -> Acc6 {
-  return Acc6(a.sa + xa, a.sb + xb, a.ca + neumaier4(a.sa, xa), a.cb + neumaier4(a.sb, xb));
-}
-
-// U^n+1 = (hi + lo) + d as a compensated sum (Knuth's TwoSum): the new hi and the rounding error
-// of hi + (lo + d), carried in lo so that increments below hi's ulp accumulate (SOLVER.md 14)
-struct Sum4 { hi: vec4f, lo: vec4f }
-fn twoSum4(a: vec4f, b: vec4f) -> Sum4 {
-  let s = a + b;
-  let bb = s - a;
-  return Sum4(s, (a - (s - bb)) + (b - bb));
-}
-
+${UPDATE_WGSL(src)}
 @compute @workgroup_size(TX, TY)
 fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index) lid: u32) {
   let info = topo[TILES + wid.x];
@@ -398,29 +423,24 @@ fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index)
     let rho = P.rhoInf + q.x;
     let uc = P.uInf + q.y;
     let w = q.w / cg.x;
-    // R = sum of the outward face fluxes - the pressure/swirl source - the volume sources, as a
-    // compensated (Neumaier) sum per component (SOLVER.md 14). The face fluxes are gauge flux
-    // differences F - F_inf(S); the free stream's part of the flow faces comes back as
-    // F_inf(sum of b S over the flow faces) = (rho_inf u_inf, rho_inf u_inf^2) cg.w.
-    let mInf = P.rhoInf * P.uInf;
-    var acc = Acc6(-wsa[fw], -vec4f(wsb[fw], 0.0, 0.0), vec4f(0.0), vec4f(0.0));
-    acc = acc6(acc, wsa[fw + 1u], vec4f(wsb[fw + 1u], 0.0, 0.0));
-    acc = acc6(acc, -wsa[fs], -vec4f(wsb[fs], 0.0, 0.0));
-    acc = acc6(acc, wsa[fs + TX], vec4f(wsb[fs + TX], 0.0, 0.0));
-    acc = acc6(acc, vec4f(mInf * cg.w, (mInf * P.uInf) * cg.w, 0.0, 0.0), vec4f(0.0));
-    acc = acc6(acc, -vec4f(0.0, pz.x * cb.y, pz.x * cb.z + cb.x * rho * w * w * cg.y, 0.0),
-               vec4f(0.0));
+    // R: the outward face fluxes, the add-back, the pressure/swirl source (cb.y, cb.z: b S_x,
+    // b S_r; b rho w^2 A) and the volume sources (cellResidual)
+    let pSrc = vec4f(0.0, pz.x * cb.y, pz.x * cb.z + cb.x * rho * w * w * cg.y, 0.0);
+    var vSrc = Flux(vec4f(0.0), vec2f(0.0));
     var da = vec4f(0.0);
     var db = vec2f(0.0);
     ${
       src
-        ? `acc = acc6(acc, -cb.w * src[4u * c], -cb.w * vec4f(src[4u * c + 1u].xy, 0.0, 0.0));
+        ? `vSrc = Flux(cb.w * src[4u * c], cb.w * src[4u * c + 1u].xy);
     da = src[4u * c + 2u];
     db = src[4u * c + 3u].xy;`
         : ''
     }
-    let ra = acc.sa + acc.ca;
-    let rb = (acc.sb + acc.cb).xy;
+    let rf = cellResidual(Flux(wsa[fw], wsb[fw]), Flux(wsa[fw + 1u], wsb[fw + 1u]),
+                          Flux(wsa[fs], wsb[fs]), Flux(wsa[fs + TX], wsb[fs + TX]), cg.w, pSrc,
+                          vSrc);
+    let ra = rf.a;
+    let rb = rf.b;
     res0 = ra.x / cb.w;
     let ua = Uin[2u * c];
     let ub = Uin[2u * c + 1u];
@@ -665,19 +685,34 @@ fn sourceMain(@builtin(global_invocation_id) gid: vec3u) {
 `;
 }
 
+/** The test probes' entry points and their records' size in vec4 (in and out). */
+export const PROBE_STRIDE = {
+  probeFlux: 4,
+  probeGas: 4,
+  probeSlope: 4,
+  probePrecondition: 4,
+  probeResidual: 10,
+} as const;
+export type ProbeEntry = keyof typeof PROBE_STRIDE;
+
 /**
- * Test probes of the device functions (no solver state), 4 vec4 in and 4 vec4 out per record:
+ * Test probes of the device functions (no solver state), PROBE_STRIDE vec4 in and out per record:
  * - probeFlux: in (L.a), (L.p', L.Z, n_x, n_r), (R.a), (R.p', R.Z, area, r_f); out SLAU2 (a), (b).
  * - probeGas: in (U.a), (eta, rho Z, r_c, T'), (Z, 0, 0, 0), (x, y, tau, 0); out the primitive
  *   record (a), (b); (temperatureGauge(deltaE(T')), deltaE(T'), deltaH(T'), cp(T_inf + T'));
  *   (log1p x, expm1 y, entropyDelta(T_inf, tau), enthalpyDelta(T_inf, tau)).
  * - probeSlope: in m.a, c.a, p.a, (m.p', c.p', p.p', 0) (Z = 0); out the slopes (a), (b), and
  *   vanAlbada(m.a, c.a), vanAlbada(-c.a, -m.a) (odd and symmetric: the negation of the first).
+ * - probePrecondition: in dU.a, (dU.b, Z, T'), (rho', u', v, rw), (c, r_c, beta^2, 0); out the
+ *   preconditioned increment (a), (b).
+ * - probeResidual: in the west, east, south, north fluxes (a), (w.b, e.b), (s.b, n.b), the
+ *   pressure/swirl source, the volume source (a), (its b, flowSx, 0), 0; out cellResidual (a), (b).
  * Bindings: 1 in, 2 out (rw).
  */
 export function probeKernelWgsl(o: KernelOptions): string {
   return `${header(o)}
 ${fluxWgsl(o.limiter)}
+${UPDATE_WGSL(true)}
 @group(0) @binding(1) var<storage, read> pin: array<vec4f>;
 @group(0) @binding(2) var<storage, read_write> pout: array<vec4f>;
 
@@ -725,6 +760,31 @@ fn probeSlope(@builtin(global_invocation_id) gid: vec3u) {
   pout[4u * k + 1u] = vec4f(s.b, 0.0, 0.0);
   pout[4u * k + 2u] = vanAlbada4(ma, ca);
   pout[4u * k + 3u] = vanAlbada4(-ca, -ma);
+}
+
+@compute @workgroup_size(64)
+fn probePrecondition(@builtin(global_invocation_id) gid: vec3u) {
+  let k = gid.x;
+  if (k >= arrayLength(&pin) / 4u) { return; }
+  let x = pin[4u * k + 1u];
+  let y = pin[4u * k + 3u];
+  let d = preconditionIncrement(pin[4u * k], x.xy, pin[4u * k + 2u], x.z, x.w, y.x, y.y, y.z);
+  pout[4u * k] = d.a;
+  pout[4u * k + 1u] = vec4f(d.b, 0.0, 0.0);
+}
+
+@compute @workgroup_size(64)
+fn probeResidual(@builtin(global_invocation_id) gid: vec3u) {
+  let k = gid.x;
+  if (k >= arrayLength(&pin) / 10u) { return; }
+  let o = 10u * k;
+  let b0 = pin[o + 4u];
+  let b1 = pin[o + 5u];
+  let v = pin[o + 8u];
+  let r = cellResidual(Flux(pin[o], b0.xy), Flux(pin[o + 1u], b0.zw), Flux(pin[o + 2u], b1.xy),
+                       Flux(pin[o + 3u], b1.zw), v.z, pin[o + 6u], Flux(pin[o + 7u], v.xy));
+  pout[o] = r.a;
+  pout[o + 1u] = vec4f(r.b, 0.0, 0.0);
 }
 `;
 }
