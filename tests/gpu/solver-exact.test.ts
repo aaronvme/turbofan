@@ -569,17 +569,18 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
     const packed = await run(sim.device, true);
     expect([plain.packed, packed.packed]).toEqual([false, true]);
     expect(packed.state.every((v, k) => Object.is(v, plain.state[k]))).toBe(true);
-    // a device at WebGPU's default limits (8): the engine with sources binds 8 (D4-54: the stage
-    // kernel no longer binds prim), and with the face dump as well (9) it packs on its own
+    // a device at WebGPU's default limits (8): the engine with sources binds 9 (D4-44's beta^2
+    // buffer; D4-54: no prim), so it packs on its own; with the face dump as well (10, 9 packed)
+    // it says what to request instead of failing silently
     const small = await requestSimDevice(createDawnGpu(), { onError: log.sink });
     try {
       expect(small.device.limits.maxStorageBuffersPerShaderStage).toBe(8);
       const own = await run(small.device, false);
-      expect(own.packed).toBe(false);
+      expect(own.packed).toBe(true);
       expect(own.state.every((v, k) => Object.is(v, plain.state[k]))).toBe(true);
-      const dumped = await run(small.device, false, true);
-      expect(dumped.packed).toBe(true);
-      expect(dumped.state.every((v, k) => Object.is(v, plain.state[k]))).toBe(true);
+      await expect(run(small.device, false, true)).rejects.toThrow(
+        /needs 10 storage buffers \(9 packed\).*allows 8/,
+      );
     } finally {
       small.destroy();
     }
