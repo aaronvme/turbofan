@@ -1,97 +1,82 @@
-w2/reference: round 5 DONE with open items (from 28fb768; HEAD = the commit of this handoff). W2R-I2/I4 DONE at c1094fc (w2/solver unblocked). D4-32 decided by its rule: preconditioned CFL 0.8, no p_u. D4-34: W2R-6 located (the sharp limiter's switch). D4-33: the smooth limiter is NOT ready as the default (L8, L1). D4-26: L7 at 96 x 96 passes in scratch; the ladder run of record is in GATES below.
+w2/reference: round 6 STOP-CLEAN (WIP; orchestrator STOP-CLEAN at 79-80 % usage). From 4553ce2; HEAD = the commit of this handoff.
+- D4-43: DONE.
+- D4-44 (a): DONE in the code and the contract. Its flow cases R and J FAIL the pre-stated rule, for reasons that neither (a) nor (b) reaches.
+- D4-36: the rule and both variants are in SOLVER.md 6 and in scratch copies of the tree. They were NOT run: the runs were stopped at STOP-CLEAN.
+- D4-45, the timeout fix and the pass-8 nits: NOT started.
+- Gates: NOT run this round.
 
-DONE (IDs -> commits, round 5)
-- W2R-I4 f8d539a: SLAU2 value tests in slau2.test.ts. Six unequal state pairs (a subsonic jump with m < 0, an expansion with g != 0, swirl with large rho' at r_f != 1, a transonic face at the M-hat clamp, D4-20 below and above M_cut) are checked against an independent evaluation of the paper formulas. The evaluation uses absolute variables of a calorically perfect gas and none of the module's gauge code, at 1e-12 relative, both ways round. Also: physicalFlux after an unrelated flux, and the zero-area face over a NaN-filled output. Stryker on slau2.ts with slau2.test.ts alone: 98.80 % (164 killed; the 2 survivors are the equivalent |M| >= 1 -> > 1).
-- W2R-N6 f8d539a: per-call side records in slau2.ts.
-- W2R-I2 cd45726 (SOLVER.md first) / e03f2c9 (TDD) / c1094fc "W2R-I2/I4 DONE".
-  - tests/ladder/oracle.ts exports the 12.2 set-ups that both the f32-storage experiment and the GPU tests import: closedBoxMesh (f32 metrics), closedBoxOptions('tracking' | 'preconditioned' | 'physical'), smoothPerturbation, sinkCase (L8; l8.ts uses it too), relativeError (a field the oracle leaves at exactly 0 must stay exactly 0).
-  - SOLVER.md 12.2 states every row's mesh, plus the new rows C-pre (the closed box at the engine's minMach = M_cut = 0.003) and S (L8's sink, preconditioned).
-  - Measured storage errors after 1 / 10 / 100: C 1.7e-7 / 1.1e-6 / 7.8e-7; C-pre 1.1e-7 / 1.7e-7 / 5.1e-7; C physical 8.0e-8 / 2.4e-7 / 4.2e-6; S 7.3e-8 / 1.8e-7 / 6.3e-7. That is 59-2000 x below the tolerances.
-- D4-32 (W2R-I3) cd45726 / e03f2c9 / c1094fc / 7faa5ef / 2252ed6 / 413b623 / 02c3323.
-  - acoustic.ts (eigenvalues once per case) is pinned in rk.test.ts: plain 1.236; matched preconditioned 0.972 (1D) / 1.550 (square), independent of beta; with p_u K_u 0.5 1.413 / 1.958.
-  - DEFAULT_CFL_PRECONDITIONED = 0.8 (minMach < 1; minMach >= 1 keeps 1.5). Found: C-pre at CFL 1.5 goes to NaN at iteration 79.
-  - The p_u trial (AUSM+-up, K_u 0.5, option lowMachPreconditioning.velocityDiffusion, default 0): L8 1.38 % at CFL 1.15 and 2.27 % at 0.8 (0.36 % without; NaN at 1.5); L7 Cd 0.0117 (FAIL; 0.0096 without); C-pre NaN at 758 at 1.15. So, by D4-32's rule: 0.8 without p_u. p_u is NOT in the contract; the option stays in the oracle for the record.
-  - L2/L4 run plain, and p_u is off there by construction.
-- D4-34 (W2R-6) 84002b0, SOLVER.md 8 (tables there).
-  - p_u does not remove W2R-6. In preconditioned tracking the duct is already stable. In the plain scheme (f_a = 1), p_u moves the steady state by 16 %.
-  - The power-iterated mode is acoustic, x 20 per 80 SSP-RK3 steps (sigma ~ 590 1/s ~ c/L).
-  - Term switches (scratch: reports/scratch/r5/w2r6.ts on reports/scratch/ref5):
-    - Removed by: first-order, zero p' slopes, zero u slopes, central p' slopes, b_f = min(b_L, b_R), and the smooth limiter (24 x 6 cells; at M 0.35 with v kept sharp).
-    - Not removed by: zero rho' or v slopes, or the pressure force as b_c grad p.
-  - The plain steady state has a +-50 Pa grid-scale pressure sawtooth at the throat (plain SLAU2 at M 0.06). At those extrema the sharp van Albada switches, and its linearisation grows.
-  - Not fixed in the contract (see decisions). The it.fails pins stand.
-- D4-33 eb89898 (SOLVER.md 6): the smooth limiter as the default of every case (an uncommitted experiment, the full ladder and the flow suites).
-  - Fixes: L9a converges (3428 its to 1e-6) and L9b converges (6169 its to 1e-5); W2R-6 goes away.
-  - Keeps: L2 (0.29 %), L3, L4a, L4b, L5, L6 and f32 green.
-  - Breaks: L8 (27-30 % at CFL 0.4, 0.6 and 0.8, i.e. independent of the CFL, so semi-discrete); L1's uniform M 0.5 growth row (round-off grows at the plain CFL 1.5 > 1.236, the central-slope acoustic limit); four unit tests (the 24 x 3 annulus does not converge because v at noise level is reconstructed centrally; solver.test's plain low-Mach duct).
-- D4-26 9589a0b (PHYSICS.md 3.3 first) / 3c9e7c9.
-  - L7's pass rows run at 96 x 96. The M 0.01 sequence 24 / 48 / 96 is reported and must fall monotonically. The plain rows stay at 48 x 48.
-  - The seven sphere runs go in parallel child processes (tests/ladder/sphereRun.ts). The ladder test timeout is now 30 min.
-  - Scratch at CFL 0.8: asymmetry 0.135 / 0.0437 / 0.0131 (order 1.62, 1.74); Cd 0.057 / 0.0096 / 0.0016; iterations 8675 (M 0.01) / 8280 (M 0.3), ratio 1.05.
-- W2R-N1 068b955 / 7d58197: setBlockage throws on b outside (0, 1], on NaN or on a short field.
-- W2R-N2 7d58197: SOLVER.md 5 says a ghost's T' and c are don't-care.
-- W2R-N3 f9f8d73 / 9080a64: SSP-RK3 gives the sources each stage's time (t, t + dt, t + dt/2).
-- Earlier: W2R-B1 9d99b04; W2R-I1 (the smooth form as an option) 1d85b0c / 485b69a / 28fb768; W2R-N5 485b69a; W2R-1..14 in earlier handoffs.
+DONE (IDs -> commits, round 6)
+- D4-43 / W2R-I5 9326202 (+ db0ed58 prettier): p_u deleted from the oracle.
+  - Removed: slau2Flux's `ku`, `lowMachPreconditioning.velocityDiffusion`, and the p_u tests in slau2.test.ts and precondition.test.ts.
+  - SOLVER.md 7 keeps the trial and its table as the record (the code lived from 413b623). acoustic.ts keeps K_u as an analysis parameter.
+  - W2R-N8's second half: the C-pre quantity is the density-residual L2.
+- D4-44 (a) 37b4d5c (SOLVER.md first) / 7b5a2f1 (TDD) / d9ca099: M_ref = min(1, max(beta_f, M_cut)), with beta_f = (beta_L + beta_R) / 2 of the preconditioner.
+  - beta is kept per extended index and frozen at stage 1. A ghost takes its source cell's beta, so interfaces stay bitwise.
+  - residual() and faceFlux() evaluate beta from the current state.
+  - The signature is now slau2Flux(..., machCut, betaFace); machCut >= 1 gives f_a = 1.
+  - The flow unit suites pass: 132 passed, plus 2 new KNOWN-FAIL (R and J).
+  - The machCut >= 1 test configuration is documented at the option (W2R-I6 gap 2). W2R-N7 and W2R-N8 are in SOLVER.md 10.
+- D4-44 analysis (SOLVER.md 10 tables):
+  - Before D4-44 (at rest, 1D, M_cut 0.003), the limit by beta/M_ref was 0.447 at 0.1, 0.608 at 1/4, 0.768 at 1/2, 0.972 at 1, 0.937 at 4 and 0.234 at 16.
+  - With (a), every uniform state has M_ref = beta. Over beta in [0.003, 0.6] and M0 in [0, beta], the 1D limit is >= 0.972. The minimum is at rest with beta = M_cut, so 0.8 holds on the whole family.
+  - The numbers come from the hand model and from critic pass 8's probe, run on the module's own slau2Flux (reports/scratch/r6/probe.ts).
+- D4-44 (c) results. The rule: 1e-5 of the peak within 20000 iterations, at CFL 0.8 with minMach = M_cut = 0.003.
 
-OPEN
-- W2R-6: the it.fails x 3 in blockage.test.ts are still KNOWN-FAIL. Cause found (above); no fix in the contract.
-- L8 at CFL 0.8: velocity 0.36 % PASS, but it does not converge to 1e-5 in 20000 (3.9e-4 of the first). This is likely the sharp limiter's floor (critic pass 7).
-- L4b convergence row (0.15 of the first; reported); L9a/L9b convergence rows FAIL (the sharp limiter).
-- W2R-N4 (keep L4b's D4-19 samples; an offset-shock start): not done.
+  | case | before D4-44 | (a) | (a), CFL 0.4 | (a) + smooth limiter | (a) + (b) | plain, no preconditioning |
+  |---|---|---|---|---|---|---|
+  | R, start from rest (blockage duct 24 x 6) | 8e-5 (abs 0.030) | 4.2e-4 (abs 0.031) | 4.0e-4 | converged to 1e-6 at 1763 | 4.4e-4 | |
+  | J, M 0.05 jet into dead air (32 x 16) | 3e-2 (abs ~4) | 0.24 (abs ~6) | 0.18 | 0.34 | 0.17 | 4.1e-5 (abs 7.6e-5), falling |
+
+  - R's floor is the sharp limiter's (D4-36). It does not move with the CFL, and the smooth form converges it.
+  - J's stall comes from the preconditioned scheme beside a shear layer: the plain scheme goes 5 orders lower. It is not the step, and neither (a) nor (b) fixes it.
+  - Both cases are pinned it.fails in precondition.test.ts. Each runs 20000 iterations, which takes minutes (R took 25 min under load in the suite).
+- D4-36 rule eacef07 (SOLVER.md 6, written before any run):
+  - (a) the smooth form on all six primitives, eps_k = 1e-4 S_k (h_c / 0.01 m)^1.5 with h_c = sqrt(cellArea), at plain CFL 1.0;
+  - (b) the smooth form (K_eps 1e-3) on p' and u only, sharp on the rest, at plain CFL 1.0;
+  - the rule: adopt the first variant that keeps every round-5 PASS row and makes blockage.test.ts's three it.fails pass.
+
+OPEN / NEXT (in order)
+1. The D4-36 runs.
+   - reports/scratch/trialA and trialB are full-tree copies (src, tests, tools, public, configs) with the variant as the default: DEFAULT_CFL 1.0 and loadLine smooth + hExtOf in solver.ts, and the eps form in muscl.ts.
+   - In each, run `npx vitest run -c vitest.ladder.config.ts` and `npx vitest run tests/unit/flow/blockage.test.ts`. Logs go to reports/scratch/r6/ladder_trialX.log and w2r6_trialX.log.
+   - Apply the rule. If a variant is adopted, port it into src with TDD.
+2. The D4-44 decisions (below). Then decide where R and J go: they are slow. Move them to the ladder, or keep them as pins with a lower cap.
+3. D4-45.
+   - A steadiness rule for L8's velocity row and the L9a/L9b value rows: max - min over the last 2000 iterations, sampled every 100, must be <= tolerance / 10. It is its own row, and the PASS depends on it.
+   - Caps x 1.5 / 0.8: L8 becomes 37500, and L9a/L9b scale from their current caps the same way.
+4. W2R-N14: explicit timeouts on solver.test.ts's iterating tests (the annulus test at 30_000 or more). Then the nits:
+   - N9: L7's Cd row also needs low.conv.converged.
+   - N10: restate the duct bound in precondition.test.ts as < 5500 at CFL 0.8.
+   - N11: clear reports/ladder at the start of test:ladder.
+   - N12: give sphereChild a timeout derived from its cap.
+   - N13: the frozen-switch power iteration.
+   - N4.
+5. The gates and the full ladder (L7/L8 values move with D4-44, since M_ref now comes from beta), the coverage gate, then the handoff.
 
 ORCHESTRATOR DECISIONS NEEDED
-- (a) The limiter (D4-33/D4-34). The sharp form causes W2R-6 and the L9 stalls. The smooth form (K_eps 1e-3) fixes both but breaks L8 (semi-discrete) and needs a plain tracking CFL <= 1.0 (0.8 x 1.236). Options:
-  - (i) keep sharp; accept W2R-6 into W3 with a workaround (not recommended: physical time is the event mode);
-  - (ii) smooth with a smaller K_eps (1e-4 / 1e-5), plus plain tracking CFL 1.0, re-tested on L1/L8/W2R-6/L9;
-  - (iii) smooth for p' and u only (the W2R-6 variables) and sharp for rho', v, rw, Z.
-  - My proposal: (ii) or (iii) as the next trial, with L8 as the gate.
-- (b) b_f = min(b_L, b_R) also removed W2R-6 (M 0.06 and 0.35). Worth a decision only if (a) fails: it is first order in b.
-- (c) p_u stays out. Should the option be deleted from the oracle, or kept as the record?
+- (a) D4-44. (a) is in, and the analysis shows the matched family is stable at 0.8 by construction. The (c) cases fail on things outside the step: R on the limiter, J on the preconditioned scheme beside a shear layer. My proposal: keep (a) as the contract with R and J pinned. Should J's stall become a new item (W2R-N15)?
+- (b) Option (b) changes nothing in R or J. Please confirm it is not adopted.
 
-FOR w2/solver
-- Implement NOW (SOLVER.md at HEAD): everything round 4 listed, plus:
-  - the preconditioned tracking default CFL 0.8 (minMach < 1);
-  - the 12.2 rows A, B, C, C-pre, C physical, D, E, S, with tests/ladder/oracle.ts imported for the set-ups, the perturbation and relativeError;
-  - the stage times for sources;
-  - the setBlockage range check.
-  - Ghost T'/c need not be filled.
-- Do NOT implement: p_u; the smooth limiter (the sharp form stays the contract until decision (a)).
-- LATER: the limiter decision (it may change section 6 and the plain CFL); any W2R-6 fix (section 8).
+FOR w2/solver (mirror now)
+- p_u is gone (it was never in the contract).
+- D4-44 (SOLVER.md 7):
+  - M_ref = min(1, max(0.5 (beta_L + beta_R), M_cut)), with beta = sqrt(beta^2) per cell, frozen at stage 1;
+  - a ghost takes its source cell's beta;
+  - f_a = 1 when machCut >= 1 or when not preconditioned.
+  - This changes the preconditioned steady state at the Delta-p-jump level, so the C-pre and S rows of 12.2 need re-measuring against the new oracle.
+- Do NOT implement either limiter variant (D4-36 is not decided).
 
 GOTCHAS
-- Parallel `>>` appends from several Git-Bash background processes overwrite each other (MSYS has no atomic O_APPEND). Give every process its own log file.
-- reports/scratch/ref5 is a scratch copy of the oracle with env switches. VAR: first, first<k>, central<k>, firstuv, smoothnov, bcp, bfmin. globalThis.KUP is p_u in the plain scheme. Drivers: r5/w2r6.ts (MODE, OUT, N, NJ, LIM, CFLPRE, CAPPRE, FF, UINF, MODEDUMP), r5/trial.ts (CASE l7 | l8 | cpre, KU, CFL, LIM, MACH, NR/NT).
-- A Bash hook blocks `rm -rf` ("Fact-Forcing Gate"). Use new folder names instead.
-- With the smooth limiter, machCut-1 preconditioning (a test configuration) needs CFL <= 0.4 (limit 0.475 at beta 0.06).
-- The ladder takes much longer now: L7 at 96 x 96 runs about 8700 iterations at CFL 0.8 (more under load).
+- Scratch drivers:
+  - reports/scratch/r6/cases.ts (env: CASE jet|rest, CFL, CAP, MC, LIM, PRE=0, DROP, NI/NJ, MJ);
+  - cases_b.ts with ref6b (option (b));
+  - probe.ts (the critic's probe plus the D4-44 sweep);
+  - ac.ts (the hand-model tables).
+- A hook (Fact-Forcing Gate) blocks recursive deletes and process kills until you state the facts. Use new folder names instead of deleting.
+- A test's vitest timeout does not interrupt synchronous iteration: R ran 25 min against a 600 s timeout.
+- Parallel `>>` appends from Git-Bash background processes overwrite each other (MSYS has no atomic O_APPEND). Give every process its own log.
+- No test or process of this branch is left running.
 
-GATES @4927332 (the code of HEAD; later commits are docs only)
-- npm test: 1735 passed + 9 expected fail (84 files). npm run lint, npm run typecheck: clean.
-- npm run coverage: passes; lines 99.57 %, branches 88.07 %; src/flow/reference lines 99.50 %, branches 89.19 % (gate 85 %).
-- npm run test:mesh: 29 passed.
-- npm run test:ladder: 10 files passed, 3 failed (the L8, L9a and L9b convergence rows), 625 s.
-
-LADDER (CPU, @4927332; reports/ladder/*.json)
-| case | metric | threshold | value | |
-|---|---|---|---|---|
-| L1 | quiescent 130k f32 (bitwise) / uniform M 0.5, 50 its | < 1e-4 m/s | 0 / 2.0e-13 | PASS |
-| L2 | L1(rho) / shock offset | < 1 % / <= 1 cell | 0.28 % / 0.23 | PASS |
-| L3 | L1(rho) vs 1D | < 2 % | 0.21 % | PASS |
-| L4a | Mach / choked mdot | < 1 % / < 0.5 % | 0.28 % / 0.10 % | PASS |
-| L4b | shock position + D4-19 steadiness | < 2 %, <= 0.1 % | 1.64 %, 0.026 % | PASS |
-| L4b | convergence (reported) | - | 0.146 of the first at 15000 | reported |
-| L5 | mdot | < 1 % | 0.084 % | PASS |
-| L6 | radial equilibrium free / solid; drift | < 0.1 % q; < 1e-4 | 0.030 % / 0.0029 %; 4.7e-15 / 5.4e-8 | PASS |
-| L7 | M 0.01 asymmetry at 96 x 96, sequence 24 / 48 / 96 falling | < 0.02 | 0.0131 (0.135 / 0.0437 / 0.0131) | PASS |
-| L7 | M 0.01 Cd at 96 x 96 | < 0.01 | 0.0016 | PASS |
-| L7 | iterations M 0.01 / M 0.3 at 96 x 96 | <= 3 | 1.05 (8675 / 8280) | PASS |
-| L8 | velocity error, M_cut 0.003, CFL 0.8 | < 1 % | 0.36 % (was 40.6 % at 1.5) | PASS |
-| L8 | convergence to 1e-5 | 20000 | not converged | FAIL |
-| L9a | Euler work / convergence | < 1e-4 / 1e-6 of the peak | 7.8e-6 / not converged | PASS / FAIL |
-| L9b | Rankine-Froude / convergence | < 2 % / 1e-5 of the peak | 0.80 % / not converged | PASS / FAIL |
-| 12.2 | storage C / C-pre / C phys / S after 100 | <= tol / 10 | 7.8e-7 / 5.1e-7 / 4.2e-6 / 6.3e-7 | PASS |
-
-NEXT
-1. The limiter decision (a), then its trial with L8 as the gate, then W2R-6's it.fails flip.
-2. W2R-N4 (L4b's samples; an offset start).
-3. Re-run the slau2/muscl Stryker spot check on the mutation config once it is merged (the slau2.ts number above used a private config).
+GATES: not run at this HEAD (STOP-CLEAN).
+- The last gates of record are round 5's, @4927332: npm test 1735 passed + 9 expected fail; lint and typecheck clean; coverage lines 99.57 %, branches 88.07 %; test:mesh 29 passed; ladder 10 files passed, 3 failed.
+- Since then: tsc is clean at d9ca099, and the flow suites give 132 passed + 4 expected fail.
