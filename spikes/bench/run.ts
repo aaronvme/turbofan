@@ -1,8 +1,12 @@
-// Benchmark harness for spikes (a) and (d), D0-1 protocol (docs/reviews/LOG.md). See
-// spikes/README.md for the commands, durations and the checklist.
+// Benchmark harness for spikes (a) and (d) and the official P1 run, D0-1 protocol
+// (docs/reviews/LOG.md). See spikes/README.md for the commands, durations and the checklist.
 //
 //   npm run bench:throughput [-- --quick] [-- --only=130k-16x8,...] [-- --port=5181] [-- --seed=N]
 //   npm run bench:worker     [-- --quick] [-- --only=main-idle,worker-idle,...]
+//   npm run bench:p1         [-- --quick] [-- --only=solver-130k]
+//     P1 (D4-54): the app's GpuFlowSolver on the shipped 130k asset at D4-2's budget inside the
+//     1080p bench scene, next to the W0 spike kernel's 130k-16x8 (M34's reference row), the two
+//     rotated as one group; prints the P1 verdict and writes docs/bench/p1-<date>-<HHMM>-<protocol>.json
 //
 // Starts a Vite dev server, launches the installed Chrome headed and maximized (Playwright,
 // whose default switches include --disable-backgrounding-occluded-windows: an occluded window
@@ -30,6 +34,7 @@ import { aggregateRuns, type RunResult } from '../lib/benchRun.ts';
 import { orderEffect, sweepOrder } from '../lib/order.ts';
 import { benchFileName, parseBenchArgs, protocolLabel, type Protocol } from '../lib/protocol.ts';
 import { median } from '../lib/stats.ts';
+import { THRESHOLDS } from '../../src/contracts/thresholds.ts';
 import {
   LONG_FRAME_FACTOR,
   BELOW_RATE_MEDIAN_FACTOR,
@@ -51,7 +56,7 @@ import {
   powerSourceFromBatteryStatus,
 } from '../lib/system.ts';
 
-type Kind = 'throughput' | 'worker';
+type Kind = 'throughput' | 'worker' | 'p1';
 
 const GRIDS = [
   { id: '80k', ni: 400, nj: 200 },
@@ -84,6 +89,38 @@ function throughputConfigs(protocol: Protocol): PageConfig[] {
       particles: 65536,
     })),
   );
+}
+
+/**
+ * P1 (D4-54): the production solver (GpuFlowSolver, its own D4-2 scheduler at solverBudgetMs's
+ * 5 ms in this scene, the resample counted) and, as the run's calibration against M34's official
+ * 1.277 ms/it, the W0 spike kernel's 130k-16x8 at its 7 ms budget. One group: the two rotate.
+ */
+function p1Configs(protocol: Protocol): PageConfig[] {
+  const scene = { protocol, particles: 65536 };
+  return [
+    {
+      id: 'solver-130k',
+      group: 'p1',
+      solver: 'production',
+      // unused by the production solver (the shipped asset, its default tile)
+      grid: { ni: 0, nj: 0 },
+      blocks: { bi: 0, bj: 0 },
+      tile: { x: 16, y: 8 },
+      iterations: 'adaptive',
+      ...scene,
+    },
+    {
+      id: 'spike-130k-16x8',
+      group: 'p1',
+      solver: 'spike',
+      grid: { ni: 512, nj: 256 },
+      blocks: { bi: 4, bj: 3 },
+      tile: { x: 16, y: 8 },
+      iterations: 'adaptive',
+      ...scene,
+    },
+  ];
 }
 
 /** Same scene + compute, fixed 3 iterations per frame so both modes carry the same GPU load. */
@@ -357,7 +394,7 @@ function attemptLine(kind: Kind, a: Attempt): string {
   const r = a.run;
   if (!a.validity.valid || r === null) return `INVALID: ${a.validity.reasons.join('; ')}`;
   const cpu = `CPU ${(100 * a.cpuLoadDuring).toFixed(0)}%`;
-  if (kind === 'throughput') {
+  if (kind !== 'worker') {
     return (
       `${fmt(r.solverMsPerIt, 3)} ms/it (p10 ${fmt(r.solverMsPerItP10, 3)}), ${r.itPerSec.toFixed(0)} it/s, ` +
       `frame p99 ${r.frameTime.p99.toFixed(1)} ms, long frames ${r.longFrames}, ${cpu}`
@@ -384,15 +421,19 @@ function serialize(a: Attempt) {
 
 async function main(): Promise<void> {
   const kindArg = process.argv[2];
-  if (kindArg !== 'throughput' && kindArg !== 'worker') {
+  if (kindArg !== 'throughput' && kindArg !== 'worker' && kindArg !== 'p1') {
     throw new Error(
-      'usage: node spikes/bench/run.ts <throughput|worker> [--quick] [--only=..] [--port=N] [--seed=N]',
+      'usage: node spikes/bench/run.ts <throughput|worker|p1> [--quick] [--only=..] [--port=N] [--seed=N]',
     );
   }
   const kind: Kind = kindArg;
   const args = parseBenchArgs(process.argv.slice(3));
   const all =
-    kind === 'throughput' ? throughputConfigs(args.protocol) : workerConfigs(args.protocol);
+    kind === 'throughput'
+      ? throughputConfigs(args.protocol)
+      : kind === 'p1'
+        ? p1Configs(args.protocol)
+        : workerConfigs(args.protocol);
   const configs = args.only ? all.filter((c) => args.only?.includes(c.id)) : all;
   if (configs.length === 0)
     throw new Error(`no configuration matches --only=${args.only?.join(',')}`);
@@ -513,20 +554,22 @@ async function main(): Promise<void> {
       };
     };
 
-    if (kind === 'throughput') {
+    // P1 runs on the throughput page (the same scene)
+    const onThroughputPage = kind !== 'worker';
+    if (onThroughputPage) {
       await page.goto(`${base}/spikes/throughput/index.html`);
       await refocus();
       pageInfo = await page.evaluate(() => window.__bench?.ready);
     }
-    const pageRun = kind === 'throughput' ? runThroughput : runWorker;
+    const pageRun = onThroughputPage ? runThroughput : runWorker;
     // W0G-N6: a stalled run is abandoned after this; the page is then reloaded before going on
     const timeoutMs = runTimeoutMs(single);
     const reloadPage = async () => {
-      const target = kind === 'throughput' ? `${base}/spikes/throughput/index.html` : 'about:blank';
+      const target = onThroughputPage ? `${base}/spikes/throughput/index.html` : 'about:blank';
       const reloaded = await withTimeout(
         (async () => {
           await page.goto(target);
-          if (kind === 'throughput') await page.evaluate(() => window.__bench?.ready);
+          if (onThroughputPage) await page.evaluate(() => window.__bench?.ready);
         })(),
         timeoutMs,
       );
@@ -568,7 +611,7 @@ async function main(): Promise<void> {
         if (last) final.get(id)?.push(last);
       }
     }
-    if (kind === 'throughput') await page.evaluate(() => window.__bench?.dispose());
+    if (onThroughputPage) await page.evaluate(() => window.__bench?.dispose());
 
     if (kind === 'worker') {
       // crossOriginIsolated / SharedArrayBuffer with COOP/COEP from a Vite dev server, set
@@ -628,7 +671,7 @@ async function main(): Promise<void> {
         continue;
       }
       const tail = `long frames/run ${a.longFrames}`;
-      if (kind === 'throughput') {
+      if (kind !== 'worker') {
         process.stdout.write(
           `  ${r.id}: ${fmt(a.solverMsPerIt, 3)} ms/it (p10 ${fmt(a.solverMsPerItP10, 3)}), ${a.itPerSec.toFixed(0)} it/s, ` +
             `${a.fps.toFixed(1)} fps, frame p99 ${a.frameTimeP99.toFixed(1)} ms, ${tail}${warningNote(r.validity)}\n`,
@@ -644,6 +687,16 @@ async function main(): Promise<void> {
             `React commit p95 ${commits.length > 0 ? median(commits).toFixed(1) : '-'} ms${warningNote(r.validity)}\n`,
         );
       }
+    }
+    if (kind === 'p1') {
+      // P1's verdict on the production row (PHYSICS 3.4); a miss counts only after a quiet re-run
+      const p1 = results.find((r) => r.id === 'solver-130k')?.aggregate;
+      const min = THRESHOLDS.P1.values.minIterationsPerS.value;
+      process.stdout.write(
+        p1
+          ? `P1 (>= ${min} it/s at 130k inside the 1080p scene): ${p1.itPerSec >= min ? 'PASS' : 'FAIL'} at ${p1.itPerSec.toFixed(0)} it/s (${fmt(p1.solverMsPerIt, 3)} ms/it, ${p1.fps.toFixed(1)} fps)${args.protocol.name === 'quick' ? ' - indicative only (--quick)' : ''}\n`
+          : 'P1: no valid solver-130k aggregate\n',
+      );
     }
     process.stdout.write(
       effect

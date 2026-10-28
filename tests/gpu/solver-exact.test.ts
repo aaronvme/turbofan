@@ -501,14 +501,61 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
     });
   }
 
+  it('D4-54: a tracking iteration is three stage dispatches (each computes its halo itself); a source model adds its prim and source passes', async () => {
+    const mesh = closedBoxMesh('f32');
+    // the pipelines a recording stands-in for a pass sees dispatched, in order
+    const record = (encode: (pass: GPUComputePassEncoder) => void): string[] => {
+      const names: string[] = [];
+      let pipe = '';
+      const pass = {
+        setPipeline: (p: GPUComputePipeline) => {
+          pipe = p.label;
+        },
+        setBindGroup: () => undefined,
+        dispatchWorkgroups: () => {
+          names.push(pipe.replace('flow solver ', ''));
+        },
+      };
+      encode(pass as unknown as GPUComputePassEncoder);
+      return names;
+    };
+    const count = async (cellSource: boolean) => {
+      const s = await create(mesh, { cellSource });
+      const iteration = record((p) => {
+        s.encodeIterations(p, 1);
+      });
+      const resample = record((p) => {
+        s.encodeCellPrimitives(p);
+      });
+      s.destroy();
+      return { iteration, resample };
+    };
+    expect(await count(false)).toEqual({
+      iteration: ['stage', 'stage', 'stage'],
+      resample: ['prim'],
+    });
+    expect((await count(true)).iteration).toEqual([
+      'prim',
+      'source',
+      'stage',
+      'prim',
+      'source',
+      'stage',
+      'prim',
+      'source',
+      'stage',
+    ]);
+  });
+
   it('D4-50: packs geo and topo for a device with 8 storage buffers, bitwise equal to unpacked', async () => {
     const mesh = closedBoxMesh('f32');
-    const run = async (device: GPUDevice, packStatic: boolean) => {
+    const run = async (device: GPUDevice, packStatic: boolean, faceDump = false) => {
       const s = await GpuSolver.create(device, mesh, {
         gas: THERMALLY_PERFECT,
         freeStream: { ...ISA, velocity: 30 },
         cellSource: true,
         packStatic,
+        faceDump,
       });
       s.setState(pulse(0.3, 0.08, 0.05, 30));
       const rate0 = new Float64Array(6 * mesh.nCells).fill(1e-3);
@@ -522,21 +569,17 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
     const packed = await run(sim.device, true);
     expect([plain.packed, packed.packed]).toEqual([false, true]);
     expect(packed.state.every((v, k) => Object.is(v, plain.state[k]))).toBe(true);
-    // a device at WebGPU's default limits (8): the solver with sources packs on its own
+    // a device at WebGPU's default limits (8): the engine with sources binds 8 (D4-54: the stage
+    // kernel no longer binds prim), and with the face dump as well (9) it packs on its own
     const small = await requestSimDevice(createDawnGpu(), { onError: log.sink });
     try {
       expect(small.device.limits.maxStorageBuffersPerShaderStage).toBe(8);
       const own = await run(small.device, false);
-      expect(own.packed).toBe(true);
+      expect(own.packed).toBe(false);
       expect(own.state.every((v, k) => Object.is(v, plain.state[k]))).toBe(true);
-      await expect(
-        GpuSolver.create(small.device, mesh, {
-          gas: THERMALLY_PERFECT,
-          freeStream: ISA,
-          cellSource: true,
-          faceDump: true,
-        }),
-      ).rejects.toThrow(/needs 10 storage buffers/);
+      const dumped = await run(small.device, false, true);
+      expect(dumped.packed).toBe(true);
+      expect(dumped.state.every((v, k) => Object.is(v, plain.state[k]))).toBe(true);
     } finally {
       small.destroy();
     }

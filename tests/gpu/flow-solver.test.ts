@@ -7,7 +7,7 @@ import { fromHalfBits } from '../../src/contracts/half';
 import { FIELD_EXTENTS, type FieldTexturePair, type FlowSolver } from '../../src/contracts/flow';
 import { nextSnapshot } from '../../src/contracts/sim';
 import type { SimDevice } from '../../src/gpu/device';
-import { GpuFlowSolver } from '../../src/flow/gpu/device/flowSolver';
+import { GpuFlowSolver, type FrameTiming } from '../../src/flow/gpu/device/flowSolver';
 import { NO_CELL, buildResampleMap } from '../../src/flow/gpu/resampleMap';
 import { snapshotSources } from '../../src/flow/gpu/status';
 import { ENGINE_DEFINITION } from '../../src/engine/definition';
@@ -85,6 +85,32 @@ describe('GpuFlowSolver (the FlowSolver contract)', () => {
     expect(status.status).toBe('running');
     expect(status.stats?.residualDensityL2).toBe(0); // the quiescent ambient: exactly zero
     expect(solver.step({ gpuTimeBudgetMs: 5, maxIterations: 0 }).iterationsThisStep).toBe(0);
+  });
+
+  it('D4-54: reports every timed frame (its iterations, solver and resample GPU time) to onFrameTiming', async () => {
+    const seen: FrameTiming[] = [];
+    const s2 = new GpuFlowSolver({
+      onFrameTiming: (t) => {
+        seen.push(t);
+      },
+    });
+    const { asset } = await shippedAsset();
+    await s2.init({ device: sim.device, mesh: asset, definition: ENGINE_DEFINITION });
+    await flush(sim.device);
+    const versions: number[] = [];
+    const its: number[] = [];
+    for (let k = 0; k < 4; k++) {
+      its.push(s2.step({ gpuTimeBudgetMs: 5, maxIterations: 3 }).iterationsThisStep);
+      versions.push(s2.fields().version);
+      await flush(sim.device);
+    }
+    s2.dispose();
+    if (!sim.hasTimestamps) return;
+    // init's resample (field version 1, no iterations), then the four steps, each by its version
+    expect(seen.map((t) => t.frame)).toEqual([1, ...versions]);
+    expect(seen.map((t) => t.iterations)).toEqual([0, ...its]);
+    for (const t of seen) expect(t.resampleMs).toBeGreaterThan(0);
+    for (const t of seen.slice(1)) expect(t.solverMs).toBeGreaterThan(0);
   });
 
   it('hands out the same textures for its lifetime and labels them as the solver (W1F-N1)', async () => {

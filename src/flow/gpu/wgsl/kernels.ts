@@ -2,25 +2,28 @@
 // section offsets and the tile are compile-time constants) and its gas model.
 //
 // Per RK stage, in one compute pass:
-//   1. prim:  conserved -> primitive record per cell (section 4)
-//   2. ghost: every ghost's primitives from its source cell(s) and BC (section 5)
-//   3. (sources, if the solver has a source model: rates and damping per cell, section 8)
-//   4. stage: the fused per-tile kernel: tile + 2-cell halo of primitives in workgroup memory,
-//      MUSCL slopes (section 6), SLAU2 or wall face fluxes x b_f (section 7), the residual with
-//      the pressure/swirl source and the volume sources (sections 8-9), the local time step and
-//      beta^2 at stage 1 (section 10), the RK update (tracking or SSP-RK3), and the stage-1
-//      density-residual partial sums (section 11).
+//   1. (sources, if the solver has a source model: the prim pass, conserved -> primitive record per
+//      cell (section 4), then the rates and damping per cell, section 8)
+//   2. stage: the fused per-tile kernel: the tile + 2-cell halo of primitives in workgroup memory,
+//      each computed from the stage's U (section 4) and, for a ghost, from its source cell(s) and
+//      BC (section 5), MUSCL slopes (section 6), SLAU2 or wall face fluxes x b_f (section 7), the
+//      residual with the pressure/swirl source and the volume sources (sections 8-9), the local
+//      time step and beta^2 at stage 1 (section 10), the RK update (tracking or SSP-RK3), and the
+//      stage-1 density-residual partial sums (section 11).
+// The prim pass (primKernelWgsl) and the ghost pass (ghostKernelWgsl) remain for the render
+// resample (cells only), the physical-time step's lambda and the read-back of the primitives.
 // Physical time adds a global-dt reduction before the step (lambda, dtFinal) and a clock update
 // after it (advanceTime).
 //
 // Bitwise symmetry: every face flux is computed by one call site (one loop over the tile's i- and
-// j-faces) and every slope by one call site, from primitives that are computed once per cell and
-// copied (not recomputed) into interface ghosts.
+// j-faces) and every slope by one call site, from primitives that every tile computes with the same
+// code from the same U (an interface ghost is its neighbour block's cell, consToPrim of the same
+// bits), so both blocks of an interface see the same face states.
 import { GHOST_LAYERS } from '../../reference/solverMesh';
 import type { GasModel } from '../../reference/gas';
 import type { GpuLayout, Tile } from '../layout';
 import { paramsStructWgsl } from '../params';
-import { BOUNDARY_WGSL } from './boundary';
+import { BOUNDARY_FNS, BOUNDARY_WGSL } from './boundary';
 import { fluxWgsl, type LimiterKind } from './flux';
 import { gasWgsl } from './gas';
 
@@ -53,7 +56,7 @@ fn topoAt(k: u32) -> vec4u { return topo[k]; }`;
 export function stageWorkgroupBytes(t: Tile): number {
   const nt = (t.x + 4) * (t.y + 4);
   const ns = (t.x + 2) * t.y + t.x * (t.y + 2);
-  return nt * (16 + 8 + 4) + ns * (16 + 8) + 4 * t.x * t.y;
+  return nt * (16 + 8 + 4) + ns * (16 + 8) + (4 + 8) * t.x * t.y;
 }
 
 /** Face slots of one tile (i-faces then j-faces): the face-dump stride. */
@@ -252,8 +255,8 @@ fn twoSum4(a: vec4f, b: vec4f) -> Sum4 {
 `;
 
 /**
- * Pass 4: the fused stage kernel. Bindings: 1 U_in, 2 U^n, 3 U_out (rw), 4 prim, 5 geo, 6 topo,
- * 7 reduction (rw), 8 sources (optional), 9 face dump (optional, rw).
+ * The fused stage kernel. Bindings: 1 U_in, 2 U^n, 3 U_out (rw), 5 geo, 6 topo, 7 reduction (rw),
+ * 8 sources (optional), 9 face dump (optional, rw), 10 the low parts (rw).
  */
 export function stageKernelWgsl(o: KernelOptions): string {
   const t = o.layout.tile;
@@ -265,7 +268,6 @@ ${TILE_WGSL(t)}
 @group(0) @binding(1) var<storage, read> Uin: array<vec4f>;
 @group(0) @binding(2) var<storage, read> U0: array<vec4f>;
 @group(0) @binding(3) var<storage, read_write> Uout: array<vec4f>;
-@group(0) @binding(4) var<storage, read> prim: array<vec4f>;
 @group(0) @binding(5) var<storage, read> geo: array<vec4f>;
 ${topoWgsl(o, 6)}
 @group(0) @binding(7) var<storage, read_write> red: array<f32>;
@@ -279,6 +281,25 @@ var<workgroup> wb: array<f32, NT>;     // b; negative: a slip-wall ghost
 var<workgroup> wsa: array<vec4f, NS>;  // slopes, then face fluxes (mass, x-mom, r-mom, ang-mom)
 var<workgroup> wsb: array<vec2f, NS>;  // slopes, then face fluxes (eta, rho Z)
 var<workgroup> wred: array<f32, NTH>;
+var<workgroup> wtc: array<vec2f, NTH>; // T', c of the tile's own cells
+
+${BOUNDARY_FNS}
+// the primitives of cell c of the stage's state (section 4)
+fn cellPrim(c: u32) -> Prim {
+  return consToPrim(Uin[2u * c], Uin[2u * c + 1u].xy, geo[CELL_GEO + c].x);
+}
+
+// the primitives of extended index e: a cell, or a ghost from its source cell(s) and BC (section 5)
+fn haloPrim(e: u32) -> Prim {
+  if (e < P.nCells) { return cellPrim(e); }
+  let g = e - P.nCells;
+  let r0 = topoAt(GHOSTS + 2u * g);
+  let r1 = topoAt(GHOSTS + 2u * g + 1u);
+  let s = cellPrim(r0.x);
+  var s1 = s;
+  if (r0.z == 1u) { s1 = cellPrim(r0.y); }
+  return ghostPrim(r0, r1, s, s1);
+}
 
 // the face states and flux of tile face f (i-faces first): the one call site of SLAU2
 fn tileFace(f: u32, i0: i32, j0: i32, d0: vec4u, d1: vec4u) -> Flux {
@@ -350,18 +371,22 @@ fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index)
   let i0 = i32(info.y * TX);
   let j0 = i32(info.z * TY);
 
-  // 1. the tile and its 2-cell halo (no corners): cells, or ghosts after their BCs
+  // 1. the tile and its 2-cell halo (no corners): cells, or ghosts after their BCs, computed here
   for (var t = lid; t < NT; t += NTH) {
-    let gi = i0 + i32(t % HX) - 2;
-    let gj = j0 + i32(t / HX) - 2;
+    let hx = i32(t % HX) - 2;
+    let hy = i32(t / HX) - 2;
+    let gi = i0 + hx;
+    let gj = j0 + hy;
     let inI = gi >= 0 && gi < ni;
     let inJ = gj >= 0 && gj < nj;
     let ok = (inI && inJ) || (inJ && gi >= -2 && gi <= ni + 1) || (inI && gj >= -2 && gj <= nj + 1);
     if (ok) {
       let e = extIndex(gi, gj, d0);
-      wqa[t] = prim[2u * e];
-      wqb[t] = prim[2u * e + 1u].xy;
+      let pr = haloPrim(e);
+      wqa[t] = pr.a;
+      wqb[t] = pr.b.xy;
       wb[t] = extB(e);
+      if (hx >= 0 && hx < i32(TX) && hy >= 0 && hy < i32(TY)) { wtc[u32(hy) * TX + u32(hx)] = pr.b.zw; }
     } else {
       wqa[t] = vec4f(0.0);
       wqb[t] = vec2f(0.0);
@@ -433,7 +458,7 @@ fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index)
     let fw = ty * (TX + 1u) + tx;
     let fs = NFI + ty * TX + tx;
     let q = wqa[h];
-    let pz = prim[2u * c + 1u];       // p', Z, T', c
+    let pz = vec4f(wqb[h], wtc[lid]); // p', Z, T', c
     let cg = geo[CELL_GEO + c];       // r_c, A, V, sum of b S_x over the flow faces
     let cb = geo[CELL_B + c];         // b, b S_x, b S_r, b V
     let rho = P.rhoInf + q.x;
