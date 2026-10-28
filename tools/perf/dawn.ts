@@ -60,6 +60,20 @@ const sim = await requestSimDevice(gpu, {
   onError: log.sink,
 });
 if (!sim.hasTimestamps) throw new Error('no timestamp-query on this adapter');
+// --ballast N: N MB of other GPU buffers allocated (and written once) before the solvers, as the
+// app's three.js scene does: the solvers' memory then behaves as it does inside the app (handoff)
+const ballast: GPUBuffer[] = [];
+const addBallast = (mbTotal: number) => {
+  for (let mb = 0; mb < mbTotal; mb += 64) {
+    const b = sim.device.createBuffer({
+      size: 64 * 2 ** 20,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    sim.device.queue.writeBuffer(b, 0, new Uint8Array(64 * 2 ** 20));
+    ballast.push(b);
+  }
+};
+addBallast(Number(arg('--ballast', '0')));
 const manifest = parseMeshManifest(JSON.parse(readFileSync('public/mesh/manifest.json', 'utf8')));
 const entry = manifest.specs['130k'];
 if (entry === undefined) throw new Error('no 130k mesh');
@@ -76,7 +90,11 @@ async function flowFrom(side: string): Promise<FlowLike> {
     GpuFlowSolver: new (o: object) => FlowLike & { init(p: unknown): Promise<void> };
   };
   const [x, y] = (tileSpec ?? '').split('x').map(Number);
-  const f = new mod.GpuFlowSolver(tileSpec === undefined ? {} : { tile: { x, y } });
+  const f = new mod.GpuFlowSolver({
+    ...(tileSpec === undefined ? {} : { tile: { x, y } }),
+    // --plain: the unpreconditioned tracking scheme (the default is the engine's preconditioning)
+    ...(args.includes('--plain') ? { lowMachPreconditioning: null } : {}),
+  });
   await f.init({ device: sim.device, mesh: asset, definition: ENGINE_DEFINITION });
   return f;
 }
@@ -99,6 +117,8 @@ try {
     for (const ref of refs) sides.push({ label: ref, flow: await flowFrom(ref) });
     const k0 = sides[0]?.flow.kernel;
     if (k0 === null || k0 === undefined) throw new Error('no kernel');
+    // --ballast-after N: the same after the solvers exist (as a scene created after the solver)
+    addBallast(Number(arg('--ballast-after', '0')));
     const U = perfState(mesh, k0.ref);
     const reps = Number(arg('--reps', '12'));
     const r = await pairedAb(sim.device, sides, U, {
@@ -140,6 +160,53 @@ try {
       ),
     );
     for (const s of sides) s.flow.dispose();
+  } else if (mode === 'soak') {
+    // how long a state stays finite: --iterations N --every K (the bench re-sets its state well before)
+    const flow = await flowFrom(arg('--ref', 'WORKTREE'));
+    const kernel = flow.kernel;
+    if (kernel === null) throw new Error('no kernel');
+    // --amp jet,dT,swirl,z,dp,v (default: PERF_AMPLITUDES); --plain: the unpreconditioned scheme
+    const [jet = 60, dT = 300, swirl = 20, z = 0.025, dp = 0.02, v = 8] = arg(
+      '--amp',
+      '60,300,20,0.025,0.02,8',
+    )
+      .split(',')
+      .map(Number);
+    kernel.setConserved(perfState(mesh, kernel.ref, { jet, dT, swirl, z, dp, v }));
+    const total = Number(arg('--iterations', '16000'));
+    const every = Number(arg('--every', '1000'));
+    for (let done = 0; done < total; done += every) {
+      for (let k = 0; k < Math.ceil(every / 50); k++) {
+        const enc = sim.device.createCommandEncoder();
+        const pass = enc.beginComputePass();
+        kernel.encodeIterations(pass, Math.min(50, every));
+        pass.end();
+        sim.device.queue.submit([enc.finish()]);
+      }
+      await sim.device.queue.onSubmittedWorkDone();
+      const st = await kernel.readState();
+      let finite = true;
+      let maxRho = 0;
+      let bad = 0;
+      let first = -1;
+      for (let c = 0; c < kernel.layout.nCells; c++) {
+        const v = st[8 * c] ?? NaN;
+        if (!Number.isFinite(v)) {
+          finite = false;
+          bad++;
+          if (first < 0) first = c;
+        }
+        maxRho = Math.max(maxRho, Math.abs(v));
+      }
+      const where =
+        first < 0
+          ? ''
+          : `; ${bad} cells, the first ${first} at x ${(mesh.cellX[first] ?? NaN).toFixed(3)} r ${(mesh.cellR[first] ?? NaN).toFixed(3)} (block ${mesh.blocks.findIndex((b) => first >= b.cellOffset && first < b.cellOffset + b.ni * b.nj)})`;
+      out(
+        `${done + every} iterations: finite ${finite}, max |rho'| ${maxRho.toExponential(3)}${where}`,
+      );
+    }
+    flow.dispose();
   } else {
     throw new Error(`unknown mode ${mode}`);
   }

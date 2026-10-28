@@ -1,13 +1,22 @@
-// The benchmark app shared by spike (a) (throughput, main thread) and spike (d) (main thread
-// vs worker). Per frame, in queue order:
-//   1. raw compute pass: k solver iterations (3 stage dispatches each), timestamped;
+// The benchmark app shared by spike (a) (throughput, main thread), spike (d) (main thread
+// vs worker) and the official P1 run (`npm run bench:p1`, D4-54). Per frame, in queue order:
+//   1. raw compute pass: k solver iterations, timestamped;
 //   2. raw compute pass: resample the state into the rgba16float flow texture, timestamped;
 //   3. three: TSL particle compute (samples the flow texture), then the scene + bloom.
-// k is either fixed or sized by the IterationScheduler to the plan's 7 ms solver budget.
+// The spike kernel (solver 'spike'): k is fixed or sized by the spike's IterationScheduler to the
+// plan's 7 ms budget. The production solver (solver 'production'): the app's GpuFlowSolver on the
+// shipped 130k asset, whose step() encodes 1 and 2 itself with its D4-2 scheduler, at the budget
+// solverBudgetMs gives from three's measured render and compute times (5 ms in this scene).
 // No DOM APIs: the canvas may be an OffscreenCanvas in a worker.
 
 import type { WebGPURenderer } from 'three/webgpu';
-import { GpuErrorLog, requestSimDevice, type GpuErrorReport } from '../../src/gpu/device';
+import {
+  FLOW_SOLVER_LIMITS,
+  GpuErrorLog,
+  requestSimDevice,
+  type GpuErrorReport,
+} from '../../src/gpu/device';
+import { runProductionSolver } from './productionRun';
 import { detectQuantumNs } from '../../src/gpu/timestamps';
 import { createRendererOnDevice } from '../../src/render/rendererOnDevice';
 import { FlowResample } from '../gpu/resample';
@@ -29,9 +38,17 @@ import { createBenchScene } from './benchScene';
 
 export interface BenchConfig {
   readonly id: string;
+  /** The spike kernel on a synthetic grid (default), or the app's GpuFlowSolver on the 130k asset. */
+  readonly solver?: 'spike' | 'production';
+  /** The spike's synthetic grid and its blocks (unused by the production solver). */
   readonly grid: { readonly ni: number; readonly nj: number };
   readonly blocks: { readonly bi: number; readonly bj: number };
+  /** The spike's tile; the production solver runs its default tile (reported in the result). */
   readonly tile: Tile;
+  /** The production solver's budget per frame, ms, in place of D4-2's solverBudgetMs (a probe). */
+  readonly budgetMs?: number;
+  /** The scene of a production run: the W0 bench scene (default) or the app's EngineView. */
+  readonly scene?: 'bench' | 'app';
   /** 'adaptive' = IterationScheduler at the 7 ms budget; a number = fixed per frame. */
   readonly iterations: 'adaptive' | number;
   readonly protocol: ProtocolTimes;
@@ -54,6 +71,7 @@ export interface AdapterReport {
 
 export interface ConfigResult {
   readonly id: string;
+  readonly solver: 'spike' | 'production';
   readonly cells: number;
   readonly grid: BenchConfig['grid'];
   readonly blocks: BenchConfig['blocks'];
@@ -122,6 +140,8 @@ export class BenchApp {
       optionalFeatures: 'all',
       requiredFeatures: ['timestamp-query'],
       maxLimits: ['maxComputeWorkgroupStorageSize', 'maxStorageBufferBindingSize', 'maxBufferSize'],
+      // the app's device request for the flow solver (D4-50)
+      preferredLimits: FLOW_SOLVER_LIMITS,
       onError: log.sink,
     });
     const renderer = await createRendererOnDevice({
@@ -152,6 +172,7 @@ export class BenchApp {
   }
 
   async run(config: BenchConfig, raf: (cb: (t: number) => void) => void): Promise<ConfigResult> {
+    if (config.solver === 'production') return this.runProduction(config, raf);
     const { device } = this;
     const { ni, nj } = config.grid;
     const nodes = makeNodes({ ni, nj, ...DOMAIN, wiggle: 0.25 });
@@ -276,6 +297,7 @@ export class BenchApp {
     const quantum = detectQuantumNs(ring.rawTimestamps());
     const result: ConfigResult = {
       id: config.id,
+      solver: 'spike',
       cells: layout.nCells,
       grid: config.grid,
       blocks: config.blocks,
@@ -301,6 +323,63 @@ export class BenchApp {
     resample.destroy();
     solver.destroy();
     return result;
+  }
+
+  /** P1 (D4-54): the app's GpuFlowSolver on the shipped 130k asset inside this scene. */
+  private runProduction(
+    config: BenchConfig,
+    raf: (cb: (t: number) => void) => void,
+  ): Promise<ConfigResult> {
+    const renderer = this.renderer;
+    return runProductionSolver({
+      device: this.device,
+      config,
+      raf,
+      size: this.size,
+      errors: () => this.log.reports,
+      scene: (flowTexture, isRun) => {
+        const scene = createBenchScene(renderer, {
+          flowA: flowTexture,
+          domain: DOMAIN,
+          particles: config.particles,
+          coreRows: 6,
+          bladesPerRow: 50,
+        });
+        let lastRender: number | null = null;
+        let lastCompute: number | null = null;
+        const runRenderMs: number[] = [];
+        const runComputeMs: number[] = [];
+        const keep = (into: number[], set: (ms: number) => void) => (ms: unknown) => {
+          if (typeof ms === 'number' && ms > 0 && Number.isFinite(ms)) {
+            set(ms);
+            if (isRun()) into.push(ms);
+          }
+        };
+        return {
+          render: (dtS) => {
+            scene.frame(dtS);
+            void renderer.resolveTimestampsAsync('render').then(
+              keep(runRenderMs, (ms) => {
+                lastRender = ms;
+              }),
+            );
+            void renderer.resolveTimestampsAsync('compute').then(
+              keep(runComputeMs, (ms) => {
+                lastCompute = ms;
+              }),
+            );
+          },
+          renderMs: () => lastRender,
+          flowVisualsMs: () => lastCompute,
+          triangles: scene.triangles,
+          runRenderMs,
+          runComputeMs,
+          dispose: () => {
+            scene.dispose();
+          },
+        };
+      },
+    });
   }
 
   async dispose(): Promise<void> {

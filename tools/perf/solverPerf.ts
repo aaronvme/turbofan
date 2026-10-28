@@ -48,7 +48,41 @@ export const median = (a: readonly number[]): number => {
  * pressure wave, and a compact hot fuel-air plume (z > 0 on part of the domain only, as in the
  * engine, so both of the gas model's branches run). Conserved values, NU per cell (the oracle's).
  */
-export function perfState(mesh: SolverMesh, ref: ReferenceState): Float64Array {
+export interface PerfAmplitudes {
+  /** Axial jet, m/s. */
+  readonly jet: number;
+  /** The plume's temperature rise, K. */
+  readonly dT: number;
+  /** Swirl, m/s. */
+  readonly swirl: number;
+  /** The plume's fuel-air ratio. */
+  readonly z: number;
+  /** The pressure wave's relative amplitude. */
+  readonly dp: number;
+  /** Radial velocity, m/s. */
+  readonly v: number;
+}
+
+/**
+ * The timing state's default amplitudes. Not a solution: with the engine's preconditioned tracking
+ * (the GpuFlowSolver default) it goes non-finite after about 150 iterations, on main's kernel too
+ * (so does a 0.1 % pressure wave at rest; the plain scheme keeps every such state finite: the
+ * handoff's finding, tools/perf/dawn.ts soak). Profiles and A/B runs re-set it well before that.
+ */
+export const PERF_AMPLITUDES: PerfAmplitudes = {
+  jet: 60,
+  dT: 300,
+  swirl: 20,
+  z: 0.025,
+  dp: 0.02,
+  v: 8,
+};
+
+export function perfState(
+  mesh: SolverMesh,
+  ref: ReferenceState,
+  amp: PerfAmplitudes = PERF_AMPLITUDES,
+): Float64Array {
   let x0 = Infinity;
   let x1 = -Infinity;
   let r1 = 0;
@@ -66,17 +100,17 @@ export function perfState(mesh: SolverMesh, ref: ReferenceState): Float64Array {
     const jet = Math.exp(-((rn / 0.3) ** 2));
     const d2 = ((xn - 0.6) / 0.2) ** 2 + (rn / 0.12) ** 2;
     const plume = d2 < 1 ? 1 - d2 : 0;
-    const t = ref.t + 450 * plume;
-    const p = ref.p * (1 + 0.02 * Math.cos(6 * Math.PI * xn) * jet);
+    const t = ref.t + amp.dT * plume;
+    const p = ref.p * (1 + amp.dp * Math.cos(6 * Math.PI * xn) * jet);
     const q = physicalToPrim(
       ref,
       {
         rho: p / (ref.r * t),
-        u: ref.u + 120 * jet,
-        v: 8 * Math.sin(2 * Math.PI * xn) * rn * jet,
-        w: 40 * jet * Math.exp(-(((xn - 0.45) / 0.1) ** 2)),
+        u: ref.u + amp.jet * jet,
+        v: amp.v * Math.sin(2 * Math.PI * xn) * rn * jet,
+        w: amp.swirl * jet * Math.exp(-(((xn - 0.45) / 0.1) ** 2)),
         p,
-        z: 0.025 * plume,
+        z: amp.z * plume,
       },
       r,
     );
