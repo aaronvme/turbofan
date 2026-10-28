@@ -100,21 +100,66 @@ export interface Settled extends GpuConvergence {
   /** The residual plateau used: stated per case, or detected (null: not reached). */
   readonly plateau: number | null;
   readonly detected: boolean;
-  /** The metric's largest relative change over the last SETTLE_WINDOW iterations. */
+  /**
+   * The metric's largest relative change over the last SETTLE_WINDOW iterations: the largest
+   * |m - m_end| / |m_end| over every sample of the window, not only its endpoints (W2S-A-I6).
+   */
   readonly change: number;
   readonly metric: readonly number[];
+  /** The metric samples (every 250 its) of the last SETTLE_WINDOW iterations, the last one last. */
+  readonly window: readonly (readonly number[])[];
   /** The plateau the detection rule sees at the end (also when a stated one was not reached). */
   readonly seen: number | null;
 }
 
-/** The detected plateau at `it`: the residual has stopped falling (see settle), else null. */
-function detect(hist: readonly { it: number; res: number }[], it: number): number | null {
+type Sample = { it: number; res: number; m: number[] };
+
+function windowOf(hist: readonly Sample[], it: number): number[][] {
+  return hist.filter((h) => h.it >= it - SETTLE_WINDOW && h.it <= it).map((h) => h.m);
+}
+
+/** The largest relative change of the metrics over the window ending at `it` (every sample). */
+function windowChange(hist: readonly Sample[], it: number): number {
+  if (hist.find((h) => h.it === it - SETTLE_WINDOW) === undefined) return NaN;
+  const win = windowOf(hist, it);
+  const end = win.at(-1) ?? [];
+  let worst = 0;
+  for (const m of win) {
+    end.forEach((v, k) => {
+      worst = Math.max(worst, Math.abs((m[k] ?? NaN) - v) / Math.max(Math.abs(v), 1e-300));
+    });
+  }
+  return worst;
+}
+
+/**
+ * D4-45's steadiness of a value row: the largest |value(m) - value(m_end)| over the window's
+ * samples (NaN for a run shorter than the window). A value is of record within a tenth of its
+ * tolerance.
+ */
+export function steadiness(c: Settled, value: (m: readonly number[]) => number): number {
+  const end = c.window.at(-1);
+  if (end === undefined || c.window.length < 2) return NaN;
+  const v = value(end);
+  return Math.max(...c.window.map((m) => Math.abs(value(m) - v)));
+}
+
+/** A residual that fell by less than this over SETTLE_WINDOW iterations has stopped (B-I5). */
+export const PLATEAU_FALL = 0.1;
+
+/**
+ * The detected plateau at `it`: the smallest residual of the last SETTLE_WINDOW iterations is at
+ * least (1 - PLATEAU_FALL) of that of the window before (it has stopped falling), else null.
+ */
+function detect(hist: readonly Sample[], it: number): number | null {
   if (it < 2 * SETTLE_WINDOW) return null;
   const recent = hist.filter((h) => h.it > it - SETTLE_WINDOW).map((h) => h.res);
   const before = hist
     .filter((h) => h.it > it - 2 * SETTLE_WINDOW && h.it <= it - SETTLE_WINDOW)
     .map((h) => h.res);
-  return Math.min(...recent) >= 0.5 * Math.min(...before) ? Math.max(...recent) : null;
+  return Math.min(...recent) >= (1 - PLATEAU_FALL) * Math.min(...before)
+    ? Math.max(...recent)
+    : null;
 }
 
 /**
@@ -122,8 +167,9 @@ function detect(hist: readonly { it: number; res: number }[], it: number): numbe
  * its f32 plateau and every accuracy metric changes by less than 1e-4 relative over the last 2000
  * iterations. The plateau is stated per case (L4a 4e-5, L5 1.7e-4: the oracle's converged state
  * rounded to f32), or, for a case without one, detected: the smallest residual of the last 2000
- * iterations is no less than half that of the 2000 before (it has stopped falling). The metric is
- * evaluated every 250 iterations on the oracle shell.
+ * iterations is at least 90 % of that of the 2000 before (it has stopped falling). The metric is
+ * evaluated every 250 iterations on the oracle shell, and its change is the largest over every
+ * sample of the window (W2S-A-I6, W2S-B-N6).
  */
 export async function settle(
   g: GpuSolver,
@@ -134,7 +180,7 @@ export async function settle(
   g.iterate(1);
   let first = await g.readResidual();
   let it = 1;
-  const hist: { it: number; res: number; m: number[] }[] = [];
+  const hist: Sample[] = [];
   let last = first;
   while (it < opts.max) {
     g.iterate(CHUNK - (it % CHUNK));
@@ -145,11 +191,8 @@ export async function settle(
     await back(g, s);
     const m = metric();
     hist.push({ it, res: last / first, m });
-    const old = hist.find((h) => h.it === it - SETTLE_WINDOW);
-    if (old === undefined) continue;
-    const change = Math.max(
-      ...m.map((v, k) => Math.abs(v - (old.m[k] ?? NaN)) / Math.max(Math.abs(v), 1e-300)),
-    );
+    const change = windowChange(hist, it);
+    if (Number.isNaN(change)) continue;
     let plateau: number | null = null;
     let detected = false;
     const seen = detect(hist, it);
@@ -170,16 +213,13 @@ export async function settle(
         detected,
         change,
         metric,
+        window: windowOf(hist, it),
         seen,
       };
     }
   }
   const lastM = hist.at(-1)?.m ?? [];
-  const old = hist.find((h) => h.it === (hist.at(-1)?.it ?? 0) - SETTLE_WINDOW);
-  const change =
-    old === undefined
-      ? NaN
-      : Math.max(...lastM.map((v, k) => Math.abs(v - (old.m[k] ?? NaN)) / Math.abs(v)));
+  const end = hist.at(-1)?.it ?? 0;
   return {
     iterations: it,
     first,
@@ -187,9 +227,10 @@ export async function settle(
     converged: false,
     plateau: null,
     detected: false,
-    change,
+    change: windowChange(hist, end),
     metric: lastM,
-    seen: detect(hist, hist.at(-1)?.it ?? 0),
+    window: windowOf(hist, end),
+    seen: detect(hist, end),
   };
 }
 
@@ -197,8 +238,8 @@ export async function settle(
 export function settleRow(id: string, c: Settled, max: number): LadderRow {
   const plateau =
     c.plateau === null
-      ? `not reached (${c.seen === null ? 'still falling' : `it stopped falling at ${c.seen.toExponential(2)}`})`
-      : `${c.plateau.toExponential(2)}${c.detected ? ' (detected)' : ''}`;
+      ? `not reached (${c.seen === null ? 'still falling' : `it fell < 10 % per ${SETTLE_WINDOW} its at ${c.seen.toExponential(2)}`})`
+      : `${c.plateau.toExponential(2)}${c.detected ? ' (detected: fell < 10 % per 2000 its)' : ''}`;
   return {
     id,
     metric: `GPU iterations to the D4-38 rule (residual ${(c.last / c.first).toExponential(2)} of the first, plateau ${plateau}; metric change over ${SETTLE_WINDOW} its ${c.change.toExponential(2)})`,

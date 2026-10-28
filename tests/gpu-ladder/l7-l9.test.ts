@@ -16,11 +16,28 @@ import { ENGINE_PRECONDITIONING, SINK, sinkCase } from '../ladder/oracle';
 import { pOverP0, tOverT0 } from '../ladder/theory';
 import { BC, gridBlock, polarMesh, rectangle, singleBlock, solverMesh } from '../unit/flow/helpers';
 import { GpuErrorLog, solverDevice } from '../gpu/helpers/solver';
-import { back, convergeGpu, onGpu, report, settle, settleRow } from './helpers';
+import { back, convergeGpu, onGpu, report, settle, settleRow, steadiness } from './helpers';
 
 const GAMMA = 1.4;
 const RGAS = 287.05287;
 const MAX = 20000;
+/**
+ * D4-45: L8's and L9's caps scale with the CFL, pseudo-time iterations going as 1/CFL: 20000 x
+ * 1.5 / 0.8 = 37500. Their value rows are of record only when steady: within a tenth of the
+ * tolerance over the last 2000 iterations.
+ */
+const MAX_D445 = (MAX * 1.5) / 0.8;
+
+/** A value row under D4-45: below the tolerance and steady to a tenth of it. */
+function valueRow(id: string, metric: string, tol: number, value: number, spread: number) {
+  return {
+    id,
+    metric: `${metric} (D4-45: it moved ${spread.toExponential(2)} over the last 2000 its, steady if <= ${(tol / 10).toExponential(1)})`,
+    threshold: `< ${tol}, steady`,
+    value,
+    pass: value < tol && spread <= tol / 10,
+  };
+}
 
 describe('GPU ladder L7-L9', () => {
   const log = new GpuErrorLog();
@@ -166,21 +183,21 @@ describe('GPU ladder L7-L9', () => {
     };
     const g = await onGpu(sim.device, s, options, { cellSource: true });
     g.setCellSource({ kMass, damping });
-    const conv = await settle(g, s, metric, { max: MAX });
+    const conv = await settle(g, s, metric, { max: MAX_D445 });
     await back(g, s);
     g.destroy();
     const [worst = NaN] = metric();
     report(
       'L8',
       [
-        {
-          id: 'L8',
-          metric: 'GPU max | |u| / (mdot / (4 pi r^2 rho)) - 1 |, 0.2-1 m',
-          threshold: `< ${L8.maxVelocityRelativeError.value}`,
-          value: worst,
-          pass: worst < L8.maxVelocityRelativeError.value,
-        },
-        { ...settleRow('L8', conv, MAX), pass: 'reported' },
+        valueRow(
+          'L8',
+          'GPU max | |u| / (mdot / (4 pi r^2 rho)) - 1 |, 0.2-1 m',
+          L8.maxVelocityRelativeError.value,
+          worst,
+          steadiness(conv, (m) => m[0] ?? NaN),
+        ),
+        { ...settleRow('L8', conv, MAX_D445), pass: 'reported' },
       ],
       { conv },
     );
@@ -249,18 +266,20 @@ describe('GPU ladder L7-L9', () => {
     await back(g, s);
     g.destroy();
     const [dh0 = NaN, euler = NaN] = metric();
+    const work = (m: readonly number[]) =>
+      Math.abs((m[0] ?? NaN) - (m[1] ?? NaN)) / Math.abs(m[1] ?? NaN);
     const err = Math.abs(dh0 - euler) / Math.abs(euler);
     report(
       'L9a',
       [
-        {
-          id: 'L9',
-          metric: 'GPU Euler work: |Delta T0 - Omega Delta(r u_theta)/cp| relative',
-          threshold: `< ${L9.maxEulerWorkRelativeError.value}`,
-          value: err,
-          pass: err < L9.maxEulerWorkRelativeError.value,
-        },
-        { ...settleRow('L9', conv, MAX), pass: 'reported' },
+        valueRow(
+          'L9',
+          'GPU Euler work: |Delta T0 - Omega Delta(r u_theta)/cp| relative',
+          L9.maxEulerWorkRelativeError.value,
+          err,
+          steadiness(conv, work),
+        ),
+        { ...settleRow('L9', conv, MAX_D445), pass: 'reported' },
       ],
       { conv },
     );
@@ -325,18 +344,19 @@ describe('GPU ladder L7-L9', () => {
     await back(g, s);
     g.destroy();
     const [uDisk = NaN] = metric();
-    const err = Math.abs(uDisk / (u * (1 + a)) - 1);
+    const disk = (m: readonly number[]) => Math.abs((m[0] ?? NaN) / (u * (1 + a)) - 1);
+    const err = disk([uDisk]);
     report(
       'L9b',
       [
-        {
-          id: 'L9',
-          metric: 'GPU actuator disk: disk velocity vs momentum theory u_inf (1 + a)',
-          threshold: `< ${L9.maxMomentumTheoryRelativeError.value}`,
-          value: err,
-          pass: err < L9.maxMomentumTheoryRelativeError.value,
-        },
-        { ...settleRow('L9', conv, MAX), pass: 'reported' },
+        valueRow(
+          'L9',
+          'GPU actuator disk: disk velocity vs momentum theory u_inf (1 + a)',
+          L9.maxMomentumTheoryRelativeError.value,
+          err,
+          steadiness(conv, disk),
+        ),
+        { ...settleRow('L9', conv, MAX_D445), pass: 'reported' },
       ],
       { conv },
     );
