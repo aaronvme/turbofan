@@ -206,6 +206,11 @@ export class ReferenceSolver {
     this.setBlockage(this.blockage);
   }
 
+  /** The tracking mode's CFL: the option, or the default of section 10 for the scheme in use. */
+  get trackingCfl(): number {
+    return this.cfl;
+  }
+
   /** Sets the blockage field (per cell, in (0, 1]) and the b-weighted face-vector sums. */
   setBlockage(b: ArrayLike<number>): void {
     const m = this.mesh;

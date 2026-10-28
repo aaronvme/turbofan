@@ -7,7 +7,7 @@ import { ReferenceSolver } from '../../../src/flow/reference/solver';
 import type { SourceModel } from '../../../src/flow/reference/sources';
 import { NP } from '../../../src/flow/reference/state';
 import { BC, gridBlock, singleBlock, solverMesh } from '../../unit/flow/helpers';
-import { converge, graded } from '../common';
+import { STEADY_WINDOW, converge, graded, scaledCap, steadyWindow } from '../common';
 
 const GAMMA = 1.4;
 const RGAS = 287.05287;
@@ -56,36 +56,60 @@ export function run() {
     sources: force,
   });
   s.setUniform({ rho: s.ref.rho, u, v: 0, w: 0, p: 1e5, z: 0 });
-  const conv = converge(s, 1e-5, 20000, 'peak');
-  const P = s.primitives();
-  let vol = 0;
-  let ux = 0;
-  for (const c of diskCells) {
-    const v = mesh.cellVolR[c] ?? NaN;
-    vol += v;
-    ux += v * (P[NP * c + 1] ?? NaN);
-  }
-  const uDisk = ux / vol;
+  // D4-45: the cap scales as 1.5 / CFL (plain tracking at the default 1.5 keeps 20000)
+  const cap = scaledCap(20000, s.trackingCfl);
+  const conv = converge(s, 1e-5, cap, 'peak');
   const a = (-1 + Math.sqrt(1 + CT)) / 2;
-  const err = Math.abs(uDisk / (u * (1 + a)) - 1);
+  const measure = () => {
+    const P = s.primitives();
+    let vol = 0;
+    let ux = 0;
+    for (const c of diskCells) {
+      const v = mesh.cellVolR[c] ?? NaN;
+      vol += v;
+      ux += v * (P[NP * c + 1] ?? NaN);
+    }
+    const uDisk = ux / vol;
+    return { uDisk, err: Math.abs(uDisk / (u * (1 + a)) - 1) };
+  };
+  // D4-45: the row is read at the end of a 2000-iteration steadiness window
+  const steady = steadyWindow(s, () => measure().err);
+  const { uDisk, err } = measure();
+  const tol = L9.maxMomentumTheoryRelativeError.value;
   return {
     id: 'L9b',
     rows: [
       {
         id: 'L9',
         metric: 'actuator disk: disk velocity vs momentum theory u_inf (1 + a)',
-        threshold: `< ${L9.maxMomentumTheoryRelativeError.value}`,
+        threshold: `< ${tol}, and steady (next row)`,
         value: err,
-        pass: err < L9.maxMomentumTheoryRelativeError.value,
+        pass: err < tol && steady.spread <= tol / 10,
       },
       {
         id: 'L9',
-        metric: 'actuator-disk case: iterations to converge to 1e-5',
-        threshold: '<= 20000',
+        metric: `D4-45 steadiness: momentum-theory error max - min over the last ${STEADY_WINDOW} iterations`,
+        threshold: `<= ${tol / 10}`,
+        value: steady.spread,
+        pass: steady.spread <= tol / 10,
+      },
+      {
+        id: 'L9',
+        metric: 'actuator-disk case: iterations to converge to 1e-5 (cap 20000 x 1.5 / CFL, D4-45)',
+        threshold: `<= ${cap}`,
         value: conv.iterations,
         pass: conv.converged,
       },
     ],
-    extra: { conv, uDisk, uInf: u, a, cells: mesh.nCells, diskCells: diskCells.length },
+    extra: {
+      conv,
+      cap,
+      steady,
+      uDisk,
+      uInf: u,
+      a,
+      cells: mesh.nCells,
+      diskCells: diskCells.length,
+    },
   };
 }
