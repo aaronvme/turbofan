@@ -2739,3 +2739,114 @@ None.
     - B-N11/N12;
     - the skipped nits;
     - D4-54's performance round: 2.09-2.4 ms/it indicative, where P1 needs ≥ 150 it/s inside the 5 ms budget, then an official measurement.
+
+## Critic pass 9: w2/reference @0c87da8 (PARTIAL: STOP-CLEAN)
+
+**PARTIAL.** I stopped on the orchestrator's STOP-CLEAN. Checked: the tip gates, the tip ladder, pre-registration, the β/M_ref analysis (independent probe), the D4-44 code, R and J, D4-45/56/57/58/59, D4-48, the kernel-impact list, and the trial merge's typecheck, lint, mesh, unit suite, test:gpu and test:gpu-ladder. **Not done:** the merged `test:ladder`; merged coverage numbers (vitest wrote no report because a test failed); mutant M3 (killed mid-run); the ECC checklists in full (the typescript-reviewer and pr-test-analyzer points below come from my own reading). The trial merge was aborted. My worktree is at c661d5c, and the builder's tracked files are unchanged at 0c87da8.
+
+I reviewed `4553ce2..0c87da8` (rounds 6-8) against main c661d5c on 2026-10-28. New probes:
+- `w2r-acoustic-beta.probe.ts.txt`: the pass-8 von Neumann probe with the face β passed to `slau2Flux`;
+- `w2r-jet-cfl.probe.ts.txt`: J at a stated CFL, with the cap scaled as 0.8/CFL;
+- `w2r-rest-uniform.probe.ts.txt`: R with and without blockage, before and after D4-44.
+
+**Gates at the tip, run in the builder worktree** (quiet apart from the other builder's GPU work):
+- typecheck and lint: clean.
+- `npm test`: 84 files, 1735 passed + 11 expected fail (323 s).
+- `npm run coverage`: lines 99.58 %, statements 98.70 %, functions 99.62 %, branches 88.07 %. `src/flow/reference` is at lines 100 %, branches 88.75 %.
+- `test:mesh`: 29 passed.
+- `test:ladder`: 11 files passed, 3 failed (840 s). L8, L9a and L9b fail on their convergence rows, and L9a also on its D4-57 steadiness row (1.062e-5 against 1e-5). L7 passed: asymmetry 0.0131 falling (0.135 / 0.044 / 0.013), Cd 0.00159, ratio 1.048.
+- Values: L8 0.449 % with a spread of 1.96e-5; L9b 0.80 % with a spread of 2.5e-5; every 12.2 storage row passes; the floor rows give 1.590e-4 / 1.096e-3, and f64 6.4e-13 / 5.9e-12. The handoff's L7 child timeout did not recur here (W2R-N15).
+- The handoff's "coverage NOT VERIFIED / test:mesh NOT RUN" are now verified, and they match the orchestrator's run.
+
+**Trial merge (w2/reference into c661d5c, --no-ff --no-commit, then aborted).**
+- The merge is clean, and so are typecheck and lint. `npm run mesh` ran.
+- `npm run coverage`: **1 failed** | 1900 passed | 11 expected fail. `test:mesh`: 29 passed.
+- **`test:gpu`: 5 failed | 52 passed | 1 expected fail** (main: 57 + 1). The 5 failures:
+  - `forms.test.ts` "14.3-14.5 SLAU2 values (machCut 0.003)": 3.0e-3;
+  - `oracle.test.ts` C-pre: e_q 1.5e-2 after 1 iteration, against 1e-5;
+  - S: 3.0e-2 after 10, against 1e-4;
+  - the two preconditioned `oracle-moving.test.ts` rows: 3.0e-5 and 6.2e-5 after 1, against 1e-5.
+- The cause is D4-44 alone. With the oracle's one `mRef` line set back to the face Mach, the three files give 20 passed + 1 expected fail. The unit failure is `tests/unit/flow/f32forms.test.ts` (14.3-14.5), whose TS gauge form keeps the face-Mach M_ref.
+- `test:gpu-ladder`: 12 passed (346 s). Its references are analytic, and the GPU L7/L8 values match the oracle's to 4 digits.
+- **So the merged tree's GPU tests do NOT pass against the new oracle.**
+
+**Pre-registration: honest. The outcomes follow the rules.**
+- D4-36: the rule went into SOLVER.md 6 at eacef07 (10-27 20:07:24). The trial trees were made at 20:07:36, and every trial ladder ran 23:04-23:49. The rule text is unchanged afterwards. Neither variant is adopted (L8 28.3 % / 32.7 %; W2R-6 0 and 2 of 3).
+- D4-44: the rule went into SOLVER.md 10 at 37b4d5c (19:33:11), before the (a) code (d9ca099) and the (a) runs (19:37-19:38). The pre-D4-44 baselines it quotes ran just before it, and the thresholds are the generic ones.
+- D4-59: the rule went in at 1c5319a (00:30:21). The driver (00:31:25) and every r8/trialM output (from 00:31:44) came after it. The text is D4-59's plus two stricter readings: L7 at max(M∞, 0.02), and L8 with its steadiness rule.
+- R fails rule 2 (4.35e-4, in `r8/R_02.log`), so 0.003 stays. That is correct.
+
+**The β/M_ref analysis: correct.**
+- My probe reproduces all 25 values of SOLVER.md 10's D4-44 table: the matched family, minimum 0.972 at rest at β = M_cut. So CFL 0.8 holds over β 0.003-0.6, with M0 ≤ β.
+- It also reproduces the pre-D4-44 row, except 0.449 against SOLVER's 0.447 at β/M_ref 0.1 (W2R-N17).
+
+**M_ref from the face's β is implemented as §7 says, ghosts included.**
+- `solver.ts:516-518` sets β = √β² per cell, and a ghost takes `ghostSrc`'s β. `solver.ts:611` forms ½(β_L + β_R), which `slau2.ts:104` uses.
+- β is frozen at stage 1 (`computeLocalDt` at k = 0), and `residual()`, `faceFlux()` and `residualFluxScale()` re-evaluate it.
+- Physical time and machCut ≥ 1 give M_ref = 1.
+- Mutants (partial): ghost β left at 1 is killed by `solver.test.ts` "hold their steady state without preconditioning". **Ghost β = cell 0's β survives the flow unit suite** (W2R-I10).
+
+### Blocking
+- **W2R-B2: merged alone, the reference turns main's `test:gpu` (5 tests) and `npm test` (`f32forms.test.ts` 14.3-14.5) red.**
+  - Main's kernel and its f32 forms implement the pre-D4-44 M_ref: `src/flow/gpu/wgsl/flux.ts:120`, `tests/unit/flow/f32forms.test.ts:99`.
+  - The reference itself is right: D4-44 says "the kernel follows".
+  - Fix (orchestrator's choice, question dd):
+    - (1) preferred: the solver's D4-44 round (W2R-I13) is built on w2/reference, and the two merge together. That keeps D4-35's rule (one scheme, the kernel's).
+    - (2) merge now with the 6 rows re-pinned KNOWN-FAIL citing D4-44. Main then carries an oracle that differs from the kernel.
+
+### Important
+- **W2R-I9: the R/J pins cannot see a divergence.**
+  - `precondition.test.ts:447-500` asserts only `conv.converged`. `converge` returns `converged: false` on NaN (`common.ts:59`), and `it.fails` also passes on a throw or a timeout.
+  - So a regression into the very instability D4-44 targets would still be "expected fail".
+  - Fix: a passing companion per case that asserts the known signature (finite; R ≤ 1e-3 and J ≤ 1 of the peak at 20000), with `it.fails` only on convergence.
+- **W2R-I10: R cannot test D4-44, because it is W2R-6's blockage duct under the sharp limiter.**
+  - My probe of R with b ≡ 1 converges: 1174 iterations at the tip, 972 before D4-44. R as specified gives 4.19e-4 at the tip and 7.5e-5 before.
+  - Fix:
+    - add b ≡ 1 R as a plain test, which guards the start-from-rest regime;
+    - keep R pinned as the limiter case;
+    - add a multi-block preconditioned test with a β jump across an interface or boundary, to kill the ghost-β mutant above.
+- **W2R-I11: D4-48 is a normalisation only, but at the kept 1e-3 it makes rows B and E unable to fail.**
+  - r_flux/r_ref is 3.9e4 on E-L5 (1.05e-3 against 2.67e-8 in my merged test:gpu) and 2.7e3 on E-L9a. On B (the GCL defect) it is larger still.
+  - So E-L5 passes a GPU residual 39× the oracle's.
+  - Question (ee): give the new metric its own tolerance from 12.2's f32 basis (about 1e-6 per iteration; measured 2.7e-8 / 2.5e-12). That would be a tightening, so it is the orchestrator's decision.
+- **W2R-I12: J's stall does not depend on the CFL, so it is semi-discrete. D4-44's step analysis and option (b) cannot reach it.**
+  - My sweep at M_cut 0.003, with the cap at 20000 × 0.8/CFL, gives residual/peak in the last quarter of:
+    - CFL 0.8: 0.016-0.32;
+    - 0.4: 0.076-0.40;
+    - 0.2: 0.095-0.32;
+    - 0.1 (160000 its): 0.085-0.33.
+  - A frozen-face estimate (dead-air cell β = M_cut, jet cell β 0.05, face ½(β_L + β_R)) puts the dead-air cell at β/M_ref 0.113, with a 1D limit of 0.468. It gives 0.672 / 0.808 / 0.980 at M_cut 0.01 / 0.02 / 0.05, the same order as J's outcomes. But CFL 0.1-0.2 is well inside 0.468 and J still stalls. So the cause is the β jump in the semi-discrete preconditioned operator, not the step.
+  - Option (b) also used the cell's β, so it never saw the face mismatch.
+  - Next round (W2R-I8): a power iteration about J's mean state, as in N13, or a 1D two-zone β-jump eigen-analysis.
+- **Kernel impact, for the next solver round:**
+  - **W2R-I13: M_ref from ½(β_L + β_R) in WGSL** (`flux.ts:120`; the calls at `kernels.ts:337, 743`).
+    - Today β² is computed in the stage kernel after the fluxes (`kernels.ts:467-476`, stored in U_B.w).
+    - D4-44 needs β at stage 1 before the fluxes, for the tile, its halo and ghosts. A ghost's β is its source cell's, and that cell's Δp term needs neighbours outside the tile.
+    - So: a β pass plus a ghost copy before the stage kernel. That weighs on D4-50's buffer count and D4-54's 1.6 ms/it.
+    - Tests: `forms.test.ts:170` and `f32forms.test.ts:94-100, 212` pass betaFace. C-pre, S and the two moving rows must then pass against the new oracle.
+  - **W2R-I14: D4-58.** `tests/gpu-ladder/ladder.test.ts:46` `PLATEAU {4e-5, 1.7e-4}` should import `GPU_CONVERGENCE_FLOOR` (1.6e-4 / 1.1e-3). Restate the KNOWN-FAIL comments (`:389-390, 454`) with the gap.
+  - **W2R-I15: D4-48.** `tests/gpu/oracle.test.ts:108-133`'s private, single-block `fluxScaleError` should become `ref.residualFluxScale()`. Make E's residual rows the 12.2 form, retire the `it.fails` at `:358`, and give B (`ladder.test.ts:177`) its residual check.
+  - **W2R-I16: D4-45/D4-56.**
+    - `tests/gpu-ladder/helpers.ts:140` uses max|v − v_end|. That is up to 2× looser than the oracle's max − min (`tests/ladder/common.ts`).
+    - The GPU window sits before the stop; the oracle's is the 2000 iterations after it.
+    - `l7-l9.test.ts:24-29` and the L9 labels at `:282, :359` say 37500 for L9, which runs to 20000.
+  - p_u: nothing on the GPU side references it. The adapter default stays 0.003 (D4-59).
+
+### Nits
+- **W2R-N15.** `l7.ts:27`: 8 µs per cell-iteration (1.7×) failed L7 under the round-8 load and passed in my quiet run. Use about 3×, or a child heartbeat.
+- **W2R-N16.** D4-44 (c)'s "≤ 1e-5 for 50 iterations" let J at 0.02 "converge" at 9441, then rebound to 9.9e-5. Future pre-stated rules should use D4-45's 2000-iteration window.
+- **W2R-N17.** SOLVER.md 10, pre-D4-44 row at 0.1: 0.447 against the probe's 0.449. Name the source per value.
+- **W2R-N18.** SOLVER.md 7's code order omits `slau2.ts:104`'s `machCut >= 1 ? 1 :` guard. It is bitwise neutral, but the kernel copies the code order.
+- **W2R-N19.** `reports/scratch/trialM/node_modules` is a junction to the worktree's `node_modules`. Remove it with `rmdir` (not a recursive delete) before anyone cleans `reports/scratch`.
+
+**Verdict w2/reference @0c87da8: FIX FIRST, for W2R-B2 only (merge order).**
+- The reference's own content is otherwise merge-ready: the rules are pre-registered and followed, and the analysis and D4-44 match SOLVER.md.
+- It merges together with the solver's D4-44 round (W2R-I13..I16), or after the orchestrator's decision (dd).
+- I9-I12 can go to the next reference round.
+- The pass-8 items are done: I5 (p_u deleted; no references left), I6 (D4-44), I7 (D4-45), N4 and N7-N14 (N14: 60 s / 600 s timeouts with reasons).
+- **Owed on resumption:** the merged `test:ladder`, mutant M3, and merged coverage numbers once B2 is resolved.
+- **Orchestrator questions:**
+  - (dd) the D4-44 merge order;
+  - (ee) a tolerance for D4-48's flux-scale form;
+  - (ff) confirm 0.003 under D4-59. I agree; also move R to the limiter work and use b ≡ 1 R for M_cut rules;
+  - (gg) J's next step, the semi-discrete β-jump analysis (W2R-I12).
