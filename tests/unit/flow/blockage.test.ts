@@ -100,18 +100,25 @@ function drift(
 // and far below the measured growth (8e-3 to 1e-2: the mode saturates at about 1 % of the state).
 const STAY = 1e-8;
 
+/**
+ * The timeout of these tests (W2R-N14's rule): the three set-ups take 3 x 8000 iterations, about 30 s
+ * alone, and exceeded 120 s once under coverage instrumentation beside two CPU ladders. 600 s is
+ * 20x the unloaded time.
+ */
+const ITERATING = 600_000;
+
 describe('W2R-6: the plain scheme about a steady state with blockage', () => {
   it('the preconditioned steady states of the three set-ups converge to 1e-11', () => {
     expect(steady(open, 0.94).converged).toBe(true);
     expect(steady(blocked, 0.998).converged).toBe(true);
     expect(steady(blocked, 0.94).converged).toBe(true);
-  }, 120_000);
+  }, ITERATING);
 
   it('control, b = 1: the plain scheme stays at its steady state in both modes', () => {
     const U0 = steady(open, 0.94).U;
     expect(drift(open, 0.94, U0, 'tracking', 1000)).toBeLessThan(STAY);
     expect(drift(open, 0.94, U0, 'physical', 2000)).toBeLessThan(STAY);
-  }, 120_000);
+  }, ITERATING);
 
   it.fails(
     'KNOWN-FAIL W2R-6 (D4-29): plain tracking leaves the steady state of a blockage duct ' +
@@ -120,7 +127,7 @@ describe('W2R-6: the plain scheme about a steady state with blockage', () => {
       const U0 = steady(blocked, 0.998).U;
       expect(drift(blocked, 0.998, U0, 'tracking', 1000)).toBeLessThan(STAY);
     },
-    120_000,
+    ITERATING,
   );
 
   it.fails(
@@ -130,7 +137,7 @@ describe('W2R-6: the plain scheme about a steady state with blockage', () => {
       const U0 = steady(blocked, 0.998).U;
       expect(drift(blocked, 0.998, U0, 'physical', 1000)).toBeLessThan(STAY);
     },
-    120_000,
+    ITERATING,
   );
 
   it.fails(
@@ -140,7 +147,7 @@ describe('W2R-6: the plain scheme about a steady state with blockage', () => {
       const U0 = steady(blocked, 0.94).U;
       expect(drift(blocked, 0.94, U0, 'physical', 2000)).toBeLessThan(STAY);
     },
-    120_000,
+    ITERATING,
   );
 });
 
