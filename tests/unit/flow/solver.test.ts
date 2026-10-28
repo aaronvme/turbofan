@@ -14,6 +14,14 @@ import { BC, gridBlock, rectangle, singleBlock, solverMesh, threeBlockRow } from
 
 const AMBIENT = { pressure: 101325, temperature: 288.15, velocity: 0 } as const;
 
+/**
+ * W2R-N14: the timeout of the tests that iterate the solver. The annulus (300 iterations of 256
+ * cells) takes 2.9 s alone and took 9.4 s on a loaded merge tree against vitest's default 5 s; the
+ * others are shorter. 60 s is 20x the unloaded time, so only a hang or a slowdown of that order
+ * fails on time.
+ */
+const ITERATING = 60_000;
+
 const allBcs = threeBlockRow(0.2, 0.15, 6, 5, {
   left: BC.INFLOW,
   right: BC.OUTFLOW,
@@ -90,55 +98,71 @@ describe('solver mesh', () => {
 });
 
 describe('reference solver: exactness', () => {
-  it('keeps the quiescent ambient exactly (bitwise) with every BC, both modes', () => {
-    const s = new ReferenceSolver(solverMesh(allBcs), {
-      gas: THERMALLY_PERFECT,
-      freeStream: AMBIENT,
-    });
-    const R = s.residual();
-    expect(R.every((v) => v === 0)).toBe(true);
-    s.iterate(3);
-    s.stepPhysical();
-    expect(s.U.every((v) => v === 0)).toBe(true);
-    expect(s.stats.residualDensityL2).toBe(0);
-  });
+  it(
+    'keeps the quiescent ambient exactly (bitwise) with every BC, both modes',
+    () => {
+      const s = new ReferenceSolver(solverMesh(allBcs), {
+        gas: THERMALLY_PERFECT,
+        freeStream: AMBIENT,
+      });
+      const R = s.residual();
+      expect(R.every((v) => v === 0)).toBe(true);
+      s.iterate(3);
+      s.stepPhysical();
+      expect(s.U.every((v) => v === 0)).toBe(true);
+      expect(s.stats.residualDensityL2).toBe(0);
+    },
+    ITERATING,
+  );
 
-  it('preserves a uniform M 0.5 stream on the curvilinear axisymmetric mesh (GCL)', () => {
-    const fs = { pressure: 101325, temperature: 288.15, velocity: 0.5 * 340.29 };
-    const s = new ReferenceSolver(solverMesh(allBcs), { gas: THERMALLY_PERFECT, freeStream: fs });
-    s.setUniform({ rho: s.ref.rho, u: fs.velocity, v: 0, w: 0, p: fs.pressure, z: 0 });
-    s.iterate(20);
-    const P = s.primitives();
-    let du = 0;
-    let dp = 0;
-    for (let c = 0; c < s.mesh.nCells; c++) {
-      du = Math.max(du, Math.abs((P[NP * c + 1] ?? 0) - fs.velocity), Math.abs(P[NP * c + 2] ?? 0));
-      dp = Math.max(dp, Math.abs(P[NP * c + 4] ?? 0));
-    }
-    expect(du).toBeLessThan(1e-9);
-    expect(dp).toBeLessThan(1e-6);
-  });
+  it(
+    'preserves a uniform M 0.5 stream on the curvilinear axisymmetric mesh (GCL)',
+    () => {
+      const fs = { pressure: 101325, temperature: 288.15, velocity: 0.5 * 340.29 };
+      const s = new ReferenceSolver(solverMesh(allBcs), { gas: THERMALLY_PERFECT, freeStream: fs });
+      s.setUniform({ rho: s.ref.rho, u: fs.velocity, v: 0, w: 0, p: fs.pressure, z: 0 });
+      s.iterate(20);
+      const P = s.primitives();
+      let du = 0;
+      let dp = 0;
+      for (let c = 0; c < s.mesh.nCells; c++) {
+        du = Math.max(
+          du,
+          Math.abs((P[NP * c + 1] ?? 0) - fs.velocity),
+          Math.abs(P[NP * c + 2] ?? 0),
+        );
+        dp = Math.max(dp, Math.abs(P[NP * c + 4] ?? 0));
+      }
+      expect(du).toBeLessThan(1e-9);
+      expect(dp).toBeLessThan(1e-6);
+    },
+    ITERATING,
+  );
 
-  it('balances a uniform pressure exactly against a varying blockage (p grad b term)', () => {
-    const s = new ReferenceSolver(solverMesh(closed), {
-      gas: THERMALLY_PERFECT,
-      freeStream: AMBIENT,
-    });
-    const b = new Float64Array(s.mesh.nCells);
-    for (let c = 0; c < b.length; c++) {
-      const x = s.mesh.cellX[c] ?? 0;
-      const r = s.mesh.cellR[c] ?? 0;
-      b[c] = 1 - 0.3 * Math.exp(-((x - 0.3) ** 2) / 0.004) * (1 + r);
-    }
-    s.setBlockage(b);
-    s.setUniform({ rho: 1.3, u: 0, v: 0, w: 0, p: 1.3e5, z: 0 });
-    s.iterate(10);
-    const P = s.primitives();
-    for (let c = 0; c < s.mesh.nCells; c++) {
-      expect(Math.abs(P[NP * c + 1] ?? NaN)).toBeLessThan(1e-9);
-      expect(Math.abs(P[NP * c + 2] ?? NaN)).toBeLessThan(1e-9);
-    }
-  });
+  it(
+    'balances a uniform pressure exactly against a varying blockage (p grad b term)',
+    () => {
+      const s = new ReferenceSolver(solverMesh(closed), {
+        gas: THERMALLY_PERFECT,
+        freeStream: AMBIENT,
+      });
+      const b = new Float64Array(s.mesh.nCells);
+      for (let c = 0; c < b.length; c++) {
+        const x = s.mesh.cellX[c] ?? 0;
+        const r = s.mesh.cellR[c] ?? 0;
+        b[c] = 1 - 0.3 * Math.exp(-((x - 0.3) ** 2) / 0.004) * (1 + r);
+      }
+      s.setBlockage(b);
+      s.setUniform({ rho: 1.3, u: 0, v: 0, w: 0, p: 1.3e5, z: 0 });
+      s.iterate(10);
+      const P = s.primitives();
+      for (let c = 0; c < s.mesh.nCells; c++) {
+        expect(Math.abs(P[NP * c + 1] ?? NaN)).toBeLessThan(1e-9);
+        expect(Math.abs(P[NP * c + 2] ?? NaN)).toBeLessThan(1e-9);
+      }
+    },
+    ITERATING,
+  );
 });
 
 // D4-48 (SOLVER.md 12.2, rows B and E): the residual check divides by the flux scale, the density
@@ -173,102 +197,114 @@ describe('reference solver: the residual flux scale', () => {
     return Math.sqrt(s2 / m.nCells);
   }
 
-  it('is the face-by-face sum over every block, bounds the residual, and is 0 at rest', () => {
-    for (const pre of [undefined, { minMach: 0.003 }]) {
-      const s = new ReferenceSolver(solverMesh(allBcs), {
-        gas: THERMALLY_PERFECT,
-        freeStream: AMBIENT,
-        ...(pre === undefined ? {} : { lowMachPreconditioning: pre }),
-      });
-      expect(s.residualFluxScale()).toBe(0);
-      s.setState((x, r) => pulse(x, r));
-      s.setBlockage(Float64Array.from(s.mesh.cellX, (x) => 1 - 0.2 * Math.exp(-(x ** 2) / 0.01)));
-      // the plain run iterates (a state of the scheme); the preconditioned one is taken at the pulse
-      if (pre === undefined) s.iterate(2);
-      const scale = s.residualFluxScale();
-      expect(scale).toBeGreaterThan(0);
-      expect(Math.abs(scale - bruteForce(s)) / scale).toBeLessThan(1e-14);
-      // without volume sources |sum_f F| <= sum_f |F| per cell (the blockage source has no mass)
-      const R = s.residual();
-      let r2 = 0;
-      for (let c = 0; c < s.mesh.nCells; c++) {
-        const q = (R[6 * c] ?? NaN) / ((s.blockage[c] ?? NaN) * (s.mesh.cellVolR[c] ?? NaN));
-        r2 += q * q;
+  it(
+    'is the face-by-face sum over every block, bounds the residual, and is 0 at rest',
+    () => {
+      for (const pre of [undefined, { minMach: 0.003 }]) {
+        const s = new ReferenceSolver(solverMesh(allBcs), {
+          gas: THERMALLY_PERFECT,
+          freeStream: AMBIENT,
+          ...(pre === undefined ? {} : { lowMachPreconditioning: pre }),
+        });
+        expect(s.residualFluxScale()).toBe(0);
+        s.setState((x, r) => pulse(x, r));
+        s.setBlockage(Float64Array.from(s.mesh.cellX, (x) => 1 - 0.2 * Math.exp(-(x ** 2) / 0.01)));
+        // the plain run iterates (a state of the scheme); the preconditioned one is taken at the pulse
+        if (pre === undefined) s.iterate(2);
+        const scale = s.residualFluxScale();
+        expect(scale).toBeGreaterThan(0);
+        expect(Math.abs(scale - bruteForce(s)) / scale).toBeLessThan(1e-14);
+        // without volume sources |sum_f F| <= sum_f |F| per cell (the blockage source has no mass)
+        const R = s.residual();
+        let r2 = 0;
+        for (let c = 0; c < s.mesh.nCells; c++) {
+          const q = (R[6 * c] ?? NaN) / ((s.blockage[c] ?? NaN) * (s.mesh.cellVolR[c] ?? NaN));
+          r2 += q * q;
+        }
+        expect(Math.sqrt(r2 / s.mesh.nCells)).toBeLessThanOrEqual(scale);
       }
-      expect(Math.sqrt(r2 / s.mesh.nCells)).toBeLessThanOrEqual(scale);
-    }
-  }, 60_000);
+    },
+    ITERATING,
+  );
 });
 
 describe('reference solver: block interfaces', () => {
-  it('conserves mass, energy, angular momentum and fuel across min/max, max/max and min/min interfaces', () => {
-    const s = new ReferenceSolver(solverMesh(closed), {
-      gas: THERMALLY_PERFECT,
-      freeStream: AMBIENT,
-    });
-    s.setState((x, r) => pulse(x, r));
-    const before = s.totals();
-    for (let k = 0; k < 30; k++) s.stepPhysical();
-    const after = s.totals();
-    const scale = s.absTotals();
-    for (const m of [0, 3, 4, 5]) {
-      expect(Math.abs((after[m] ?? NaN) - (before[m] ?? NaN))).toBeLessThan(
-        1e-13 * (scale[m] ?? NaN),
-      );
-    }
-    // and the pulse really moved
-    expect(Math.abs(s.primitives()[NP * 40 + 1] ?? 0)).toBeGreaterThan(0.01);
-  });
-
-  it('gives the same field on three rotated blocks as on one block over the same nodes', () => {
-    const one = rectangle('one', 0, 0.6, 0, 0.15, 18, 5);
-    const single: MultiBlockMesh = singleBlock(one, {
-      imin: BC.INFLOW,
-      imax: BC.OUTFLOW,
-      jmin: BC.AXIS,
-      jmax: BC.FARFIELD,
-    });
-    const three = threeBlockRow(
-      0.2,
-      0.15,
-      6,
-      5,
-      { left: BC.INFLOW, right: BC.OUTFLOW, bottom: BC.AXIS, top: BC.FARFIELD },
-      0,
-    );
-    const a = new ReferenceSolver(solverMesh(single), {
-      gas: THERMALLY_PERFECT,
-      freeStream: AMBIENT,
-    });
-    const b = new ReferenceSolver(solverMesh(three), {
-      gas: THERMALLY_PERFECT,
-      freeStream: AMBIENT,
-    });
-    a.setState((x, r) => pulse(x, r));
-    b.setState((x, r) => pulse(x, r));
-    a.iterate(8);
-    b.iterate(8);
-    const Pa = a.primitives();
-    const Pb = b.primitives();
-    // map block-row cells to the single block by centroid
-    const key = (x: number, r: number) => `${Math.round(x * 1e6)},${Math.round(r * 1e6)}`;
-    const at = new Map<string, number>();
-    for (let c = 0; c < a.mesh.nCells; c++)
-      at.set(key(a.mesh.cellX[c] ?? 0, a.mesh.cellR[c] ?? 0), c);
-    let worst = 0;
-    for (let c = 0; c < b.mesh.nCells; c++) {
-      const ca = at.get(key(b.mesh.cellX[c] ?? 0, b.mesh.cellR[c] ?? 0));
-      expect(ca).toBeDefined();
-      for (const k of [0, 1, 2, 3, 4]) {
-        worst = Math.max(
-          worst,
-          Math.abs((Pa[NP * (ca ?? 0) + k] ?? NaN) - (Pb[NP * c + k] ?? NaN)) /
-            (k === 4 ? 1e4 : k === 0 ? 0.06 : 40),
+  it(
+    'conserves mass, energy, angular momentum and fuel across min/max, max/max and min/min interfaces',
+    () => {
+      const s = new ReferenceSolver(solverMesh(closed), {
+        gas: THERMALLY_PERFECT,
+        freeStream: AMBIENT,
+      });
+      s.setState((x, r) => pulse(x, r));
+      const before = s.totals();
+      for (let k = 0; k < 30; k++) s.stepPhysical();
+      const after = s.totals();
+      const scale = s.absTotals();
+      for (const m of [0, 3, 4, 5]) {
+        expect(Math.abs((after[m] ?? NaN) - (before[m] ?? NaN))).toBeLessThan(
+          1e-13 * (scale[m] ?? NaN),
         );
       }
-    }
-    expect(worst).toBeLessThan(1e-10);
-  });
+      // and the pulse really moved
+      expect(Math.abs(s.primitives()[NP * 40 + 1] ?? 0)).toBeGreaterThan(0.01);
+    },
+    ITERATING,
+  );
+
+  it(
+    'gives the same field on three rotated blocks as on one block over the same nodes',
+    () => {
+      const one = rectangle('one', 0, 0.6, 0, 0.15, 18, 5);
+      const single: MultiBlockMesh = singleBlock(one, {
+        imin: BC.INFLOW,
+        imax: BC.OUTFLOW,
+        jmin: BC.AXIS,
+        jmax: BC.FARFIELD,
+      });
+      const three = threeBlockRow(
+        0.2,
+        0.15,
+        6,
+        5,
+        { left: BC.INFLOW, right: BC.OUTFLOW, bottom: BC.AXIS, top: BC.FARFIELD },
+        0,
+      );
+      const a = new ReferenceSolver(solverMesh(single), {
+        gas: THERMALLY_PERFECT,
+        freeStream: AMBIENT,
+      });
+      const b = new ReferenceSolver(solverMesh(three), {
+        gas: THERMALLY_PERFECT,
+        freeStream: AMBIENT,
+      });
+      a.setState((x, r) => pulse(x, r));
+      b.setState((x, r) => pulse(x, r));
+      a.iterate(8);
+      b.iterate(8);
+      const Pa = a.primitives();
+      const Pb = b.primitives();
+      // map block-row cells to the single block by centroid
+      const key = (x: number, r: number) => `${Math.round(x * 1e6)},${Math.round(r * 1e6)}`;
+      const at = new Map<string, number>();
+      for (let c = 0; c < a.mesh.nCells; c++)
+        at.set(key(a.mesh.cellX[c] ?? 0, a.mesh.cellR[c] ?? 0), c);
+      let worst = 0;
+      for (let c = 0; c < b.mesh.nCells; c++) {
+        const ca = at.get(key(b.mesh.cellX[c] ?? 0, b.mesh.cellR[c] ?? 0));
+        expect(ca).toBeDefined();
+        for (const k of [0, 1, 2, 3, 4]) {
+          worst = Math.max(
+            worst,
+            Math.abs((Pa[NP * (ca ?? 0) + k] ?? NaN) - (Pb[NP * c + k] ?? NaN)) /
+              (k === 4 ? 1e4 : k === 0 ? 0.06 : 40),
+          );
+        }
+      }
+      expect(worst).toBeLessThan(1e-10);
+    },
+    ITERATING,
+  );
 });
 
 describe('reference solver: slip walls', () => {
@@ -294,34 +330,38 @@ describe('reference solver: slip walls', () => {
     }
   });
 
-  it('hold the radial equilibrium of a swirling annulus at the walls (no dp/dn = 0 mirror mode)', () => {
-    const ring = singleBlock(rectangle('ring', 0, 0.05, 0.5, 1.0, 4, 64), {
-      imin: BC.SLIP_WALL,
-      imax: BC.SLIP_WALL,
-      jmin: BC.SLIP_WALL,
-      jmax: BC.SLIP_WALL,
-    });
-    const gas = caloricallyPerfectGas(1.4, 287.05287);
-    const s = new ReferenceSolver(solverMesh(ring), {
-      gas,
-      freeStream: { pressure: 1e5, temperature: 300, velocity: 0 },
-    });
-    const cp = (1.4 * 287.05287) / 0.4;
-    const vortex = (r: number) => {
-      const w = 75 / r;
-      const T = 300 - (w * w) / (2 * cp);
-      const p = 1e5 * (T / 300) ** 3.5;
-      return { rho: p / (287.05287 * T), u: 0, v: 0, w, p, z: 0 };
-    };
-    s.setState((_, r) => vortex(r));
-    s.iterate(300);
-    const P = s.primitives();
-    // the inner wall cell (j = 0, i = 1): the W0 mirror ghost left 72 Pa (5e-3 q) here
-    const c = 1;
-    const r = s.mesh.cellR[c] ?? NaN;
-    const q = 0.5 * vortex(0.5).rho * 150 * 150;
-    expect(Math.abs(s.ref.p + (P[NP * c + 4] ?? NaN) - vortex(r).p) / q).toBeLessThan(1e-3);
-  });
+  it(
+    'hold the radial equilibrium of a swirling annulus at the walls (no dp/dn = 0 mirror mode)',
+    () => {
+      const ring = singleBlock(rectangle('ring', 0, 0.05, 0.5, 1.0, 4, 64), {
+        imin: BC.SLIP_WALL,
+        imax: BC.SLIP_WALL,
+        jmin: BC.SLIP_WALL,
+        jmax: BC.SLIP_WALL,
+      });
+      const gas = caloricallyPerfectGas(1.4, 287.05287);
+      const s = new ReferenceSolver(solverMesh(ring), {
+        gas,
+        freeStream: { pressure: 1e5, temperature: 300, velocity: 0 },
+      });
+      const cp = (1.4 * 287.05287) / 0.4;
+      const vortex = (r: number) => {
+        const w = 75 / r;
+        const T = 300 - (w * w) / (2 * cp);
+        const p = 1e5 * (T / 300) ** 3.5;
+        return { rho: p / (287.05287 * T), u: 0, v: 0, w, p, z: 0 };
+      };
+      s.setState((_, r) => vortex(r));
+      s.iterate(300);
+      const P = s.primitives();
+      // the inner wall cell (j = 0, i = 1): the W0 mirror ghost left 72 Pa (5e-3 q) here
+      const c = 1;
+      const r = s.mesh.cellR[c] ?? NaN;
+      const q = 0.5 * vortex(0.5).rho * 150 * 150;
+      expect(Math.abs(s.ref.p + (P[NP * c + 4] ?? NaN) - vortex(r).p) / q).toBeLessThan(1e-3);
+    },
+    ITERATING,
+  );
 });
 
 describe('reference solver: time stepping', () => {

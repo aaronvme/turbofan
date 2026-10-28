@@ -326,6 +326,8 @@ describe('preconditioned tracking mode', () => {
     // preconditioned default CFL 0.8 (D4-32) this takes 4723 iterations (< 4000 at CFL 1.5).
     const conv = converge(pre, 1e-11, 6000);
     expect(conv.converged).toBe(true);
+    // W2R-N10: the bound restated for CFL 0.8 (4723 measured), so a slowdown of the path is caught
+    expect(conv.iterations).toBeLessThan(5500);
     // the plain scheme, started from the preconditioned steady state, has R = 0 there too: it is the
     // same equation with and without the preconditioner. This checks the steady state, not its
     // stability, so it runs only 30 iterations: with blockage the plain scheme is linearly unstable

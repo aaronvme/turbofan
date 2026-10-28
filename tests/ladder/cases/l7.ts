@@ -17,6 +17,19 @@ const RS = 0.5;
 /** The pass rows' grid (D4-26) and the refinement sequence. */
 const N_PASS = 96;
 const SEQUENCE = [24, 48, 96] as const;
+/** The sphere runs' iteration cap (PHYSICS.md 3.3 L7: at most 20000 iterations). */
+export const SPHERE_CAP = 20000;
+/**
+ * W2R-N12: the time budget per cell-iteration of a sphere child, so that a hung child fails in about
+ * its run's time instead of the ladder's 30 minutes. Measured 4.8 us per cell-iteration (96 x 96,
+ * plain Node, under a ladder's load, 2026-10-27); the budget is 8 us, 1.7x that, plus a minute.
+ */
+const US_PER_CELL_ITERATION = 8;
+
+/** The child's timeout for an n x n sphere run to the full cap. */
+export function sphereTimeoutMs(n: number): number {
+  return 60_000 + Math.ceil((SPHERE_CAP * n * n * US_PER_CELL_ITERATION) / 1000);
+}
 
 /** One sphere run; machCut is the D4-20 M_cut (default: minMach = the free-stream Mach). */
 export function sphere(
@@ -24,7 +37,7 @@ export function sphere(
   precondition: boolean,
   machCut = mach,
   tol = 1e-4,
-  cap = 20000,
+  cap = SPHERE_CAP,
   n = N_PASS,
 ) {
   const NR = n;
@@ -79,7 +92,7 @@ async function sphereChild(mach: number, precondition: boolean, n: number): Prom
       precondition ? '1' : '0',
       String(n),
     ],
-    { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 1_800_000 },
+    { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: sphereTimeoutMs(n) },
   );
   const line = stdout.split('\n').find((l) => l.startsWith('@@SPHERE@@'));
   if (line === undefined) throw new Error(`sphere ${mach} ${precondition} ${n}: no result`);
@@ -141,7 +154,8 @@ export async function run() {
         metric: `M 0.01 (${N_PASS} x ${N_PASS}): |Cd|`,
         threshold: `< ${L7.maxDragCoefficient.value}`,
         value: Math.abs(low.cd),
-        pass: Math.abs(low.cd) < L7.maxDragCoefficient.value,
+        // W2R-N9: an unconverged run must not pass Cd either
+        pass: Math.abs(low.cd) < L7.maxDragCoefficient.value && low.conv.converged,
       },
       {
         id: 'L7',
