@@ -211,6 +211,29 @@ Never quote personal data (emails, keys, tokens) in this file.
   - If it already uses the flux scale, investigate the blockage terms in f32 (b-weighted areas, p∇b).
 - **D4-40 (question d): the engine adapter's defaults are accepted.** minMach = M_cut = 0.003 and preconditioned CFL 0.8, per D4-35.
 - **D4-41 (question e): the two f32 reorderings go into SOLVER.md as a new, appended §13 "f32 implementation forms",** written by w2/solver: R(φ) − R∞ evaluated as φ·dR, and the preconditioned density increment. Each states the algebraic identity, and an oracle-side test shows both forms agree to f64 rounding. The reference does not edit §13, which keeps the two branches' SOLVER.md edits disjoint.
+- **D4-42 (critic pass 8 question y): D4-24 applies.** P4's measure of record is the **back-to-back** render GPU time, on three conditions:
+  - valid runs only (W2L-I2);
+  - the OS power source AC throughout the run, checked by the tool (W2L-I4);
+  - the busy fraction reported beside the number.
+  
+  Vsync stays reported beside it.
+  **Corrections to the "D4-24 evidence" entry:**
+  - The INVALID run is 23239a1's back-to-back rep 0, and the summary included it. The valid pairs are −0.59 and −1.22 ms (median −0.90).
+  - The record ends "not charging, 0.98".
+  - The vsync medians do not mean the governor "fills the frame": rep 0 ran at 56 fps / 10.4 ms and reps 1-2 at 40 fps / 16.4 ms, all at 0.65 busy. The conclusion stands: vsync GPU time follows the clock, not the work.
+- **D4-43 (question z): p_u is deleted as the next reference round's first item** (D4-35). It is already merged, and the record stays in SOLVER.md.
+- **D4-44 (question aa): CFL 0.8 is valid only for β ≈ M_ref (W2R-I6).** The fix is to make the preconditioner and the scaled dissipation use the same reference velocity: M_ref from the face's β, option (a). That is the standard consistency requirement in Weiss-Smith/Turkel preconditioning.
+  - Verify it with the discrete analysis over β/M_ref, plus a shear-layer case and a start-from-rest case, option (c).
+  - If (a) does not restore stability across the range, add the scaled diffusion's eigenvalue to the local step, option (b).
+  - SOLVER.md is updated first, and the kernel follows.
+- **D4-45 (question bb):**
+  - Value rows taken before convergence (L8, L9a, L9b) get a D4-19-style steadiness rule: the value is constant within a tenth of its tolerance over the last 2000 iterations.
+  - L8's iteration cap scales with the CFL change: pseudo-time iterations go as 1/CFL, so 20000 × 1.5/0.8 = 37500. That is a property of the scheme, stated here, not a tuning. L8 converges at about 32500 (0.449%).
+  - L9a/L9b get the same scaling rule.
+- **D4-46 (question cc): back-to-back captures follow D3-6.** INVALID is decided by the occlusion signature, a hidden page or a blur. The look-dev watcher's stricter 2.5-interval stretch becomes a WARNING, and D3-6's blur rule reaches look-dev captures (W2L-I5).
+- **Next rounds:**
+  - Reference round 6: D4-43, D4-36's limiter trials, D4-44, D4-45, W2R-I5..I7, the pass-8 nits, and the tight 5 s timeout on `solver.test.ts`'s annulus test.
+  - Look-dev round 5: W2L-I1..I5 and the pass-8 visual notes (matte nacelle, stippled/torn moving fan with 06 regressed, the spinner stripe in 01, the toy-like stand, the flat cutaway), then the official P4 back to back.
 
 
 
@@ -2654,3 +2677,7 @@ None.
 - **(aa) W2R-I6:** CFL 0.8 is below the fully discrete limit only for β ≈ M_ref; β/M_ref ≤ ~0.6 or ≥ ~4.6 is unstable at 0.8 in 1D. Which remedy goes to the next round? (a) M_ref from the face's β, (b) the scaled diffusion's eigenvalue in the local step, or (c) a stated validity range plus a shear-layer and start-from-rest case.
 - **(bb) W2R-I7:** a D4-19-style steadiness rule for the value rows taken before convergence (L8, L9a, L9b). Separately, L8 converges at CFL 0.8 by about 32500 iterations: keep the 20000 cap (row FAIL), or scale it for the CFL change by a decision?
 - **(cc) W2L-I5:** should back-to-back runs be stricter than D3-6 (the watcher's 2.5-interval stretch), or follow D3-6's occlusion signature? Either way, D3-6's blur rule should reach look-dev captures.
+- **Merged into main @2032c73** (critic pass 8, w2/reference @4553ce2, MERGE) after the critic's own merge commit 1369a36.
+  - Gates on the merged tree: 1857 passed + 9 expected fail. One failure is the known annulus load-timeout flake: 9.4 s against 5 s, it passes alone, and round 6 fixes the timeout. Mesh 29 passed.
+  - `test:ladder` under a heavy load (two agents' suites running) gave 8 passed / 5 failed. L8 and L9a fail as expected, on their convergence rows. L4b, L7 and L9b hit the 30-minute vitest timeout from CPU contention, not an assertion.
+  - The critic's quieter trial merge of the same tree gave the tip's 10 passed / 3 failed. The orchestrator owes a quiet-window rerun of the ladder on main.
