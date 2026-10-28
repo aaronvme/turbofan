@@ -2691,3 +2691,14 @@ None.
   - **P4 FAIL by 0.50 ms** (default ≤ 8.0). Cutaway meets its 10 ms target; hero does not.
   - The next look-dev round finds the 0.5 ms. Candidates are the critic's pass-8 notes, the rotor pass (1.15 ms) and TRAA (1.06 ms).
 - **The ladder rerun owed on main a337d4e (quiet, same window, 20:41-20:47): 10 files passed / 3 failed.** L8, L9a and L9b fail on their convergence rows, under D4-45. This matches the critic's trial merge, which settles the load-timeout question.
+- **D4-47 (w2/solver round 2 @81e9508, question a): the L4a/L5 GPU convergence rows stay KNOWN-FAIL until the limiter decision.** The residuals stop at 3.99e-4 and 7.5e-3, above the floors D4-38 stated (4e-5 and 1.7e-4), while the accuracy rows pass. The oracle shows the same sharp-limiter floor (round 6's start-from-rest case: 4.2e-4 of the peak, converged by the smooth form), so the plateau is the limiter, not f32. It is resolved with D4-36's trials. The accuracy rows remain the checks of record.
+- **D4-48 (question b): the flux-scale normalisation is adopted for §12.2's rows E and B,** as D4-39 anticipated. Rows that divide by a near-zero residual are ill-posed in f32. E-L5 becomes 2.7e-8 that way.
+  - The reference branch owns §12, so reference round 7 rewrites the E/B rows. The solver's tests follow it.
+  - The solver's santa-loop reviewers check that the change is a normalisation only.
+- **D4-49 (question c): SOLVER.md §14 "f32 implementation forms" is accepted** (§13 already existed), with its six forms. Each needs its identity test against the oracle, and the reviewers check every one.
+- **D4-50 (question d): the device requests the limits the engine needs,** as standard WebGPU practice: `requiredLimits.maxStorageBuffersPerShaderStage` ≥ 9 for the engine with sources, checked against the adapter.
+  - Record the Arc 140T's adapter value in GPU_FACTS.
+  - If an adapter offers only 8, pack two read-only buffers into one: a tested fallback, never a silent failure.
+  - w2/solver implements the request in the device module. w2/app-ui's worker inherits it.
+- **D4-51 (w2/reference round 6 @c937913, questions 1 and 3): D4-44 (a) is kept,** with M_ref taken from the face's β. CFL 0.8 now holds for β 0.003-0.6 at any M0 ≤ β. The start-from-rest (R) and shear-layer (J) cases stay pinned `it.fails`. Option (b) is not adopted: it changed nothing in R or J.
+- **D4-52 (question 2): J's stall is Important, W2R-I8, not a nit.** The engine's flow is full of shear layers: the bypass/core mixing and the jet plume. A tracking-mode stall there would slow the app's settling. The plain scheme converges J, so the preconditioner is the cause. Investigate it after D4-36's trials, first with the standard pressure-difference cutoff in β², β² = min(1, max(M², M_cut², K·|Δp|/(ρc²))) (Weiss-Smith; Darmofal & Siu). Bring the data back.
