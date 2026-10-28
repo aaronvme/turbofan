@@ -258,6 +258,18 @@ describe('preconditioned tracking mode', () => {
     const ratio = solver(0.01, 1.2).map((dt, c) => dt / (solver(0.01)[c] as number));
     for (const r of ratio) expect(r).toBeCloseTo(1.2 / DEFAULT_CFL_PRECONDITIONED, 12);
     expect(solver(1)).toEqual(solver(1, DEFAULT_CFL));
+    // the CFL the tracking mode runs at, for the ladder's CFL-scaled caps (D4-45)
+    const cflOf = (pre?: { minMach: number }, cfl?: number) =>
+      new ReferenceSolver(mesh, {
+        gas: THERMALLY_PERFECT,
+        freeStream: fs,
+        ...(pre === undefined ? {} : { lowMachPreconditioning: pre }),
+        ...(cfl === undefined ? {} : { cfl }),
+      }).trackingCfl;
+    expect(cflOf({ minMach: 0.01 })).toBe(DEFAULT_CFL_PRECONDITIONED);
+    expect(cflOf({ minMach: 1 })).toBe(DEFAULT_CFL);
+    expect(cflOf()).toBe(DEFAULT_CFL);
+    expect(cflOf({ minMach: 0.01 }, 1.2)).toBe(1.2);
   });
 
   it('keeps the quiescent ambient exactly', () => {
