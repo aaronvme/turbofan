@@ -201,7 +201,8 @@ describe('SLAU2', () => {
         const bf = 0.001 + 0.5 * next();
         const F = flux(L, R, Math.cos(a), Math.sin(a), 0.3, rf, 0.003, bf);
         const G = flux(R, L, -Math.cos(a), -Math.sin(a), 0.3, rf, 0.003, bf);
-        for (let m = 0; m < 6; m++) expect(F[m]).toBe(-(G[m] ?? NaN));
+        // === (not Object.is): a vacuum-forming expansion (g = 1, chi = 0) has m = +0 both ways
+        for (let m = 0; m < 6; m++) expect(F[m] === -(G[m] ?? NaN)).toBe(true);
       }
       const q = new Float64Array(NP);
       const Z = flux(q, q, 0.3, -0.95, 1, 1, 0.003, 0.003);

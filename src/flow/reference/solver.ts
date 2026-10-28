@@ -46,8 +46,10 @@ export interface SolverOptions {
   /**
    * Low-Mach preconditioning of the tracking mode's pseudo-time derivative (section 10, D4-10):
    * beta^2 = min(1, max(M^2, minMach^2, dp / (rho c^2))), with SLAU2's pressure diffusion scaled by
-   * 1 / f_a(max(M, machCut)) (section 7, D4-20; machCut defaults to minMach, >= 1 turns it off).
-   * Physical time ignores both.
+   * 1 / f_a(max(beta_f, machCut)), beta_f the face's mean beta (section 7, D4-20 and D4-44;
+   * machCut defaults to minMach, >= 1 turns it off). Physical time ignores both.
+   * machCut >= 1 with minMach < 1 is a test configuration only: its acoustic limit at small beta
+   * (0.475 at beta 0.06, 0.176 at 0.003; section 10) is below the default CFL 0.8.
    */
   readonly lowMachPreconditioning?: {
     readonly minMach: number;
@@ -104,6 +106,8 @@ export class ReferenceSolver {
   private readonly dt: Float64Array;
   /** Per cell beta^2 of the preconditioner, frozen at stage 1 like tau (1 without it). */
   private readonly beta2: Float64Array;
+  /** beta per extended index (a ghost: its source cell's), for the face's M_ref (D4-44). */
+  private readonly betaExt: Float64Array;
   private readonly dU = new Float64Array(NU);
   private readonly src: SourceRates;
   /** Per cell: i-face west, i-face east, j-face south, j-face north; ext index of each neighbour. */
@@ -163,6 +167,7 @@ export class ReferenceSolver {
     this.tau = new Float64Array(n);
     this.dt = new Float64Array(n);
     this.beta2 = new Float64Array(n).fill(1);
+    this.betaExt = new Float64Array(nx).fill(1);
     this.src = { rate: new Float64Array(NU * n), damping: new Float64Array(NU * n) };
     this.cellFace = new Int32Array(4 * n);
     this.cellNbr = new Int32Array(4 * n);
@@ -257,6 +262,7 @@ export class ReferenceSolver {
   /** The residual R (section 9) of the current state; a copy. */
   residual(): Float64Array {
     this.updatePrimitives();
+    this.computeBeta(true);
     this.evaluateSources();
     this.assembleResidual(this.machCut);
     return Float64Array.from(this.R);
@@ -372,6 +378,7 @@ export class ReferenceSolver {
     const L = dir === 'i' ? blk.ni + 4 : blk.nj + 4;
     const fixed = dir === 'i' ? j : i;
     const f = dir === 'i' ? i : j;
+    this.computeBeta(true);
     this.loadLine(b, dir, fixed, L);
     this.fluxMachCut = this.machCut;
     this.faceFromLine(
@@ -460,16 +467,16 @@ export class ReferenceSolver {
     );
   }
 
-  /** tau and dt per cell; `tracking` applies the low-Mach preconditioner's beta^2 if it is on. */
-  private computeLocalDt(tracking: boolean): void {
+  /**
+   * beta^2 per cell of the current primitives (1 unless `tracking` and preconditioned) and beta per
+   * extended index, a ghost taking its source cell's (section 7, D4-44).
+   */
+  private computeBeta(tracking: boolean): void {
     const m = this.mesh;
-    const { P, tau, dt, cellFace, cellNbr, bExt, beta2 } = this;
+    const n = m.nCells;
+    const { P, cellNbr, beta2, betaExt } = this;
     const pre = tracking ? this.opts.lowMachPreconditioning : undefined;
-    for (let c = 0; c < m.nCells; c++) {
-      const u = P[NP * c + 1] as number;
-      const v = P[NP * c + 2] as number;
-      const a = P[NP * c + 7] as number;
-      const bc = this.blockage[c] as number;
+    for (let c = 0; c < n; c++) {
       let b2 = 1;
       if (pre !== undefined) {
         let dpMax = 0;
@@ -480,6 +487,22 @@ export class ReferenceSolver {
         b2 = lowMachBeta2(P, NP * c, m.cellR[c] as number, pre.minMach, dpMax, rho);
       }
       beta2[c] = b2;
+      betaExt[c] = Math.sqrt(b2);
+    }
+    for (let g = 0; g < m.nGhosts; g++) betaExt[n + g] = betaExt[m.ghostSrc[g] ?? 0] as number;
+  }
+
+  /** tau and dt per cell; `tracking` applies the low-Mach preconditioner's beta^2 if it is on. */
+  private computeLocalDt(tracking: boolean): void {
+    const m = this.mesh;
+    const { P, tau, dt, cellFace, cellNbr, bExt, beta2 } = this;
+    this.computeBeta(tracking);
+    for (let c = 0; c < m.nCells; c++) {
+      const u = P[NP * c + 1] as number;
+      const v = P[NP * c + 2] as number;
+      const a = P[NP * c + 7] as number;
+      const bc = this.blockage[c] as number;
+      const b2 = beta2[c] as number;
       let lam = 0;
       for (let d = 0; d < 2; d++) {
         let best = 0;
@@ -559,6 +582,7 @@ export class ReferenceSolver {
       (dir === 'i' ? m.iRf[face] : m.jRf[face]) as number,
       this.F,
       this.fluxMachCut,
+      0.5 * ((this.betaExt[l] as number) + (this.betaExt[r] as number)),
     );
     return area;
   }
