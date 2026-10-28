@@ -3015,3 +3015,14 @@ None.
 - (kk) D4-61: the split pin of W2I-I1, or the row kept red like the CPU ladder?
 - (ll) Expectation for the quiet run. The builder's indicative in-scene figure is 2.49 ms/it before the β pass (about +0.1 ms/it), which is 2 it/frame, about 120 it/s. A P1 miss under D0-1 then goes to D4-54's logged decision (about 80k cells or a half-rate solver). The scene's after-allocation slowdown (solver-perf FINDINGS 2) may be part of it.
 - Carried to the next solver round: W2I-N1 (one `cellPrim` call site), N4 (preconditioned bitwise tests and an oracle comparison on the real mesh), and N2/N3/N6-N8.
+- **Merged into main @4d096fb: w2/solver-int @f07f57e** (critic pass 10: MERGE, 0 B / 2 I / 8 N), with the critic branch at 6685cb3.
+  - The merged code under src/tests/tools/spikes is byte-identical to the reviewed tip; main's only additions since are LOG text.
+  - On a memory-starved machine (0.2-1.4 GB free), the orchestrator ran the light gates on the merged tree: typecheck clean, lint clean, mesh 29, mesh manifest unchanged. It relies on the critic's full gates at f07f57e: coverage 1901 + 11 expected fail (lines 99.59%), test:gpu 60/60, gpu-ladder 11/12 (the L9a steadiness row, W2I-I1), browser 25, CPU ladder 11/3.
+- **D4-64 (critic pass 10 question jj): P1's measurement of record runs in the app's own 1080p engine scene** (D4-54), with the W0 bench scene reported beside it for continuity. W2I-I2 is fixed before the quiet run:
+  - a run with GPU errors or a non-finite state is INVALID;
+  - `scene: 'app'` takes effect;
+  - a README entry is added.
+- **D4-65 (question kk): D4-61's pin takes the critic's form.** Only the steadiness check is `it.fails`, with the D4-57 reason, and a passing value row sits beside it, so a value regression, a NaN or a timeout still fails.
+- **D4-66 (question ll): P1 is expected to miss in the app's scene (about 120 it/s).** The arithmetic: render 8.5 ms back to back (P4), so D4-2 gives the solver min(5, 15 − 8.5 − 2) − 0.66 ms resample ≈ 3.8 ms, which is 2 iterations at 1.29 ms.
+  - The official run decides it. If it misses, P1's own rule applies: a logged decision between the 80k mesh and a half-rate solver, made on measured numbers (80k ≈ 0.8 ms/it would give about 4 iterations per frame).
+  - P4's last 0.5 ms (look-dev round 5) feeds the same budget.
