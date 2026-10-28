@@ -2850,3 +2850,13 @@ I reviewed `4553ce2..0c87da8` (rounds 6-8) against main c661d5c on 2026-10-28. N
   - (ee) a tolerance for D4-48's flux-scale form;
   - (ff) confirm 0.003 under D4-59. I agree; also move R to the limiter work and use b ≡ 1 R for M_cut rules;
   - (gg) J's next step, the semi-discrete β-jump analysis (W2R-I12).
+- **D4-60 (w2/solver-int @f07f57e, question dd): merge order.** w2/solver-int is the merge unit: main + w2/solver-perf + w2/reference rounds 6-8 + this round's D4-44 mirror.
+  - Critic pass 10 reviews it whole, including the so-far unreviewed solver-perf kernel. On MERGE it goes into main with foreground gates.
+  - **The NaN cause is confirmed as W2R-I6:** β/M_ref reaches 8.9 in the inflow-axis corner cell, against a 1D limit of about 0.47 at CFL 0.8. The f64 oracle with the old M_ref also blows up. The D4-44 mirror (a β pass plus the face-mean β) fixes it.
+- **D4-61 (question hh): the GPU L9a value row is pinned KNOWN-FAIL** (`it.fails`, citing D4-57's steadiness rule: 1.31e-5 against 1e-5), the same as the oracle's. It stays visible, and flips when the convergence work fixes it.
+- **D4-62 (question ee): the flux-scale rows (§12.2 E/B) are tightened, so they can fail.** r_flux/r_ref is 4e4 on E-L5 and 1e10 on B, so 1e-3 can't fail.
+  - Set each tolerance from the f32 error model: ten times the measured storage/arithmetic error on the flux scale. The derivation goes into SOLVER.md §12.2 before the re-run, as tightening only.
+  - The next reference round owns §12, and the solver's tests follow it.
+- **D4-63 (question ii), HIGH before W3: slow growth from rest on the engine mesh.** A 0.1% pressure wave on the real mesh grows 13.6× by 2000 iterations, and the oracle shows the same through 300. That is the scheme, not the kernel. In the app the field must not grow from rest.
+  - The next reference round finds the growing mode on the real mesh: its location (axis, block interfaces, lips), the sharp limiter (the W2R-6 family), and the preconditioning.
+  - Fix it under a pre-stated rule.
