@@ -225,6 +225,15 @@ with S_f the cell's **outward** face vectors. For b ≡ 1 this is (0, p′A + ρ
 | as specified, 24 × 12 cells | grows (slower) | |
 
 - *Reading.* The plain scheme's steady state carries a grid-scale pressure sawtooth at the throat (±50 Pa on a 200 Pa dynamic pressure; plain SLAU2's O(M) pressure coupling at M 0.06, the L7 sawtooth that D4-20 removes only in preconditioned tracking). So p′ and u have an extremum in nearly every blockage cell, where the sharp van Albada switches (φ = 0 for ab ≤ 0, and next to it a one-sided slope with ∂φ/∂b → 1). The linearisation of that switch is what grows. The p∇b source is well-balanced (D4-29), and replacing it does not help. The smooth limiter, which linearises to the central slope where |a|, |b| ≪ ε, removes the mode. With 3 radial cells it cannot be shown: its central reconstruction of the noise-level radial velocity (|v| ~ 1e-13 ≪ ε_v = 0.34 m/s) keeps this narrow annulus from converging even preconditioned. Central v slopes alone do that at 24 × 3, and 24 × 6 does not show it.
+- *The direct check (W2R-N13, round 7, 2026-10-27; scratch `reports/scratch/trialN13/n13.ts`).* A power iteration of the plain scheme's one-iteration map about the steady state U0 of `blockage.test.ts`'s duct: δ_{n+1} = Φ(U0 + δ_n) − Φ(U0), renormalised to 1e-7 of the state every iteration. It is run twice: with the sharp van Albada's switch pattern frozen at U0 (the ab > 0 mask per cell, direction and primitive; 547 of the 1188 slopes are on), and with the live switch. The growth per iteration is the geometric mean of the last 100:
+
+| map | frozen switch | live switch | the frozen map with the switch forced on for p′ and u | forced on for all six |
+|---|---|---|---|---|
+| tracking, M 0.06 | 1.0718 | 1.0718 | 1.2182 | 1.2182 |
+| physical time, M 0.06 | 1.0397 | 1.0397 | | |
+| physical time, M 0.35 | 1.0152 | 1.0151 | | |
+
+  The frozen operator grows at the live rate to 5-6 digits, so the mode is a linear instability of the scheme linearised with that switch pattern, not the switching. Forcing the switch on (the classic ab(a + b)/(a² + b²) across the extrema) grows faster, so the zeroing at the extrema is not the cause either. What remains is the limited slope's linearisation beside the sawtooth's extrema, which is one-sided (∂φ/∂b → 1, ∂φ/∂a → 0), while the central slope (round 5: p′ slopes unlimited) is stable. Round 5's reading stands, and this check makes it direct.
 - *Fix proposed:* the smooth limiter as the default (D4-33). Until a decision this section, §6 and the KNOWN-FAIL pins stand.
 
 **Volume sources.** A source model (`SourceModel`) is called once per RK stage with the stage's primitives and the stage's time (physical time: t, t + dt and t + dt/2 for the three SSP-RK3 stages, so a time-dependent schedule keeps third order, W2R-N3; tracking: the iteration's time, unchanged). Per cell it writes:
@@ -303,6 +312,30 @@ The minimum over the family is the at-rest 0.972 at β = M_cut, so CFL 0.8 holds
 - Option (b), the rule's next step, was run in a scratch copy of the oracle (`reports/scratch/ref6b`): the diffusion eigenvalue β²χc/(2f_a) per face was added to λ, with M_ref from the cell's β. It does not change the outcome: R 4.4e-4 and J 0.17 of the peak at 20000. So (b) is not adopted.
 - Without preconditioning, J (the plain scheme, sharp, CFL 1.5) reaches 4.1e-5 of its peak, 7.6e-5 kg/(m³ s) absolute, at 20000, still falling. Preconditioned, J stays at about 4-6 kg/(m³ s). So J's stall is a property of the preconditioned scheme at M_cut 0.003 beside a shear layer, open (see the handoff).
 - (a) breaks no unit test (the flow suites: 132 passed). R and J are pinned as KNOWN-FAIL in `precondition.test.ts`. The closed-box case C-pre of §12.2 shows the limit is real: at CFL 1.5 the preconditioned pulse (engine settings, minMach = M_cut = 0.003) goes to NaN at iteration 79 (48 at a hundredth of the amplitude), while at 1.15 and 0.8 it stays bounded for 400 iterations; ladder L8's polar mode (D4-27) grows at 1.5 and 1.2, is neutral at 0.9 and decays at 0.75 (critic pass 7). Preconditioning with machCut ≥ 1 (no D4-20 scaling) has a far lower limit at small β (0.475 at β 0.06 and 0.176 at β 0.003, critic pass 8) and is a test configuration only (D4-22's measurement, the steady-state check of `precondition.test.ts`). It also takes the 0.8 default, which is above its limit. The option's documentation says so (W2R-I6 gap 2). D4-32's p_u trial (§7) worsened L7 and L8 and destabilised C-pre, so the default stays **0.8 without p_u** (decision D4-32's second branch).
+
+*W2R-I8, J's stall (decision D4-52, round 7, 2026-10-27; scratch copy `reports/scratch/trialJ`, driver `rj/cases.ts`).* β² already has the pressure-difference cutoff K·Δp/(ρc²) with K = 1, Δp the largest |p′| difference to the four face neighbours (Weiss, Maruszewski & Smith 1999; Darmofal & Siu 1999). D4-52's trial varies K, and adds a velocity-difference term K_u |Δq|²/c² (Δq the largest velocity difference to the four neighbours), the neighbours' M² (the largest over the four), and the global cutoff M_cut. Everything else is J as above (sharp limiter, CFL 0.8, minMach = M_cut = 0.003 unless stated). The value is the residual over its peak at 20000 iterations (the rule is 1e-5):
+
+| β² cutoff | J | R |
+|---|---|---|
+| K = 1 (the contract) | 0.24 | 4.2e-4 |
+| K = 10 | 0.39 | 9.4e-4 |
+| K = 100 | 0.40 | 2.7e-4 |
+| K = 1000 | NaN at iteration 265 | |
+| K = 1, K_u = 1 | 0.68 | |
+| K = 10, K_u = 1 | 0.35 | |
+| K = 100, K_u = 1 | 1.1e-3 | 2.7e-4 |
+| K = 100, K_u = 4 | 1.8e-3 | |
+| K = 1 and the neighbours' M² | 2.9e-3 (0.13 at 16000) | |
+| M_cut = minMach = 0.01 | 0.50 | |
+| M_cut = minMach = 0.02 | 5.8e-5 (9e-6 at 10000, bouncing) | |
+| M_cut = minMach = 0.05 | 3.8e-6 | |
+| the D4-36 limiter variants (a) / (b), K = 1 | 0.25 / 0.65 | converged (1e-6 at 1566 / 1390) |
+| plain scheme (round 6) | 4.1e-5, falling | |
+
+- *The pressure-difference cutoff does not fix J* at any K, and K = 1000 diverges. J's shear layer runs at the ambient pressure, so Δp is small there.
+- *Where the residual sits* (K = 1 at 6000 iterations): in the dead air just outside the jet (the rows j = 4-5 beside the jet's four rows) and at the base-wall corner, where the flow is a slow recirculation (u from +0.9 to −1 m/s, M 3e-4 to 7e-3), at β ≈ M_cut. The ten largest cells carry 24 % of R².
+- *J converges once M_cut ≥ 0.02*, about 0.4 of the jet Mach. The stall therefore comes from the dead-air cells whose β sits at M_cut, far below the jet's beside them. The local cutoffs that spread the jet's β into its neighbours (K_u, the neighbours' M²) bring J two orders lower, but it still stalls at 1e-3.
+- *No variant is adopted* (the decision is the orchestrator's). The contract stays K = 1, and J stays pinned. A global cutoff tied to the flow (M_cut = K_g · the domain's maximum Mach, Turkel's β² ≥ K M∞²) is the form the data supports, but it is a contract change: it raises β everywhere in a fast flow. Two candidates for the next round: that cutoff, or a local cutoff that reaches more than one cell into the dead air.
 
 **Low-Mach preconditioning (tracking mode only; decision D4-10).** Without it the pseudo-time step is set by the acoustic speed |u| + c while the flow converges at the convective speed |u|, so the iterations to converge grow like 1/M (ladder L7: the M 0.01 sphere did not converge in 20000 iterations, the M 0.3 sphere took 3096). The option `lowMachPreconditioning: { minMach }` multiplies the pseudo-time derivative of the pressure by 1/β² (Turkel's preconditioner with α = 0 in the variables (p, u, v, rw, s, Z), equivalent for this gas to Weiss & Smith 1995). Per cell, from the stage-1 primitives and frozen for the three stages like τ:
 
