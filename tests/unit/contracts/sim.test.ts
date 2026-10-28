@@ -12,6 +12,7 @@ import {
   validateSimCommand,
   validateSimCommandMessage,
   SNAPSHOT_ROOTS,
+  FLOW_DEFAULT_ERRORS,
   FLOW_RUN_STATUSES,
   sanitizeFlowStatus,
   snapshotHasMockData,
@@ -302,10 +303,27 @@ describe('W0C-I5: the solver has a failure channel in the snapshot', () => {
     expect(ok.flow.reduction?.grossThrustN).toBe(120_000);
   });
 
-  it('nulls a non-finite GPU time and drops stats whose counters are not finite', () => {
-    const gpu = nextSnapshot(null, withFlow({ stats: { ...healthyStats, gpuTimeMs: Infinity } }));
-    expect(gpu.flow.stats).toEqual({ ...healthyStats, gpuTimeMs: null });
-    expect(gpu.flow.error).toMatch(/stats\.gpuTimeMs is Infinity/);
+  it('W1F-I1: a non-finite GPU time alone is a timing glitch, not divergence', () => {
+    // a stale or backwards timestamp pair (every fresh D3D12 device) gives NaN by design
+    for (const gpuTimeMs of [Number.NaN, Infinity]) {
+      const s = nextSnapshot(null, withFlow({ stats: { ...healthyStats, gpuTimeMs } }));
+      expect(s.flow).toMatchObject({ status: 'running', error: null });
+      expect(s.flow.stats).toEqual({ ...healthyStats, gpuTimeMs: null });
+    }
+    // with a non-finite residual as well, the residual is what diverges
+    const both = nextSnapshot(
+      null,
+      withFlow({
+        stats: { ...healthyStats, gpuTimeMs: Number.NaN, residualDensityL2: Number.NaN },
+      }),
+    );
+    expect(both.flow.status).toBe('diverged');
+    expect(both.flow.error).toMatch(/stats\.residualDensityL2 is NaN/);
+    expect(both.flow.error).not.toMatch(/gpuTimeMs/);
+    expect(both.flow.stats).toEqual({ ...healthyStats, gpuTimeMs: null, residualDensityL2: null });
+  });
+
+  it('drops stats whose counters are not finite', () => {
     const counters = nextSnapshot(
       null,
       withFlow({ stats: { ...healthyStats, totalIterations: Number.NaN } }),
@@ -347,17 +365,29 @@ describe('W0C-I5: the solver has a failure channel in the snapshot', () => {
     expect(none.flow.status).toBe('unavailable');
   });
 
-  it('refuses unknown states and failures without a message', () => {
+  it('refuses unknown states and a non-string error', () => {
     expect(() => nextSnapshot(null, withFlow({ status: 'exploded' as never }))).toThrow(
       /flow\.status "exploded"/,
     );
-    expect(() => nextSnapshot(null, withFlow({ status: 'diverged', error: null }))).toThrow(
-      /flow\.error/,
-    );
-    expect(() => nextSnapshot(null, withFlow({ status: 'lost', error: '' }))).toThrow(
-      /flow\.error/,
-    );
     expect(() => nextSnapshot(null, withFlow({ error: 42 as never }))).toThrow(/flow\.error/);
+  });
+
+  it('W1F-I1: a failure without a message gets a default one instead of stopping publication', () => {
+    // GPUDeviceLostInfo.message may be empty (the spec allows it)
+    const lost = nextSnapshot(null, withFlow({ status: 'lost', error: '' }));
+    expect(lost.flow.status).toBe('lost');
+    expect(lost.flow.error).toBe(FLOW_DEFAULT_ERRORS.lost);
+    const diverged = nextSnapshot(null, withFlow({ status: 'diverged', error: null }));
+    expect(diverged.flow.status).toBe('diverged');
+    expect(diverged.flow.error).toBe(FLOW_DEFAULT_ERRORS.diverged);
+    for (const msg of Object.values(FLOW_DEFAULT_ERRORS)) expect(msg.length).toBeGreaterThan(0);
+    // a lost device with an empty message and a bad number keeps the loss as the root cause
+    const both = nextSnapshot(
+      null,
+      withFlow({ status: 'lost', error: '', stats: { ...healthyStats, residualDensityL2: NaN } }),
+    );
+    expect(both.flow).toMatchObject({ status: 'lost', error: FLOW_DEFAULT_ERRORS.lost });
+    expect(both.flow.stats?.residualDensityL2).toBeNull();
   });
 
   it('leaves a healthy status untouched and still refuses NaN in the cycle state', () => {

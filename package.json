@@ -22,6 +22,7 @@
     "test:ladder": "vitest run -c vitest.ladder.config.ts",
     "coverage": "vitest run --coverage",
     "test:gpu": "vitest run -c vitest.gpu.config.ts",
+    "test:gpu-ladder": "vitest run -c vitest.gpuladder.config.ts",
     "test:browser": "vitest run -c vitest.browser.config.ts",
     "bench:throughput": "node spikes/bench/run.ts throughput",
     "bench:worker": "node spikes/bench/run.ts worker",

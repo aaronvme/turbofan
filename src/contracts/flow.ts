@@ -4,6 +4,7 @@
 import { R_AIR, type AmbientConditions } from './ambient';
 import type { CycleState } from './cycle';
 import type { EngineDefinition } from './engine';
+import type { FlowStatus } from './sim';
 import { HALF_MAX, fromHalfBits, toHalfBits } from './half';
 import { SOLVER_REDUCTION_STATIONS, type SolverReductionStationId } from './stations';
 
@@ -118,7 +119,10 @@ export interface StepBudget {
 export interface FlowStepStats {
   readonly iterationsThisStep: number;
   readonly totalIterations: number;
-  /** Latest resolved timestamp-query GPU time, ms; null until one resolves or if unsupported. */
+  /**
+   * Latest resolved timestamp-query GPU time of a whole solver frame (the iterations and the
+   * render resample), ms; null until one resolves or if unsupported.
+   */
   readonly gpuTimeMs: number | null;
   /** L2 norm of the density residual from the latest readback; null before the first one. */
   readonly residualDensityL2: number | null;
@@ -159,6 +163,14 @@ export interface FlowSolver {
   latestReduction(): StationReduction | null;
   /** The render textures; the same GPUTexture objects for the solver's lifetime. */
   fields(): FlowField;
+  /**
+   * The solver's FlowStatus for the snapshot (W1F-I1; W2S-A-I10): initialising, running, lost (a
+   * lost device or an uncaptured GPU error) or diverged. The app routes its device's error sink
+   * (src/gpu/device.ts onError) to reportGpuError.
+   */
+  status(): FlowStatus;
+  /** An uncaptured GPU error reported by the device's error sink: the solver stops (lost). */
+  reportGpuError(message: string): void;
   dispose(): void;
 }
 

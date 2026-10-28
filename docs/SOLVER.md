@@ -353,3 +353,35 @@ The f32 asset rounds the face vectors, so a cell's Σ S_x is not zero but of ord
 - **The far field at static conditions.** The linearised far field (3) imposes w₋ = 0, which for a steady inflow of speed |u_n| through the boundary means p′_b ≈ −ρ∞c∞|u_n|: with the static engine's suction at the far-field boundary (about 1 m/s), the whole field sits a few hundred pascals low. The upstream inflow boundary (4) uses total conditions and has no such offset. If L12 shows the offset, switch the lateral far field to total conditions on inflow faces too.
 - **Corner ghosts** (W0M-N4): none; the v1 plume eddy viscosity must build its face gradients from the cells the dimension-split stencil reads.
 - **Interface kinks** (W1M-N5): see §6.
+
+## 14. f32 implementation forms (w2/solver; D4-37, D4-41)
+
+The GPU kernel evaluates some terms of sections 3-10 in a different but algebraically identical order, so that f32 rounds the perturbation rather than the free stream. Each form below states its identity; `tests/unit/flow/f32forms.test.ts` transcribes each WGSL form in f64 and shows that it agrees with the oracle's literal form to f64 rounding. The oracle keeps the literal forms. (D4-41 named this section 13; 13 already holds the notes for W3, so it is appended as 14. The reference does not edit it.)
+
+**14.1 R(φ) − R∞ = φ (R_p − R_a)** (`gasRDelta`, wgsl/gas.ts). The ambient is air, R∞ = R_a, and R(φ) = R_a + φ(R_p − R_a) (§3). In f32, R_a + φ dR keeps only the high bits of a small φ dR (a third of it at φ 1e-4), which put an error of 3e-8 p∞ into every p′ and 1e-2 K into T′ of a lean fuel trace.
+
+**14.2 The preconditioned density increment** (`preconditionIncrement`, wgsl/kernels.ts). §10's δρ′ ← δρ′ − (1 − β²) δp/c². With c² = cp R T / c_v (§3) and c_v = cp − R, δp/c² = δρ′ − n with the non-acoustic part
+
+```
+n = (Y δρ′ − δη + u δ(ρu) + v δ(ρv) + w δ(ρrw)/r_c) / (cp T),   Y = R∞ T′ + (R − R∞) T − ½(u∞² + q²) + Δe
+```
+
+so δρ′ ← n + β² (δρ′ − n). The literal order is the difference of two numbers equal to within β², a relative error ~1e-7/β² in f32 (2.7e-2 on ladder L8's sink at β² = 9e-6). The other five components keep the literal form.
+
+**14.3 The momentum and velocity gauges.** The kernel stores (ρu)′ = ρu − ρ∞u∞ in place of ρu (§4's U_1) and carries u′ = u − u∞ in place of u in the primitive record (§4's q_1), with ρ∞, u∞ the kernel's f32 reference values (the host converts with ρ∞u∞ = fround(ρ∞) fround(u∞), exact in f64). Identities: u′ = ((ρu)′ − ρ′ u∞)/ρ; q² − q∞² = u′(u′ + 2u∞) + v² + w²; the MUSCL slopes and face values of u′ are those of u (differences and q ± σ/2); every absolute velocity the scheme uses (vn, q², the BCs, λ_c, β²_c) is u∞ + u′. The f32 free stream (u′ = 0, every other gauge 0) is then an exact zero of every gauge, like the quiescent ambient. The tracking update U + δU and the stage combinations are affine with weights summing to 1, so they act on (ρu)′ exactly as on ρu.
+
+**14.4 Gauge flux differences** (`slau2`, wgsl/flux.ts; the stage kernel). Each flow face (not a slip wall) carries G_f = F_f − F∞(S_f), where F∞(S) = (ρ∞u∞, ρ∞u∞², 0, 0, 0, 0) S_x is the free stream's flux. With vn = vn∞ + δvn (vn∞ = u∞ n_x, δvn = u′ n_x + v n_r) and §7's g = 0 or not:
+
+```
+2 G_0 = ρ′_L vn_L + ρ′_R vn_R + ρ∞ (δvn_L + δvn_R) + (1 − g) V̄ (ρ′_L − ρ′_R) + g (ρ_L|vn_L| − ρ_R|vn_R|) − (χ/(c̄ f_a))(p′_R − p′_L)
+ṁ   = ρ∞ vn∞ + G_0
+G_1 = G_0 u∞ + ṁ⁺ u′_L + ṁ⁻ u′_R + p̃ n_x
+```
+
+(the first line is §7's ṁ − ρ∞vn∞ expanded, using V̄⁺ = (1 − g)V̄ + g|vn_L| and V̄⁻ likewise; the second uses ṁ⁺ + ṁ⁻ = ṁ). Components 2-5 are already gauges and unchanged. The cell residual adds the free stream's part back once: R_c = Σ_f ± b_f |S_f| G_f + (ρ∞u∞, ρ∞u∞²) Σ_flow faces b_f S_f,x − (sources), the sum computed in f64 from the stored metrics (`CELL_GEO.w`, layout.ts blockageData). Slip-wall faces keep §7's pressure-only flux and are left out of that sum. In f32 the f32 metrics' Σ S_x is then the only forcing of the free stream, exactly the oracle's (§12.3).
+
+**14.5 p̃'s last term from the gauges.** β⁺(M) + β⁻(M) = 1 for every M, so β⁺(M_L) + β⁻(M_R) − 1 = β⁺(M_L) − β⁺(M_R) = ¼ (M_L − M_R)(3 − M_L² − M_L M_R − M_R²) for |M_L|, |M_R| < 1 (β⁺ = ¼(2 + 3M − M³)), with M_L − M_R = (δvn_L − δvn_R)/c̄. Otherwise the literal form. For equal states it is an exact zero; the literal β⁺ + β⁻ − 1 rounds to ~1e-7 and multiplies q̄ ρ̄ c̄ (7e-3 Pa per face at M 0.5).
+
+**14.6 Compensated sums.** (a) The cell residual of §9 is a Neumaier (compensated) sum of its face fluxes and sources, per component. (b) U^n is the f32 state plus a per-cell low part (the `lo` buffer). Tracking: U^{n+1} = U^n + δU_3 is a TwoSum of the f32 part and (low part + δU_3), the rounding error kept as the new low part; stages 1 and 2 use the f32 part. Physical time: SSP-RK3 in its Butcher form U^{n+1} = U^n + ⅙ e_1 + ⅙ e_2 + ⅔ e_3 (e_k = E(U^(k−1)) − U^(k−1) with the point-implicit factor; identical to §10's Shu-Osher form), the weighted e_k accumulated in the low part and added to U^n as a TwoSum at stage 3; the stage values themselves are §10's. Increments below the state's ulp then accumulate at their exact rate (`tests/gpu/solver-exact.test.ts`). The primitives are computed from the f32 part.
+
+**What the forms bought (D4-37, 130k asset, Dawn, 2026-10-27).** Ladder L1 uniform (M 0.5, 20k iterations): 2.0e-4 m/s with the literal forms; 14.4 alone 1.1e-4 at 2000; 14.4 + 14.6(b) 7.8e-5 at 2000; 14.3 + 14.4 + 14.6 2.9e-5; with 14.5's gauge Mach difference **2.1e-5, plateaued from iteration 200** (2.07e-5 at 200, 2.13e-5 at 20k), against the oracle's 1.44e-5 at 100 iterations (GPU − oracle per cell 8.4e-6, the f32 rounding of the free stream itself). With 14.3-14.5 in place, 14.6 changes L1 by less than 1e-8; it is what tightens the physical-time rows of 12.2 (D 7.7e-7 → 3.7e-8).
