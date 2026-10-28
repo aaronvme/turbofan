@@ -21,7 +21,7 @@ ID -> COMMIT
 | B-N4 | fields() after dispose | b081663 |
 | B-N5 | physical mode's double prim + ghost | skipped: the same change as D4-54's prim-reuse item |
 | B-N6, A-I6 | settle window | db3c57f: the largest change over every sample of the window |
-| B-N7 | cfl <= 0 | 196954c |
+| B-N7 | cfl < 0 | 196954c + the STOP-CLEAN commit: a negative or non-finite CFL throws; 0 stays legal (solver-exact's M 0.5 test freezes tau with it) |
 | B-N8 | source stage time | noted: the built-in model is time-independent; W3's scheduled sources need t, t + dt, t + dt/2 per stage (main's W2R-N3) |
 | B-N9 | M_ref from the face's beta | follows reference round 6 (D4-51) when it merges |
 | B-N10 | moving-reference rows | 9387657: the rows use flows that move with u_inf, as B suggests; margins 20-100x (below) |
@@ -78,5 +78,13 @@ GOTCHAS
 - Browser tests cannot import tests/ladder/oracle.ts (node:fs).
 - I used port 5189 for my own browser run. Nothing is left running.
 
-GATES
-- Filled in by the next commit.
+STOP-CLEAN at the usage limit (84 %): this is the last commit of the round.
+
+GATES (code at 196954c + the STOP-CLEAN fix of the CFL check)
+- npm run typecheck: clean. npm run lint (ESLint + Prettier): clean.
+- npm run test:mesh: 29 passed.
+- npm run test:gpu: 10 files, 56 passed + 1 expected fail, and 1 failure (solver-exact's M 0.5 free stream used cfl 0, which B-N7's first check rejected); after the fix solver-exact passes alone (12 passed). A full rerun is owed.
+- npm run test:gpu-ladder: 2 files, 12 passed (at db3c57f; later commits do not touch the ladder's code).
+- npm run test:browser: 6 files, 22 passed (port 5189).
+- npm run coverage and npm test: the coverage run was still going at STOP-CLEAN (machine shared with the mutant runs). Not reported; owed.
+- Mutants: the round's first full run (all-1) and the HEAD run (all-2) were partial at STOP-CLEAN; each killed mutant above was verified (oracle-moving, forms, solver-exact and flow-solver runs). twosum-lo, M2b and M2c were verified killed by their new tests only in the targeted runs of this round's tests: the reviewers should re-run them.

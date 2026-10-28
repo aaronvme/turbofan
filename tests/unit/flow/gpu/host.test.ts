@@ -174,7 +174,7 @@ describe('uniform parameters', () => {
     const wgsl = paramsStructWgsl();
     for (const [name, type] of PARAM_FIELDS) expect(wgsl).toContain(`${name}: ${type},`);
     expect(PARAMS_BYTES % 16).toBe(0);
-    expect(() => stageParams({ ...opts, cfl: 0 }, sizes)).toThrow(/cfl 0 must be > 0/);
+    expect(() => stageParams({ ...opts, cfl: -1 }, sizes)).toThrow(/cfl -1 must be >= 0/);
     expect(() => stageParams({ ...opts, cflPhysical: -1 }, sizes)).toThrow(/cflPhysical/);
     const set = stageParams(opts, sizes);
     const second = set.tracking[1];

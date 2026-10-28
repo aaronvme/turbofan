@@ -151,7 +151,7 @@ export function stageParams(
   opts: GpuSchemeOptions,
   sizes: { readonly nCells: number; readonly nGhosts: number; readonly nWorkgroups: number },
 ): StageParamSet {
-  // a zero or negative CFL would freeze the state silently (W2S-B-N7)
+  // a negative or non-finite CFL is a caller error (W2S-B-N7; 0 stays: solver-exact freezes tau with it)
   for (const [name, v] of [
     ['cfl', opts.cfl],
     ['cflPhysical', opts.cflPhysical],
