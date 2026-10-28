@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { FLOW_DEFAULT_ERRORS } from '../../../../src/contracts/sim';
+import { FLOW_SOLVER_LIMITS, selectPreferredLimits } from '../../../../src/gpu/device';
 import {
   DEFAULT_TILE,
   blockageData,
   buildLayout,
   checkTile,
+  stageStorageBuffers,
 } from '../../../../src/flow/gpu/layout';
 import {
   DEFAULT_CFL_PRECONDITIONED,
@@ -333,5 +335,47 @@ describe('solver status (W1F-I1) and provenance (W1F-N1)', () => {
       flow: 'mock',
     });
     expect(snapshotSources({ source: 'model' }, null).flow).toBe('none');
+  });
+});
+
+describe('D4-50: the stage kernel storage buffers against the device limit', () => {
+  it('binds 8, 9 with sources, 10 with the face dump; packs geo and topo when the device is short', () => {
+    expect(stageStorageBuffers({ sources: false, faceDump: false }, 8)).toEqual({
+      buffers: 8,
+      packed: false,
+    });
+    expect(stageStorageBuffers({ sources: true, faceDump: false }, 16)).toEqual({
+      buffers: 9,
+      packed: false,
+    });
+    // an adapter with WebGPU's default 8: the two read-only static buffers share one binding
+    expect(stageStorageBuffers({ sources: true, faceDump: false }, 8)).toEqual({
+      buffers: 8,
+      packed: true,
+    });
+    expect(stageStorageBuffers({ sources: true, faceDump: false }, 16, true)).toEqual({
+      buffers: 8,
+      packed: true,
+    });
+    expect(() => stageStorageBuffers({ sources: true, faceDump: true }, 8)).toThrow(
+      /needs 10 storage buffers \(9 packed\).*allows 8.*maxStorageBuffersPerShaderStage/,
+    );
+    expect(FLOW_SOLVER_LIMITS.maxStorageBuffersPerShaderStage).toBe(
+      stageStorageBuffers({ sources: true, faceDump: false }, 99).buffers,
+    );
+  });
+
+  it('requests a preferred limit at the adapter value when the adapter offers less', () => {
+    const adapter = { maxStorageBuffersPerShaderStage: 8, maxBufferSize: 2 ** 31 };
+    expect(
+      selectPreferredLimits(adapter as unknown as GPUSupportedLimits, FLOW_SOLVER_LIMITS),
+    ).toEqual({ maxStorageBuffersPerShaderStage: 8 });
+    const arc = { maxStorageBuffersPerShaderStage: 16 };
+    expect(
+      selectPreferredLimits(arc as unknown as GPUSupportedLimits, FLOW_SOLVER_LIMITS),
+    ).toEqual({ maxStorageBuffersPerShaderStage: 9 });
+    expect(() =>
+      selectPreferredLimits({} as unknown as GPUSupportedLimits, FLOW_SOLVER_LIMITS),
+    ).toThrow(/does not report limit/);
   });
 });
