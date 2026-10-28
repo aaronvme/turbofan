@@ -64,10 +64,11 @@ export interface PerfAmplitudes {
 }
 
 /**
- * The timing state's default amplitudes. Not a solution: with the engine's preconditioned tracking
- * (the GpuFlowSolver default) it goes non-finite after about 150 iterations, on main's kernel too
- * (so does a 0.1 % pressure wave at rest; the plain scheme keeps every such state finite: the
- * handoff's finding, tools/perf/dawn.ts soak). Profiles and A/B runs re-set it well before that.
+ * The timing state's default amplitudes. Not a solution. Before the kernel took M_ref from the
+ * face's beta (D4-44), the engine's preconditioned tracking (the GpuFlowSolver default) took it
+ * non-finite after about 150 iterations, and a 0.1 % pressure wave at rest within 10 (W2R-I6:
+ * w2-solver-perf and w2-solver-int handoffs, tools/perf/dawn.ts soak). With D4-44 both, and the
+ * hot plume alone, stay finite for 1000 iterations. Profiles and A/B runs still re-set it.
  */
 export const PERF_AMPLITUDES: PerfAmplitudes = {
   jet: 60,
