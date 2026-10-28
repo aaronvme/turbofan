@@ -37,7 +37,7 @@ DONE (IDs -> commits, round 7)
   - N11: tests/ladder/globalSetup.ts clears reports/ladder/*.json first.
   - N12: the sphere child times out at 60 s + cap x n^2 x 8 us (4.8 us was measured under load). That is 25.6 min at 96, 7 min at 48 and 2.5 min at 24.
   - N4: L4b keeps its 20 samples and reports starts at 0.16 and 0.24 m. Both reach x_s 0.2132 m, the target start's equilibrium: 1.644 / 1.655 % against 1.64 %.
-- 960862f: the R/J pin comments, and PHYSICS.md 3.3's first D4-45 result.
+- 960862f: the R/J pin comments. The handoff commit adds PHYSICS.md 3.3's first D4-45 result.
 
 LADDER (`npm run test:ladder` @0e1bdba, 905 s): 10 files passed, 3 failed
 - Value rows that pass:
