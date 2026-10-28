@@ -2702,3 +2702,22 @@ None.
   - w2/solver implements the request in the device module. w2/app-ui's worker inherits it.
 - **D4-51 (w2/reference round 6 @c937913, questions 1 and 3): D4-44 (a) is kept,** with M_ref taken from the face's β. CFL 0.8 now holds for β 0.003-0.6 at any M0 ≤ β. The start-from-rest (R) and shear-layer (J) cases stay pinned `it.fails`. Option (b) is not adopted: it changed nothing in R or J.
 - **D4-52 (question 2): J's stall is Important, W2R-I8, not a nit.** The engine's flow is full of shear layers: the bypass/core mixing and the jet plume. A tracking-mode stall there would slow the app's settling. The plain scheme converges J, so the preconditioner is the cause. Investigate it after D4-36's trials, first with the standard pressure-difference cutoff in β², β² = min(1, max(M², M_cut², K·|Δp|/(ρc²))) (Weiss-Smith; Darmofal & Siu). Bring the data back.
+- **D4-53: the santa-loop review of w2/solver @81e9508, round 1.** Reviewer A (critic branch a486cb1, `docs/reviews/santa-solver-A.md`) gives **APPROVE**: 0 B, 10 I, 9 N. Reviewer B (branch santa-b e3135c4, `docs/reviews/santa-solver-B.md`) gives **CHANGES REQUIRED**: 1 B, 6 I, 10 N.
+  - Both find the kernel matches SOLVER.md and the oracle term for term. All gates are green at the tip.
+  - Under the plan's rule (both must approve), a fix round runs. Both reviewers then re-verify their own findings, each seeing only its own file.
+  - **The fix list:**
+    - W2S-B-B1: a trial merge into main fails typecheck at `tests/gpu/oracle.test.ts:162` (main's limiter is named `'sharp'|'smooth'`, the kernel's `'vanAlbadaSharp'`).
+    - Surviving mutants of real terms: B-I1/I2, A-I2 (oracle rows at u∞ ≠ 0), A-I5 (TwoSum low part), and the Neumaier form's own test. The §14 identity tests must exercise the kernel's WGSL, not a TS copy.
+    - The resample's values: A-I1.
+    - The resample left out of D4-2's budget and of L13's ceiling: A-I4, B-I3.
+    - The D4-38 settle check reading only the window's endpoints: A-I6.
+    - L8/L9 rows under D4-45: B-I5.
+    - D4-50's device limits: B-I6.
+    - D4-48's E/B normalisation once the reference lands it.
+    - The FlowSolver status channel: A-I10.
+    - Numbers checked in Chrome: A-I3.
+    - The nits, where cheap.
+- **D4-54: solver throughput is a tracked follow-up, not a merge blocker,** as both reviewers concluded.
+  - Indicative Chrome cost is 2.09-2.4 ms/it, about 2 iterations per frame at D4-2's 5 ms, roughly 120 it/s against P1's 150. The cause is memory and dispatch: about 161 MB per iteration over 9 dispatches.
+  - After the fix round's merge, a performance round targets ≤ 1.6 ms/it, from the reviewers' list: merge the ghost pass into the prim pass, reuse the resample's prim pass, and slim the halo record.
+  - It is then measured officially under D0-1 inside the app's 1080p scene. P1 is judged on that number. A miss there needs a logged decision under P1's own rule: about 80k cells, or a half-rate solver.
