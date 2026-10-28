@@ -387,7 +387,7 @@ describe('GPU ladder', () => {
           pass: mErr < L4.maxChokedMassFlowRelativeError.value,
         },
         // KNOWN-FAIL (data for the critic, D4-38): the GPU residual stops above the stated
-        // plateau (round 2: 3.6e-4 against 4e-5) while the accuracy metrics settle
+        // plateau (round 2: it stops falling at 3.99e-4, the last value 3.64e-4, against 4e-5; D4-47) while the accuracy metrics settle
         { ...settleRow('L4', conv, 8000), pass: 'reported' },
       ],
       { conv },
@@ -451,7 +451,7 @@ describe('GPU ladder', () => {
           value: err,
           pass: err < L5.maxMassFlowRelativeError.value,
         },
-        // KNOWN-FAIL (data for the critic, D4-38): 4.9e-3 against the stated 1.7e-4
+        // KNOWN-FAIL (D4-47): it stops falling at 7.54e-3 (the last value 4.9e-3) against the stated 1.7e-4
         { ...settleRow('L5', conv, 8000), pass: 'reported' },
       ],
       { conv },

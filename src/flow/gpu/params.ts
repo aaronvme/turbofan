@@ -151,6 +151,14 @@ export function stageParams(
   opts: GpuSchemeOptions,
   sizes: { readonly nCells: number; readonly nGhosts: number; readonly nWorkgroups: number },
 ): StageParamSet {
+  // a zero or negative CFL would freeze the state silently (W2S-B-N7)
+  for (const [name, v] of [
+    ['cfl', opts.cfl],
+    ['cflPhysical', opts.cflPhysical],
+  ] as const) {
+    if (v !== undefined && !(v > 0 && Number.isFinite(v)))
+      throw new Error(`${name} ${v} must be > 0`);
+  }
   const ref = referenceState(opts.gas, opts.freeStream);
   const bcOpts = {
     ...(opts.inflowTotal === undefined ? {} : { inflowTotal: opts.inflowTotal }),

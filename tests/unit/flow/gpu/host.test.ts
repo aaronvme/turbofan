@@ -174,6 +174,8 @@ describe('uniform parameters', () => {
     const wgsl = paramsStructWgsl();
     for (const [name, type] of PARAM_FIELDS) expect(wgsl).toContain(`${name}: ${type},`);
     expect(PARAMS_BYTES % 16).toBe(0);
+    expect(() => stageParams({ ...opts, cfl: 0 }, sizes)).toThrow(/cfl 0 must be > 0/);
+    expect(() => stageParams({ ...opts, cflPhysical: -1 }, sizes)).toThrow(/cflPhysical/);
     const set = stageParams(opts, sizes);
     const second = set.tracking[1];
     const first = set.tracking[0];
@@ -371,9 +373,9 @@ describe('D4-50: the stage kernel storage buffers against the device limit', () 
       selectPreferredLimits(adapter as unknown as GPUSupportedLimits, FLOW_SOLVER_LIMITS),
     ).toEqual({ maxStorageBuffersPerShaderStage: 8 });
     const arc = { maxStorageBuffersPerShaderStage: 16 };
-    expect(
-      selectPreferredLimits(arc as unknown as GPUSupportedLimits, FLOW_SOLVER_LIMITS),
-    ).toEqual({ maxStorageBuffersPerShaderStage: 9 });
+    expect(selectPreferredLimits(arc as unknown as GPUSupportedLimits, FLOW_SOLVER_LIMITS)).toEqual(
+      { maxStorageBuffersPerShaderStage: 9 },
+    );
     expect(() =>
       selectPreferredLimits({} as unknown as GPUSupportedLimits, FLOW_SOLVER_LIMITS),
     ).toThrow(/does not report limit/);
