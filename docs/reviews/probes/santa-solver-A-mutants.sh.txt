@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Santa-loop reviewer A, w2/solver @81e9508: targeted WGSL mutants against `test:gpu` files.
+#
+# Usage: bash santa-solver-A-mutants.sh.txt <scratch dir>   (saved as .txt like the other probes)
+#   The scratch dir is a plain `git archive w2/solver` export (never the builder's worktree), with
+#   public/mesh/*.bin copied in and node_modules a junction to the builder's. Each mutant edits
+#   one line in the scratch copy, runs the named Dawn test files, and restores the line.
+# Output: one line per mutant, KILLED (a test failed) or SURVIVED (every test passed).
+set -u
+M="$1"  # the scratch export
+cd "$M" || exit 2
+
+run() {
+  local id="$1" file="$2" from="$3" to="$4"
+  shift 4
+  cp "$file" "$file.orig"
+  # literal (fixed-string) replacement of exactly one occurrence
+  node -e '
+    const fs = require("fs");
+    const [f, a, b] = process.argv.slice(1);
+    const s = fs.readFileSync(f, "utf8");
+    const n = s.split(a).length - 1;
+    if (n !== 1) { console.error(`${f}: ${n} matches`); process.exit(3); }
+    fs.writeFileSync(f, s.replace(a, b));
+  ' "$file" "$from" "$to" || { mv "$file.orig" "$file"; echo "$id BAD-MUTANT"; return; }
+  if npx vitest run -c vitest.gpu.config.ts "$@" > "/tmp/santaA/mut-$id.log" 2>&1; then
+    echo "$id SURVIVED ($*)"
+  else
+    echo "$id KILLED ($*): $(grep -E 'Tests +[0-9]' "/tmp/santaA/mut-$id.log" | tail -1)"
+  fi
+  mv "$file.orig" "$file"
+}
+
+F=src/flow/gpu/wgsl/flux.ts
+K=src/flow/gpu/wgsl/kernels.ts
+
+# M1: SLAU2's mass-flux pressure diffusion with the wrong sign (a wrong flux)
+run M1 $F '    - (chi / (cbar * fa)) * (pR - pL));' '    + (chi / (cbar * fa)) * (pR - pL));' \
+  tests/gpu/oracle.test.ts tests/gpu/functions.test.ts
+# M2: the resample writes rw instead of w = rw / r_c into the u_theta channel
+run M2 $K 'a += wk * vec4f(qa.x, qa.y, qa.z, qa.w / geo[CELL_GEO + c].x);' \
+  'a += wk * vec4f(qa.x, qa.y, qa.z, qa.w);' tests/gpu/flow-solver.test.ts
+# M3: the free stream's add-back (SOLVER.md 14.4) with the wrong sign: only u_inf != 0 sees it
+run M3 $K 'acc = acc6(acc, vec4f(mInf * cg.w, (mInf * P.uInf) * cg.w, 0.0, 0.0), vec4f(0.0));' \
+  'acc = acc6(acc, -vec4f(mInf * cg.w, (mInf * P.uInf) * cg.w, 0.0, 0.0), vec4f(0.0));' \
+  tests/gpu/oracle.test.ts tests/gpu/solver-exact.test.ts
+# M4: the tracking TwoSum drops the low part (SOLVER.md 14.6b)
+run M4 $K 'let sa = twoSum4(ba, lo[2u * c] + d.a);' 'let sa = twoSum4(ba, d.a);' \
+  tests/gpu/solver-exact.test.ts
+# M5: M_ref of the D4-20 scaling without the min(1, .) clamp (transonic preconditioned faces)
+run M5 $F 'let mRef = min(1.0, max(qAvg / cbar, machCut));' 'let mRef = max(qAvg / cbar, machCut);' \
+  tests/gpu/oracle.test.ts tests/gpu/functions.test.ts

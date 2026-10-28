@@ -1,0 +1,83 @@
+// Santa-loop reviewer A, w2/solver @81e9508: what one iteration of the production kernel moves.
+// A static count from the layout (no GPU, no timing): workgroups, thread occupancy of the 16 x 8
+// tiles, halo over-fetch, and the bytes each pass reads and writes per iteration if nothing is
+// reused across workgroups (an upper bound on DRAM traffic; L2 reuse lowers it).
+//
+// Run from the root of a w2/solver checkout (it imports that checkout's src):
+//   copy to a .ts name, then: node --import ./tools/mesh/ts-resolve.mjs <path>/santa-solver-A-cost.ts [tile x] [tile y]
+import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+
+const root = pathToFileURL(`${process.cwd()}/`).href;
+const { loadMeshAsset, parseMeshManifest } = await import(`${root}src/flow/mesh/loader.ts`);
+const { solverMeshFromFile } = await import(`${root}src/flow/reference/solverMesh.ts`);
+const { buildLayout } = await import(`${root}src/flow/gpu/layout.ts`);
+const { stageWorkgroupBytes, tileFaceSlots } = await import(`${root}src/flow/gpu/wgsl/kernels.ts`);
+
+const manifest = parseMeshManifest(JSON.parse(readFileSync('public/mesh/manifest.json', 'utf8')));
+const entry = manifest.specs['130k'];
+const { file } = await loadMeshAsset(readFileSync(`public/mesh/${entry.file}`), entry);
+const mesh = solverMeshFromFile(file);
+const tile = { x: Number(process.argv[2] ?? 16), y: Number(process.argv[3] ?? 8) };
+const L = buildLayout(mesh, { tile });
+const n = L.nCells;
+const threads = L.workgroups * tile.x * tile.y;
+let halo = 0;
+let faces = 0;
+for (const t of L.tiles) {
+  const b = mesh.blocks[t.block];
+  const i0 = t.ti * tile.x;
+  const j0 = t.tj * tile.y;
+  for (let jj = -2; jj < tile.y + 2; jj++) {
+    for (let ii = -2; ii < tile.x + 2; ii++) {
+      const gi = i0 + ii;
+      const gj = j0 + jj;
+      const inI = gi >= 0 && gi < b.ni;
+      const inJ = gj >= 0 && gj < b.nj;
+      if (
+        (inI && inJ) ||
+        (inJ && gi >= -2 && gi <= b.ni + 1) ||
+        (inI && gj >= -2 && gj <= b.nj + 1)
+      )
+        halo++;
+    }
+  }
+  for (let fy = 0; fy < tile.y; fy++)
+    for (let fx = 0; fx <= tile.x; fx++) if (i0 + fx <= b.ni && j0 + fy < b.nj) faces++;
+  for (let fy = 0; fy <= tile.y; fy++)
+    for (let fx = 0; fx < tile.x; fx++) if (i0 + fx < b.ni && j0 + fy <= b.nj) faces++;
+}
+// bytes per stage, from the WGSL (kernels.ts): prim pass reads U (32) + CELL_GEO (16), writes 32;
+// ghost pass ~ reads 1-2 prim records (32-64) + topo (32), writes 32 per ghost; stage kernel reads
+// the halo (prim 2 x vec4 = 32 per loaded cell; extB a vec4 load = 16), per face one FACE vec4 (16),
+// per cell prim[2c+1] (16), CELL_GEO + CELL_B (32), Uin + U0 (64), writes Uout (32); stage 1 adds
+// the 4 FACE vec4 of the time step (64, mostly L1 hits); stage 3 reads and writes lo (64).
+const prim = n * (32 + 16 + 32);
+const ghost = L.nGhosts * (48 + 32 + 32);
+const stage = halo * (32 + 16) + faces * 16 + n * (16 + 32 + 64 + 32);
+const perIt = 3 * (prim + ghost + stage) + n * 64 + n * 64;
+const fmt = (b: number) => `${(b / 1e6).toFixed(1)} MB`;
+console.log(
+  JSON.stringify(
+    {
+      tile,
+      cells: n,
+      ghosts: L.nGhosts,
+      blocks: mesh.blocks.map((b: { ni: number; nj: number }) => `${b.ni}x${b.nj}`),
+      stageWorkgroups: L.workgroups,
+      threadOccupancy: +(n / threads).toFixed(3),
+      haloLoadsPerCell: +(halo / n).toFixed(3),
+      facesPerCell: +(faces / n).toFixed(3),
+      faceSlotsPerTile: tileFaceSlots(tile),
+      workgroupBytes: stageWorkgroupBytes(tile),
+      dispatchesPerIteration: 3 * 3,
+      bytesPerStage: { prim: fmt(prim), ghost: fmt(ghost), stage: fmt(stage) },
+      bytesPerIterationUpperBound: fmt(perIt),
+      gbPerSecondAt: Object.fromEntries(
+        [1.28, 2.0, 2.3].map((ms) => [`${ms} ms/it`, +(perIt / ms / 1e6).toFixed(1)]),
+      ),
+    },
+    null,
+    2,
+  ),
+);

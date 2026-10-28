@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Santa-loop reviewer A, w2/solver @81e9508: follow-up mutants (same harness as
+# santa-solver-A-mutants.sh). M2 there removed the resample's only use of `geo`, so the 'auto'
+# layout dropped binding 2 and the bind group failed validation: killed for the wrong reason.
+# M2b/M2c keep every binding and change only values.
+#
+# Usage: bash santa-solver-A-mutants2.sh.txt <scratch dir>   (saved as .txt like the other probes)
+set -u
+M="$1"
+cd "$M" || exit 2
+
+run() {
+  local id="$1" file="$2" from="$3" to="$4"
+  shift 4
+  cp "$file" "$file.orig"
+  node -e '
+    const fs = require("fs");
+    const [f, a, b] = process.argv.slice(1);
+    const s = fs.readFileSync(f, "utf8");
+    const n = s.split(a).length - 1;
+    if (n !== 1) { console.error(`${f}: ${n} matches`); process.exit(3); }
+    fs.writeFileSync(f, s.replace(a, b));
+  ' "$file" "$from" "$to" || { mv "$file.orig" "$file"; echo "$id BAD-MUTANT"; return; }
+  if npx vitest run -c vitest.gpu.config.ts "$@" > "/tmp/santaA/mut-$id.log" 2>&1; then
+    echo "$id SURVIVED ($*)"
+  else
+    echo "$id KILLED ($*): $(grep -E 'Tests +[0-9]' "/tmp/santaA/mut-$id.log" | tail -1)"
+  fi
+  mv "$file.orig" "$file"
+}
+
+K=src/flow/gpu/wgsl/kernels.ts
+
+# M2b: the resample's u_theta = rw * r_c instead of rw / r_c
+run M2b $K 'a += wk * vec4f(qa.x, qa.y, qa.z, qa.w / geo[CELL_GEO + c].x);' \
+  'a += wk * vec4f(qa.x, qa.y, qa.z, qa.w * geo[CELL_GEO + c].x);' tests/gpu/flow-solver.test.ts
+# M2c: the state texture's p and rho gauge ratios swapped
+run M2c $K 'textureStore(outState, g.xy, vec4f(b.x / P.pInf, a.x / P.rhoInf, P.tInf + b.z, b.y));' \
+  'textureStore(outState, g.xy, vec4f(a.x / P.rhoInf, b.x / P.pInf, P.tInf + b.z, b.y));' \
+  tests/gpu/flow-solver.test.ts
+# M6: the beta^2 pressure term (Weiss-Smith cutoff) dropped
+run M6 $K '                               dpMax / (rho * c2)));' '                               0.0 * dpMax / (rho * c2)));' \
+  tests/gpu/oracle.test.ts
+
+# M3 again (the add-back with the wrong sign), now against the GPU ladder rows that run with
+# u_inf != 0: 12.2 row B (uniform M 0.5 on 130k vs the oracle) and L7 (the spheres)
+cp $K $K.orig
+node -e '
+  const fs = require("fs");
+  const f = process.argv[1];
+  const a = "acc = acc6(acc, vec4f(mInf * cg.w, (mInf * P.uInf) * cg.w, 0.0, 0.0), vec4f(0.0));";
+  const s = fs.readFileSync(f, "utf8");
+  if (s.split(a).length !== 2) process.exit(3);
+  fs.writeFileSync(f, s.replace(a, a.replace("vec4f(mInf", "-vec4f(mInf")));
+' $K
+for t in "12.2 B" "L7"; do
+  if npx vitest run -c vitest.gpuladder.config.ts tests/gpu-ladder -t "$t" > "/tmp/santaA/mut-M3-ladder-${t// /_}.log" 2>&1; then
+    echo "M3 ladder '$t' SURVIVED"
+  else
+    echo "M3 ladder '$t' KILLED: $(grep -E 'Tests +[0-9]' "/tmp/santaA/mut-M3-ladder-${t// /_}.log" | tail -1)"
+  fi
+done
+mv $K.orig $K

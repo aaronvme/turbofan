@@ -33,11 +33,14 @@ Independent reviewer A of the two-reviewer merge rule for the GPU flow solver (D
 - The scheduler implements D4-2.
 - The L4a/L5 KNOWN-FAILs are pinned as D4-47 says.
 
-**What keeps this from being a clean pass is test strength, not a defect found.** Four of my eight WGSL mutants survive `test:gpu`:
+**What keeps this from being a clean pass is test strength, not a defect found.** Four of my eight WGSL mutants survive `test:gpu` for real:
 - the resample's values (M2b, M2c), which the renderer will read: W2S-A-I1;
 - the free stream's add-back (M3), because every term-for-term oracle row runs at u∞ = 0: W2S-A-I2;
-- the low part of half the tracking TwoSum (M4): W2S-A-I5;
-- the M_ref clamp (M5): W2S-A-I2.
+- the low part of half the tracking TwoSum (M4): W2S-A-I5.
+
+Two more do not show a gap:
+- M5 survives but is nearly equivalent, because χ = 0 wherever q̄ ≥ c̄.
+- M2 was killed only by a validation error, not by a value check.
 
 **Other Important items:**
 - The Chrome path has no numerical check (W2S-A-I3).
@@ -270,9 +273,9 @@ None.
 
 **W2S-A-I2. The term-for-term oracle rows in `test:gpu` all run at u∞ = 0, so the u∞-dependent parts of 14.3-14.5 and the add-back are untested there.**
 - *Where:* `tests/ladder/oracle.ts` `AMBIENT_AT_REST`; `tests/gpu/oracle.test.ts:227, 285, 378` (the D, E-L5 and E-L9a free streams are at rest); `tests/gpu/functions.test.ts:19-22` (`probeFlux` at rest). `solver-exact.test.ts:215-246` checks the M 0.5 free stream at `cfl: 0` (τ = 0), so the add-back cannot act.
-- *Failure:* mutant M3, which flips the sign of the free stream's add-back (`kernels.ts:410`), **survives every `test:gpu` file** (oracle, solver-exact). In the ladder: [[M3-LADDER]].
+- *Failure:* mutant M3, which flips the sign of the free stream's add-back (`kernels.ts:410`), **survives every `test:gpu` file** (oracle, solver-exact). In the ladder, row B lets it through (2.07e-5 against 1.95e-5 unmutated, both well inside 10× the oracle). Only L7 kills it, grossly: asymmetry 554, Cd 0.29. So only the slow, merge-time `test:gpu-ladder` would see a wrong add-back, never the routine `test:gpu`.
 
-  Separately, `probeFlux` checks only antisymmetry and equal-state consistency, never an SLAU2 value for unequal states. This is the gap W2R-I4 closed on the oracle side. Mutant M5, which removes the min(1, ·) of D4-20's M_ref, also survives, although it matters on supersonic preconditioned faces: f_a → 0 at M_ref = 2, which gives 0/0 there.
+  Separately, `probeFlux` checks only antisymmetry and equal-state consistency, never an SLAU2 value for unequal states. This is the gap W2R-I4 closed on the oracle side. Mutant M5, which removes the min(1, ·) of D4-20's M_ref, also survives. It is nearly equivalent: χ = 0 wherever q̄ ≥ c̄, so the only difference is 0/0 at exactly q̄ = 2c̄. Still, nothing in `test:gpu` would notice a wrong transonic preconditioned flux.
 - *Fix:*
   - (a) A 12.2-style row with u∞ ≠ 0 in `test:gpu`: for example, case C's pulse on a free stream at M 0.3 in a box with far-field ends and slip-wall sides, so that CELL_GEO.w is nonzero at the walls. Tracking and C-pre, 1 / 10 iterations.
   - (b) `probeFlux` values against `slau2Flux − F∞(S)` for main's W2R-I4 state pairs, at u∞ = 0 and 170 m/s and machCut 0.01 and 1, including the transonic M̂-clamp face. Tolerance about 1e-5 of the face's flux scale.
@@ -360,7 +363,9 @@ None.
 | M2 | resample u_θ = rw, `/ r_c` dropped | flow-solver | killed, but by a bind-group validation error (binding 2 unused), not by a value |
 | M2b | resample u_θ = rw · r_c | flow-solver | **survived** |
 | M2c | the state texture's p and ρ gauge ratios swapped | flow-solver | **survived** |
-| M3 | the free stream's add-back with the wrong sign (`kernels.ts:410`) | oracle, solver-exact | **survived**; ladder: [[M3-LADDER]] |
+| M3 | the free stream's add-back with the wrong sign (`kernels.ts:410`) | oracle, solver-exact | **survived**. Ladder: row B survived (2.07e-5); L7 **killed** (asymmetry 554) |
 | M4 | the tracking TwoSum drops the low part of components 0-3 (`kernels.ts:462`) | solver-exact | **survived** |
-| M5 | D4-20's M_ref without min(1, ·) (`flux.ts:117`) | oracle, functions | **survived** |
+| M5 | D4-20's M_ref without min(1, ·) (`flux.ts:117`) | oracle, functions | survived; nearly equivalent (χ = 0 for q̄ ≥ c̄, except 0/0 at q̄ = 2c̄) |
 | M6 | β² without the Δp term (`kernels.ts:439`) | oracle | **killed** (2 tests fail: C-pre and S) |
+
+M1 failed C, C-pre, C physical, D, E-L5, E-L9a and S: a wrong flux cannot pass the 12.2 rows at u∞ = 0.
