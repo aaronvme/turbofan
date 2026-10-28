@@ -341,28 +341,30 @@ describe('solver status (W1F-I1) and provenance (W1F-N1)', () => {
 });
 
 describe('D4-50: the stage kernel storage buffers against the device limit', () => {
-  it('binds 8, 9 with sources, 10 with the face dump; packs geo and topo when the device is short', () => {
+  it('binds 7, 8 with sources, 9 with the face dump (no prim since D4-54); packs geo and topo when the device is short', () => {
     expect(stageStorageBuffers({ sources: false, faceDump: false }, 8)).toEqual({
+      buffers: 7,
+      packed: false,
+    });
+    // the engine with sources fits WebGPU's default 8
+    expect(stageStorageBuffers({ sources: true, faceDump: false }, 8)).toEqual({
       buffers: 8,
       packed: false,
     });
-    expect(stageStorageBuffers({ sources: true, faceDump: false }, 16)).toEqual({
-      buffers: 9,
-      packed: false,
-    });
-    // an adapter with WebGPU's default 8: the two read-only static buffers share one binding
-    expect(stageStorageBuffers({ sources: true, faceDump: false }, 8)).toEqual({
+    // short by one: the two read-only static buffers share one binding
+    expect(stageStorageBuffers({ sources: true, faceDump: true }, 8)).toEqual({
       buffers: 8,
       packed: true,
     });
     expect(stageStorageBuffers({ sources: true, faceDump: false }, 16, true)).toEqual({
-      buffers: 8,
+      buffers: 7,
       packed: true,
     });
-    expect(() => stageStorageBuffers({ sources: true, faceDump: true }, 8)).toThrow(
-      /needs 10 storage buffers \(9 packed\).*allows 8.*maxStorageBuffersPerShaderStage/,
+    expect(() => stageStorageBuffers({ sources: true, faceDump: true }, 7)).toThrow(
+      /needs 9 storage buffers \(8 packed\).*allows 7.*maxStorageBuffersPerShaderStage/,
     );
-    expect(FLOW_SOLVER_LIMITS.maxStorageBuffersPerShaderStage).toBe(
+    // the device asks for at least what the engine with sources binds
+    expect(FLOW_SOLVER_LIMITS.maxStorageBuffersPerShaderStage).toBeGreaterThanOrEqual(
       stageStorageBuffers({ sources: true, faceDump: false }, 99).buffers,
     );
   });
