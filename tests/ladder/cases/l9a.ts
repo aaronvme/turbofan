@@ -8,7 +8,7 @@ import { ReferenceSolver } from '../../../src/flow/reference/solver';
 import type { SourceModel } from '../../../src/flow/reference/sources';
 import { NP } from '../../../src/flow/reference/state';
 import { BC, rectangle, singleBlock, solverMesh } from '../../unit/flow/helpers';
-import { converge } from '../common';
+import { STEADY_WINDOW, converge, scaledCap, steadyWindow } from '../common';
 import { pOverP0, tOverT0 } from '../theory';
 
 const GAMMA = 1.4;
@@ -59,7 +59,10 @@ export function run() {
     p: 0.95e5,
     z: 0,
   });
-  const conv = converge(s, 1e-6, 20000, 'peak');
+  // D4-45/D4-56: the cap scales as 1.5 / CFL only where the CFL changed (L8); L9 runs plain
+  // tracking at the default 1.5, so its cap stays 20000
+  const cap = scaledCap(20000, s.trackingCfl);
+  const conv = converge(s, 1e-6, cap, 'peak');
   const plane = (i: number) => {
     let m = 0;
     let h = 0;
@@ -72,29 +75,44 @@ export function run() {
     }
     return { m, h0: h / m, rw: L / m };
   };
-  const up = plane(20); // x = -0.1 m
-  const down = plane(40); // x = +0.1 m
-  const dh0 = down.h0 - up.h0;
-  const euler = OMEGA * (down.rw - up.rw);
-  const err = Math.abs(dh0 - euler) / Math.abs(euler);
+  const measure = () => {
+    const up = plane(20); // x = -0.1 m
+    const down = plane(40); // x = +0.1 m
+    const dh0 = down.h0 - up.h0;
+    const euler = OMEGA * (down.rw - up.rw);
+    return { up, down, dh0, err: Math.abs(dh0 - euler) / Math.abs(euler) };
+  };
+  // D4-45: the row is read at the end of a 2000-iteration steadiness window. D4-57 keeps the rule
+  // as written (max - min <= tol / 10), not loosened after round 7 measured 1.06e-5 against 1e-5
+  const steady = steadyWindow(s, () => measure().err);
+  const { up, down, dh0, err } = measure();
+  const tol = L9.maxEulerWorkRelativeError.value;
   return {
     id: 'L9a',
     rows: [
       {
         id: 'L9',
         metric: 'Euler work: |Delta T0 - Omega Delta(r u_theta)/cp| relative',
-        threshold: `< ${L9.maxEulerWorkRelativeError.value}`,
+        threshold: `< ${tol}, and steady (next row)`,
         value: err,
-        pass: err < L9.maxEulerWorkRelativeError.value,
+        pass: err < tol && steady.spread <= tol / 10,
       },
       {
         id: 'L9',
-        metric: 'Euler-work case: iterations to converge to 1e-6',
-        threshold: '<= 20000',
+        metric: `D4-45 steadiness: Euler-work error max - min over the last ${STEADY_WINDOW} iterations`,
+        threshold: `<= ${tol / 10}`,
+        value: steady.spread,
+        pass: steady.spread <= tol / 10,
+      },
+      {
+        id: 'L9',
+        metric:
+          'Euler-work case: iterations to converge to 1e-6 (cap 20000 at the plain CFL 1.5, D4-56)',
+        threshold: `<= ${cap}`,
         value: conv.iterations,
         pass: conv.converged,
       },
     ],
-    extra: { conv, up, down, dT0: dh0 / ((GAMMA * RGAS) / (GAMMA - 1)) },
+    extra: { conv, cap, steady, up, down, dT0: dh0 / ((GAMMA * RGAS) / (GAMMA - 1)) },
   };
 }

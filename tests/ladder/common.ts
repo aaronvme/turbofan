@@ -67,6 +67,50 @@ export function converge(
   return { iterations: it, first, last, converged: false };
 }
 
+/** D4-45 (after D4-19): a value row taken at the end of a run must be steady over its last window. */
+export const STEADY_WINDOW = 2000;
+export const STEADY_EVERY = 100;
+
+export interface Steadiness {
+  /** The metric at the window's start and after every STEADY_EVERY iterations (21 samples). */
+  readonly samples: readonly number[];
+  /** max - min of the samples. */
+  readonly spread: number;
+  /** The last sample: the value the row reports. */
+  readonly value: number;
+}
+
+/**
+ * D4-45 (W2R-I7): runs the last STEADY_WINDOW iterations of a case, sampling `metric` every
+ * STEADY_EVERY iterations (and at the start), so a value row can require max - min <= a tenth of
+ * its tolerance. Without it a slowly oscillating case passes or fails on the iteration it stopped
+ * at (L8 at CFL 0.8 swung between 0.35 % and 0.68 % over 2500-20000 iterations, critic pass 8).
+ */
+export function steadyWindow(s: ReferenceSolver, metric: () => number): Steadiness {
+  const samples = [metric()];
+  for (let k = 0; k < STEADY_WINDOW / STEADY_EVERY; k++) {
+    s.iterate(STEADY_EVERY);
+    samples.push(metric());
+  }
+  return {
+    samples,
+    spread: Math.max(...samples) - Math.min(...samples),
+    value: samples[samples.length - 1] ?? NaN,
+  };
+}
+
+/** The tracking CFL the ladder's 20000-iteration caps were set at (the plain default). */
+export const CAP_CFL = 1.5;
+
+/**
+ * D4-45: pseudo-time iterations to a steady state go as 1 / CFL, so a cap set at CAP_CFL scales by
+ * CAP_CFL / cfl (L8 at the preconditioned 0.8: 20000 -> 37500). A property of the scheme, not a
+ * tuning: a case at CAP_CFL keeps its cap.
+ */
+export function scaledCap(cap: number, cfl: number): number {
+  return Math.round((cap * CAP_CFL) / cfl);
+}
+
 /** Run physical-time steps to exactly tEnd (the last step is shortened). */
 export function runTo(s: ReferenceSolver, tEnd: number): number {
   let steps = 0;

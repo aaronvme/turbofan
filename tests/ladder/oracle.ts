@@ -51,6 +51,16 @@ export function closedBoxMesh(precision: 'f32' | 'f64' = 'f32'): SolverMesh {
 /** The engine's low-Mach preconditioning: minMach = M_cut = 0.003 (SOLVER.md 7, machCut default). */
 export const ENGINE_PRECONDITIONING = { minMach: 0.003 } as const;
 
+/**
+ * D4-38's GPU stopping rule, with the floors restated by D4-58 (SOLVER.md 12.4): the GPU's L4 (a)
+ * and L5 runs count as converged once the density residual has reached its f32 plateau, at or
+ * below this fraction of the first iteration's, and the accuracy metric moves by less than 1e-4
+ * relative over the last 2000 iterations. The floors are the oracle's own with f32 storage: the
+ * minimum of the residual over its first, over the last 2000 of 20000 iterations
+ * (tests/ladder/cases/floor.ts measures them; in f64 the same runs fall to ~1e-12).
+ */
+export const GPU_CONVERGENCE_FLOOR = { L4a: 1.6e-4, L5: 1.1e-3 } as const;
+
 /** The case C rows' options: tracking, preconditioned tracking (C-pre) or physical time. */
 export function closedBoxOptions(mode: 'tracking' | 'preconditioned' | 'physical'): SolverOptions {
   return {

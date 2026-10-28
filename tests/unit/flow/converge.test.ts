@@ -3,7 +3,15 @@
 // first run stopped at iteration 1017 on the dip of an oscillating residual (1e-5 at 1017, 1.6e-4
 // ten iterations later), with the field still 0.5 % from steady at 1.7 m.
 import { describe, expect, it } from 'vitest';
-import { CONVERGED_WINDOW, converge } from '../../ladder/common';
+import {
+  CAP_CFL,
+  CONVERGED_WINDOW,
+  STEADY_EVERY,
+  STEADY_WINDOW,
+  converge,
+  scaledCap,
+  steadyWindow,
+} from '../../ladder/common';
 import type { ReferenceSolver } from '../../../src/flow/reference/solver';
 
 /** A stand-in solver whose residual follows a script (iteration n returns history(n), n >= 1). */
@@ -43,5 +51,34 @@ describe('ladder convergence driver', () => {
   it('stops at a non-finite residual', () => {
     const s = scripted((n) => (n < 5 ? 1 : NaN));
     expect(converge(s, 1e-5, 100)).toMatchObject({ converged: false, iterations: 5 });
+  });
+});
+
+// D4-45 (W2R-I7): a value row taken before convergence must be steady over the run's last
+// STEADY_WINDOW iterations (max - min of the samples within a tenth of the row's tolerance)
+describe('the D4-45 steadiness window', () => {
+  it('samples the metric at the window start and every STEADY_EVERY iterations to its end', () => {
+    let n = 0;
+    const s = {
+      iterate: (k = 1) => {
+        n += k;
+        return { residualDensityL2: 1 };
+      },
+    } as unknown as ReferenceSolver;
+    n = 500;
+    const w = steadyWindow(s, () => n);
+    expect(STEADY_WINDOW).toBe(2000);
+    expect(STEADY_EVERY).toBe(100);
+    expect(w.samples).toEqual(Array.from({ length: 21 }, (_, k) => 500 + 100 * k));
+    expect(w.value).toBe(2500);
+    expect(w.spread).toBe(2000);
+    expect(n).toBe(2500);
+  });
+
+  it('scales an iteration cap set at the plain CFL as 1 / CFL (pseudo-time steps)', () => {
+    expect(CAP_CFL).toBe(1.5);
+    expect(scaledCap(20000, 0.8)).toBe(37500);
+    expect(scaledCap(20000, 1.5)).toBe(20000);
+    expect(scaledCap(20000, 1.0)).toBe(30000);
   });
 });
