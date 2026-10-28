@@ -268,6 +268,27 @@ export class ReferenceSolver {
     return Float64Array.from(this.R);
   }
 
+  /**
+   * The flux scale of the tracking density residual at the current state (decision D4-48),
+   * sqrt(mean_c (sum_f |b_f F_f,rho| / (b_c V_c))^2): the residual's L2 with every face's mass flux
+   * counted positive. SOLVER.md 12.2's residual check on rows B and E divides by it, because there
+   * the residual is a small difference of large fluxes.
+   */
+  residualFluxScale(): number {
+    this.updatePrimitives();
+    this.computeBeta(true);
+    this.evaluateSources();
+    const m = this.mesh;
+    const abs = new Float64Array(m.nCells);
+    this.assembleResidual(this.machCut, abs);
+    let sum = 0;
+    for (let c = 0; c < m.nCells; c++) {
+      const q = (abs[c] as number) / ((this.blockage[c] as number) * (m.cellVolR[c] as number));
+      sum += q * q;
+    }
+    return Math.sqrt(sum / m.nCells);
+  }
+
   /** Local time step dt_c of the last tracking iteration (or of the current state if none). */
   localDt(): Float64Array {
     if (this.iterations === 0) {
@@ -587,8 +608,11 @@ export class ReferenceSolver {
     return area;
   }
 
-  /** The residual of section 9; machCut < 1 scales SLAU2's pressure diffusion (tracking, D4-20). */
-  private assembleResidual(machCut: number): void {
+  /**
+   * The residual of section 9; machCut < 1 scales SLAU2's pressure diffusion (tracking, D4-20).
+   * `absMass` (per cell) accumulates sum_f |b_f F_f,rho| as well (residualFluxScale).
+   */
+  private assembleResidual(machCut: number, absMass?: Float64Array): void {
     const m = this.mesh;
     const { R, F, line, bExt } = this;
     this.fluxMachCut = machCut;
@@ -615,6 +639,11 @@ export class ReferenceSolver {
             if (f < nAlong)
               for (let k = 0; k < NU; k++)
                 R[NU * r + k] = (R[NU * r + k] ?? 0) - bf * (F[k] as number);
+            if (absMass !== undefined) {
+              const a = Math.abs(bf * (F[0] as number));
+              if (f >= 1) absMass[l] = (absMass[l] as number) + a;
+              if (f < nAlong) absMass[r] = (absMass[r] as number) + a;
+            }
           }
         }
       }

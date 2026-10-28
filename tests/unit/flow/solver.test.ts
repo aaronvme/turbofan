@@ -183,7 +183,8 @@ describe('reference solver: the residual flux scale', () => {
       expect(s.residualFluxScale()).toBe(0);
       s.setState((x, r) => pulse(x, r));
       s.setBlockage(Float64Array.from(s.mesh.cellX, (x) => 1 - 0.2 * Math.exp(-(x ** 2) / 0.01)));
-      s.iterate(2);
+      // the plain run iterates (a state of the scheme); the preconditioned one is taken at the pulse
+      if (pre === undefined) s.iterate(2);
       const scale = s.residualFluxScale();
       expect(scale).toBeGreaterThan(0);
       expect(Math.abs(scale - bruteForce(s)) / scale).toBeLessThan(1e-14);
