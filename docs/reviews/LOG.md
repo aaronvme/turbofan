@@ -2731,3 +2731,11 @@ None.
   - Round 7's results: the pressure-difference cutoff (K up to 100) and local velocity cutoffs do not converge J; only a global M_cut ≥ 0.02 does. A global cutoff tied to the domain's peak velocity is standard practice, and for this engine (inlet Mach about 0.5) 0.02 is about 4% of it.
   - **The pre-stated rule:** adopt M_cut = 0.02 only if every row passing now still passes (L1-L7, including L7's iteration ratio of at most 3×, L8 velocity, L9 values, §12.2) and J and R converge. Otherwise keep 0.003, with J pinned.
   - The kernel's adapter default (D4-40) follows the outcome.
+- **Merged into main @bc4bfaf: w2/solver @22ba7ac, the live GPU flow solver.** Santa-loop: reviewers A and B both APPROVE after re-verification. Each conditioned the merge on the same one-line fix, carried in the merge commit: `tests/gpu/forms.test.ts` passes `rc` to main's `limitedSlopes` (A-B1 / B-B2).
+  - Gates on the merged tree, run quiet: typecheck and lint clean; npm test/coverage 1901 passed + 9 expected fail, lines 99.59%; test:mesh 29; test:gpu 57 + 1 expected fail; test:gpu-ladder 12 passed.
+  - The reviews are on main as `docs/reviews/santa-solver-A.md` and `-B.md` (a49da42, f9113e9).
+  - **Carried forward:**
+    - A-I3, the §12.2 oracle row in Chrome (the oracle shell imports node:fs);
+    - B-N11/N12;
+    - the skipped nits;
+    - D4-54's performance round: 2.09-2.4 ms/it indicative, where P1 needs ≥ 150 it/s inside the 5 ms budget, then an official measurement.
