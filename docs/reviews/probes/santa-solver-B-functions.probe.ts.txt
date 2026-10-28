@@ -1,0 +1,350 @@
+// Santa-loop reviewer B probe (w2/solver @81e9508): the WGSL device functions value-for-value
+// against the f64 oracle on UNEQUAL states, which tests/gpu/functions.test.ts does not do (it checks
+// SLAU2's antisymmetry and equal-state consistency only, consToPrim at U = 0 only, and the energy
+// inversion as a round trip). Every dissipation term of SLAU2 vanishes for equal states, so a wrong
+// term there is invisible to the branch's unit-level GPU tests.
+//
+// Run from a checkout of w2/solver (with public/mesh present):
+//   for f in docs/reviews/probes/santa-solver-B-*.probe.ts.txt; do cp "$f" "${f%.txt}"; done; npx vitest run -c docs/reviews/probes/santa-solver-B-vitest.config.mjs
+// Both sides get bit-identical f32 inputs; the oracle runs in f64 on a reference state whose
+// constants are the kernel's f32 ones (rho_inf, u_inf, T_inf, R, D_inf), so what is left is f32
+// arithmetic. Tolerances: 1e-5 of a per-component scale (f32 is 6e-8; a term error of O(1) in a
+// dissipation term is >= 1e-4 of the scale on these states).
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { SimDevice } from '../../../src/gpu/device';
+import type { GpuSchemeOptions } from '../../../src/flow/gpu/params';
+import {
+  THERMALLY_PERFECT,
+  cpMix,
+  deltaE,
+  deltaH,
+  enthalpyDelta,
+  entropyDelta,
+  productsFraction,
+  referenceState,
+  type ReferenceState,
+} from '../../../src/flow/reference/gas';
+import { limitedSlopes } from '../../../src/flow/reference/muscl';
+import { slau2Flux } from '../../../src/flow/reference/slau2';
+import { NP, consToPrim, physicalToPrim, primToCons } from '../../../src/flow/reference/state';
+import { BC, rectangle, singleBlock, solverMesh } from '../../../tests/unit/flow/helpers';
+import { GpuErrorLog, solverDevice } from '../../../tests/gpu/helpers/solver';
+import { runProbe } from '../../../tests/gpu/helpers/probe';
+
+const f = Math.fround;
+const U_INF = 170;
+const OPTS: GpuSchemeOptions = {
+  gas: THERMALLY_PERFECT,
+  freeStream: { pressure: 101325, temperature: 288.15, velocity: U_INF },
+};
+const REF = referenceState(OPTS.gas, OPTS.freeStream);
+/** The oracle's reference state with the kernel's f32 constants. */
+const REF_F: ReferenceState = {
+  ...REF,
+  rho: f(REF.rho),
+  u: f(REF.u),
+  t: f(REF.t),
+  r: f(REF.r),
+  dInf: f(REF.dInf),
+};
+const MESH = solverMesh(
+  singleBlock(rectangle('m', 0, 1, 0, 1, 4, 4), {
+    imin: BC.SLIP_WALL,
+    imax: BC.SLIP_WALL,
+    jmin: BC.AXIS,
+    jmax: BC.SLIP_WALL,
+  }),
+);
+
+function rng(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 2 ** 32;
+  };
+}
+
+/** A random primitive record (oracle layout, f32-representable, u absolute = u_inf_f32 + du). */
+function randomState(next: () => number, du: number, rc: number): Float64Array {
+  const P = physicalToPrim(
+    REF,
+    {
+      rho: REF.rho * (1 + 0.4 * (next() - 0.5)),
+      u: REF.u + du * (next() - 0.5),
+      v: du * (next() - 0.5),
+      w: 0.5 * du * (next() - 0.5),
+      p: REF.p * (1 + 0.4 * (next() - 0.5)),
+      z: next() < 0.5 ? 0 : 0.06 * next(),
+    },
+    rc,
+  );
+  const out = new Float64Array(NP);
+  out[0] = f(P[0] ?? NaN);
+  out[1] = REF_F.u + f((P[1] ?? NaN) - REF_F.u);
+  out[2] = f(P[2] ?? NaN);
+  out[3] = f(P[3] ?? NaN);
+  out[4] = f(P[4] ?? NaN);
+  out[5] = f(P[5] ?? NaN);
+  return out;
+}
+
+describe('santa-solver-B: WGSL device functions against the f64 oracle (unequal states)', () => {
+  const log = new GpuErrorLog();
+  let sim: SimDevice;
+
+  beforeAll(async () => {
+    sim = await solverDevice(log);
+  });
+
+  afterAll(() => {
+    log.assertNone('santa-solver-B probe');
+    sim.destroy();
+  });
+
+  for (const machCut of [1, 0.003]) {
+    it(`SLAU2 values (machCut ${machCut}): subsonic, expansions, transonic, supersonic`, async () => {
+      const next = rng(machCut === 1 ? 101 : 202);
+      const N = 600;
+      const faces: {
+        L: Float64Array;
+        R: Float64Array;
+        nx: number;
+        nr: number;
+        area: number;
+        rf: number;
+      }[] = [];
+      const input = new Float32Array(16 * N);
+      for (let k = 0; k < N; k++) {
+        const rf = f(0.2 + next());
+        const a = 2 * Math.PI * next();
+        const nx = f(Math.cos(a));
+        const nr = f(Math.sin(a));
+        const area = f(0.01 + next());
+        const du = [40, 250, 700][k % 3] ?? 40;
+        const L = randomState(next, du, rf);
+        const R = randomState(next, du, rf);
+        faces.push({ L, R, nx, nr, area, rf });
+        const rec = (P: Float64Array) => [
+          P[0] ?? NaN,
+          (P[1] ?? NaN) - REF_F.u,
+          P[2] ?? NaN,
+          P[3] ?? NaN,
+        ];
+        input.set(
+          [
+            ...rec(L),
+            L[4] ?? NaN,
+            L[5] ?? NaN,
+            nx,
+            nr,
+            ...rec(R),
+            R[4] ?? NaN,
+            R[5] ?? NaN,
+            area,
+            rf,
+          ],
+          16 * k,
+        );
+      }
+      const out = await runProbe(sim.device, MESH, OPTS, 'probeFlux', input, { machCut });
+      const F = new Float64Array(6);
+      const worst = [0, 0, 0, 0, 0, 0];
+      let expansions = 0;
+      let transonic = 0;
+      const faMin = machCut < 1 ? machCut * (2 - machCut) : 1;
+      faces.forEach(({ L, R, nx, nr, area, rf }, k) => {
+        slau2Flux(REF_F, L, 0, R, 0, nx, nr, area, rf, F, machCut);
+        const fInf = REF_F.rho * REF_F.u * nx;
+        const g = [
+          (out[16 * k] ?? NaN) + area * fInf,
+          (out[16 * k + 1] ?? NaN) + area * fInf * REF_F.u,
+          out[16 * k + 2] ?? NaN,
+          out[16 * k + 3] ?? NaN,
+          out[16 * k + 4] ?? NaN,
+          out[16 * k + 5] ?? NaN,
+        ];
+        const rho = REF_F.rho + 0.5 * ((L[0] ?? NaN) + (R[0] ?? NaN));
+        const q = Math.max(...[L, R].map((P) => Math.hypot(P[1] ?? NaN, P[2] ?? NaN))) + 400;
+        const mScale = rho * q + Math.abs((R[4] ?? NaN) - (L[4] ?? NaN)) / (340 * faMin);
+        const scale = [
+          area * mScale,
+          area * (mScale * q + Math.abs(L[4] ?? NaN) + Math.abs(R[4] ?? NaN)),
+          area * (mScale * q + Math.abs(L[4] ?? NaN) + Math.abs(R[4] ?? NaN)),
+          area * mScale * (Math.abs(L[3] ?? NaN) + Math.abs(R[3] ?? NaN) + 1e-3),
+          area * mScale * q * q,
+          area * mScale * 0.07,
+        ];
+        for (let m = 0; m < 6; m++) {
+          const e = Math.abs((g[m] ?? NaN) - (F[m] ?? NaN)) / (scale[m] ?? NaN);
+          worst[m] = Math.max(worst[m] ?? 0, Number.isNaN(e) ? Infinity : e);
+        }
+        const vnL = (L[1] ?? NaN) * nx + (L[2] ?? NaN) * nr;
+        const vnR = (R[1] ?? NaN) * nx + (R[2] ?? NaN) * nr;
+        if (vnL < -10 && vnR > 10) expansions++;
+        if (Math.abs(vnL) > 340 || Math.abs(vnR) > 340) transonic++;
+      });
+      process.stdout.write(
+        `[santa-B] SLAU2 machCut ${machCut}: worst relative error per component ${worst
+          .map((e) => e.toExponential(2))
+          .join(' ')} (${expansions} expansions, ${transonic} |M| > 1 faces)\n`,
+      );
+      expect(expansions).toBeGreaterThan(30);
+      expect(transonic).toBeGreaterThan(30);
+      for (let m = 0; m < 6; m++) expect(worst[m], `component ${m}`).toBeLessThan(1e-5);
+    });
+  }
+
+  it('consToPrim, deltaE, deltaH, cp, enthalpyDelta and entropyDelta against the oracle', async () => {
+    const next = rng(303);
+    const N = 400;
+    const input = new Float32Array(16 * N);
+    const cells: { U: Float64Array; rc: number; tP: number; z: number; tau: number }[] = [];
+    for (let k = 0; k < N; k++) {
+      const rc = f(0.05 + next());
+      const P = physicalToPrim(
+        REF,
+        {
+          rho: REF.rho * (0.3 + 1.5 * next()),
+          u: REF.u + 400 * (next() - 0.5),
+          v: 200 * (next() - 0.5),
+          w: 150 * (next() - 0.5),
+          p: REF.p * (0.3 + 2 * next()),
+          z: next() < 0.3 ? 0 : 0.07 * next(),
+        },
+        rc,
+      );
+      const Ua = new Float64Array(6);
+      primToCons(REF, P, 0, rc, Ua, 0);
+      const mG = REF_F.rho * REF_F.u;
+      const ga = [f(Ua[0] ?? NaN), f((Ua[1] ?? NaN) - mG), f(Ua[2] ?? NaN), f(Ua[3] ?? NaN)];
+      const gb = [f(Ua[4] ?? NaN), f(Ua[5] ?? NaN)];
+      const U = Float64Array.from([
+        ga[0] ?? NaN,
+        (ga[1] ?? NaN) + mG,
+        ga[2] ?? NaN,
+        ga[3] ?? NaN,
+        gb[0] ?? NaN,
+        gb[1] ?? NaN,
+      ]);
+      const tP = f(-150 + 1700 * next());
+      const z = f(next() < 0.3 ? 0 : 0.07 * next());
+      const tau = f(-100 + 1500 * next());
+      cells.push({ U, rc, tP, z, tau });
+      input.set([...ga, gb[0] ?? NaN, gb[1] ?? NaN, rc, tP, z, 0, 0, 0, 0, 0, tau, 0], 16 * k);
+    }
+    const out = await runProbe(sim.device, MESH, OPTS, 'probeGas', input);
+    const Q = new Float64Array(NP);
+    const worst: Record<string, number> = {};
+    const note = (name: string, e: number) => {
+      worst[name] = Math.max(worst[name] ?? 0, Number.isNaN(e) ? Infinity : e);
+    };
+    cells.forEach(({ U, rc, tP, z, tau }, k) => {
+      const o = 16 * k;
+      consToPrim(REF_F, U, 0, rc, Q, 0);
+      const T = REF_F.t + (Q[6] ?? NaN);
+      const qScale = 400;
+      note("rho'", Math.abs((out[o] ?? NaN) - (Q[0] ?? NaN)) / REF_F.rho);
+      note('u', Math.abs(REF_F.u + (out[o + 1] ?? NaN) - (Q[1] ?? NaN)) / qScale);
+      note('v', Math.abs((out[o + 2] ?? NaN) - (Q[2] ?? NaN)) / qScale);
+      note('rw', Math.abs((out[o + 3] ?? NaN) - (Q[3] ?? NaN)) / (qScale * rc));
+      note("p'", Math.abs((out[o + 4] ?? NaN) - (Q[4] ?? NaN)) / REF_F.p);
+      note('Z', Math.abs((out[o + 5] ?? NaN) - (Q[5] ?? NaN)));
+      note("T'", Math.abs((out[o + 6] ?? NaN) - (Q[6] ?? NaN)) / T);
+      note('c', Math.abs((out[o + 7] ?? NaN) / (Q[7] ?? NaN) - 1));
+      const phi = productsFraction(REF_F.gas, z);
+      const de = deltaE(REF_F, tP, phi);
+      const eScale = 1004 * (REF_F.t + Math.abs(tP));
+      note('deltaE', Math.abs((out[o + 9] ?? NaN) - de) / eScale);
+      note('deltaH', Math.abs((out[o + 10] ?? NaN) - deltaH(REF_F, tP, phi)) / eScale);
+      note('cp', Math.abs((out[o + 11] ?? NaN) / cpMix(REF_F.gas, REF_F.t + tP, phi) - 1));
+      const sScale = 1004 * Math.abs(Math.log((REF_F.t + tau) / REF_F.t)) + 1e-3;
+      note(
+        'entropyDelta',
+        Math.abs((out[o + 14] ?? NaN) - entropyDelta(REF_F.gas, REF_F.t, tau, phi)) / sScale,
+      );
+      note(
+        'enthalpyDelta',
+        Math.abs((out[o + 15] ?? NaN) - enthalpyDelta(REF_F.gas, REF_F.t, tau, phi)) /
+          (1004 * (REF_F.t + Math.abs(tau))),
+      );
+    });
+    process.stdout.write(
+      `[santa-B] gas: ${Object.entries(worst)
+        .map(([k, v]) => `${k} ${v.toExponential(2)}`)
+        .join(', ')}\n`,
+    );
+    for (const [name, e] of Object.entries(worst)) expect(e, name).toBeLessThan(1e-5);
+  });
+
+  it('limited slopes and the positivity fallback (rho and p) against the oracle', async () => {
+    const next = rng(404);
+    const N = 300;
+    const input = new Float32Array(16 * N);
+    const recs: Float64Array[][] = [];
+    for (let k = 0; k < N; k++) {
+      // every third record has a pressure jump large enough that p - |sigma| / 2 <= 0 is possible
+      const big = k % 3 === 0;
+      const one = () => {
+        const P = new Float64Array(NP);
+        P[0] = f(0.5 * (next() - 0.5));
+        P[1] = REF_F.u + f(100 * (next() - 0.5));
+        P[2] = f(100 * (next() - 0.5));
+        P[3] = f(20 * (next() - 0.5));
+        P[4] = f((big ? -0.95 + 1.9 * next() : 0.4 * (next() - 0.5)) * REF_F.p);
+        return P;
+      };
+      const [m, c, p] = [one(), one(), one()];
+      // a monotone pressure line through a non-positive neighbour (an extrapolated wall ghost can
+      // be one): van Albada keeps |sigma| / 2 <= 0.604 min(|a|, |b|), so with positive neighbours
+      // the face value never reaches 0 and the fallback cannot trigger
+      if (big) {
+        m[4] = f((-1.6 + 1.2 * next()) * REF_F.p);
+        c[4] = f((-0.9 + 0.5 * next()) * REF_F.p);
+        p[4] = f(next() * REF_F.p);
+      }
+      recs.push([m, c, p]);
+      const a = (P: Float64Array) => [
+        P[0] ?? NaN,
+        (P[1] ?? NaN) - REF_F.u,
+        P[2] ?? NaN,
+        P[3] ?? NaN,
+      ];
+      input.set([...a(m), ...a(c), ...a(p), m[4] ?? NaN, c[4] ?? NaN, p[4] ?? NaN, 0], 16 * k);
+    }
+    const out = await runProbe(sim.device, MESH, OPTS, 'probeSlope', input);
+    const S = new Float64Array(6);
+    const all = new Float64Array(3 * NP);
+    let fallbacks = 0;
+    let pressureFallbacks = 0;
+    let worst = 0;
+    let mismatchedFallback = 0;
+    recs.forEach(([m, c, p], k) => {
+      all.set(m ?? [], 0);
+      all.set(c ?? [], NP);
+      all.set(p ?? [], 2 * NP);
+      const fell = limitedSlopes(REF_F, all, 0, NP, 2 * NP, S, 0);
+      if (fell) fallbacks++;
+      const rhoOk = REF_F.rho + (c?.[0] ?? NaN) - 0.5 * Math.abs(S[0] ?? NaN) > 0;
+      if (fell && rhoOk) pressureFallbacks++;
+      const g = [0, 1, 2, 3].map((j) => out[16 * k + j] ?? NaN);
+      g.push(out[16 * k + 4] ?? NaN);
+      const want = [S[0], S[1], S[2], S[3], S[4]].map((x) => x ?? NaN);
+      const gpuFell = g.every((x) => x === 0);
+      // the oracle fell back and the GPU did not, or the GPU fell back where the oracle kept slopes
+      if ((fell && !gpuFell) || (!fell && gpuFell && want.some((x) => x !== 0))) {
+        mismatchedFallback++;
+      }
+      for (let j = 0; j < 5; j++) {
+        const sc = Math.abs(want[j] ?? NaN) + 1e-30;
+        const e = Math.abs((g[j] ?? NaN) - (want[j] ?? NaN)) / sc;
+        if ((want[j] ?? 0) !== 0) worst = Math.max(worst, e);
+      }
+    });
+    process.stdout.write(
+      `[santa-B] slopes: worst ${worst.toExponential(2)}, fallbacks ${fallbacks} (pressure-only ${pressureFallbacks}), mismatched ${mismatchedFallback}\n`,
+    );
+    expect(pressureFallbacks).toBeGreaterThan(5);
+    expect(mismatchedFallback).toBe(0);
+    expect(worst).toBeLessThan(1e-5);
+  });
+});

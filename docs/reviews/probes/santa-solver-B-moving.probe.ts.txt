@@ -1,0 +1,185 @@
+// Santa-loop reviewer B probe (w2/solver @81e9508): SOLVER.md 12.2-style GPU-against-oracle rows
+// with a MOVING reference state (u_inf != 0). Every preconditioned row of tests/gpu/oracle.test.ts
+// (C-pre, S) and every inflow row (E) runs at u_inf = 0, and no row has a slip wall with u_inf != 0,
+// so the velocity-gauge terms of the preconditioned increment (14.2/14.3), of the preconditioned
+// far field (vn_inf), of the inflow ghost and of the slip-wall ghost are never compared with the
+// oracle (mutants of those terms survive test:gpu; docs/reviews/santa-solver-B.md).
+// Same protocol and tolerances as tests/gpu/oracle.test.ts (1 / 10 / 100: 1e-5 / 1e-4 / 1e-3;
+// E-style 10 iterations: 1e-4). Run from a checkout of w2/solver:
+//   for f in docs/reviews/probes/santa-solver-B-*.probe.ts.txt; do cp "$f" "${f%.txt}"; done; npx vitest run -c docs/reviews/probes/santa-solver-B-vitest.config.mjs
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import type { SimDevice } from '../../../src/gpu/device';
+import { GpuSolver, type GpuSolverOptions } from '../../../src/flow/gpu/device/gpuSolver';
+import { DEFAULT_CFL_PRECONDITIONED } from '../../../src/flow/gpu/params';
+import { caloricallyPerfectGas } from '../../../src/flow/reference/gas';
+import { ReferenceSolver, type SolverOptions } from '../../../src/flow/reference/solver';
+import type { SolverMesh } from '../../../src/flow/reference/solverMesh';
+import { NP, type PhysicalState } from '../../../src/flow/reference/state';
+import {
+  ENGINE_PRECONDITIONING,
+  SINK,
+  closedBoxMesh,
+  closedBoxOptions,
+  relativeError,
+  sinkCase,
+  smoothPerturbation,
+} from '../../../tests/ladder/oracle';
+import { machFromArea, pOverP0, tOverT0 } from '../../../tests/ladder/theory';
+import { BC, rectangle, singleBlock, solverMesh } from '../../../tests/unit/flow/helpers';
+import { GpuErrorLog, solverDevice } from '../../../tests/gpu/helpers/solver';
+
+const TOL = { 1: 1e-5, 10: 1e-4, 100: 1e-3 } as const;
+
+describe('santa-solver-B: GPU against the oracle with u_inf != 0', () => {
+  const log = new GpuErrorLog();
+  let sim: SimDevice;
+
+  beforeAll(async () => {
+    sim = await solverDevice(log);
+  });
+
+  afterEach(() => {
+    log.assertNone('santa-solver-B moving');
+  });
+
+  afterAll(() => {
+    sim.destroy();
+  });
+
+  async function pair(
+    mesh: SolverMesh,
+    options: SolverOptions,
+    init: (s: ReferenceSolver) => void,
+    gpuExtra: Partial<GpuSolverOptions> = {},
+  ) {
+    const ref = new ReferenceSolver(mesh, options);
+    init(ref);
+    for (let k = 0; k < ref.U.length; k++) ref.U[k] = Math.fround(ref.U[k] ?? NaN);
+    const gpu = await GpuSolver.create(sim.device, mesh, {
+      gas: options.gas,
+      freeStream: options.freeStream,
+      ...(options.cfl === undefined ? {} : { cfl: options.cfl }),
+      ...(options.inflowTotal === undefined ? {} : { inflowTotal: options.inflowTotal }),
+      ...(options.outflowPressure === undefined ? {} : { outflowPressure: options.outflowPressure }),
+      ...(options.lowMachPreconditioning === undefined
+        ? {}
+        : { lowMachPreconditioning: options.lowMachPreconditioning }),
+      ...gpuExtra,
+    });
+    gpu.setBlockage(ref.blockage);
+    gpu.setConserved(ref.U);
+    return { gpu, ref };
+  }
+
+  async function rows(p: Awaited<ReturnType<typeof pair>>, label: string, checkpoints: number[]) {
+    let done = 0;
+    const out: string[] = [];
+    for (const n of checkpoints) {
+      p.ref.iterate(n - done);
+      p.gpu.iterate(n - done);
+      done = n;
+      const e = relativeError(
+        await p.gpu.readPrimitives(),
+        p.ref.primitives(),
+        p.ref.mesh.cellR,
+        p.ref.ref.u,
+      );
+      out.push(e.toExponential(2));
+      expect(e, `${label} after ${n}`).toBeLessThanOrEqual(TOL[n as 1 | 10 | 100]);
+    }
+    process.stdout.write(`[santa-B] ${label}: ${out.join(' / ')}\n`);
+    p.gpu.destroy();
+  }
+
+  it('C-pre with u_inf = 30 m/s: preconditioned increment and slip-wall ghosts in a moving gauge', async () => {
+    const base = closedBoxOptions('preconditioned');
+    const options: SolverOptions = {
+      ...base,
+      freeStream: { ...base.freeStream, velocity: 30 },
+      cfl: DEFAULT_CFL_PRECONDITIONED,
+    };
+    const p = await pair(closedBoxMesh('f32'), options, (s) => {
+      s.setState(smoothPerturbation);
+    });
+    await rows(p, 'C-pre, u_inf 30', [1, 10, 100]);
+  });
+
+  it('S with u_inf = 20 m/s: the preconditioned far field with vn_inf != 0 (and the sink)', async () => {
+    const sc = sinkCase(ENGINE_PRECONDITIONING, 'f32');
+    const options: SolverOptions = {
+      ...sc.options,
+      freeStream: { ...sc.options.freeStream, velocity: 20 },
+      cfl: DEFAULT_CFL_PRECONDITIONED,
+    };
+    const p = await pair(
+      sc.mesh,
+      options,
+      (s) => {
+        s.setUniform({ rho: s.ref.rho, u: 20, v: 0, w: 0, p: s.ref.p, z: 0 });
+      },
+      { cellSource: true },
+    );
+    const n = sc.mesh.nCells;
+    const kMass = new Float64Array(n);
+    const damping = new Float64Array(6 * n);
+    for (const c of sc.sinkCells) {
+      kMass[c] = SINK.k;
+      for (let m = 0; m < 6; m++) damping[6 * c + m] = SINK.k;
+    }
+    p.gpu.setCellSource({ kMass, damping });
+    await rows(p, 'S, u_inf 20', [1, 10, 100]);
+  });
+
+  it('E-L5 with u_inf = 60 m/s: the inflow and slip-wall ghosts in a moving gauge (10 its)', async () => {
+    const GAMMA = 1.4;
+    const RGAS = 287.05287;
+    const P0 = 1e5;
+    const T0 = 288.15;
+    const B_MIN = 0.8;
+    const b = (x: number) =>
+      Math.abs(x) < 0.1 ? 1 - (1 - B_MIN) * Math.cos((Math.PI * x) / 0.2) ** 2 : 1;
+    const mesh = solverMesh(
+      singleBlock(rectangle('duct', -0.3, 0.3, 0.5, 0.6, 90, 4), {
+        imin: BC.INFLOW,
+        imax: BC.OUTFLOW,
+        jmin: BC.SLIP_WALL,
+        jmax: BC.SLIP_WALL,
+      }),
+      'f32',
+    );
+    const options: SolverOptions = {
+      gas: caloricallyPerfectGas(GAMMA, RGAS),
+      freeStream: { pressure: P0, temperature: T0, velocity: 60 },
+      inflowTotal: { p0: P0, t0: T0 },
+      outflowPressure: 0.2 * P0,
+    };
+    const blockage = Float64Array.from(mesh.cellX, b);
+    const p = await pair(mesh, options, (s) => {
+      s.setBlockage(blockage);
+      s.setState((x): PhysicalState => {
+        const M = machFromArea(b(x) / B_MIN, GAMMA, x > 0);
+        const T = T0 * tOverT0(M, GAMMA);
+        const pr = P0 * pOverP0(M, GAMMA);
+        return { rho: pr / (RGAS * T), u: M * Math.sqrt(GAMMA * RGAS * T), v: 0, w: 0, p: pr, z: 0 };
+      });
+    });
+    p.ref.iterate(10);
+    p.gpu.iterate(10);
+    const P = await p.gpu.readPrimitives();
+    const e = relativeError(P, p.ref.primitives(), mesh.cellR, p.ref.ref.u);
+    // the inflow ghosts themselves (extended indices after the cells), against the oracle's
+    const R = p.ref.primitives();
+    let ghost = 0;
+    for (let g = 0; g < mesh.nGhosts; g++) {
+      if (mesh.ghostBc[g] !== BC.INFLOW) continue;
+      const k = NP * (mesh.nCells + g) + 1;
+      ghost = Math.max(ghost, Math.abs((P[k] ?? NaN) - (R[k] ?? NaN)) / 300);
+    }
+    process.stdout.write(
+      `[santa-B] E-L5, u_inf 60: ${e.toExponential(2)}; inflow ghost u ${ghost.toExponential(2)}\n`,
+    );
+    expect(e).toBeLessThanOrEqual(1e-4);
+    expect(ghost).toBeLessThanOrEqual(1e-5);
+    p.gpu.destroy();
+  });
+});

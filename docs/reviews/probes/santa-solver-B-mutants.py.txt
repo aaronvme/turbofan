@@ -1,0 +1,112 @@
+# Santa-loop reviewer B: WGSL mutation probes of w2/solver @81e9508.
+# Run from a scratch checkout of w2/solver (never the builder worktree), with public/mesh present and the
+# probes copied to .ts (for f in docs/reviews/probes/santa-solver-B-*.probe.ts.txt; do cp "$f" "${f%.txt}"; done):
+#   python -I docs/reviews/probes/santa-solver-B-mutants.py <mutant id> ...   (or "all")
+#   [--probe: also the reviewer probes; --all-gpu: the whole test:gpu suite (re-verification @22ba7ac)]
+# Each mutant is one exact string replacement in src/flow/gpu/wgsl/*.ts. The script applies it,
+# runs the GPU suite files named for it (npx vitest -c vitest.gpu.config.ts <files>) and the
+# reviewer probe (docs/reviews/probes/santa-solver-B-vitest.config.mjs) if asked, records
+# KILLED / SURVIVED, and restores the file with git checkout.
+import subprocess
+import sys
+import time
+
+GPU = ['tests/gpu/functions.test.ts', 'tests/gpu/oracle.test.ts', 'tests/gpu/solver-exact.test.ts']
+
+MUTANTS = {
+    # SLAU2's g term of the mass flux (nonzero only at expansion faces, vn_L < 0 < vn_R)
+    'g-term': ('src/flow/gpu/wgsl/flux.ts',
+               ' + g * sdiff(l.rho * abs(l.vn), r.rho * abs(r.vn));',
+               ';'),
+    # p~'s velocity term (14.5): 3 -> 2 in (3 - mL^2 - mL mR - mR^2)
+    'beta-sum': ('src/flow/gpu/wgsl/flux.ts',
+                 'return 0.25 * dm * (3.0 - sadd(mL * mL, mR * mR) - mL * mR);',
+                 'return 0.25 * dm * (2.0 - sadd(mL * mL, mR * mR) - mL * mR);'),
+    # the positivity fallback's pressure test (section 6)
+    'positivity-p': ('src/flow/gpu/wgsl/flux.ts',
+                     'if (!(rho - halfRho > 0.0 && p - halfP > 0.0))',
+                     'if (!(rho - halfRho > 0.0 && p + halfP > 0.0))'),
+    # 14.6(a) at 22ba7ac (cellResidual): drop both compensations
+    'neumaier-r3': ('src/flow/gpu/wgsl/kernels.ts',
+                    'return Flux(acc.sa + acc.ca, (acc.sb + acc.cb).xy);',
+                    'return Flux(acc.sa, acc.sb.xy);'),
+    # 14.6(a): drop the Neumaier compensation of the residual
+    'neumaier': ('src/flow/gpu/wgsl/kernels.ts',
+                 'let ra = acc.sa + acc.ca;',
+                 'let ra = acc.sa;'),
+    # 14.2 / section 10: the preconditioned momentum increment with the velocity gauge u' for u
+    'precond-u': ('src/flow/gpu/wgsl/kernels.ts',
+                  'da.y - k * u, da.z - k * v',
+                  'da.y - k * q.y, da.z - k * v'),
+    # section 5: the preconditioned far field's a+- without the - beta^2 vn_inf term
+    'farfield-a': ('src/flow/gpu/wgsl/boundary.ts',
+                   'let aPlus = P.rhoInf * (lPlus - beta2 * vnInf);',
+                   'let aPlus = P.rhoInf * lPlus;'),
+    # section 5: the inflow ghost's velocity gauge without - u_inf
+    'inflow-uinf': ('src/flow/gpu/wgsl/boundary.ts',
+                    '-n.x * sigma - P.uInf,',
+                    '-n.x * sigma,'),
+    # section 5: the slip-wall ghost's velocity gauge without - u_inf
+    'wall-uinf': ('src/flow/gpu/wgsl/boundary.ts',
+                  '(vn * n.x - vt * n.y) - P.uInf,',
+                  '(vn * n.x - vt * n.y),'),
+    # section 10: beta^2's pressure-difference term divided by 4
+    'beta2-dp': ('src/flow/gpu/wgsl/kernels.ts',
+                 'dpMax / (rho * c2)));',
+                 'dpMax / (4.0 * rho * c2)));'),
+    # section 8: the swirl source b rho w^2 A dropped
+    'swirl-src': ('src/flow/gpu/wgsl/kernels.ts',
+                  'pz.x * cb.z + cb.x * rho * w * w * cg.y',
+                  'pz.x * cb.z'),
+    # 14.6(b): the tracking update without the low part
+    'twosum-lo': ('src/flow/gpu/wgsl/kernels.ts',
+                  'let sa = twoSum4(ba, lo[2u * c] + d.a);',
+                  'let sa = twoSum4(ba, d.a);'),
+    # 14.6(b): the tracking update without the low part, second record (eta, rho Z)
+    'twosum-lo-b': ('src/flow/gpu/wgsl/kernels.ts',
+                    'lo[2u * c + 1u] + vec4f(d.b, 0.0, 0.0));',
+                    'vec4f(d.b, 0.0, 0.0));'),
+    # section 5: outflow subsonic test against |vn| + c instead of c (any change of the switch)
+    'outflow-switch': ('src/flow/gpu/wgsl/boundary.ts',
+                       '< s.b.w) { o.b.x = P.pOutGauge; }',
+                       '< 0.5 * s.b.w) { o.b.x = P.pOutGauge; }'),
+}
+
+
+def run(cmd):
+    t = time.time()
+    p = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='utf-8', errors='replace')
+    return p.returncode, time.time() - t, p.stdout + p.stderr
+
+
+def main(ids, probe):
+    for mid in ids:
+        path, old, new = MUTANTS[mid]
+        src = open(path, encoding='utf-8').read()
+        if src.count(old) != 1:
+            print(f'{mid}: pattern found {src.count(old)} times, skipped', flush=True)
+            continue
+        open(path, 'w', encoding='utf-8', newline='\n').write(src.replace(old, new))
+        try:
+            files = '' if ALL_GPU else ' '.join(GPU)
+            code, dt, out = run('npx vitest run -c vitest.gpu.config.ts ' + files)
+            failed = [l.strip() for l in out.splitlines() if l.strip().startswith(('×', 'FAIL'))]
+            verdict = 'KILLED' if code != 0 else 'SURVIVED'
+            scope = 'all of test:gpu' if ALL_GPU else 'functions, oracle, solver-exact'
+            line = f'{mid}: test:gpu ({scope}) {verdict} in {dt:.0f} s'
+            if failed:
+                line += ' | ' + ' ; '.join(failed[:4])
+            if probe:
+                pcode, pdt, pout = run('npx vitest run -c docs/reviews/probes/santa-solver-B-vitest.config.mjs')
+                line += f' | reviewer probe {"KILLED" if pcode != 0 else "SURVIVED"}'
+            print(line, flush=True)
+        finally:
+            subprocess.run(f'git checkout -- {path}', shell=True)
+
+
+ALL_GPU = '--all-gpu' in sys.argv
+
+if __name__ == '__main__':
+    args = [a for a in sys.argv[1:] if a not in ('--probe', '--all-gpu')]
+    ids = list(MUTANTS) if args == ['all'] else args
+    main(ids, '--probe' in sys.argv)

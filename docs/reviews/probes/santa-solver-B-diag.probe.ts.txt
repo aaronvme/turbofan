@@ -1,0 +1,67 @@
+// Reviewer B diagnostic (not a gate): which field and where the moving-gauge C-pre error sits, and
+// the plain-tracking control at the same u_inf.
+import { afterAll, beforeAll, it } from 'vitest';
+import type { SimDevice } from '../../../src/gpu/device';
+import { GpuSolver } from '../../../src/flow/gpu/device/gpuSolver';
+import { DEFAULT_CFL_PRECONDITIONED } from '../../../src/flow/gpu/params';
+import { ReferenceSolver, type SolverOptions } from '../../../src/flow/reference/solver';
+import { NP } from '../../../src/flow/reference/state';
+import { closedBoxMesh, closedBoxOptions, smoothPerturbation } from '../../../tests/ladder/oracle';
+import { GpuErrorLog, solverDevice } from '../../../tests/gpu/helpers/solver';
+
+let sim: SimDevice;
+beforeAll(async () => {
+  sim = await solverDevice(new GpuErrorLog());
+});
+afterAll(() => {
+  sim.destroy();
+});
+
+for (const [mode, uInf] of [
+  ['preconditioned', 30],
+  ['preconditioned', 0],
+  ['tracking', 30],
+  ['preconditioned', 100],
+] as const) {
+  it(`diag ${mode} u_inf ${uInf}`, async () => {
+    const base = closedBoxOptions(mode);
+    const options: SolverOptions = {
+      ...base,
+      freeStream: { ...base.freeStream, velocity: uInf },
+      ...(mode === 'preconditioned' ? { cfl: DEFAULT_CFL_PRECONDITIONED } : {}),
+    };
+    const mesh = closedBoxMesh('f32');
+    const ref = new ReferenceSolver(mesh, options);
+    ref.setState(smoothPerturbation);
+    for (let k = 0; k < ref.U.length; k++) ref.U[k] = Math.fround(ref.U[k] ?? NaN);
+    const gpu = await GpuSolver.create(sim.device, mesh, { ...options });
+    gpu.setConserved(ref.U);
+    let done = 0;
+    for (const n of [1, 3, 10, 30, 100]) {
+      ref.iterate(n - done);
+      gpu.iterate(n - done);
+      done = n;
+      const G = await gpu.readPrimitives();
+      const R = ref.primitives();
+      const names = ["rho'", 'u', 'v', 'rw/r', "p'", 'Z', "T'"];
+      const parts: string[] = [];
+      for (let k = 0; k < 7; k++) {
+        let d = 0;
+        let s = 0;
+        let at = -1;
+        for (let c = 0; c < mesh.nCells; c++) {
+          const rc = k === 3 ? (mesh.cellR[c] ?? NaN) : 1;
+          const e = Math.abs((G[NP * c + k] ?? NaN) - (R[NP * c + k] ?? NaN)) / rc;
+          if (e > d) {
+            d = e;
+            at = c;
+          }
+          s = Math.max(s, Math.abs((R[NP * c + k] ?? NaN) / rc - (k === 1 ? ref.ref.u : 0)));
+        }
+        parts.push(`${names[k]} ${(d / s).toExponential(1)}@${at}`);
+      }
+      process.stdout.write(`[diag] ${mode} u_inf ${uInf} n ${n}: ${parts.join(' ')}\n`);
+    }
+    gpu.destroy();
+  });
+}
