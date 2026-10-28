@@ -2,6 +2,7 @@
 # Run from a scratch checkout of w2/solver (never the builder worktree), with public/mesh present and the
 # probes copied to .ts (for f in docs/reviews/probes/santa-solver-B-*.probe.ts.txt; do cp "$f" "${f%.txt}"; done):
 #   python -I docs/reviews/probes/santa-solver-B-mutants.py <mutant id> ...   (or "all")
+#   [--probe: also the reviewer probes; --all-gpu: the whole test:gpu suite (re-verification @22ba7ac)]
 # Each mutant is one exact string replacement in src/flow/gpu/wgsl/*.ts. The script applies it,
 # runs the GPU suite files named for it (npx vitest -c vitest.gpu.config.ts <files>) and the
 # reviewer probe (docs/reviews/probes/santa-solver-B-vitest.config.mjs) if asked, records
@@ -25,6 +26,10 @@ MUTANTS = {
     'positivity-p': ('src/flow/gpu/wgsl/flux.ts',
                      'if (!(rho - halfRho > 0.0 && p - halfP > 0.0))',
                      'if (!(rho - halfRho > 0.0 && p + halfP > 0.0))'),
+    # 14.6(a) at 22ba7ac (cellResidual): drop both compensations
+    'neumaier-r3': ('src/flow/gpu/wgsl/kernels.ts',
+                    'return Flux(acc.sa + acc.ca, (acc.sb + acc.cb).xy);',
+                    'return Flux(acc.sa, acc.sb.xy);'),
     # 14.6(a): drop the Neumaier compensation of the residual
     'neumaier': ('src/flow/gpu/wgsl/kernels.ts',
                  'let ra = acc.sa + acc.ca;',
@@ -83,10 +88,12 @@ def main(ids, probe):
             continue
         open(path, 'w', encoding='utf-8', newline='\n').write(src.replace(old, new))
         try:
-            code, dt, out = run('npx vitest run -c vitest.gpu.config.ts ' + ' '.join(GPU))
+            files = '' if ALL_GPU else ' '.join(GPU)
+            code, dt, out = run('npx vitest run -c vitest.gpu.config.ts ' + files)
             failed = [l.strip() for l in out.splitlines() if l.strip().startswith(('×', 'FAIL'))]
             verdict = 'KILLED' if code != 0 else 'SURVIVED'
-            line = f'{mid}: test:gpu (functions, oracle, solver-exact) {verdict} in {dt:.0f} s'
+            scope = 'all of test:gpu' if ALL_GPU else 'functions, oracle, solver-exact'
+            line = f'{mid}: test:gpu ({scope}) {verdict} in {dt:.0f} s'
             if failed:
                 line += ' | ' + ' ; '.join(failed[:4])
             if probe:
@@ -97,7 +104,9 @@ def main(ids, probe):
             subprocess.run(f'git checkout -- {path}', shell=True)
 
 
+ALL_GPU = '--all-gpu' in sys.argv
+
 if __name__ == '__main__':
-    args = [a for a in sys.argv[1:] if a != '--probe']
+    args = [a for a in sys.argv[1:] if a not in ('--probe', '--all-gpu')]
     ids = list(MUTANTS) if args == ['all'] else args
     main(ids, '--probe' in sys.argv)
