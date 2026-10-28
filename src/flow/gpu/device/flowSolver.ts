@@ -46,6 +46,20 @@ export interface GpuFlowSolverOptions {
    * the resample's u = u_inf + u' be tested at u_inf != 0 (W2S-A-I1).
    */
   readonly freeStreamVelocity?: number;
+  /**
+   * Called when a frame's GPU timestamps resolve (a few frames late; untimed frames are skipped):
+   * the P1 benchmark's per-frame record (spikes/scene/benchApp.ts, D4-54).
+   */
+  readonly onFrameTiming?: (t: FrameTiming) => void;
+}
+
+/** One timed frame of step(): its iterations and the GPU time of its two passes, ms (NaN: invalid). */
+export interface FrameTiming {
+  /** The field version the frame wrote (FlowField.version after it). */
+  readonly frame: number;
+  readonly iterations: number;
+  readonly solverMs: number;
+  readonly resampleMs: number;
 }
 
 const READBACK_SLOTS = 3;
@@ -260,9 +274,16 @@ export class GpuFlowSolver implements FlowSolver {
     this.version++;
     if (this.field !== null) this.field = { ...this.field, version: this.version };
     if (slot !== null) {
+      const frame = this.version;
       void slot
         .read()
         .then(([solverMs, resampleMs]) => {
+          this.opts.onFrameTiming?.({
+            frame,
+            iterations: n,
+            solverMs: solverMs ?? NaN,
+            resampleMs: resampleMs ?? NaN,
+          });
           const sOk = solverMs !== undefined && Number.isFinite(solverMs);
           const rOk = resampleMs !== undefined && Number.isFinite(resampleMs);
           this.resampleMs = rOk ? resampleMs : null;
