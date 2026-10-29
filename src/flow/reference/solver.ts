@@ -68,6 +68,11 @@ export interface SolverOptions {
 export interface IterationStats {
   /** sqrt(mean (R_rho / (b V))^2) of the last iteration's first stage, kg/(m^3 s). */
   readonly residualDensityL2: number;
+  /**
+   * The same residual in the volume-weighted norm, sqrt(sum b V (R_rho / (b V))^2 / sum b V)
+   * (D4-77: the energy norm of D4-72's rule; the cell mean weights the small near-axis cells).
+   */
+  readonly residualDensityL2Volume: number;
 }
 
 export class ReferenceSolver {
@@ -82,7 +87,7 @@ export class ReferenceSolver {
   readonly blockage: Float64Array;
   iterations = 0;
   time = 0;
-  stats: IterationStats = { residualDensityL2: 0 };
+  stats: IterationStats = { residualDensityL2: 0, residualDensityL2Volume: 0 };
 
   private readonly opts: SolverOptions;
   private readonly cfl: number;
@@ -673,11 +678,18 @@ export class ReferenceSolver {
   private recordResidual(): void {
     const m = this.mesh;
     let sum = 0;
+    let weighted = 0;
+    let volume = 0;
     for (let c = 0; c < m.nCells; c++) {
-      const q =
-        (this.R[NU * c] as number) / ((this.blockage[c] as number) * (m.cellVolR[c] as number));
+      const bv = (this.blockage[c] as number) * (m.cellVolR[c] as number);
+      const q = (this.R[NU * c] as number) / bv;
       sum += q * q;
+      weighted += bv * q * q;
+      volume += bv;
     }
-    this.stats = { residualDensityL2: Math.sqrt(sum / m.nCells) };
+    this.stats = {
+      residualDensityL2: Math.sqrt(sum / m.nCells),
+      residualDensityL2Volume: Math.sqrt(weighted / volume),
+    };
   }
 }

@@ -467,7 +467,9 @@ describe('reference solver: time stepping', () => {
         expect(s.stats.residualDensityL2Volume).toBe(0); // at rest: exactly zero in both
         s.setState((x, r) => pulse(x, r));
         s.setBlockage(Float64Array.from(s.mesh.cellX, (x) => 1 - 0.2 * Math.exp(-(x ** 2) / 0.01)));
-        s.iterate(2);
+        // as above: the plain run iterates, the preconditioned one is taken at the pulse (its 10 %
+        // wave at M_cut leaves the linear range within a few iterations)
+        if (pre === undefined) s.iterate(2);
         // stage 1 of the next iteration sees the current state, so residual() is its R_0
         const R = s.residual();
         let mean = 0;
