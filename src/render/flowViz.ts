@@ -162,6 +162,8 @@ export interface FlowViz {
   setDilation(d: number): void;
   /** Hides the particles whatever the mode (a debug A/B). */
   setParticlesHidden(hidden: boolean): void;
+  /** D4-76: the cut plane over the full near-field raster instead of the mode's crop. */
+  setFullDomain(full: boolean): void;
   /** Follows the cutaway wedge (the planes lie on its faces) and the camera's pixel angle. */
   update(cutCenter: number, cutHalf: number, open: boolean, radPerPx: number): void;
   /** The haze's background shift in uv (xy), built on the pipeline's depth (post.ts). */
@@ -300,6 +302,17 @@ export function createFlowViz(o: {
   let built: FieldQuantityId | null = null;
   let mode: FlowVizMode | null = null;
   let particlesHidden = false;
+  let fullDomain = false;
+  const applyCrop = () => {
+    const c: CutPlaneCrop | null = fullDomain ? null : (mode?.crop ?? null);
+    crop.on.value = c === null ? 0 : 1;
+    if (c !== null) {
+      crop.xMin.value = c.xMin;
+      crop.xMax.value = c.xMax;
+      crop.rMax.value = c.rMax;
+      crop.fade.value = c.fadeM;
+    }
+  };
   const buildPlane = (id: FieldQuantityId) => {
     built = id;
     const spec = FIELD_QUANTITIES[id];
@@ -545,15 +558,12 @@ export function createFlowViz(o: {
       opacity.value = m?.particleOpacity ?? 0;
       display.value = m?.composite === 'display' ? 1 : 0;
       sheet.on.value = m?.cutPlane === true ? 1 : 0;
-      const c: CutPlaneCrop | null = m?.crop ?? null;
-      crop.on.value = c === null ? 0 : 1;
-      if (c !== null) {
-        crop.xMin.value = c.xMin;
-        crop.xMax.value = c.xMax;
-        crop.rMax.value = c.rMax;
-        crop.fade.value = c.fadeM;
-      }
+      applyCrop();
       streaks.visible = (m?.particleOpacity ?? 0) > 0 && !particlesHidden;
+    },
+    setFullDomain(full) {
+      fullDomain = full;
+      applyCrop();
     },
     setParticlesHidden(h) {
       particlesHidden = h;

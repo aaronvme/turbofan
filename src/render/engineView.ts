@@ -185,6 +185,8 @@ export interface EngineView {
   setFlowQuantity(id: FieldQuantityId | null): void;
   /** Time dilation of the particles: simulated seconds per wall second (default 1/200). */
   setFlowTimeScale(dilation: number): void;
+  /** D4-76: the cut plane over the whole near-field raster (true) or the near-field crop. */
+  setFlowFullDomain(full: boolean): void;
   /** The GPU particle records (src/flow/viz/particleKernel.ts layout): tests, inspection. */
   readFlowParticles(): Promise<Float32Array>;
   /** Look-dev A/B switches (e.g. caps or culling off) for timing comparisons. */
@@ -551,6 +553,9 @@ async function assemble(
       applyFlowMode();
     },
     readFlowParticles: () => flowCompute.readParticles(),
+    setFlowFullDomain(full) {
+      flowViz.setFullDomain(full);
+    },
     setFlowTimeScale(d) {
       if (!(d > 0 && d <= 1)) throw new Error(`flow time scale ${String(d)} must be in (0, 1]`);
       dilation = d;

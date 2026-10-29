@@ -3,7 +3,8 @@
 // solver) and what the flow visuals cost; and the legend of whatever is drawn as colour (the
 // LUT's own stops, src/flow/viz/legend.ts, so the bar matches the pixels: D4-76).
 // Query: ?flow=realistic|cutaway|schlieren|data&field=mock|solver&dilation=200&quantity=mach.
-// Keys: f the next flow mode, [ and ] slower / faster, m the next quantity.
+// &domain=full (D4-76's option: the cut plane uncropped). Keys: f the next flow mode, [ and ]
+// slower / faster, m the next quantity, n the near-field crop on / off.
 
 import { ISA_SLS } from '../contracts/ambient';
 import { ENGINE_DEFINITION } from '../engine/definition';
@@ -109,6 +110,8 @@ export async function createFlowPanel(
   let solver: GpuFlowSolver | null = null;
   let lever = 0;
   let mockTimer = 0;
+  let fullDomain = params.get('domain') === 'full';
+  view.setFlowFullDomain(fullDomain);
 
   if (params.get('field') === 'solver') {
     const manifest = parseMeshManifest(await (await fetch('/mesh/manifest.json')).json());
@@ -202,6 +205,10 @@ export async function createFlowPanel(
       if (key === 'f') {
         const order: (FlowVizModeId | null)[] = [null, ...FLOW_VIZ_MODE_IDS];
         api.setMode(order[(order.indexOf(mode) + 1) % order.length] ?? null);
+      }
+      if (key === 'n') {
+        fullDomain = !fullDomain;
+        view.setFlowFullDomain(fullDomain);
       }
       if (key === '[') api.setDilation(Math.max(1e-3, dilation / 2));
       if (key === ']') api.setDilation(Math.min(0.1, dilation * 2));
