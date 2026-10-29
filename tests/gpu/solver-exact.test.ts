@@ -18,9 +18,22 @@ import type { MultiBlockMesh, Patch } from '../../tools/mesh/types';
 import { GpuErrorLog, shippedMesh, solverDevice } from './helpers/solver';
 import { createDawnGpu } from './helpers/dawn';
 import { requestSimDevice } from '../../src/gpu/device';
-import { closedBoxMesh } from '../ladder/oracle';
+import { ENGINE_PRECONDITIONING, closedBoxMesh } from '../ladder/oracle';
+import { DEFAULT_CFL_PRECONDITIONED } from '../../src/flow/gpu/params';
 
 const ISA = { pressure: 101325, temperature: 288.15, velocity: 0 };
+
+/**
+ * The bitwise invariants (interfaces, tile shapes, D4-50 packing) run plain and with the engine's
+ * preconditioning (W2I-N4): the beta pass has its own ring, ghost sources and bindings.
+ */
+const MODES = [
+  ['plain', {}],
+  [
+    'preconditioned (D4-44)',
+    { lowMachPreconditioning: ENGINE_PRECONDITIONING, cfl: DEFAULT_CFL_PRECONDITIONED },
+  ],
+] as const satisfies readonly (readonly [string, Partial<GpuSolverOptions>])[];
 
 /** A smooth pulse with swirl and a hot fuel-air spot on top of the ambient (every code path). */
 function pulse(x0: number, r0: number, scale: number, uInf = 0) {
@@ -180,8 +193,17 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
     return Array.from(dump.subarray(o, o + 6));
   }
 
-  async function checkInterfaces(mesh: SolverMesh, label: string, uInf = 0) {
-    const s = await create(mesh, { faceDump: true, freeStream: { ...ISA, velocity: uInf } });
+  async function checkInterfaces(
+    mesh: SolverMesh,
+    label: string,
+    uInf = 0,
+    mode: Partial<GpuSolverOptions> = {},
+  ) {
+    const s = await create(mesh, {
+      ...mode,
+      faceDump: true,
+      freeStream: { ...ISA, velocity: uInf },
+    });
     s.setState(
       pulse(
         0.5 *
@@ -248,22 +270,27 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
     s.destroy();
   });
 
-  it('computes every interface face flux bitwise equal or negated on both sides', async () => {
-    const row = solverMesh(
-      threeBlockRow(1, 1, 20, 12, {
-        left: BC.SLIP_WALL,
-        right: BC.SLIP_WALL,
-        bottom: BC.AXIS,
-        top: BC.SLIP_WALL,
-      }),
-      'f32',
-    );
-    expect(await checkInterfaces(row, 'three-block row')).toBe(24);
-    expect(await checkInterfaces(engine, '130k asset')).toBeGreaterThan(1000);
-    // in a free stream (u_inf != 0) the gauge flux differences of SOLVER.md 14 are used
-    expect(await checkInterfaces(row, 'three-block row, u_inf 170 m/s', 170)).toBe(24);
-    expect(await checkInterfaces(engine, '130k asset, u_inf 170 m/s', 170)).toBeGreaterThan(1000);
-  });
+  it.each(MODES)(
+    'computes every interface face flux bitwise equal or negated on both sides (%s)',
+    async (_, mode) => {
+      const row = solverMesh(
+        threeBlockRow(1, 1, 20, 12, {
+          left: BC.SLIP_WALL,
+          right: BC.SLIP_WALL,
+          bottom: BC.AXIS,
+          top: BC.SLIP_WALL,
+        }),
+        'f32',
+      );
+      expect(await checkInterfaces(row, 'three-block row', 0, mode)).toBe(24);
+      expect(await checkInterfaces(engine, '130k asset', 0, mode)).toBeGreaterThan(1000);
+      // in a free stream (u_inf != 0) the gauge flux differences of SOLVER.md 14 are used
+      expect(await checkInterfaces(row, 'three-block row, u_inf 170 m/s', 170, mode)).toBe(24);
+      expect(await checkInterfaces(engine, '130k asset, u_inf 170 m/s', 170, mode)).toBeGreaterThan(
+        1000,
+      );
+    },
+  );
 
   it('gives slip-wall faces exact zeros in mass, angular momentum, energy and fuel', async () => {
     const box = solverMesh(
@@ -299,7 +326,7 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
     s.destroy();
   });
 
-  it('does not depend on the tile shape (bitwise)', async () => {
+  it.each(MODES)('does not depend on the tile shape (bitwise, %s)', async (_, mode) => {
     const mesh = solverMesh(
       threeBlockRow(1, 1, 37, 21, {
         left: BC.INFLOW,
@@ -317,6 +344,7 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
       { x: 5, y: 3 },
     ]) {
       const s = await create(mesh, {
+        ...mode,
         tile,
         freeStream: { ...ISA, velocity: 60 },
       });
@@ -547,44 +575,48 @@ describe('GPU solver exactness (SOLVER.md 12.1)', () => {
     ]);
   });
 
-  it('D4-50: packs geo and topo for a device with 8 storage buffers, bitwise equal to unpacked', async () => {
-    const mesh = closedBoxMesh('f32');
-    const run = async (device: GPUDevice, packStatic: boolean, faceDump = false) => {
-      const s = await GpuSolver.create(device, mesh, {
-        gas: THERMALLY_PERFECT,
-        freeStream: { ...ISA, velocity: 30 },
-        cellSource: true,
-        packStatic,
-        faceDump,
-      });
-      s.setState(pulse(0.3, 0.08, 0.05, 30));
-      const rate0 = new Float64Array(6 * mesh.nCells).fill(1e-3);
-      s.setCellSource({ rate0 });
-      s.iterate(20);
-      const out = { packed: s.packed, state: await s.readState() };
-      s.destroy();
-      return out;
-    };
-    const plain = await run(sim.device, false);
-    const packed = await run(sim.device, true);
-    expect([plain.packed, packed.packed]).toEqual([false, true]);
-    expect(packed.state.every((v, k) => Object.is(v, plain.state[k]))).toBe(true);
-    // a device at WebGPU's default limits (8): the engine with sources binds 9 (D4-44's beta^2
-    // buffer; D4-54: no prim), so it packs on its own; with the face dump as well (10, 9 packed)
-    // it says what to request instead of failing silently
-    const small = await requestSimDevice(createDawnGpu(), { onError: log.sink });
-    try {
-      expect(small.device.limits.maxStorageBuffersPerShaderStage).toBe(8);
-      const own = await run(small.device, false);
-      expect(own.packed).toBe(true);
-      expect(own.state.every((v, k) => Object.is(v, plain.state[k]))).toBe(true);
-      await expect(run(small.device, false, true)).rejects.toThrow(
-        /needs 10 storage buffers \(9 packed\).*allows 8/,
-      );
-    } finally {
-      small.destroy();
-    }
-  });
+  it.each(MODES)(
+    'D4-50: packs geo and topo for a device with 8 storage buffers, bitwise equal to unpacked (%s)',
+    async (_, mode) => {
+      const mesh = closedBoxMesh('f32');
+      const run = async (device: GPUDevice, packStatic: boolean, faceDump = false) => {
+        const s = await GpuSolver.create(device, mesh, {
+          ...mode,
+          gas: THERMALLY_PERFECT,
+          freeStream: { ...ISA, velocity: 30 },
+          cellSource: true,
+          packStatic,
+          faceDump,
+        });
+        s.setState(pulse(0.3, 0.08, 0.05, 30));
+        const rate0 = new Float64Array(6 * mesh.nCells).fill(1e-3);
+        s.setCellSource({ rate0 });
+        s.iterate(20);
+        const out = { packed: s.packed, state: await s.readState() };
+        s.destroy();
+        return out;
+      };
+      const plain = await run(sim.device, false);
+      const packed = await run(sim.device, true);
+      expect([plain.packed, packed.packed]).toEqual([false, true]);
+      expect(packed.state.every((v, k) => Object.is(v, plain.state[k]))).toBe(true);
+      // a device at WebGPU's default limits (8): the engine with sources binds 9 (D4-44's beta^2
+      // buffer; D4-54: no prim), so it packs on its own; with the face dump as well (10, 9 packed)
+      // it says what to request instead of failing silently
+      const small = await requestSimDevice(createDawnGpu(), { onError: log.sink });
+      try {
+        expect(small.device.limits.maxStorageBuffersPerShaderStage).toBe(8);
+        const own = await run(small.device, false);
+        expect(own.packed).toBe(true);
+        expect(own.state.every((v, k) => Object.is(v, plain.state[k]))).toBe(true);
+        await expect(run(small.device, false, true)).rejects.toThrow(
+          /needs 10 storage buffers \(9 packed\).*allows 8/,
+        );
+      } finally {
+        small.destroy();
+      }
+    },
+  );
 
   it('adds the power of a force source to the energy (work: s_eta = u s_x + v s_r + w s_L / r)', async () => {
     // ladder L9b's actuator disk: a force density f along x with s_eta = f u, in a uniform stream

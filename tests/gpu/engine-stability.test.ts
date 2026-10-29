@@ -6,8 +6,9 @@
 // within 10 iterations, first at cell 0, the inflow-axis corner: there the wave's jump to the
 // inflow ghost lifts beta^2 by its dp term while the flow is at rest, so beta / M_ref was 8.9
 // (M_ref = M_cut at rest; 94 cells above 8), where SOLVER.md 10's 1D limit before D4-44 is about
-// 0.47. The same wave stayed finite at CFL 0.5 and below, and the f64 oracle with the face-Mach
-// M_ref put back also went NaN within 10 iterations: the step limit of the mismatched family
+// 0.42 (its table: 0.469 at beta / M_ref 8, 0.234 at 16; W2I-N5), below CFL 0.8. The same wave
+// stayed finite at CFL 0.5 and below, and the f64 oracle with the face-Mach M_ref put back also
+// went NaN within 10 iterations: the step limit of the mismatched family
 // (W2R-I6), not f32. With D4-44 the oracle's max |rho'| over its first is 0.998, 0.991, 0.984,
 // 0.979, 0.974, 0.970, 0.966, 1.145, 1.343, 1.510 every 10 iterations to 100, and the kernel's
 // the same to 3 digits (w2-solver-int handoff).

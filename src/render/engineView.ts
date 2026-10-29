@@ -33,7 +33,12 @@ import { easeInOut, explodeOffsets } from '../geometry/explode';
 import { advanceAngle, shutterBlurAngle, spoolDisplayFactor } from '../geometry/motion';
 import { screenRectOfBox, type Box3Like } from '../geometry/screenRect';
 import { closedViewVisibility } from '../geometry/visibility';
-import { requestSimDevice, type GpuErrorReport, type SimDevice } from '../gpu/device';
+import {
+  requestSimDevice,
+  type GpuErrorReport,
+  type SimDevice,
+  type SimDeviceOptions,
+} from '../gpu/device';
 import type { FrameSample, PassMedians } from '../gpu/passTimings';
 import {
   initialRenderScale,
@@ -61,6 +66,11 @@ export interface EngineViewOptions {
   readonly dpr: number;
   readonly quality?: keyof typeof GEOMETRY_QUALITY;
   readonly onError?: (r: GpuErrorReport) => void;
+  /**
+   * Device limits wanted for a compute consumer on the view's device, each at min(value, the
+   * adapter's): the flow solver's FLOW_SOLVER_LIMITS (D4-50), as the P1 page asks (D4-64).
+   */
+  readonly preferredLimits?: SimDeviceOptions['preferredLimits'];
   readonly debug?: PostDebug;
   /** Per-pass GPU timestamps (default on when the adapter has timestamp-query). */
   readonly timing?: boolean;
@@ -203,6 +213,7 @@ export async function createEngineView(o: EngineViewOptions): Promise<EngineView
     optionalFeatures: ['float32-filterable', 'timestamp-query'],
     // the scene pass writes 3 rgba16float targets (colour, normal, velocity): 24 B/sample
     maxLimits: ['maxColorAttachmentBytesPerSample'],
+    ...(o.preferredLimits === undefined ? {} : { preferredLimits: o.preferredLimits }),
     onError: sink,
   });
   let renderer: WebGPURenderer | null = null;

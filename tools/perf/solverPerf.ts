@@ -458,9 +458,24 @@ function differingWords(a: ArrayBufferView, b: ArrayBufferView): number {
 }
 
 /**
+ * Non-finite values of a float array, or of half-float bits (exponent all ones). Two NaN states
+ * compare equal word for word, so a bitwise match says nothing without this (W2I-N3).
+ */
+function nonFinite(a: Float32Array | Float64Array | Uint16Array): number {
+  let n = 0;
+  if (a instanceof Uint16Array) {
+    for (const h of a) if ((h & 0x7c00) === 0x7c00) n++;
+  } else {
+    for (const x of a) if (!Number.isFinite(x)) n++;
+  }
+  return n;
+}
+
+/**
  * Both sides from U through the same frames (`frames` x `perFrame` iterations, each with its
  * resample): the state copy, the compensated U^n (copy + low part) and the four render textures,
- * compared bitwise. 0 everywhere: the two builds give the same results bit for bit.
+ * compared bitwise, with each side's non-finite values counted. 0 everywhere: the two builds give
+ * the same finite results bit for bit.
  */
 export async function compareSides(
   device: GPUDevice,
@@ -509,5 +524,16 @@ export async function compareSides(
     nearVelocity: differingWords(x.nearVelocity, y.nearVelocity),
     farState: differingWords(x.farState, y.farState),
     farVelocity: differingWords(x.farVelocity, y.farVelocity),
+    // the f32 state copy (U^n's high part) and the textures; the f64 U^n follows the state
+    nonFiniteStateA: nonFinite(x.state),
+    nonFiniteStateB: nonFinite(y.state),
+    nonFiniteTexturesA: [x.nearState, x.nearVelocity, x.farState, x.farVelocity].reduce(
+      (n, t) => n + nonFinite(t),
+      0,
+    ),
+    nonFiniteTexturesB: [y.nearState, y.nearVelocity, y.farState, y.farVelocity].reduce(
+      (n, t) => n + nonFinite(t),
+      0,
+    ),
   };
 }
