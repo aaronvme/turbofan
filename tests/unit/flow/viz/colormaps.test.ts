@@ -14,7 +14,13 @@ import {
   FIELD_QUANTITY_IDS,
   normalizeQuantity,
 } from '../../../../src/flow/viz/fields';
-import { FLOW_VIZ_MODES, FLOW_VIZ_MODE_IDS, lookModeFor } from '../../../../src/flow/viz/modes';
+import {
+  cropAlpha,
+  FLOW_VIZ_MODES,
+  FLOW_VIZ_MODE_IDS,
+  lookModeFor,
+  nearFieldCrop,
+} from '../../../../src/flow/viz/modes';
 
 const close = (a: readonly number[], b: readonly number[], tol: number) =>
   a.every((v, i) => Math.abs(v - (b[i] ?? NaN)) <= tol);
@@ -151,5 +157,37 @@ describe('modes', () => {
 
   it('presents nothing synthesized: every mode draws only derived fields (PHYSICS.md 1)', () => {
     for (const id of FLOW_VIZ_MODE_IDS) expect(FLOW_VIZ_MODES[id].synthesized).toEqual([]);
+  });
+
+  it('D4-76: data colours composite after tone mapping (display space), the beauty paths before', () => {
+    expect(FLOW_VIZ_MODES.data.composite).toBe('display');
+    expect(FLOW_VIZ_MODES.cutaway.composite).toBe('display');
+    expect(FLOW_VIZ_MODES.realistic.composite).toBe('scene');
+    // the schlieren image is its own grey scale with a legend: shown as computed
+    expect(FLOW_VIZ_MODES.schlieren.composite).toBe('display');
+  });
+
+  it('D4-76: the cut plane is cropped to the near field (a few diameters) by default', () => {
+    for (const id of ['data', 'cutaway'] as const) {
+      const c = FLOW_VIZ_MODES[id].crop;
+      expect(c).not.toBeNull();
+      if (c === null) continue;
+      // about the nacelle: r out to ~1.2 m, x from a little ahead of the lip to behind the plug
+      expect(c.rMax).toBeGreaterThan(1);
+      expect(c.rMax).toBeLessThan(1.5);
+      expect(c.xMin).toBeLessThan(-0.6);
+      expect(c.xMax).toBeGreaterThan(3.6);
+      expect(c.fadeM).toBeGreaterThan(0);
+    }
+    expect(nearFieldCrop(null)).toBeNull();
+    expect(cropAlpha({ xMin: -1, xMax: 4, rMax: 1.2, fadeM: 0.2 }, 0, 0.5)).toBe(1);
+    expect(cropAlpha({ xMin: -1, xMax: 4, rMax: 1.2, fadeM: 0.2 }, 0, 1.2)).toBe(0);
+    expect(cropAlpha({ xMin: -1, xMax: 4, rMax: 1.2, fadeM: 0.2 }, -1.1, 0.5)).toBe(0);
+    expect(cropAlpha({ xMin: -1, xMax: 4, rMax: 1.2, fadeM: 0.2 }, 0, 1.1)).toBeCloseTo(0.5, 12);
+  });
+
+  it('states the schlieren sensitivity (knife-edge cut-off a/f, rad)', () => {
+    expect(FLOW_VIZ_MODES.schlieren.schlierenRangeRad).toBeGreaterThan(0);
+    expect(FLOW_VIZ_MODES.schlieren.schlierenRangeRad).toBeLessThan(1e-2);
   });
 });
