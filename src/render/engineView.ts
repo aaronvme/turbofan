@@ -185,6 +185,8 @@ export interface EngineView {
   setFlowQuantity(id: FieldQuantityId | null): void;
   /** Time dilation of the particles: simulated seconds per wall second (default 1/200). */
   setFlowTimeScale(dilation: number): void;
+  /** The GPU particle records (src/flow/viz/particleKernel.ts layout): tests, inspection. */
+  readFlowParticles(): Promise<Float32Array>;
   /** Look-dev A/B switches (e.g. caps or culling off) for timing comparisons. */
   setDebugFlags(flags: DebugFlags): void;
   /** Advances the simulation clock by dt seconds and renders one frame. */
@@ -544,6 +546,7 @@ async function assemble(
       flowQuantity = id;
       applyFlowMode();
     },
+    readFlowParticles: () => flowCompute.readParticles(),
     setFlowTimeScale(d) {
       if (!(d > 0 && d <= 1)) throw new Error(`flow time scale ${String(d)} must be in (0, 1]`);
       dilation = d;

@@ -35,6 +35,8 @@ interface LookdevApi {
   setFlowMode(id: FlowVizModeId | null): void;
   setFlowTimeScale(dilation: number): void;
   setFlowQuantity(id: FieldQuantityId | null): void;
+  /** The GPU particle records (12 floats each, src/flow/viz/particleKernel.ts). */
+  readFlowParticles(): Promise<number[]>;
   /** Renders n frames at a fixed 1/60 s step, one per animation frame, then waits for the GPU. */
   renderFrames(n: number): Promise<void>;
   /** Renders n frames and returns the per-pass GPU and CPU medians over them. */
@@ -54,6 +56,8 @@ interface LookdevApi {
   conditions(): Promise<Record<string, unknown>>;
   pause(paused: boolean): void;
   stats(): ReturnType<EngineView['stats']>;
+  /** The camera's (unjittered) view-projection, column-major: inspection of the particles. */
+  viewProjection(): number[];
 }
 
 export interface TimingRun {
@@ -218,6 +222,7 @@ async function main(): Promise<void> {
     setFlowQuantity: (id) => {
       flow.setQuantity(id);
     },
+    readFlowParticles: async () => Array.from(await view.readFlowParticles()),
     setShutter: (d) => {
       view.setShutter(d);
     },
@@ -349,6 +354,11 @@ async function main(): Promise<void> {
       paused = p;
     },
     stats: () => view.stats(),
+    viewProjection: () => {
+      view.camera.updateMatrixWorld();
+      const m = view.camera.projectionMatrix.clone().multiply(view.camera.matrixWorldInverse);
+      return [...m.elements];
+    },
   };
 }
 

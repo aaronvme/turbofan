@@ -63,6 +63,8 @@ export interface FlowCompute {
   medianMs(): number | null;
   /** Particles start over (a field switch: they were following the old one). */
   resetParticles(): void;
+  /** A copy of the particle records (tests and look-dev inspection; waits for the GPU). */
+  readParticles(): Promise<Float32Array>;
   dispose(): void;
 }
 
@@ -268,6 +270,22 @@ export async function createFlowCompute(o: {
     },
     medianMs: () => (timed.length === 0 ? null : median(timed)),
     resetParticles,
+    async readParticles() {
+      const rb = device.createBuffer({
+        label: 'flow particles read',
+        size: particleBuffer.size,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      });
+      const enc = device.createCommandEncoder();
+      enc.copyBufferToBuffer(particleBuffer, 0, rb, 0, particleBuffer.size);
+      device.queue.submit([enc.finish()]);
+      try {
+        await rb.mapAsync(GPUMapMode.READ);
+        return new Float32Array(rb.getMappedRange().slice(0));
+      } finally {
+        rb.destroy();
+      }
+    },
     dispose() {
       dropOwned();
       particleBuffer.destroy();

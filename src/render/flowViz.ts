@@ -109,6 +109,17 @@ export const STREAK_S = 0.25;
 const MAX_STREAK_M = 0.45;
 /** Half the streak's width, px (of the flow pass's target). */
 const HALF_WIDTH_PX = 1;
+/**
+ * In the display modes a streak carries a dark halo out to this half width, px, so a light
+ * tracer reads on every colour of the map (white on viridis yellow has no contrast), as map
+ * labels do.
+ */
+const HALO_PX = 2.2;
+/**
+ * A tracer's exposure is spread along its streak: in the scene-linear mode the streak's
+ * opacity falls as 1 / length beyond this length, m, so fast jets do not paint solid white.
+ */
+const EXPOSURE_LEN_M = 0.12;
 /** Gladstone-Dale K at 550 nm (the photopic peak), m^3/kg. */
 const K_GD = gladstoneDaleK(550);
 /** A rotor surface hides the flow layer only when it is this much nearer, m. */
@@ -390,9 +401,11 @@ export function createFlowViz(o: {
     const nrm = vec2(dir.y.negate(), dir.x);
     const s = corner.x;
     const side = corner.y;
-    // along the streak in px from the tail, extended by the half width at both ends (round caps)
-    const along = mix(float(-HALF_WIDTH_PX), lenPx.add(HALF_WIDTH_PX), s);
-    const across = side.mul(HALF_WIDTH_PX + 0.5);
+    // along the streak in px from the tail, extended by the half width at both ends (round
+    // caps); the display modes' quads also hold the halo
+    const outer = mix(float(HALF_WIDTH_PX + 0.5), float(HALO_PX + 0.5), display);
+    const along = mix(outer.negate(), lenPx.add(outer), s);
+    const across = side.mul(outer);
     const p = sT.add(dir.mul(along)).add(nrm.mul(across));
     const w = mix(clipT.w, clipH.w, s);
     const z = mix(clipT.z, clipH.z, s);
@@ -412,7 +425,9 @@ export function createFlowViz(o: {
       ),
       sheet.on,
     );
-    const alphaLit = aux.y.mul(lit);
+    // the long exposure's spread (scene-linear mode): opacity ~ 1 / length past EXPOSURE_LEN_M
+    const spread = mix(min(float(1), float(EXPOSURE_LEN_M).div(max(len, 1e-4))), float(1), display);
+    const alphaLit = aux.y.mul(lit).mul(spread);
     // a particle behind the camera, unborn or invisible is collapsed away
     const live = alphaLit
       .greaterThan(0.002)
@@ -432,18 +447,22 @@ export function createFlowViz(o: {
       // distance to the segment [0, len] on the streak's axis: a capsule
       const dx = max(max(vAlong.negate(), vAlong.sub(vLen)), 0);
       const dist = length(vec2(dx, vAcross));
-      const cov = float(1).sub(smoothstep(HALF_WIDTH_PX - 0.75, HALF_WIDTH_PX + 0.5, dist));
+      const core = float(1).sub(smoothstep(HALF_WIDTH_PX - 0.75, HALF_WIDTH_PX + 0.5, dist));
+      const halo = float(1)
+        .sub(smoothstep(HALO_PX - 0.75, HALO_PX + 0.5, dist))
+        .mul(0.55)
+        .mul(display);
       const toward = vAlong.div(max(vLen, 1)).clamp(0, 1);
-      const a = cov
-        .mul(vAlpha)
-        .mul(opacity)
-        .mul(mix(float(0.15), float(1), toward));
+      const k = vAlpha.mul(opacity).mul(mix(float(0.15), float(1), toward));
+      // the light core over its dark halo (premultiplied): the halo's alpha where the core is not
+      const aCore = core.mul(k);
+      const a = aCore.add(halo.mul(k).mul(float(1).sub(core)));
       If(a.lessThan(0.002), () => {
         Discard();
       });
-      // scene-linear: a pale smoke under the studio light; display: near-white
-      const rgb = mix(vec3(0.82, 0.86, 0.92), vec3(0.95, 0.97, 1), display);
-      return vec4(rgb.mul(a), a);
+      // scene-linear: a pale smoke under the studio light; display: near-white on a dark halo
+      const rgb = mix(vec3(0.82, 0.86, 0.92), vec3(0.97, 0.98, 1), display);
+      return vec4(rgb.mul(aCore), a);
     })();
     streakMaterial.needsUpdate = true;
   };
