@@ -427,6 +427,21 @@ Otherwise the engine setting stays 0.003 and J stays pinned. The rows that fail 
 - **Verdict: a non-normal transient.** The energy decays monotonically. Max |p′| and the residual, which weight small cells (the residual is the unweighted mean of (R_ρ/V)²), grow transiently 3-5× and 10-28×, then decay. The decay is slow (thousands of iterations): by 20000 the residual is still 2.1× its value at 100. So rule 1b fails for the linear part too: its residual is not an energy norm. Whether 1b moves to an energy-weighted residual is a decision. D4-70 does not let the window be changed here.
 - *Found on the way (not the contract):* with the smooth limiter (D4-25's trial form) and a far-field boundary, G has a **genuine growing mode**, 1.00289 per iteration, pressure-free, at the far-field / wall corner of the stand-in (core(0..2, 14)). A power iteration from that Ritz vector holds the shape (cosine 0.99998) and the rate for 3000 iterations. With the sharp limiter the same start decays (0.99996 per iteration). The far field's inflow/outflow switch on the sign of u_n (§5) makes G non-additive at rest, so Arnoldi with a far field is only a candidate finder: the power iteration is the proof. It matters if D4-25's smooth form is ever adopted.
 
+*D4-77 (round 11, 2026-10-29): rule 1b's residual is in the same volume-weighted norm as 1a*, `residualDensityL2Volume` = sqrt(Σ_c b_c V_c (R_ρ/(b_c V_c))² / Σ_c b_c V_c) of stage 1 (§11), in place of the cell mean. It rests on the definition (the energy norm of D4-72, and the standard convergence monitor), it is a change after seeing data (D4-69's decaying linear part fails the cell-mean form), and it does not loosen 1a. **The rule in force for any D4-63 fix:** (1) the D4-63 case is finite to 2000 iterations, and over iterations 1000-2000 (a) the volume-weighted L2 of p′ is at most 2× its first and (b) the volume-weighted density residual is at most its value at iteration 100; (2) every row that passes now still passes (as stated above). Max |p′| and the cell-mean residual are reported beside it (`tests/ladder/cases/d463.ts` rows 3 and 4).
+
+*D4-77's results (round 11; `reports/scratch/r11/diag.ts`, the case's start, solver and norms with the residual's location; logs in `r11/logs`).* The contract run reproduces round 9's numbers (max |p′| 2.44 at 100, 5.43 at 200; cell-mean residual 12.44 at 100), and the linear run round 10's (cell-mean residual 7.914e-2 at 200, the same digits).
+
+| run | (a) L2(p′), late max / first (≤ 2) | (b) weighted residual, late max / at 100 (≤ 1) | cell-mean residual, late max / at 100 (reported) | max \|p′\|, late max / first (reported) |
+|---|---|---|---|---|
+| **the D4-63 case** (1e-3, isothermal, the contract) | 1.717: pass | **2.614: FAIL** (3.55 at 100, 9.28 at 1500, 6.87 at 2000) | 11.95 | 8.39 |
+| the linear part (1e-6, isentropic) | 0.505: pass | **1.092: FAIL** (1.19e-2 at 100; 0.81-1.09 of it from 200 to 2000) | 12.19 | 3.57 |
+| the linear part at 20000 (round 10's vector) | 0.022 | **0.14** | 2.10 | 0.35 |
+
+- **Where the weighted residual grows (the contract).** At iteration 100 it sits where the wave starts, in the upstream (42 %) and far-field (29 %) blocks. Over 1000-2000 it sits in the far-field block's interior (31-55 %; r 2.4-4.7 m, x 1.8-7.9 m, the rows 7-15 inside its outer boundary row), the plume-bypass block (15-19 %) and the plume-outer block (9-14 %). No cell carries more than 2 %. The far-field block is 80 % of the volume and the two plume blocks 1.6 % and 1.4 %, so per unit volume the plume blocks carry 8-12× the mean. The cell-mean form sits in the core block instead (40-78 %, r 0.26-0.29 m, V ~ 1e-6 m³ per radian): that is round 10's small-cell weighting, which D4-77 removes.
+- **The linear part is non-growing in D4-70's sense (decay in the limit), and still fails the window, narrowly.** Its weighted residual is flat (0.81-1.09× its value at 100) through 2000 while L2(p′) falls to 0.5, and it is 0.14× by 20000 (the cell mean is still 2.1× there). It fails the 1000-2000 window by 9 % because its decay is slow, not because it grows.
+- **The contract's nonlinear part grows in the energy norm.** Its L2(p′) rises to 1.27-1.72× while the linear part's halves, and its weighted residual rises 2.6× within the window, in the outer and plume blocks rather than at the axis. D4-68 found that no local Δp form removes it.
+- **D4-63 stays open; the pin stays `it.fails`.** No scheme change was made. The candidates go to the orchestrator (below and in the handoff).
+
 
 **Low-Mach preconditioning (tracking mode only; decision D4-10).** Without it the pseudo-time step is set by the acoustic speed |u| + c while the flow converges at the convective speed |u|, so the iterations to converge grow like 1/M (ladder L7: the M 0.01 sphere did not converge in 20000 iterations, the M 0.3 sphere took 3096). The option `lowMachPreconditioning: { minMach }` multiplies the pseudo-time derivative of the pressure by 1/β² (Turkel's preconditioner with α = 0 in the variables (p, u, v, rw, s, Z), equivalent for this gas to Weiss & Smith 1995). Per cell, from the stage-1 primitives and frozen for the three stages like τ:
 
@@ -467,6 +482,8 @@ The default dt is CFL_phys · min_c(b_c V_c/λ_c) with CFL_phys = 0.9 (the RK3 l
 ## 11. Diagnostics
 
 `residualDensityL2` = sqrt(mean_c (R_c,0 / (b_c V_c))²) from stage 1, kg/(m³ s) (`FlowStepStats.residualDensityL2`).
+
+`residualDensityL2Volume` = sqrt(Σ_c b_c V_c (R_c,0 / (b_c V_c))² / Σ_c b_c V_c) from the same stage, kg/(m³ s): the same residual in the volume-weighted norm (D4-77), the one D4-63's rule 1b judges. The oracle reports it beside the cell mean (`IterationStats`); the cell mean weights every cell alike, so on the r-weighted mesh the near-axis cells dominate it.
 
 ## 12. Where f32 differs, and what w2/solver must meet
 

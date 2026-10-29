@@ -5,6 +5,9 @@
 // 2000 iterations (W2R-N16); checkpoints every 100. D4-72: the rule's pressure bound is on the
 // volume-weighted L2 of p' (the acoustic energy's norm: a converging cylindrical wave grows
 // pointwise towards the axis, about 1 / sqrt(r), while its energy decays); max |p'| is reported.
+// D4-77: the rule's residual is the density residual in the same volume-weighted norm (the
+// standard convergence monitor); the cell mean of (R / V)^2, which the near-axis cells dominate,
+// is reported beside it.
 import { ISA_SLS } from '../../../src/contracts/ambient';
 import { THERMALLY_PERFECT } from '../../../src/flow/reference/gas';
 import { ReferenceSolver } from '../../../src/flow/reference/solver';
@@ -61,13 +64,15 @@ export async function run() {
   const first = norms();
   const pressure: number[] = [];
   const energy: number[] = [];
-  const residual: number[] = [];
+  const residual: number[] = []; // volume-weighted (D4-77), the rule's
+  const residualMean: number[] = []; // the cell mean (SOLVER.md 11), reported
   for (let done = EVERY; done <= D463_ITERATIONS; done += EVERY) {
     s.iterate(EVERY);
     const now = norms();
     pressure.push(now.max / first.max);
     energy.push(now.l2 / first.l2);
-    residual.push(s.stats.residualDensityL2);
+    residual.push(s.stats.residualDensityL2Volume);
+    residualMean.push(s.stats.residualDensityL2);
     if (!Number.isFinite(pressure[pressure.length - 1])) break;
   }
   const finite =
@@ -79,6 +84,8 @@ export async function run() {
   const lateEnergy = Math.max(...energy.slice(LATE / EVERY - 1));
   const res100 = residual[0] as number;
   const lateRes = Math.max(...residual.slice(LATE / EVERY - 1));
+  const lateResMean =
+    Math.max(...residualMean.slice(LATE / EVERY - 1)) / (residualMean[0] as number);
   return {
     id: 'D4-63-rest',
     rows: [
@@ -98,7 +105,7 @@ export async function run() {
       },
       {
         id: 'D4-63',
-        metric: 'rule (b): max residual over 1000-2000 / residual at 100',
+        metric: 'rule (b, D4-77): volume-weighted residual, max over 1000-2000 / at 100',
         threshold: '<= 1',
         value: lateRes / res100,
         pass: finite && lateRes <= res100,
@@ -110,7 +117,14 @@ export async function run() {
         value: latePeak,
         pass: 'reported' as const,
       },
+      {
+        id: 'D4-63',
+        metric: "reported (round 9's residual): cell-mean residual, max over 1000-2000 / at 100",
+        threshold: 'reported',
+        value: lateResMean,
+        pass: 'reported' as const,
+      },
     ],
-    extra: { pressure, energy, residual },
+    extra: { pressure, energy, residual, residualMean },
   };
 }
