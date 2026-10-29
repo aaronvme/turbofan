@@ -1,0 +1,138 @@
+// Critic pass 11 (w2/lookdev-5 @4538f0f, P4's lean scene pass): what GTAO's normal from the
+// depth and TRAA's camera velocity from the depth change in the picture. For each view, the
+// shipped pipeline (colour + depth) against `legacyGbuffer` (the stored view normal and three's
+// velocity), both TRAA-converged at dt 0 (48 frames), the beauty and the `ao` debug view. Writes
+// the images and the diff (red: luminance differs by > THRESHOLD) to test-results/w2l-gbuffer/.
+// Run in a tree with lookdev-5: copy to tests/browser/w2lGbuffer.probe.test.ts, then
+// `npx vitest run -c vitest.browser.config.ts tests/browser/w2lGbuffer.probe.test.ts`.
+import { describe, expect, it } from 'vitest';
+import { commands } from 'vitest/browser';
+import { ENGINE_DEFINITION } from '../../src/engine/definition';
+import { createEngineView } from '../../src/render/engineView';
+import type { LookPresetId } from '../../src/render/presets';
+import { diff, diffImage, grab, settle, type Grab } from './lib/frames';
+
+const W = 1920;
+const H = 1080;
+const THRESHOLD = 0.04;
+const VIEWS: readonly LookPresetId[] = ['side', 'threeQuarterFront', 'cutaway', 'hotSection'];
+
+const png = (g: Grab): string => {
+  const out = document.createElement('canvas');
+  out.width = g.w;
+  out.height = g.h;
+  const ctx = out.getContext('2d');
+  if (ctx === null) throw new Error('no 2d context');
+  const img = ctx.createImageData(g.w, g.h);
+  img.data.set(g.rgba);
+  ctx.putImageData(img, 0, 0);
+  return out.toDataURL('image/png').split(',')[1] ?? '';
+};
+
+describe('critic probe: lean scene pass (normal and velocity from the depth) vs legacy', () => {
+  it('beauty and AO, lean vs legacy, per view', async () => {
+    const shots: Record<string, Record<string, Grab>> = {};
+    for (const legacy of [false, true])
+      for (const debug of [null, 'ao'] as const) {
+        const c = document.createElement('canvas');
+        c.width = W;
+        c.height = H;
+        document.body.appendChild(c);
+        const v = await createEngineView({
+          gpu: navigator.gpu,
+          canvas: c,
+          definition: ENGINE_DEFINITION,
+          width: W,
+          height: H,
+          dpr: 1,
+          quality: 'high',
+          debug,
+          ...(legacy ? { legacyGbuffer: true } : {}),
+        });
+        for (const id of VIEWS) {
+          v.setPreset(id);
+          v.setShutter(0);
+          await settle(v, 48);
+          const g = grab(v, c);
+          const key = `${id}-${debug ?? 'beauty'}`;
+          (shots[key] ??= {})[legacy ? 'legacy' : 'lean'] = g;
+        }
+        expect(v.stats().errors).toEqual([]);
+        await v.dispose();
+        c.remove();
+      }
+    const rows: string[] = [];
+    for (const [key, s] of Object.entries(shots)) {
+      const a = s.legacy;
+      const b = s.lean;
+      if (a === undefined || b === undefined) continue;
+      const d = diff(a, b, THRESHOLD);
+      rows.push(
+        `${key}: ${(100 * d.changed).toFixed(3)} % px differ > ${String(THRESHOLD)}, ${String(d.tilesOver25)} tiles over 25 %, worst tile ${(100 * d.worstTile).toFixed(1)} %`,
+      );
+      await commands.writeFile(`test-results/w2l-gbuffer/${key}-lean.png`, png(b), 'base64');
+      await commands.writeFile(`test-results/w2l-gbuffer/${key}-legacy.png`, png(a), 'base64');
+      await commands.writeFile(
+        `test-results/w2l-gbuffer/${key}-diff.png`,
+        diffImage(a, b, THRESHOLD),
+        'base64',
+      );
+    }
+    await commands.writeFile('test-results/w2l-gbuffer/summary.txt', `${rows.join('\n')}\n`);
+    console.warn(`critic probe lean vs legacy\n${rows.join('\n')}`);
+  });
+
+  // The exploded transition: the main pass's parts move, and lean TRAA reprojects them as the
+  // camera alone (the handoff's question). At frames 15 and 30 of setMode('exploded') at dt
+  // 1/60, the TRAA frame against a TRAA-off still of the same instant: tiles over 25 % changed.
+  it('the exploded transition: TRAA against the instant still, lean vs legacy', async () => {
+    const rows: string[] = [];
+    for (const legacy of [false, true]) {
+      const c = document.createElement('canvas');
+      c.width = W;
+      c.height = H;
+      document.body.appendChild(c);
+      const v = await createEngineView({
+        gpu: navigator.gpu,
+        canvas: c,
+        definition: ENGINE_DEFINITION,
+        width: W,
+        height: H,
+        dpr: 1,
+        quality: 'high',
+        ...(legacy ? { legacyGbuffer: true } : {}),
+      });
+      v.setPreset('threeQuarterFront');
+      v.setShutter(0);
+      await settle(v, 48);
+      v.setMode('exploded');
+      const out: string[] = [];
+      for (let k = 1; k <= 30; k++) {
+        if (k === 15 || k === 30) {
+          v.setDebugFlags({});
+          v.frame(1 / 60);
+          const moving = grab(v, c);
+          v.setDebugFlags({ noTraa: true });
+          const still = grab(v, c);
+          v.setDebugFlags({});
+          const d = diff(still, moving, THRESHOLD);
+          out.push(
+            `frame ${String(k)}: ${(100 * d.changed).toFixed(2)} % px, ${String(d.tilesOver25)} tiles`,
+          );
+          await commands.writeFile(
+            `test-results/w2l-gbuffer/explode-${String(k)}-${legacy ? 'legacy' : 'lean'}-diff.png`,
+            diffImage(still, moving, THRESHOLD),
+            'base64',
+          );
+        } else v.frame(1 / 60);
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+      rows.push(`${legacy ? 'legacy' : 'lean'}: ${out.join('; ')}`);
+      expect(v.stats().errors).toEqual([]);
+      await v.dispose();
+      c.remove();
+    }
+    await commands.writeFile('test-results/w2l-gbuffer/explode.txt', `${rows.join('\n')}\n`);
+    console.warn(`critic probe exploded transition\n${rows.join('\n')}`);
+  });
+});

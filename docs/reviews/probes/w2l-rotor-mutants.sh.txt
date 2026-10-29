@@ -1,0 +1,29 @@
+#!/bin/bash
+# Critic pass 11 (W2L-I1): can the new rotor-motion test see a wrong vector that is not zero or
+# flipped? Five mutants of src/render/post.ts's rotor velocity (each a plausible bug), each run
+# against `rotorMotion.test.ts -t W2L-I1` alone; the file is restored after each. Run from the root
+# of a tree with w2/lookdev-5 (the critic's trial merge), nothing else on the GPU.
+#   M1 half the turn back        M2 1.5x the turn back      M3 the HP and LP steps swapped
+#   M4 the wrap at a full pitch  M5 the vector's y flipped (a y-up/y-down convention slip)
+set -u
+F=src/render/post.ts
+cp "$F" /tmp/post.ts.orig
+run() {
+  local name=$1
+  npx vitest run -c vitest.browser.config.ts tests/browser/rotorMotion.test.ts -t "W2L-I1" \
+    --browser.api.port=5190 --browser.api.strictPort > "/tmp/w2l-$name.log" 2>&1
+  local code=$?
+  echo "$name exit $code: $(grep -E 'shipped:|Tests ' "/tmp/w2l-$name.log" | tr '\n' ' ')"
+  cp /tmp/post.ts.orig "$F"
+}
+mut() { # name, sed expression
+  sed -i "$2" "$F"
+  if cmp -s "$F" /tmp/post.ts.orig; then echo "$1: the sed did not apply"; return; fi
+  run "$1"
+}
+mut M1 's|const back = step.sub(pitch.mul(round(step.div(pitch)))).negate();|const back = step.sub(pitch.mul(round(step.div(pitch)))).negate().mul(0.5);|'
+mut M2 's|const back = step.sub(pitch.mul(round(step.div(pitch)))).negate();|const back = step.sub(pitch.mul(round(step.div(pitch)))).negate().mul(1.5);|'
+mut M3 's|const step = select(b.a.greaterThan(1.5), motion.hpStep, motion.lpStep);|const step = select(b.a.greaterThan(1.5), motion.lpStep, motion.hpStep);|'
+mut M4 's|const pitch = b.g.max(1e-4);|const pitch = b.g.max(1e-4).mul(2);|'
+mut M5 's|return select(isRotor, vec4(vel, 0, 0), sceneVel);|return select(isRotor, vec4(vel.x, vel.y.negate(), 0, 0), sceneVel);|'
+cmp -s "$F" /tmp/post.ts.orig && echo "restored"
