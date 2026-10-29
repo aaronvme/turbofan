@@ -3398,3 +3398,156 @@ None.
     2. a **global M_cut tied to the domain's peak velocity** (the standard Weiss-Smith/Turkel floor; D4-59's rationale), tried at 0.02 then 0.05. D4-59 found 0.02 kept every other row passing (L7 ratio 1.78 ≤ 3, L8 0.754%). It was rejected there only on R's convergence, which D4-55/D4-58 later traced to the limiter, so that criterion was wrong for R;
     3. only if both fail, come back with data for a deeper change.
   - The kernel mirrors the adopted M_cut, as a parameter: D4-40's adapter default.
+
+## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
+
+I reviewed `1eb1e62..2cfd469` in place (read-only) on 2026-10-29. Main moved only `docs/reviews/LOG.md` since 1eb1e62, so a trial merge would be the branch's tree plus the LOG. **Stopped on the coordinator's STOP-CLEAN** with the in-place coverage run under way. I stopped it, and no leftover processes remain. The flowviz worktree is clean at 2cfd469. No trial merge was started, and no dev server or Chrome page was opened.
+
+**Checked so far**
+- Gates in place: typecheck clean (15 s), lint (ESLint + Prettier) clean (95 s).
+- Code read:
+  - `src/flow/viz/{particles,particleKernel,seeding,modes,fields,colormaps,legend,optics,glow}.ts`;
+  - `src/render/{flowCompute,flowViz}.ts` (the streaks, the cut plane, the march), the post.ts and engineView.ts diffs, `src/gpu/passTimings.ts`, `src/render/passTimer.ts`, `spikes/p1/appScene.ts`, `src/lookdev/flowPanel.ts`;
+  - `tests/gpu/flowParticles.test.ts`, `tests/browser/flowViz.test.ts`, and the unit-test lists.
+- The PHYSICS.md, GPU_FACTS M49-M53 and LOOKDEV diffs.
+- All 11 screenshots, viewed.
+- Probe `docs/reviews/probes/pass12_optics.py` (independent of the branch's code):
+  - Edlén gives n − 1 = 2.778e-4 at 550 nm, so K = 2.268e-4 m³/kg;
+  - grey-body luminance against an 80 % wall at 1000 lux (255 cd/m²): the HPT vane (1148 K, ε 0.4) 9.3 %, the LPT vane (1130 K, ε 0.85) about 15 %, and 750 K 4e-6;
+  - the schlieren comment's own estimate is 9.9e-4 rad, 2.0 × its a/f.
+- MOCK take-off stations: T3 836, T4 1617, T41 1513, T45 1130, T5 852 K.
+
+**Not checked (next pass):**
+- coverage, test:mesh, test:gpu and test:browser in place;
+- the trial merge and its mesh, gates and browser runs;
+- a live look on my own page at port 5190 (shimmer, and the readout fix);
+- the haze shift's TS model (`schlieren.ts` haze) line by line;
+- the ECC agent checklists (not run).
+- **No verdict yet.**
+
+**Physics and maths, as far as read**
+- *Particles:* the midpoint RK2 in (x, r, θ) is second order. θ̇ = u_θ/r is taken at the midpoint's r, and the unit test shows the 4× error ratio. The 3D map is right:
+  - (x, r cos θ, r sin θ), with e_θ = x̂ × e_r;
+  - `velocity3D` = (u_x, u_r c − u_θ s, u_r s + u_θ c);
+  - the streaks use world = engine frame. The engine root has no transform, and the spools turn about +x with `def.rotation` (−1), as the MOCK's swirl does, so the swirl sign and the axis agree with PHYSICS.md 2.1.
+- *The WGSL kernel and its mirror:*
+  - they are the same statement by statement (the uniform layout is 160 B and matches `packParticleParams`);
+  - the axis ghost row is odd in u_r and u_θ (rMin = 0);
+  - the gradient kernel's spans are right at the axis (even g, row −1 = row 0) and at the ends.
+  - The Dawn test can fail: a 10 % swirl mutant gives 7e-3 m against 1e-5 m.
+- *Gladstone–Dale and the march:* eps = K ρ∞ ∫ ∇⊥g ds with K at 550 nm. The cylinder/slab clip and the surface stop are right. The ledger's 2.26e-4 is Merzkirch's figure, against my 2.268e-4.
+- *Blackbody:* Planck (CODATA), the Wyman–Sloan–Shirley lobes (coefficients checked), the D65 matrix and the 683 lm/W luminance are right.
+- *Colour maps:*
+  - viridis and inferno are polynomial fits within 0.02;
+  - the diverging map is linear in CIELAB, so L* is symmetric and monotone, which suits the data;
+  - the legend's bar comes from the same LUT bytes, its ticks are 1-2-5 inside the range, the log2 quantities are labelled as ratios, and the schlieren's grey matches the composite's 0.5 + eps/(2a/f);
+  - the LUT is sampled at texel centres.
+- *D4-76 is after tone mapping:*
+  - `displayPipe` = over(renderOutput(vignette(traa), AgX, sRGB)), with `outputColorTransform = false`;
+  - the LUT is NoColorSpace;
+  - the browser check (68 % of pixels within 3/255 of the LUT, against 0 % through AgX in round 1) can fail.
+  - The crop is lip − 0.6 m to plug tip + 0.9 m, r ≤ 1.15 R_nacelle (about 3.5 D long), the same formula in TS and TSL.
+- *Timing:*
+  - "Flow …" passes leave every render group and `gpuTotal`, so P4 excludes them;
+  - the compute pass is timed in its own ring;
+  - `visualsMs` goes to D4-2's scheduler.
+  - The flow pipeline's output quad (one extra overlay sample, and the schlieren's depth reconstruct) stays inside P4; the paired +0.03 ms is consistent with that.
+
+### Blocking (so far)
+None found.
+
+### Important (so far)
+- **W2V-I1: the solver badge does not say the field is uncoupled.**
+  - Where: `src/flow/viz/legend.ts:98-102` ("Live flow solver (GPU, 2D axisymmetric + swirl)"); `src/lookdev/flowPanel.ts:116-127` (`perfState`, the timing start state: no blade or combustor forces).
+  - The HUD beside it shows the MOCK cycle's N1/N2 (`ui-solver-cutaway.jpg`: "MOCK cycle · N1 1074 rpm").
+  - The failure: a viewer takes the near-rest field for the solver's answer for this engine. `FlowFieldSource` has only mock/solver, so W3's coupled field would get the same badge.
+  - The fix: carry the coupling state with the field and label it ("uncoupled: timing start state") until W3. A legend test pins it.
+- **W2V-I2: the solver-link test cannot tell the solver's values from a zero field** (`tests/browser/flowViz.test.ts:238-273`: chroma > 0.05 and `source === 'solver'`).
+  - The started field is near rest, so the plane is viridis' low end whatever the velocity texture holds.
+  - The failure: a wrong texture (state bound as velocity) or a scale error in the binding still passes.
+  - The fix: set a known state through `kernel.setConserved` (uniform 100 m/s, M ≈ 0.29), then check sampled plane pixels against that value's LUT colour, as the D4-76 check does.
+- **W2V-I3: the haze and schlieren shaders are not tested against their TS model.**
+  - Where: `src/render/flowViz.ts:501-548` (the march). `src/flow/viz/schlieren.ts` is tested against the Gaussian column. The browser test asserts only that ≥ 1 haze pixel changes (line 230), and nothing about the schlieren's level.
+  - The failure: K, ρ∞, the r-scale or the right/up basis off by a factor or a sign still passes.
+  - The fix: render the schlieren side on, on the MOCK take-off field, or read back the "Flow Schlieren" RTT. Compare one column through the core jet with `rayDeflection` on the same rays, at a tolerance from the 96-sample convergence. Do the same for the haze shift.
+- **W2V-I4: the particles step with no CFL limit.**
+  - Where: `particleKernel.ts:160-178`, `particles.ts:59-79`.
+  - At the panel's ×1/10 (`flowPanel.ts:89`), a core-jet tracer moves about 0.75 m per frame (110 near-field texels). The start/midpoint/end fluid checks then skip thin walls (core cowl trailing edge, splitter lip), and RK2 cuts corners round the spinner.
+  - The failure: streaks cross solids at ×1/10 to ×1/50.
+  - The fix: substeps n = min(N_max, ceil(|u| dt / Δx)) with a fluid check per substep, mirrored in TS, and the Dawn test adds a high-dilation step.
+- **W2V-I5 (visual): the overlay is not accumulated by TRAA but is drawn with TRAA's jitter** (GPU_FACTS M51; handoff NEXT 5).
+  - The failure: the cut plane's contours and edges, and the streaks, shimmer by up to half a pixel against the resolved engine, so Data and Cutaway crawl.
+  - The fix: draw the overlay unjittered (clear the view offset for the flow pass), or accumulate it.
+- **W2V-I6: there is no runtime MOCK fallback.**
+  - Where: `flowPanel.ts:116-127`.
+  - The failure: a failed `?field=solver` (mesh fetch, `solver.init`, missing FLOW_SOLVER_LIMITS) throws out of `createFlowPanel`, and the page stops. A solver that goes NaN or loses its device keeps drawing under the green badge (`status()` is read only in the test), and NaN reaches the blend.
+  - The fix: try/catch to the MOCK with the amber badge and the reason, and rebind the MOCK when `status() !== 'running'` or a readback is non-finite. The app shell should adopt the same contract.
+
+### Nits (so far)
+- **W2V-N7:** `.claude-scratch-h.py`, a debug-revert script, was committed at the repo root in b29b74e ("prettier"). Remove it.
+- **W2V-N8:** `tests/browser/flowViz.test.ts:135,193,260,266,339` writes 7 tracked PNGs and `timing.json` on every run.
+  - So every gate run dirties `docs/look-dev/flow/`, and the timing record changes with whoever ran it.
+  - Write to `reports/`, or gate it behind an env var.
+- **W2V-N9:** `ui-realistic.jpg` shows the panel's readout "off" with Real selected. It was shot before df53ed1's refresh fix; re-shoot it.
+- **W2V-N10:** the comment at `modes.ts:85-90` contradicts itself.
+  - It estimates about 1e-3 rad and says a/f 5e-4 "keeps the shear layers inside the grey scale". The probe gives 2.0 × the range, and `schlieren.png` shows them saturated.
+  - Either take a/f ≈ 1e-3, or restate the comment.
+- **W2V-N11:** `fields.ts:13-24` `deriveQuantities` (the unit-tested Mach) uses γ(T, FAR) R(FAR). The shader (`flowViz.ts:261,294-302`) uses air, as the ledger says. Make the tested function the drawn one.
+- **W2V-N12:** the midpoint's axis reflection keeps u_r's sign (`particles.ts:67-68`, `particleKernel.ts:165-166`).
+  - It samples at |r + ½ dt u_r| without negating the odd u_r, so the end step's radial velocity has the wrong sign when the midpoint crosses the axis.
+  - It is rare, and u_r → 0 there. The reflection test uses a uniform u_r, which is not odd.
+- **W2V-N13:** `RollingPassStats.push` stores `flowMs ?? 0` (`passTimings.ts`).
+  - So frames before a mode switch, and frames whose flow queries were dropped, count as 0 in `medians().flow`, and D4-2's scheduler sees the visuals low for a window.
+  - Skip those frames instead.
+- **W2V-N14:** the glow uniforms recompute 12 blackbody integrals (471 steps each) every frame, flow on or off.
+  - That is 0.28 ms CPU per frame at take-off, measured in Node on the branch's `glowSceneRadiance`.
+  - Cache by temperature, or tabulate.
+- **W2V-N15:** the ledger's glow line ("a few % of a lit white wall on the HPT vanes") understates it.
+  - The probe gives about 9 % for the HPT vane and about 15 % for the LPT vanes (uncooled, ε 0.85), which are the brightest part.
+  - The HPT blade uses the absolute T41, not the relative total temperature. That is an assumption to state.
+- **W2V-N16:** GPU_FACTS M53 keeps the earlier 1.28 ms (1.16-1.56), while the handoff's gate run is 1.18 (1.15-1.22). Record both.
+- **W2V-N17:** two wording fixes in the notes.
+  - Realistic's UI note lacks "mean flow, no shimmer"; the schlieren's note has "mean flow, no turbulence", and the ledger has it.
+  - "Derived from the field; nothing synthesized", beside "MOCK field (a synthetic stand-in)", reads as a contradiction. Make it "the visuals add nothing synthesized".
+- **W2V-N18:** `MAX_STREAK_M = 0.45` caps every stream above 360 m/s at ×1/200, so the core and bypass jets draw equal streaks. The ledger and the note state the exposure but not the cap.
+- **W2V-N19:** `flowCompute.ts:191-193` checks only width and height against `FIELD_EXTENTS.near`, but the kernels use its bounds; check those too.
+  - The solver's textures are captured once: a solver that re-creates them would leave destroyed views bound.
+  - The intake seed zone is shaped around the MOCK's over-converging inflow (`seeding.ts`). Revisit it on the solver field (W3), or the capture streamtube never shows.
+
+### Visual review (screenshots; "ultra high level UI / very realistic")
+**Reads as premium:**
+- The flow panel and the legend: dark glass, a tabular ms readout, amber MOCK and green solver badges, round ticks, the unit, and the provenance on the legend.
+- The Data mode's laser-sheet tracers with a dark halo.
+- The schlieren: light and dark core-jet layers, the intake ring, a dim silhouette, physically credible.
+- True viridis in display space.
+
+**Does not read as premium yet:**
+1. *Realistic's tracers read as hair or static* (`realistic.png`, `ui-realistic.jpg`): a uniform grey fur over the fan, and a bristle-brush spray from the core nozzle. Visible tracers also contradict "Realistic", and its physical haze is about a pixel. Suggestion: Realistic shows haze and glow only, and tracers become an option (fewer, longer, depth-faded).
+2. *The crop leaves a soft purple fog round the engine* in Cutaway and Data: viridis' darkest end out to 1.15 R, faded over 25 cm. On the solver field it fills most of the frame. Prefer a crisp, outlined border, or a reduced opacity outside the nacelle (stated on the legend).
+3. *W2V-I5's shimmer.*
+4. *The cutaway's core jet sits flat at the top of the speed map.*
+5. *The solver screenshots show near-rest dashes,* which read as noise; don't showcase them before W3.
+
+The glow reads as faint pink metal, which is honest for its physics. Provisional view: the UI chrome is at the target level; the flow layer needs a polish round before the app shows it.
+
+## Critic pass 12: w2/reference-9 a5d86dd..c2d7c9f (no merge; light review, PARTIAL: STOP-CLEAN)
+
+Reviewed with `git show` and `git diff` only; the worktree's uncommitted scratch patch was ignored. The monitor itself landed in round 11, before a5d86dd (2d3a592 TDD, 8ed4497), so I read `bcacc0a..c2d7c9f -- src tests`. The only src change is the monitor; there is no scheme change.
+
+- **The monitor is correct.**
+  - `recordResidual` computes sqrt(Σ bV q² / Σ bV) with bV = blockage × cellVolR, the per-radian volume of the r-weighted scheme. That is D4-77's energy norm, beside the unchanged cell mean.
+  - Its test (`tests/unit/flow/solver.test.ts:457-495`) recomputes both norms from stage 1's R with a non-uniform blockage, plain and preconditioned. It requires 1e-14 agreement and that the two norms differ by > 1e-3. So it catches a dropped b, a dropped weight, or the wrong stage. It does restate the definition (it is a mirror), which is acceptable for a monitor.
+- **D4-79 in `tests/ladder/cases/d463.ts`.**
+  - `window` and `at` index the checkpoints correctly (1000-2000 inclusive, and iteration k at index k/100 − 1).
+  - `finite` requires all 200 checkpoints, including the residual.
+  - Rule (b) is resEnd ≤ resMid and resEnd ≤ res100. Rule (a) is at 1000-2000 and at 20000. They match D4-79.
+  - The pin stays `it.fails` with the passing signature companion (D4-65's split). The isentropic start is ρ0 + p′/c0².
+- **W2R-N26:** D4-79 applies the rule to each case, but the ladder runs only the contract case. `cases/d463lin.ts` is manual (its header says so).
+  - The failure: a fix can be judged on the contract alone.
+  - The fix: the D4-63 fix's handoff must attach `reports/ladder/D4-63-linear.json`, or add an opt-in `it`.
+- **W2R-N27:** the d463 test's timeout is now 6 h (`D463_TIMEOUT_MS`), and round 12's run was killed for low memory at 16000. A whole ladder run now costs 1.3-4.3 h on this case alone. Consider resumable checkpoints, or keeping it out of the default `test:ladder` with an explicit gate step.
+- Not run: no reference-9 suites (light review by diff, as asked).
+
+**Orchestrator questions (provisional):**
+- (rr) W2V-I1/I6: should `FlowField` carry a coupling state ('uncoupled' / 'coupled'), so the badge and the app shell can say it, with the MOCK fallback as the contract for w2/app-ui?
+- (ss) Visual: should Realistic default to haze and glow without tracers (tracers as a "smoke" option), and should the cut-plane crop be crisp rather than fogged?
