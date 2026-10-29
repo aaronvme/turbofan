@@ -3076,3 +3076,18 @@ I re-checked each pass-10 finding on 2026-10-28. I read the diff 6ed8d81..9e1257
     - A kernel-tuning pass on the 3-dispatch kernel (1.448 ms/it; the β pass and the halo work are the candidates) adds more.
     - The 80k mesh (about 0.85 ms/it, about 4 it/frame) costs fidelity the 130k mesh was sized for (plan, D2-5), so it is the fallback, not the first remedy.
   - **The rule:** re-measure P1 officially after look-dev round 5 and one kernel-tuning round. If it is still under 150 it/s, switch the default to the 80k mesh (already generated, meeting every mesh requirement), with 130k as the "high" preset, and record both.
+- **P4 and P1 official at w2/lookdev-5 ffd6b3f** (records committed there, 4538f0f), 2026-10-28 23:21 to 2026-10-29 00:05. AC throughout, no agents, the display awake. D0-1: 10 s warm-up + 3 × 60 s. Every run was VALID.
+  - **P4 PASS (back to back, measure of record): default 6.96 ms ≤ 8.0**, GPU busy 71%. Cutaway 8.06 ms meets its 10 ms target; hero 10.88 ms misses it (not gated). Performance profile 5.43 ms. Vsync beside it: default 12.02 ms.
+  - **P1 PASS: solver-130k-app 157 it/s (1.421 ms/it) at 60.0 fps in the app's 1080p engine scene.** The calibration spike is 287 it/s.
+  - D4-67's path held: look-dev round 5's render saving flowed into the solver's D4-2 budget. **The 130k mesh stays**, the 80k fallback is not needed, and the kernel-tuning round becomes optional headroom.
+  - test:browser on that tip: 27 passed.
+- **D4-68 (D4-63, the nonlinear part): drop the K·|Δp| term from β², as a trial under round 9's pre-stated rule.**
+  - The term is a standard robustness cutoff (Weiss-Smith; D4-52). But here it lifts β from a 1e-3 wave and drives pseudo-velocities that focus on the axis. It bought nothing for J either (round 7: K up to 100 did not converge J).
+  - Run K = 0 under the SOLVER.md §10 rule: adopt only if the rest state is non-growing and every currently passing row still passes, L7's iteration ratio included. If K = 0 breaks a row, try the term with the face-limited Δp instead.
+  - The kernel mirrors whichever form is adopted.
+- **D4-69 (D4-63, the linear part): transient or mode, decided by evidence.** The plain scheme's 1e-6 core-duct growth (2.8-4× by 1000 iterations) needs:
+  - a long run to 20k iterations;
+  - a power iteration on the linearised operator about rest, on the core-duct stand-in.
+  
+  A spectral radius above 1 is a mode, an instability to fix, with the location from the eigenvector. Growth that saturates and decays with all eigenvalues inside is a non-normal transient.
+- **D4-70 (the 2× bound): round 9's rule stands as pre-stated** and is not loosened after the data. If D4-69 proves a decaying non-normal transient, any change to the rule's window must rest on the definition of "non-growing" (decay in the limit) and comes back as a logged decision with that evidence.
