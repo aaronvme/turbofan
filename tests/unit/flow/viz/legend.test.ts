@@ -3,7 +3,12 @@
 import { describe, expect, it } from 'vitest';
 import { bakeLut } from '../../../../src/flow/viz/colormaps';
 import { FIELD_QUANTITIES } from '../../../../src/flow/viz/fields';
-import { legendFor, provenanceLabel } from '../../../../src/flow/viz/legend';
+import {
+  dilationLabel,
+  flowModeNote,
+  legendFor,
+  provenanceLabel,
+} from '../../../../src/flow/viz/legend';
 import { FLOW_VIZ_MODES } from '../../../../src/flow/viz/modes';
 
 describe('legendFor', () => {
@@ -66,5 +71,21 @@ describe('legendFor', () => {
     expect(provenanceLabel('mock')).toMatch(/MOCK/);
     expect(provenanceLabel('solver')).toMatch(/solver/i);
     expect(provenanceLabel('mock')).not.toMatch(/solver/i);
+  });
+});
+
+describe('flowModeNote and dilationLabel', () => {
+  it('names every derived part of a mode and says nothing is synthesized', () => {
+    expect(dilationLabel(1 / 200)).toBe('x1/200');
+    expect(dilationLabel(1)).toBe('x1 (real time)');
+    const r = flowModeNote('realistic', 1 / 200);
+    expect(r).toMatch(/^Tracer streaks advected by its velocity, time x1\/200/);
+    expect(r).toMatch(/heat haze/);
+    expect(r).toMatch(/nothing synthesized/);
+    expect(flowModeNote('data', 1 / 100)).toMatch(
+      /^Cut plane: mach number of the field; laser-sheet/,
+    );
+    expect(flowModeNote('cutaway', 1 / 100, 't')).toMatch(/static temperature/);
+    expect(flowModeNote('schlieren', 1)).toMatch(/^Knife-edge schlieren .* a\/f 500 µrad/);
   });
 });

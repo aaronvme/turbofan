@@ -501,12 +501,12 @@ export function createPipeline(
   let renderScale = 1;
 
   const flowDeps: FlowPostDeps = {
-    sceneDepth: sceneDepth as unknown as FlowPostDeps['sceneDepth'],
-    rotorDepth: rotorDepth as unknown as FlowPostDeps['rotorDepth'],
+    sceneDepth: sceneDepth,
+    rotorDepth: rotorDepth,
     viewZOf,
-    camProjInv: camProjInv as unknown as FlowPostDeps['camProjInv'],
-    camWorld: camWorld as unknown as FlowPostDeps['camWorld'],
-    cameraPosition: cameraPosition as unknown as FlowPostDeps['cameraPosition'],
+    camProjInv: camProjInv,
+    camWorld: camWorld,
+    cameraPosition: cameraPosition,
   };
   let flowComposite: FlowCompositeMode = 'off';
   let flow: {

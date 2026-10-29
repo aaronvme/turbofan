@@ -100,3 +100,38 @@ export function provenanceLabel(source: FlowFieldSource): string {
     ? 'Live flow solver (GPU, 2D axisymmetric + swirl)'
     : 'MOCK field (a synthetic stand-in, not simulated)';
 }
+
+/** "x1/200": the dilation as a slow-motion factor. */
+export function dilationLabel(dilation: number): string {
+  return dilation >= 1 ? 'x1 (real time)' : `x1/${String(Math.round(1 / dilation))}`;
+}
+
+/**
+ * What a mode shows and where each part comes from (the "What's simulated" line of the flow
+ * panel, PHYSICS.md 1): every part is derived from the field, and `synthesized` is named.
+ */
+export function flowModeNote(
+  mode: FlowVizModeId,
+  dilation: number,
+  quantity?: FieldQuantityId,
+): string {
+  const m = FLOW_VIZ_MODES[mode];
+  const parts: string[] = [];
+  if (m.cutPlane)
+    parts.push(
+      `Cut plane: ${FIELD_QUANTITIES[quantity ?? m.quantity].label.toLowerCase()} of the field`,
+    );
+  if (m.particleOpacity > 0)
+    parts.push(
+      `${m.cutPlane ? 'laser-sheet tracers on the cut faces' : 'tracer streaks'} advected by its velocity, time ${dilationLabel(dilation)}`,
+    );
+  if (m.haze > 0) parts.push('heat haze from its density gradient (Gladstone-Dale)');
+  if (m.schlieren)
+    parts.push(
+      `knife-edge schlieren of its density (Gladstone-Dale, a/f ${String(Math.round(m.schlierenRangeRad * 1e6))} µrad; mean flow, no turbulence)`,
+    );
+  const synth =
+    m.synthesized.length === 0 ? 'nothing synthesized' : `synthesized: ${m.synthesized.join(', ')}`;
+  const s = parts.join('; ');
+  return `${s.charAt(0).toUpperCase()}${s.slice(1)}. Derived from the field; ${synth}.`;
+}
