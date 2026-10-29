@@ -48,7 +48,7 @@ GOTCHAS
 GATES @eddce14 (the code at 4848367; later commits are docs and screenshots)
 - npm run typecheck: clean.
 - npm run lint: clean (ESLint --max-warnings 0 + Prettier).
-- npm run coverage: 108 files, 2016 passed + 11 expected fail; lines 99.51 %, statements 98.55 %; thresholds met (exit 0). Run at 097a569+ (src/render, excluded from coverage, changed after).
+- npm run coverage: 108 files, 2016 passed + 11 expected fail; lines 99.51 %, statements 98.55 %; thresholds met (exit 0). Run at b29b74e (only src/render, excluded from coverage, changed after).
 - npm run test:mesh: 2 files, 29 passed.
 - npm run test:gpu: 12 files, 67 passed (64 + tests/gpu/flowParticles.test.ts's 3).
 - npm run test:browser: 10 files, 30 passed (28 + 2 new in flowViz.test.ts), 0 WebGPU errors.
