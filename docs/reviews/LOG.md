@@ -3386,3 +3386,6 @@ None.
     - if not, trial a local time-step limit from the measured β/M_ref (the standard remedy; the 1D limit is in SOLVER.md §10) under the same rule;
     - a β floor such as minMach 0.02 is the last resort: it raises L7's iteration ratio to 1.78 and L8 to 0.754%.
   - D4-63 must be closed before W3's coupling. It does not block W2's flow visuals or app shell.
+- **D4-80 (w2/app-ui @6762716, PARTIAL at the cap): the four new dev dependencies are accepted.** They are pinned exactly: @testing-library/react 16.3.3, @testing-library/dom 10.4.2, @testing-library/user-event 14.6.8 and happy-dom 21.0.4.
+  - This is the standard React Testing Library stack, which the plan's react-testing approach calls for. They are dev-only and not bundled.
+  - The critic checks the lockfile change and that no install scripts were added.
