@@ -3341,3 +3341,60 @@ None.
 **Orchestrator questions:**
 - (mm) W2R-I17: E-L9a at 1e-10 rather than 3e-11, with the norm's f32 reduction added to §12.2's model, decided before the solver round adopts the rows (no test uses 3e-11 yet)?
 - (nn) W2R-I18, for D4-69/D4-70: should the D4-63 rule judge a volume-weighted energy (p′ and kinetic) with a decay requirement over a 2000-iteration window, instead of max |p′| and the cell-mean residual? The builder's own logs show the linear part decaying in that norm (0.37 / 0.47 at 1000) while max |p′| grows 2.8-3.3×.
+- **Merged into main @9e4933e (w2/lookdev-5 @4538f0f) and @e6c6326 (w2/reference-9 @bcacc0a, the reviewed commit; the builder has moved on to 9a9dd28, which is unreviewed), plus critic pass 11 @a049709.** Both got MERGE. Gates on the merged tree, run in the foreground: typecheck and lint clean, mesh 29, test:gpu 64/64. The critic's trial merges ran the full suites.
+- **D4-71 (pass 11 question mm): E-L9a's tolerance is 1e-10.** The value 3e-11 sat inside the f32 rounding of the norm it compares (W2R-I17), so it could fail for rounding alone. 1e-10 is above that floor, consistent with D4-62's ten-times-measured-error model.
+- **D4-72 (question nn): the D4-63 rule is stated in the volume-weighted energy (L2) norm.**
+  - The reason is the definition of "non-growing", not the data. In axisymmetric coordinates, a converging cylindrical acoustic wave amplifies physically towards the axis, roughly as 1/√r, so the pointwise max |p′| can grow while the wave's energy decays.
+  - The standard stability notion for a discretisation is a bounded energy norm.
+  - The rule becomes: from 1000 to 2000 iterations, the volume-weighted L2 of p′ is ≤ 2× its first and the residual is ≤ its value at 100. Max |p′| is still reported.
+  - This is the case D4-70 anticipated, and it rests on that definition: the energy norm is the measure, the 2× bound is kept, and the D4-68 nonlinear part still has to meet it.
+- **D4-73 (question oo): yes, fix the bench's focus emulation** (W2L-I7). D3-6's blur rule must take effect in official capture, ab and bench runs.
+  - The official P4 and P1 results stand: their rAF watchers saw no occlusion signature, and occlusion is the rule that would have caught a hidden window.
+  - The fix goes into the next tools/kernel round.
+- **D4-74 (question pp): MARGIN is not widened after seeing a test at its bound** (W2L-I8). Make the cutaway close-up measurement robust instead: average over N frames, or derive the bound from a measured distribution, with the rationale stated. W2L-I6 (vectors at half length, NDC vs UV) is fixed in the same round.
+- **D4-75 (question qq): yes, record P4's margin.** It is 6.96 ms official against 8.0, a 1.04 ms margin. The indicative session-to-session drift here is up to about 2×, so only official runs count.
+- **D4-76 (w2/flowviz @89ef843, PARTIAL at the cap): Data-mode colours composite after tone mapping, in display space.**
+  - A data colour map (viridis, inferno, CIELAB diverging) must show its stated colours. AgX tone mapping, exposure and bloom would distort them and break the legend.
+  - Standard practice: the scientific overlay is drawn after the cinematic pipeline, unaffected by it.
+  - In Data and Cutaway modes, the cut plane is cropped to the engine's near field (a few diameters), so the far-field slab doesn't cover the studio. The full domain stays available as an option.
+  - Realistic and Schlieren keep their physically based paths.
+- **D4-77 (w2/reference-9 round 10 @a1313a3): rule (b)'s residual is restated in the same volume-weighted norm as D4-72, consistently with it.**
+  - **Round 10's evidence:**
+    - The linear part is a decaying non-normal transient: over 20k iterations at 1e-6, the pseudo-energy fell in 99 of 100 windows, L2(p′) ended at 0.022× its first, and max |p′| peaked at 4.98× before ending at 0.35×.
+    - The spectral radius is 1 from neutral entropy/vortical modes only. The stand-in Arnoldi carries no pressure in its leading vector.
+    - Yet that decaying case fails the unweighted residual rule, at 11.9×.
+  - **So the unweighted residual does not measure growth.** It is dominated by the r-weighted scheme's tiny near-axis cells.
+  - Rule (b) becomes: the volume-weighted L2 residual from 1000 to 2000 iterations is ≤ its value at iteration 100. This rests on the definition: the same energy norm as (a), and the standard convergence monitor. It is a change after seeing data, logged as such, and it does not loosen (a).
+- **D4-78 (round 10, the nonlinear part and the scheme):**
+  - K = 0 (D4-68) is not adopted: it goes NaN and breaks C-pre and L8. The face-limited Δp also fails the rule, so the Δp term does not cause the nonlinear part. β² stays as it is (K = 1, the neighbour Δp), and the kernel needs no change.
+  - Under the energy rule, (a) passes: the contract case 1.72× and the linear part 0.51×.
+  - The next reference round:
+    - implements D4-77;
+    - re-runs the d463 case. If (a) and the restated (b) pass, D4-63 closes without a scheme change: max-norm geometric focusing plus a non-normal transient. If (b) still fails, come back with data for a floor or a scheme change;
+    - runs the full gates and the ladder.
+  - The smooth limiter's real growing far-field mode (1.00289 per iteration) is recorded as further support for D4-55 (keep sharp).
+- **D4-79 (w2/reference-9 round 11 @a5d86dd): rule (b) judges decay in the limit, per D4-70, with the evidence it requires.**
+  - **Round 11's results with D4-77's weighted residual:**
+    - contract case: (a) 1.717 pass, (b) 2.614 fail;
+    - linear part: (a) 0.505 pass, (b) 1.092 fail. Its weighted residual stays flat through 2000 iterations, then falls to 0.14× by 20000;
+    - the contract case's residual grows in the far-field interior and the plume blocks, not at the axis.
+  - A decaying non-normal transient can fail any early window, so the 1000-2000 window does not test "non-growing" (decay in the limit, D4-70).
+  - **Rule (b) becomes:** run each d463 case to 20k iterations. The weighted residual at 20k must be ≤ its value at 10k and ≤ its value at iteration 100. Rule (a) is unchanged and is also checked at 20k.
+  - **Next round, timeboxed to one round:**
+    - run the contract case to 20k;
+    - if (a) and the new (b) pass, close D4-63 with no scheme change;
+    - if not, trial a local time-step limit from the measured β/M_ref (the standard remedy; the 1D limit is in SOLVER.md §10) under the same rule;
+    - a β floor such as minMach 0.02 is the last resort: it raises L7's iteration ratio to 1.78 and L8 to 0.754%.
+  - D4-63 must be closed before W3's coupling. It does not block W2's flow visuals or app shell.
+- **D4-80 (w2/app-ui @6762716, PARTIAL at the cap): the four new dev dependencies are accepted.** They are pinned exactly: @testing-library/react 16.3.3, @testing-library/dom 10.4.2, @testing-library/user-event 14.6.8 and happy-dom 21.0.4.
+  - This is the standard React Testing Library stack, which the plan's react-testing approach calls for. They are dev-only and not bundled.
+  - The critic checks the lockfile change and that no install scripts were added.
+- **D4-81 (w2/reference-9 round 12 @36ea10e, at the cap): D4-63 needs a scheme change, and the candidates are ordered.**
+  - Under D4-79's long-run rule the contract case **grows for real**: L2(p′) 1.27× at 2000, 4.36× at 10k, 5.39× at 15k; weighted residual 3.55 at 100, 8.73 at 10k, 10.0 at 15k.
+  - The growth sits in the far-field interior and the plume blocks, where the app's coupled field will be near rest. So it blocks W3, and no change to the rule's window can close it.
+  - The local time-step limit (round 12's screen) tracks the baseline, so it is not adopted. **Its scratch patch is still applied, uncommitted, in the worktree's src: the next round reverts it first.**
+  - **Next round, all under the D4-79 rule** (20k-iteration runs; every currently passing row still passes; R is excluded because it is the sharp limiter's known floor, pinned):
+    1. a plain-scheme long run of the contract case, to confirm the preconditioning is the source;
+    2. a **global M_cut tied to the domain's peak velocity** (the standard Weiss-Smith/Turkel floor; D4-59's rationale), tried at 0.02 then 0.05. D4-59 found 0.02 kept every other row passing (L7 ratio 1.78 ≤ 3, L8 0.754%). It was rejected there only on R's convergence, which D4-55/D4-58 later traced to the limiter, so that criterion was wrong for R;
+    3. only if both fail, come back with data for a deeper change.
+  - The kernel mirrors the adopted M_cut, as a parameter: D4-40's adapter default.

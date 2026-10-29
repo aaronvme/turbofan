@@ -25,22 +25,28 @@
 // 6. Cleanup, whatever happened: Chrome closed, the Vite servers killed (process tree), and
 //    each checkout removed (`git worktree remove --force`) unless --keep.
 //
-// Official only under D0-1 (AC, nothing else running, Chrome in the foreground, 10 s warm-up,
-// 3 x 60 s); otherwise indicative. About (2 sides x 2 pacings x reps) x (warm-up + run + page
+// Official only under D0-1 (AC throughout by the OS power source, read before and after every
+// run, W2L-I4; nothing else running, Chrome in the foreground, 10 s warm-up, 3 x 60 s) and
+// with every run VALID; otherwise indicative. INVALID runs and their pairs never enter the
+// summary (W2L-I2). About (2 sides x 2 pacings x reps) x (warm-up + run + page
 // load): 3 reps at D0-1 is 12 runs, about 15 min, plus the checkouts' `npm ci`.
 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { chromium } from '@playwright/test';
-import { displayIntervalMs } from '../../spikes/lib/validity.ts';
+import type { PowerSource } from '../../spikes/lib/system.ts';
+import { combineValidity, displayIntervalMs } from '../../spikes/lib/validity.ts';
 import { summarizeRun, type FrameSample, type RunSummary } from '../../src/gpu/passTimings.ts';
+import { osPowerSource } from './os.ts';
 import {
   abOrder,
   abSummary,
+  acThroughout,
   backToBackLoad,
   pacedValidity,
   parseTimingArgs,
+  powerValidity,
   type AbRun,
 } from './timing.ts';
 
@@ -158,6 +164,7 @@ interface LookdevPage {
       frames: FrameSample[];
       rafDeltas: number[];
       hiddenMs: number;
+      blurs?: number;
       events: string[];
       vsyncDeltas?: number[];
     }>;
@@ -223,6 +230,8 @@ async function main(): Promise<void> {
     log(
       `A/B ${a.ref} (${a.short}) - ${b.ref} (${b.short}): ${preset}, ${profile}, pacing ${t.pacings.join(' + ')}, ${String(t.reps)} reps x ${String(t.warmupS)} s warm-up + ${String(t.runS)} s, ${String(order.length)} runs`,
     );
+    const protocol = t.warmupS >= 10 && t.runS >= 60 && t.reps >= 3;
+    const power: PowerSource[] = [];
     const runs: (AbRun & {
       summary: RunSummary;
       valid: boolean;
@@ -231,11 +240,13 @@ async function main(): Promise<void> {
       framesPerS: number;
       gpuBusy: number;
       errors: number;
+      power: readonly PowerSource[];
     })[] = [];
     for (const r of order) {
       const s = r.ref === a.short ? a : b;
       await open(s);
       const sat = r.pacing === 'backToBack';
+      const powerBefore = osPowerSource();
       const run = await page.evaluate(
         async ([p, prof, warmMs, runMs, saturate]) => {
           const l = (window as LookdevPage).lookdev;
@@ -248,20 +259,35 @@ async function main(): Promise<void> {
         },
         [preset, profile, t.warmupS * 1000, t.runS * 1000, sat] as const,
       );
+      const powerAfter = osPowerSource();
+      power.push(powerBefore, powerAfter);
       const summary = summarizeRun(run.frames);
-      const v = pacedValidity(
-        r.pacing,
-        run.rafDeltas,
-        displayMs,
-        run.hiddenMs,
-        run.frames,
-        run.vsyncDeltas ?? [],
-      );
+      const v = combineValidity([
+        pacedValidity(
+          r.pacing,
+          {
+            intervalsMs: run.rafDeltas,
+            hiddenMs: run.hiddenMs,
+            blurs: run.blurs ?? 0,
+            frames: run.frames,
+            vsyncDeltasMs: run.vsyncDeltas ?? [],
+          },
+          displayMs,
+        ),
+        powerValidity([powerBefore, powerAfter], protocol),
+      ]);
       const load = backToBackLoad(run.frames, run.rafDeltas);
-      runs.push({ ...r, summary, ...v, ...load, errors: run.errors });
+      runs.push({
+        ...r,
+        summary,
+        ...v,
+        ...load,
+        errors: run.errors,
+        power: [powerBefore, powerAfter],
+      });
       const g = summary.gpu;
       log(
-        `rep ${String(r.rep + 1)} ${r.pacing.padEnd(10)} ${s.short}: GPU ${summary.gpuTotal.p50.toFixed(2)} ms (p10 ${summary.gpuTotal.p10.toFixed(2)}, p90 ${summary.gpuTotal.p90.toFixed(2)}; opaque ${g.opaque.p50.toFixed(2)}, rotors ${g.rotors.p50.toFixed(2)}), ${String(summary.frames)} frames, ${load.framesPerS.toFixed(1)} fps, busy ${(100 * load.gpuBusy).toFixed(0)} %, ${v.valid ? 'valid' : v.reasons.join('; ')}${v.warnings.length > 0 ? ` [${v.warnings.join('; ')}]` : ''}, errors ${String(run.errors)}`,
+        `rep ${String(r.rep + 1)} ${r.pacing.padEnd(10)} ${s.short}: GPU ${summary.gpuTotal.p50.toFixed(2)} ms (p10 ${summary.gpuTotal.p10.toFixed(2)}, p90 ${summary.gpuTotal.p90.toFixed(2)}; opaque ${g.opaque.p50.toFixed(2)}, rotors ${g.rotors.p50.toFixed(2)}), ${String(summary.frames)} frames, ${load.framesPerS.toFixed(1)} fps, busy ${(100 * load.gpuBusy).toFixed(0)} %, ${v.valid ? 'valid' : v.reasons.join('; ')}${v.warnings.length > 0 ? ` [${v.warnings.join('; ')}]` : ''}, errors ${String(run.errors)}, power ${powerBefore} -> ${powerAfter}`,
       );
     }
     const atEnd = await page.evaluate(async () => {
@@ -283,12 +309,14 @@ async function main(): Promise<void> {
       const d = sm.diff;
       const f = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(2)}`;
       log(
-        `${pacing} ${a.short} - ${b.short}, paired (${String(sm.pairs)}): GPU ${f(d.gpuTotal.median)} [${d.gpuTotal.values.map(f).join(' ')}]; ${shown.map((k) => `${k} ${f(d[k].median)} [${d[k].values.map(f).join(' ')}]`).join('; ')}`,
+        `${pacing} ${a.short} - ${b.short}, paired (${String(sm.pairs)} valid${sm.dropped.length > 0 ? `; dropped repetitions ${sm.dropped.join(', ')}` : ''}): GPU ${f(d.gpuTotal.median)} [${d.gpuTotal.values.map(f).join(' ')}]; ${shown.map((k) => `${k} ${f(d[k].median)} [${d[k].values.map(f).join(' ')}]`).join('; ')}`,
       );
     }
     const allValid = runs.every((r) => r.valid);
-    log(allValid ? 'every run VALID' : 'INVALID runs: see above');
-    const official = t.warmupS >= 10 && t.runS >= 60 && t.reps >= 3;
+    log(allValid ? 'every run VALID' : 'INVALID runs: see above (their pairs are dropped)');
+    const ac = acThroughout(power);
+    if (!ac) log('the OS power source was not AC throughout: indicative');
+    const official = protocol && ac && allValid;
     const file = join(out, `ab-${a.short}-${b.short}.json`);
     writeFileSync(
       file,
@@ -302,8 +330,9 @@ async function main(): Promise<void> {
           viewport: '1920x1080 DPR 1',
           protocol: { warmupS: t.warmupS, runS: t.runS, reps: t.reps, pacings: t.pacings, order },
           official: official
-            ? 'D0-1 protocol (official if the conditions were quiet)'
+            ? 'D0-1 protocol, AC throughout, every run VALID (official if the machine was quiet)'
             : 'indicative',
+          powerSourceAcThroughout: ac,
           displayIntervalMs: displayMs,
           conditions: { start: atStart, end: atEnd },
           allValid,

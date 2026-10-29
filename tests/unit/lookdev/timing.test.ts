@@ -14,14 +14,19 @@ import {
   abSummary,
   BACK_TO_BACK_MIN_BUSY,
   backToBackLoad,
+  acThroughout,
   combineReps,
+  combineValid,
+  MIN_WATCHER_COVERAGE,
   OFFICIAL_CONFIGS,
   p4Verdict,
   pacedValidity,
+  powerValidity,
   parseTimingArgs,
   runOrder,
   runValidityOf,
   withPacings,
+  type PacedRun,
 } from '../../../tools/lookdev/timing';
 
 const pass = (opaque: number, rotors = 0): PassMs => {
@@ -191,19 +196,28 @@ describe('pacing: vsync and back to back (D4-24)', () => {
     expect(Number.isNaN(backToBackLoad([], []).gpuBusy)).toBe(true);
   });
 
+  // a back-to-back run as the page reports it: the loop's intervals, the rAF watcher's deltas
+  // (at the display rate unless the window is occluded), no hidden time, no blur
+  const b2b = (over: Partial<PacedRun> = {}): PacedRun => ({
+    intervalsMs: Array.from({ length: 600 }, () => 9),
+    hiddenMs: 0,
+    blurs: 0,
+    frames: Array.from({ length: 600 }, () => ({ gpu: pass(8), cpu: 1 })),
+    vsyncDeltasMs: Array.from({ length: 323 }, () => 16.7),
+    ...over,
+  });
+
   it('a back-to-back run: INVALID when hidden or stalled; a GPU that idled is a warning', () => {
-    const busy = Array.from({ length: 600 }, () => ({ gpu: pass(8), cpu: 1 }));
-    const steady = Array.from({ length: 600 }, () => 9);
-    const ok = pacedValidity('backToBack', steady, 16.7, 0, busy);
+    const ok = pacedValidity('backToBack', b2b(), 16.7);
     expect(ok.valid).toBe(true);
     // no "below display rate" or other warning: back to back outruns the display by design
     expect(ok.warnings).toEqual([]);
-    expect(pacedValidity('backToBack', steady, 16.7, 50, busy).valid).toBe(false);
-    const stalled = [...steady, ...Array.from({ length: 6 }, () => 1000)];
-    expect(pacedValidity('backToBack', stalled, 16.7, 0, busy).valid).toBe(false);
+    expect(pacedValidity('backToBack', b2b({ hiddenMs: 50 }), 16.7).valid).toBe(false);
+    const stalled = [...b2b().intervalsMs, ...Array.from({ length: 6 }, () => 1000)];
+    expect(pacedValidity('backToBack', b2b({ intervalsMs: stalled }), 16.7).valid).toBe(false);
     // the GPU busy under BACK_TO_BACK_MIN_BUSY of the wall time: its clock could still fall
     const idle = Array.from({ length: 600 }, () => ({ gpu: pass(4), cpu: 1 }));
-    const w = pacedValidity('backToBack', steady, 16.7, 0, idle);
+    const w = pacedValidity('backToBack', b2b({ frames: idle }), 16.7);
     expect(w.valid).toBe(true);
     expect(w.warnings.join(' ')).toMatch(/busy/);
     expect(BACK_TO_BACK_MIN_BUSY).toBeGreaterThan(0.5);
@@ -213,32 +227,186 @@ describe('pacing: vsync and back to back (D4-24)', () => {
   it('a back-to-back run in an occluded window is INVALID: its rAF watcher sees the throttle', () => {
     // the frame loop does not wait for rAF, so an occluded window does not slow it; the
     // watcher's rAF deltas show it (w2/lookdev-4: 1 Hz rAF while the back-to-back runs went on)
-    const busy = Array.from({ length: 600 }, () => ({ gpu: pass(8), cpu: 1 }));
-    const steady = Array.from({ length: 600 }, () => 9);
-    const vsyncOk = Array.from({ length: 300 }, () => 16.7);
-    const vsyncOccluded = Array.from({ length: 10 }, () => 1016);
-    expect(pacedValidity('backToBack', steady, 16.7, 0, busy, vsyncOk).valid).toBe(true);
-    const v = pacedValidity('backToBack', steady, 16.7, 0, busy, vsyncOccluded);
+    const occluded = [
+      ...Array.from({ length: 200 }, () => 16.7),
+      ...Array.from({ length: 2 }, () => 1016),
+    ];
+    const v = pacedValidity('backToBack', b2b({ vsyncDeltasMs: occluded }), 16.7);
     expect(v.valid).toBe(false);
     expect(v.reasons.join(' ')).toMatch(/occluded/);
+  });
+
+  it('W2L-I5 (D4-46): the watcher follows D3-6: its 2.5-interval stretch is a WARNING, only the occlusion signature is INVALID', () => {
+    // a busy main thread delays rAF to 3 display intervals for 0.6 s: D2-11's stretch, not
+    // Chrome's ~1 Hz throttle
+    const delayed = [
+      ...Array.from({ length: 280 }, () => 16.7),
+      ...Array.from({ length: 12 }, () => 50),
+    ];
+    const v = pacedValidity('backToBack', b2b({ vsyncDeltasMs: delayed }), 16.7);
+    expect(v.valid).toBe(true);
+    expect(v.warnings.join(' ')).toMatch(/rAF watcher/);
+    // one 600 ms rAF gap is a stall, not the sustained occlusion signature (>= 1000 ms)
+    const oneGap = [...Array.from({ length: 290 }, () => 16.7), 600];
+    expect(pacedValidity('backToBack', b2b({ vsyncDeltasMs: oneGap }), 16.7).valid).toBe(true);
+  });
+
+  it('W2L-I5 (D4-46): a run in which the page lost focus is INVALID at either pacing (D3-6 blur rule)', () => {
+    const v = pacedValidity('backToBack', b2b({ blurs: 1 }), 16.7);
+    expect(v.valid).toBe(false);
+    expect(v.reasons.join(' ')).toMatch(/focus/);
+    const steady = Array.from({ length: 600 }, () => 16.7);
+    const frames = Array.from({ length: 600 }, () => ({ gpu: pass(8), cpu: 1 }));
+    expect(
+      pacedValidity('vsync', { intervalsMs: steady, hiddenMs: 0, blurs: 2, frames }, 16.7).valid,
+    ).toBe(false);
+    expect(runValidityOf(steady, 16.7, 0, 1).valid).toBe(false);
+    expect(runValidityOf(steady, 16.7, 0, 0).valid).toBe(true);
+  });
+
+  it('W2L-I3: the watcher must cover the run: too few rAF ticks is INVALID; the last open interval counts', () => {
+    // occluded from 1 s in until after the end: the watcher ticked 60 times, then never again.
+    // Without its last open interval it would look steady (the pass-8 failure scenario)
+    const ticks = Array.from({ length: 60 }, () => 16.7);
+    const v = pacedValidity('backToBack', b2b({ vsyncDeltasMs: ticks }), 16.7);
+    expect(v.valid).toBe(false);
+    expect(v.reasons.join(' ')).toMatch(/watcher/);
+    // with its last open interval (what the page now pushes on stop) it is the occlusion signature
+    const closed = pacedValidity('backToBack', b2b({ vsyncDeltasMs: [...ticks, 4400] }), 16.7);
+    expect(closed.valid).toBe(false);
+    expect(closed.reasons.join(' ')).toMatch(/occluded/);
+    // no watcher at all is INVALID too
+    expect(pacedValidity('backToBack', b2b({ vsyncDeltasMs: [] }), 16.7).valid).toBe(false);
+    // half the display intervals of the run is enough (5.4 s of loop at 16.7 ms: 323 intervals)
+    const half = Array.from({ length: 162 }, () => 33.4);
+    expect(pacedValidity('backToBack', b2b({ vsyncDeltasMs: half }), 16.7).valid).toBe(true);
+    expect(MIN_WATCHER_COVERAGE).toBe(0.5);
   });
 
   it('a vsync run is judged as before (D2-11 / D3-6)', () => {
     const steady = Array.from({ length: 600 }, () => 16.7);
     const frames = Array.from({ length: 600 }, () => ({ gpu: pass(8), cpu: 1 }));
-    expect(pacedValidity('vsync', steady, 16.7, 0, frames)).toEqual(runValidityOf(steady, 16.7, 0));
+    expect(
+      pacedValidity('vsync', { intervalsMs: steady, hiddenMs: 0, blurs: 0, frames }, 16.7),
+    ).toEqual(runValidityOf(steady, 16.7, 0));
   });
 
-  it('p4Verdict: PASS only if every measured pacing passes; official only under D0-1', () => {
-    const p = p4Verdict({ vsync: 9.1, backToBack: 7.5 }, 8, true);
+  it('p4Verdict (D4-42): back to back is the measure of record, vsync reported beside it', () => {
+    const ok = { valid: true, gpuBusy: 0.72 };
+    const p = p4Verdict({
+      byPacing: { vsync: { ms: 9.1, ...ok }, backToBack: { ms: 7.5, ...ok } },
+      maxMs: 8,
+      protocol: true,
+      acThroughout: true,
+    });
     expect(p.perPacing).toEqual({ vsync: 'FAIL', backToBack: 'PASS' });
-    expect(p.verdict).toBe('FAIL');
-    expect(p4Verdict({ vsync: 7.9, backToBack: 8 }, 8, true).verdict).toBe('PASS');
-    expect(p4Verdict({ backToBack: 7 }, 8, true).verdict).toBe('PASS');
-    expect(p4Verdict({ vsync: 7.9, backToBack: 7 }, 8, false).verdict).toBe(
-      'PASS (indicative: not the D0-1 protocol)',
+    expect(p.verdict).toBe('PASS');
+    expect(p.official).toBe(true);
+    // the busy fraction is reported beside the number (D4-42 condition 3)
+    expect(p.gpuBusy).toBeCloseTo(0.72, 9);
+    expect(
+      p4Verdict({
+        byPacing: { backToBack: { ms: 8.5, ...ok } },
+        maxMs: 8,
+        protocol: true,
+        acThroughout: true,
+      }).verdict,
+    ).toBe('FAIL');
+    expect(
+      p4Verdict({
+        byPacing: { backToBack: { ms: 7, ...ok } },
+        maxMs: 8,
+        protocol: false,
+        acThroughout: true,
+      }).verdict,
+    ).toBe('PASS (indicative: not the D0-1 protocol)');
+    // vsync alone is not the measure of record
+    expect(
+      p4Verdict({
+        byPacing: { vsync: { ms: 7, ...ok } },
+        maxMs: 8,
+        protocol: true,
+        acThroughout: true,
+      }).verdict,
+    ).toBe('NONE');
+    expect(p4Verdict({ byPacing: {}, maxMs: 8, protocol: true, acThroughout: true }).verdict).toBe(
+      'NONE',
     );
-    expect(p4Verdict({}, 8, true).verdict).toBe('NONE');
+  });
+
+  it('W2L-I2: p4Verdict is INVALID when the default config has an INVALID back-to-back run', () => {
+    const v = p4Verdict({
+      byPacing: { backToBack: { ms: 7.5, valid: false, gpuBusy: 0.72 } },
+      maxMs: 8,
+      protocol: true,
+      acThroughout: true,
+    });
+    expect(v.verdict).toBe('INVALID');
+    expect(v.official).toBe(false);
+    // an INVALID vsync run beside it does not decide the verdict, but is shown
+    const w = p4Verdict({
+      byPacing: {
+        vsync: { ms: 9, valid: false, gpuBusy: 0.6 },
+        backToBack: { ms: 7.5, valid: true, gpuBusy: 0.72 },
+      },
+      maxMs: 8,
+      protocol: true,
+      acThroughout: true,
+    });
+    expect(w.verdict).toBe('PASS');
+    expect(w.perPacing.vsync).toBe('INVALID');
+  });
+
+  it('W2L-I4: P4 is official only with the OS power source on AC throughout (D4-42)', () => {
+    const v = p4Verdict({
+      byPacing: { backToBack: { ms: 7.5, valid: true, gpuBusy: 0.72 } },
+      maxMs: 8,
+      protocol: true,
+      acThroughout: false,
+    });
+    expect(v.official).toBe(false);
+    expect(v.verdict).toBe('PASS (indicative: the OS power source was not AC throughout)');
+  });
+});
+
+describe('W2L-I4: the OS power source before and after every run (D4-42)', () => {
+  it('acThroughout: AC (or a machine with no battery) at every reading', () => {
+    expect(acThroughout(['ac', 'ac', 'ac'])).toBe(true);
+    expect(acThroughout(['no-battery', 'no-battery'])).toBe(true);
+    expect(acThroughout(['ac', 'battery', 'ac'])).toBe(false);
+    expect(acThroughout(['ac', 'unknown'])).toBe(false);
+    expect(acThroughout([])).toBe(false);
+  });
+
+  it('powerValidity: on battery is INVALID for an official run, a warning for an indicative one', () => {
+    expect(powerValidity(['ac', 'ac'], true)).toEqual({ valid: true, reasons: [], warnings: [] });
+    const off = powerValidity(['ac', 'battery'], true);
+    expect(off.valid).toBe(false);
+    expect(off.reasons.join(' ')).toMatch(/battery/);
+    const ind = powerValidity(['battery', 'battery'], false);
+    expect(ind.valid).toBe(true);
+    expect(ind.warnings.join(' ')).toMatch(/battery/);
+    // an unreadable power source is never AC: a warning, and the result is not official
+    const unk = powerValidity(['unknown', 'ac'], true);
+    expect(unk.valid).toBe(true);
+    expect(unk.warnings.join(' ')).toMatch(/unknown/);
+  });
+});
+
+describe('W2L-I2: only VALID runs enter a result', () => {
+  const run = (gpu: number) => summarizeRun([{ gpu: pass(gpu), cpu: 1 }]);
+  const valid = { valid: true, reasons: [], warnings: [] };
+  const invalid = { valid: false, reasons: ['occluded'], warnings: [] };
+
+  it('combineValid: the median of the valid runs only, which runs were used, and whether all were valid', () => {
+    const c = combineValid([run(8), run(1.5), run(8.4)], [valid, invalid, valid]);
+    expect(c.used).toEqual([0, 2]);
+    expect(c.valid).toBe(false);
+    expect(c.combined.runs).toBe(2);
+    expect(c.combined.gpuTotal.p50).toBeCloseTo(8.2, 9);
+    const none = combineValid([run(8)], [invalid]);
+    expect(none.used).toEqual([]);
+    expect(Number.isNaN(none.combined.gpuTotal.p50)).toBe(true);
   });
 });
 
@@ -267,12 +435,12 @@ describe('the A/B of two commits (D4-24 result: bad7ad0 against 23239a1)', () =>
     const s = abSummary(
       ['a', 'b'],
       [
-        { ref: 'a', pacing: 'vsync', rep: 0, summary: run(6.3, 1.9) },
-        { ref: 'b', pacing: 'vsync', rep: 0, summary: run(5.6, 1.4) },
-        { ref: 'b', pacing: 'vsync', rep: 1, summary: run(8.0, 1.0) },
-        { ref: 'a', pacing: 'vsync', rep: 1, summary: run(8.2, 1.2) },
-        { ref: 'a', pacing: 'vsync', rep: 2, summary: run(7.0, 1.5) },
-        { ref: 'b', pacing: 'vsync', rep: 2, summary: run(7.1, 1.5) },
+        { ref: 'a', pacing: 'vsync', rep: 0, summary: run(6.3, 1.9), valid: true },
+        { ref: 'b', pacing: 'vsync', rep: 0, summary: run(5.6, 1.4), valid: true },
+        { ref: 'b', pacing: 'vsync', rep: 1, summary: run(8.0, 1.0), valid: true },
+        { ref: 'a', pacing: 'vsync', rep: 1, summary: run(8.2, 1.2), valid: true },
+        { ref: 'a', pacing: 'vsync', rep: 2, summary: run(7.0, 1.5), valid: true },
+        { ref: 'b', pacing: 'vsync', rep: 2, summary: run(7.1, 1.5), valid: true },
       ],
     );
     const v = s.vsync;
@@ -290,7 +458,41 @@ describe('the A/B of two commits (D4-24 result: bad7ad0 against 23239a1)', () =>
   it('abSummary refuses an unpaired run', () => {
     const r = summarizeRun([{ gpu: pass(1), cpu: 1 }]);
     expect(() =>
-      abSummary(['a', 'b'], [{ ref: 'a', pacing: 'vsync', rep: 0, summary: r }]),
+      abSummary(['a', 'b'], [{ ref: 'a', pacing: 'vsync', rep: 0, summary: r, valid: true }]),
     ).toThrow(/pair/);
+  });
+
+  it('W2L-I2: abSummary drops a pair with an INVALID side and records which pairs it used', () => {
+    // the official A/B of record: 23239a1's back-to-back rep 0 was INVALID (1.5 fps, the
+    // display asleep), and its pair -0.89 entered the summary
+    const run = (gpu: number) => summarizeRun([{ gpu: pass(gpu), cpu: 1 }]);
+    const s = abSummary(
+      ['bad7ad0', '23239a1'],
+      [
+        { ref: 'bad7ad0', pacing: 'backToBack', rep: 0, summary: run(7.86), valid: true },
+        { ref: '23239a1', pacing: 'backToBack', rep: 0, summary: run(8.75), valid: false },
+        { ref: '23239a1', pacing: 'backToBack', rep: 1, summary: run(8.87), valid: true },
+        { ref: 'bad7ad0', pacing: 'backToBack', rep: 1, summary: run(8.28), valid: true },
+        { ref: 'bad7ad0', pacing: 'backToBack', rep: 2, summary: run(8.55), valid: true },
+        { ref: '23239a1', pacing: 'backToBack', rep: 2, summary: run(9.77), valid: true },
+      ],
+    ).backToBack;
+    expect(s?.pairs).toBe(2);
+    expect(s?.reps).toEqual([1, 2]);
+    expect(s?.dropped).toEqual([0]);
+    expect(s?.diff.gpuTotal.values.map((x) => Number(x.toFixed(9)))).toEqual([-0.59, -1.22]);
+    expect(s?.diff.gpuTotal.median).toBeCloseTo(-0.905, 9);
+    // the side medians are over the valid pairs only
+    expect(s?.side['23239a1']?.gpuTotal.p50).toBeCloseTo(9.32, 9);
+    // no valid pair at all: NaN, never a number from an INVALID run
+    const none = abSummary(
+      ['a', 'b'],
+      [
+        { ref: 'a', pacing: 'vsync', rep: 0, summary: run(8), valid: false },
+        { ref: 'b', pacing: 'vsync', rep: 0, summary: run(8), valid: true },
+      ],
+    ).vsync;
+    expect(none?.pairs).toBe(0);
+    expect(Number.isNaN(none?.diff.gpuTotal.median)).toBe(true);
   });
 });
