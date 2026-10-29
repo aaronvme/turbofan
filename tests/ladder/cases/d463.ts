@@ -2,7 +2,9 @@
 // shipped 130k asset (f32 metrics), started at rest from tests/gpu/engine-stability.test.ts's 0.1 %
 // pressure wave. GpuFlowSolver's defaults: thermally perfect gas, ISA SLS at rest, preconditioned
 // tracking at minMach = M_cut = 0.003, the preconditioned CFL 0.8. The rule's window is D4-45's
-// 2000 iterations (W2R-N16); checkpoints every 100.
+// 2000 iterations (W2R-N16); checkpoints every 100. D4-72: the rule's pressure bound is on the
+// volume-weighted L2 of p' (the acoustic energy's norm: a converging cylindrical wave grows
+// pointwise towards the axis, about 1 / sqrt(r), while its energy decays); max |p'| is reported.
 import { ISA_SLS } from '../../../src/contracts/ambient';
 import { THERMALLY_PERFECT } from '../../../src/flow/reference/gas';
 import { ReferenceSolver } from '../../../src/flow/reference/solver';
@@ -16,7 +18,7 @@ export const D463_ITERATIONS = 2000;
 const EVERY = 100;
 /** The rule's late window: iterations 1000..2000 (the focusing transient comes before it). */
 const LATE = 1000;
-/** The rule's bound on max |p'| over the late window, over its first (engine-stability's GROWTH). */
+/** The rule's bound on the volume-weighted L2 of p' over the late window, over its first (D4-72). */
 export const D463_LATE_PRESSURE_BOUND = 2;
 /** The signature (the passing companion): finite, and max |p'| below this many times its first. */
 export const D463_SIGNATURE_BOUND = 100;
@@ -44,28 +46,37 @@ export async function run() {
       p * (1 + D463_AMPLITUDE * Math.cos(6 * Math.PI * xn) * Math.exp(-((rc / r1 / 0.3) ** 2)));
     return { rho: pc / (r * t), u: 0, v: 0, w: 0, p: pc, z: 0 };
   });
-  const maxP = (): number => {
+  // max |p'| and the volume-weighted L2 sqrt(sum_c V_c p'_c^2) (V per radian; blockage 1 here)
+  const norms = (): { max: number; l2: number } => {
     const P = s.primitives();
     let m = 0;
+    let e = 0;
     for (let c = 0; c < mesh.nCells; c++) {
-      const q = Math.abs(P[NP * c + 4] as number);
-      m = Number.isNaN(q) ? NaN : Math.max(m, q);
+      const q = P[NP * c + 4] as number;
+      m = Number.isNaN(q) ? NaN : Math.max(m, Math.abs(q));
+      e += (mesh.cellVolR[c] as number) * q * q;
     }
-    return m;
+    return { max: m, l2: Math.sqrt(e) };
   };
-  const first = maxP();
+  const first = norms();
   const pressure: number[] = [];
+  const energy: number[] = [];
   const residual: number[] = [];
   for (let done = EVERY; done <= D463_ITERATIONS; done += EVERY) {
     s.iterate(EVERY);
-    pressure.push(maxP() / first);
+    const now = norms();
+    pressure.push(now.max / first.max);
+    energy.push(now.l2 / first.l2);
     residual.push(s.stats.residualDensityL2);
     if (!Number.isFinite(pressure[pressure.length - 1])) break;
   }
-  const finite = pressure.length === D463_ITERATIONS / EVERY && pressure.every(Number.isFinite);
+  const finite =
+    pressure.length === D463_ITERATIONS / EVERY &&
+    pressure.every(Number.isFinite) &&
+    energy.every(Number.isFinite);
   const peak = Math.max(...pressure);
-  const late = pressure.slice(LATE / EVERY - 1);
-  const latePeak = Math.max(...late);
+  const latePeak = Math.max(...pressure.slice(LATE / EVERY - 1));
+  const lateEnergy = Math.max(...energy.slice(LATE / EVERY - 1));
   const res100 = residual[0] as number;
   const lateRes = Math.max(...residual.slice(LATE / EVERY - 1));
   return {
@@ -80,10 +91,10 @@ export async function run() {
       },
       {
         id: 'D4-63',
-        metric: "rule (a): max |p'| / first over iterations 1000-2000",
+        metric: "rule (a, D4-72): volume-weighted L2 of p' / first over iterations 1000-2000",
         threshold: `<= ${D463_LATE_PRESSURE_BOUND}`,
-        value: latePeak,
-        pass: finite && latePeak <= D463_LATE_PRESSURE_BOUND,
+        value: lateEnergy,
+        pass: finite && lateEnergy <= D463_LATE_PRESSURE_BOUND,
       },
       {
         id: 'D4-63',
@@ -92,7 +103,14 @@ export async function run() {
         value: lateRes / res100,
         pass: finite && lateRes <= res100,
       },
+      {
+        id: 'D4-63',
+        metric: "reported (round 9's measure): max |p'| / first over iterations 1000-2000",
+        threshold: 'reported',
+        value: latePeak,
+        pass: 'reported' as const,
+      },
     ],
-    extra: { pressure, residual },
+    extra: { pressure, energy, residual },
   };
 }
