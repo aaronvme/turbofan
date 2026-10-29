@@ -408,7 +408,7 @@ Otherwise the engine setting stays 0.003 and J stays pinned. The rows that fail 
 | D4-63 case: finite to 2000 (rule 1) | yes | **NaN at iteration ~190** (the upstream block's radial focus at i = 2, r 0.8 m → axis) | yes |
 | D4-63: max \|p′\| / first over 1000-2000 (≤ 2) | 8.0 | – | **8.05** |
 | D4-63: residual over 1000-2000 / at 100 (≤ 1) | 10.4 | – | **11.2** |
-| D4-63: volume-weighted L2 of p′ / first over 1000-2000 (D4-72's rule 1a, ≤ 2) | 1.72 (round 9's log) | – |  |
+| D4-63: volume-weighted L2 of p′ / first over 1000-2000 (D4-72's rule 1a, ≤ 2) | 1.72 (round 9's log) | – | 1.43 |
 | D4-63: peak max \|p′\| / first at the checkpoints (signature < 100) | 12.3 (19.6 at 270, between checkpoints) | NaN | 10.3 |
 | §12.2 C-pre f32 storage after 1 / 10 / 100 (≤ 1e-6 / 1e-5 / 1e-4) | 1.43e-7 / 1.80e-7 / 2.26e-6 | 6.31e-7 / **NaN / NaN** | 6.42e-7 / 1.88e-7 / 8.29e-7 |
 | §12.2 S after 1 / 10 / 100 | 7.31e-8 / 1.56e-7 / 4.70e-7 | 7.31e-8 / 1.35e-7 / 2.71e-7 | 7.31e-8 / 2.01e-7 / 3.63e-7 |
