@@ -13,32 +13,38 @@
 // `--diagnostics`), a warm-up before EACH run, `--reps` runs per config in a seeded order
 // rotated per repetition (D2-12), every frame of a run kept (p10/p50/p90 per pass), the
 // median of the runs, and each run marked INVALID on the occlusion signature or a hidden
-// page (D2-11 as amended by D3-6). The conditions (battery, power plan, CPU load, Chrome,
-// adapter) are recorded at the start and the end. Official only on AC with nothing else
-// running and Chrome in the foreground; otherwise the numbers are indicative.
+// page or a blur (D2-11 as amended by D3-6; D4-46 for back to back). The conditions (battery,
+// power plan, CPU load, Chrome, adapter) are recorded at the start and the end, and the OS
+// power source before and after every run (W2L-I4). Official only under D0-1's protocol with
+// the OS power source on AC throughout (a run on battery is then INVALID), nothing else running
+// and Chrome in the foreground; otherwise the numbers are indicative.
 //
 // Pacing (D4-24, `--pacing`, default both): every config runs at vsync (one frame per
-// animation frame, as the app) and back to back (the next frame as soon as the previous one
-// is done, so the iGPU stays at its loaded clock), warm-up included; ids of the back-to-back
-// runs end in "[back to back]". P4 is printed per pacing and passes only if both do (until the
-// critic confirms the DVFS evidence, D4-24). Back-to-back runs also record their frames per
-// second and the GPU busy fraction (a warning under BACK_TO_BACK_MIN_BUSY).
+// animation frame, as the app) and back to back (the next frame as soon as the GPU has taken
+// the previous ones), warm-up included; ids of the back-to-back runs end in "[back to back]".
+// D4-42: P4's measure of record is back to back, over VALID runs only (W2L-I2), with the GPU
+// busy fraction beside it; vsync is printed beside it. Back-to-back runs also record their
+// frames per second and the GPU busy fraction (a warning under BACK_TO_BACK_MIN_BUSY).
 
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium, type Page } from '@playwright/test';
-import { displayIntervalMs, type Validity } from '../../spikes/lib/validity.ts';
+import type { PowerSource } from '../../spikes/lib/system.ts';
+import { combineValidity, displayIntervalMs, type Validity } from '../../spikes/lib/validity.ts';
 import { THRESHOLDS } from '../../src/contracts/thresholds.ts';
 import { summarizeRun, type FrameSample, type RunSummary } from '../../src/gpu/passTimings.ts';
+import { osPowerSource } from './os.ts';
 import {
+  acThroughout,
   backToBackLoad,
-  combineReps,
+  combineValid,
   DIAGNOSTIC_CONFIGS,
   OFFICIAL_CONFIGS,
   p4Verdict,
   pacedValidity,
   parseTimingArgs,
+  powerValidity,
   runOrder,
   withPacings,
   type BackToBackLoad,
@@ -100,6 +106,7 @@ interface LookdevPage {
       frames: FrameSample[];
       rafDeltas: number[];
       hiddenMs: number;
+      blurs?: number;
       events: string[];
       vsyncDeltas?: number[];
     }>;
@@ -134,6 +141,7 @@ async function conditions(page: Page, chrome: string): Promise<Record<string, un
   return {
     ...fromPage,
     chrome,
+    powerSource: osPowerSource(),
     powerPlan: query('powercfg', ['/getactivescheme']),
     cpuLoadPercent: query('powershell', [
       '-NoProfile',
@@ -228,6 +236,9 @@ async function main(): Promise<void> {
         return d;
       });
       const displayMs = displayIntervalMs(probe);
+      // D0-1's protocol lengths; official also needs AC throughout (D4-42, W2L-I4)
+      const protocol = !t.diagnostics && t.warmupS >= 10 && t.runS >= 60 && t.reps >= 3;
+      const power: PowerSource[] = [];
       const perConfig = new Map<
         string,
         {
@@ -236,6 +247,7 @@ async function main(): Promise<void> {
           load: BackToBackLoad[];
           scales: number[];
           errors: number[];
+          power: PowerSource[][];
         }
       >();
       for (const [rep, ids] of order.entries()) {
@@ -243,6 +255,7 @@ async function main(): Promise<void> {
           const c = configs.find((k) => k.id === id);
           if (c === undefined) throw new Error(`no config ${id}`);
           const saturate = c.pacing === 'backToBack';
+          const powerBefore = osPowerSource();
           const run = await page.evaluate(
             async ([preset, flags, profile, warmMs, runMs, sat]) => {
               const l = (window as LookdevPage).lookdev;
@@ -267,15 +280,23 @@ async function main(): Promise<void> {
               saturate,
             ] as const,
           );
+          const powerAfter = osPowerSource();
+          power.push(powerBefore, powerAfter);
           const summary = summarizeRun(run.frames);
-          const validity = pacedValidity(
-            c.pacing,
-            run.rafDeltas,
-            displayMs,
-            run.hiddenMs,
-            run.frames,
-            run.vsyncDeltas ?? [],
-          );
+          const validity = combineValidity([
+            pacedValidity(
+              c.pacing,
+              {
+                intervalsMs: run.rafDeltas,
+                hiddenMs: run.hiddenMs,
+                blurs: run.blurs ?? 0,
+                frames: run.frames,
+                vsyncDeltasMs: run.vsyncDeltas ?? [],
+              },
+              displayMs,
+            ),
+            powerValidity([powerBefore, powerAfter], protocol),
+          ]);
           const load = backToBackLoad(run.frames, run.rafDeltas);
           const e = perConfig.get(id) ?? {
             runs: [],
@@ -283,15 +304,17 @@ async function main(): Promise<void> {
             load: [],
             scales: [],
             errors: [],
+            power: [],
           };
           e.runs.push(summary);
           e.validity.push(validity);
           e.load.push(load);
           e.scales.push(run.scale);
           e.errors.push(run.errors);
+          e.power.push([powerBefore, powerAfter]);
           perConfig.set(id, e);
           log(
-            `rep ${rep + 1} ${id}: GPU p50 ${summary.gpuTotal.p50.toFixed(2)} ms (p10 ${summary.gpuTotal.p10.toFixed(2)}, p90 ${summary.gpuTotal.p90.toFixed(2)}), ${summary.frames} frames, ${load.framesPerS.toFixed(1)} fps, GPU busy ${(100 * load.gpuBusy).toFixed(0)} %, ${validity.valid ? 'valid' : validity.reasons.join('; ')}${validity.warnings.length > 0 ? ` [${validity.warnings.join('; ')}]` : ''}${run.events.length > 0 ? ` events: ${run.events.join(', ')}` : ''}, render scale ${run.scale}, errors ${run.errors}`,
+            `rep ${rep + 1} ${id}: GPU p50 ${summary.gpuTotal.p50.toFixed(2)} ms (p10 ${summary.gpuTotal.p10.toFixed(2)}, p90 ${summary.gpuTotal.p90.toFixed(2)}), ${summary.frames} frames, ${load.framesPerS.toFixed(1)} fps, GPU busy ${(100 * load.gpuBusy).toFixed(0)} %, ${validity.valid ? 'valid' : validity.reasons.join('; ')}${validity.warnings.length > 0 ? ` [${validity.warnings.join('; ')}]` : ''}${run.events.length > 0 ? ` events: ${run.events.join(', ')}` : ''}, render scale ${run.scale}, errors ${run.errors}, power ${powerBefore} -> ${powerAfter}${saturate ? `, rAF watcher ${(run.vsyncDeltas ?? []).length} ticks` : ''}`,
           );
         }
       }
@@ -299,45 +322,53 @@ async function main(): Promise<void> {
       for (const c of configs) {
         const e = perConfig.get(c.id);
         if (e === undefined) continue;
-        const combined = combineReps(e.runs);
-        const valid = e.validity.every((v) => v.valid);
+        // W2L-I2: the medians are over the VALID runs only
+        const { combined, used, valid } = combineValid(e.runs, e.validity);
+        const busy = used.map((i) => e.load[i]?.gpuBusy ?? Number.NaN).sort((x, y) => x - y);
         // W1V-N1: each run's render scale and GPU error count go into the record too
         results[c.id] = {
           ...combined,
           pacing: c.pacing,
           valid,
+          runsUsed: used,
+          gpuBusyMedian: busy[Math.floor(busy.length / 2)] ?? Number.NaN,
           validity: e.validity,
           load: e.load,
           renderScale: e.scales,
           errors: e.errors,
+          powerSource: e.power,
         };
         const passes = Object.entries(combined.gpu)
           .filter(([, v]) => v.p50 > 0.0005)
           .map(([k, v]) => `${k} ${v.p50.toFixed(2)}`)
           .join(', ');
         log(
-          `${c.id}: GPU ${combined.gpuTotal.p50.toFixed(2)} ms median of ${combined.runs} runs (${passes}); CPU ${combined.cpu.p50.toFixed(2)} ms; ${valid ? 'VALID' : 'INVALID'}`,
+          `${c.id}: GPU ${combined.gpuTotal.p50.toFixed(2)} ms median of ${combined.runs} valid runs of ${e.runs.length} (${passes}); CPU ${combined.cpu.p50.toFixed(2)} ms; ${valid ? 'VALID' : 'INVALID'}`,
         );
       }
       // P4 (D4-2, PHYSICS 3.4): the default view's median render GPU time, gated at <= 8.0 ms
-      // only under D0-1 (the official set: 10 s warm-up, 3 x 60 s, AC, nothing else running);
-      // the cutaway and hero are reported against the 10 ms target, not gated. D4-24: it is
-      // reported per pacing and passes only if both do, until the critic confirms the DVFS
-      // evidence (then back to back is the measure of record)
+      // only under D0-1 (the official set: 10 s warm-up, 3 x 60 s, AC throughout, nothing else
+      // running); the cutaway and hero are reported against the 10 ms target, not gated.
+      // D4-42: back to back is the measure of record, over valid runs only, the busy fraction
+      // beside it; vsync is judged beside it
       const p4 = THRESHOLDS.P4.values;
-      const gpuOf = (id: string, pacing: Pacing): number | undefined => {
-        const key = pacing === 'vsync' ? id : `${id} [back to back]`;
-        const r = results[key] as { gpuTotal?: { p50: number } } | undefined;
-        return r?.gpuTotal?.p50;
-      };
-      const official = !t.diagnostics && t.warmupS >= 10 && t.runS >= 60 && t.reps >= 3;
+      type Row = { gpuTotal?: { p50: number }; valid?: boolean; gpuBusyMedian?: number };
+      const rowOf = (id: string, pacing: Pacing): Row | undefined =>
+        results[pacing === 'vsync' ? id : `${id} [back to back]`] as Row | undefined;
+      const gpuOf = (id: string, pacing: Pacing): number | undefined =>
+        rowOf(id, pacing)?.gpuTotal?.p50;
       const defaults: Partial<Record<Pacing, number>> = {};
+      const byPacing: Partial<Record<Pacing, { ms: number; valid: boolean; gpuBusy: number }>> = {};
       for (const pacing of t.pacings) {
-        const ms = gpuOf('default (threeQuarterFront)', pacing);
-        if (ms !== undefined) defaults[pacing] = ms;
+        const r = rowOf('default (threeQuarterFront)', pacing);
+        const ms = r?.gpuTotal?.p50;
+        if (r === undefined || ms === undefined) continue;
+        defaults[pacing] = ms;
+        byPacing[pacing] = { ms, valid: r.valid === true, gpuBusy: r.gpuBusyMedian ?? Number.NaN };
       }
-      const v = p4Verdict(defaults, p4.maxRenderGpuMs.value, official);
-      if (v.verdict !== 'NONE') {
+      const ac = acThroughout(power);
+      const v = p4Verdict({ byPacing, maxMs: p4.maxRenderGpuMs.value, protocol, acThroughout: ac });
+      if (v.verdict !== 'NONE' || Object.keys(byPacing).length > 0) {
         const reported = Object.fromEntries(
           t.pacings.map((pacing) => [
             pacing,
@@ -345,19 +376,23 @@ async function main(): Promise<void> {
           ]),
         );
         results.P4 = {
+          measureOfRecord: 'backToBack (D4-42)',
           defaultGpuMs: defaults,
+          gpuBusy: v.gpuBusy,
           maxMs: p4.maxRenderGpuMs.value,
           perPacing: v.perPacing,
           verdict: v.verdict,
+          official: v.official,
+          acThroughout: ac,
           reported: { ...reported, targetMs: p4.reportedTargetMs.value },
         };
         const f = (x: number | undefined) => (x === undefined ? '-' : x.toFixed(2));
         for (const pacing of t.pacings)
           log(
-            `P4 ${pacing}: default ${f(defaults[pacing])} ms vs <= ${String(p4.maxRenderGpuMs.value)} ms: ${v.perPacing[pacing] ?? '-'}; cutaway ${f(gpuOf('cutaway', pacing))}, hero ${f(gpuOf('hero (cinematic, DoF on)', pacing))} (target <= ${String(p4.reportedTargetMs.value)} ms, not gated)`,
+            `P4 ${pacing}${pacing === 'backToBack' ? ' (measure of record)' : ' (beside it)'}: default ${f(defaults[pacing])} ms vs <= ${String(p4.maxRenderGpuMs.value)} ms: ${v.perPacing[pacing] ?? '-'}${pacing === 'backToBack' && v.gpuBusy !== undefined ? `, GPU busy ${(100 * v.gpuBusy).toFixed(0)} %` : ''}; cutaway ${f(gpuOf('cutaway', pacing))}, hero ${f(gpuOf('hero (cinematic, DoF on)', pacing))} (target <= ${String(p4.reportedTargetMs.value)} ms, not gated)`,
           );
-        log(`P4: ${v.verdict}`);
-        if (v.verdict.startsWith('FAIL')) process.exitCode = 1;
+        log(`P4: ${v.verdict}${ac ? '' : ' (OS power source not AC throughout)'}`);
+        if (v.verdict.startsWith('FAIL') || v.verdict === 'INVALID') process.exitCode = 1;
       }
       const file = join(out, 'timings.json');
       writeFileSync(
@@ -376,7 +411,8 @@ async function main(): Promise<void> {
               order,
             },
             displayIntervalMs: displayMs,
-            note: 'official only on AC, nothing else running, Chrome in the foreground (D0-1); otherwise indicative',
+            note: 'official only under the D0-1 protocol with the OS power source on AC throughout, nothing else running, Chrome in the foreground (D0-1, D4-42); otherwise indicative',
+            powerSourceAcThroughout: acThroughout(power),
             conditions: { start: atStart, end: atEnd },
             results,
           },

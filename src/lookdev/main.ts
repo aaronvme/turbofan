@@ -50,8 +50,13 @@ export interface TimingRun {
   readonly frames: FrameSample[];
   readonly rafDeltas: number[];
   readonly hiddenMs: number;
+  /** Times the window lost focus during the run (D3-6's blur rule, W2L-I5). */
+  readonly blurs: number;
   readonly events: string[];
-  /** Back to back: rAF deltas seen by a watcher during the run (occlusion). */
+  /**
+   * Back to back: rAF deltas seen by a watcher during the run (occlusion), the interval still
+   * open when the run stopped included (W2L-I3).
+   */
   readonly vsyncDeltas: number[];
 }
 
@@ -118,6 +123,8 @@ async function main(): Promise<void> {
     quality: params.get('quality') === 'test' ? 'test' : 'high',
     profile: params.get('profile') === 'performance' ? 'performance' : 'quality',
     debug: (params.get('debug') as PostDebug) ?? null,
+    // look-dev A/B of round 5's P4 cut (tools/lookdev/variantAb.ts)
+    legacyGbuffer: params.get('gbuffer') === 'legacy',
   });
   const controls = new OrbitControls(view.camera, canvas);
   controls.enableDamping = true;
@@ -226,7 +233,11 @@ async function main(): Promise<void> {
           hiddenSince = -1;
         }
       };
-      const onBlur = () => events.push(`blur at ${performance.now().toFixed(0)}`);
+      let blurs = 0;
+      const onBlur = () => {
+        blurs++;
+        events.push(`blur at ${performance.now().toFixed(0)}`);
+      };
       const onFocus = () => events.push(`focus at ${performance.now().toFixed(0)}`);
       document.addEventListener('visibilitychange', onVis);
       window.addEventListener('blur', onBlur);
@@ -236,8 +247,8 @@ async function main(): Promise<void> {
       // in its intervals: a watcher records rAF on the side (the run's occlusion check)
       const vsyncDeltas: number[] = [];
       let watching = saturate;
+      let lastV = performance.now();
       if (saturate) {
-        let lastV = performance.now();
         const tick = () => {
           if (!watching) return;
           const t = performance.now();
@@ -265,12 +276,15 @@ async function main(): Promise<void> {
         await nextFrame();
       }
       watching = false;
+      // W2L-I3: the interval still open at the stop counts too; a window occluded from some
+      // point until after the end would otherwise leave only the short deltas before it
+      if (saturate) vsyncDeltas.push(performance.now() - lastV);
       const frames = view.endTimingRun();
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('focus', onFocus);
       if (hiddenSince >= 0) hiddenMs += performance.now() - hiddenSince;
-      return { frames, rafDeltas, hiddenMs, events, vsyncDeltas };
+      return { frames, rafDeltas, hiddenMs, blurs, events, vsyncDeltas };
     },
     async conditions() {
       const nav = navigator as Navigator & {

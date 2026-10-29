@@ -96,7 +96,7 @@ export interface LookUniforms {
 /** Time-offset copies of the fan drawn per frame (stochastic blur, src/render/post.ts). */
 // 6, not 8 (LOD round 2, D4-5): with the rotor motion vectors TRAA accumulates the fan's
 // instants across frames too, so fewer per frame hold the fan-blur bounds (fanBlur.test.ts)
-export const FAN_TIME_SAMPLES = 6;
+export const FAN_TIME_SAMPLES = 8;
 
 export function createLookUniforms(): LookUniforms {
   return {
@@ -399,11 +399,13 @@ function nacellePaint(): MeshPhysicalNodeMaterial {
   // interpolation softens them a little, at +-0.035 roughness; LOD round 2)
   const wipe = perVertex(mx_noise_float(vec3(x.mul(1.6), p.y.mul(16), p.z.mul(16))));
   const low = smoothstep(-0.35, -0.85, p.y);
-  const white = vec3(0.78, 0.785, 0.79);
+  // round 5 (critic pass 8, the matte nacelle): a satin aerospace topcoat, glossier and a
+  // touch darker, so the softboxes' long strip highlights read on the white
+  const white = vec3(0.75, 0.755, 0.76);
   m.colorNode = white
     .mul(float(1).add(tone).add(broad.mul(0.012)).sub(low.mul(0.025)))
     .mul(float(1).sub(seam.mul(0.55)));
-  m.roughnessNode = float(0.27)
+  m.roughnessNode = float(0.15)
     .add(gloss)
     .add(broad.mul(0.05))
     .add(wipe.mul(0.035))
@@ -542,7 +544,7 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
       // spinner sees the studio only through the intake, and the light the white intake walls
       // and the fan bounce onto it is not in the image-based light (it has no visibility). A
       // faint lift of the white paint stands in for that bounce, so the stripe always reads
-      m.emissiveNode = spinnerSpiral().sub(0.035).max(0).mul(0.085);
+      m.emissiveNode = spinnerSpiral().sub(0.035).max(0).mul(0.2);
       // the spinner turns with the fan and is drawn (and blurred) in the rotor pass
       m.mrtNode = mrt({ blur: vec4(u.lpBlur, TWO_PI, 0, 1) });
       break;
@@ -579,17 +581,17 @@ const CAVITY: Readonly<Record<PartMaterial, number>> = {
   fanCase: 0.65,
   splitter: 0.75,
   cowlPaint: 0.9,
-  compressorCase: 0.5,
-  combustorCase: 0.5,
-  turbineCase: 0.5,
+  compressorCase: 0.42,
+  combustorCase: 0.42,
+  turbineCase: 0.42,
   exhaust: 0.85,
   plug: 0.9,
   spinner: 0.85,
-  drum: 0.5,
-  disk: 0.45,
-  innerCase: 0.5,
-  shaft: 0.45,
-  combustorLiner: 0.45,
+  drum: 0.4,
+  disk: 0.38,
+  innerCase: 0.42,
+  shaft: 0.38,
+  combustorLiner: 0.4,
 };
 
 /** The painted spiral, in the spinner's frame: a stripe winding 0.9 turn from nose to base. */
@@ -599,7 +601,7 @@ function spinnerSpiral(): Node<'vec3'> {
   const th = atan(positionLocal.z, positionLocal.y);
   const centre = sqrt(s).mul(0.9 * TWO_PI);
   const d = abs(wrapPi(th.sub(centre)));
-  const half = float(0.1).add(s.mul(0.28));
+  const half = float(0.14).add(s.mul(0.3));
   const aa = fwidth(d).add(1e-4);
   const stripe = float(1).sub(smoothstep(half.sub(aa), half.add(aa), d));
   const tip = float(1).sub(smoothstep(0.035, 0.05, s));
@@ -630,7 +632,10 @@ const CAP_TINT: Readonly<Record<PartMaterial, readonly [number, number, number]>
 
 function capMaterial(kind: PartMaterial): NodeMaterial {
   const [r, g, b] = CAP_TINT[kind];
-  const m = new MeshStandardNodeMaterial({ metalness: 0, roughness: 0.6 });
+  // round 5 (critic pass 8, the flat cutaway): a glossier section enamel, so the studio's
+  // softboxes put a gradient across the large flat faces, and section shading: the faces deep
+  // inside the engine (small radius) darker than the cases', so the section reads in depth
+  const m = new MeshStandardNodeMaterial({ metalness: 0, roughness: 0.36 });
   m.aoNode = float(0.7);
   // 45-degree hatching every 6 mm in the section plane (cap uv is (x, r) in metres),
   // anti-aliased, fading to the mean tone where the lines are finer than a pixel
@@ -639,7 +644,10 @@ function capMaterial(kind: PartMaterial): NodeMaterial {
   const line = aaLine(float(0.5).sub(d), 0.09);
   const k = resolved1(s, 1);
   const base = vec3(r, g, b);
-  m.colorNode = mix(base, base.mul(0.45), line.mul(k).add(float(1).sub(k).mul(0.18)));
+  const depthShade = mix(float(0.62), float(1), smoothstep(0.08, 0.85, uv().y));
+  m.colorNode = mix(base, base.mul(0.45), line.mul(k).add(float(1).sub(k).mul(0.18))).mul(
+    depthShade,
+  );
   return m;
 }
 
