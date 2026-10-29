@@ -21,7 +21,7 @@ export function sceneOf(scene: unknown): P1Scene {
   throw new Error(`unknown bench scene ${JSON.stringify(scene)} (expected 'bench' or 'app')`);
 }
 
-/** The page of each scene. The harness loads a fresh one for every run: a fresh device each time. */
+/** The page of each scene, loaded fresh for every run (so every run gets a fresh device). */
 export const P1_PAGES: Readonly<Record<P1Scene, string>> = {
   bench: '/spikes/throughput/index.html',
   app: '/spikes/p1/index.html',
@@ -29,7 +29,7 @@ export const P1_PAGES: Readonly<Record<P1Scene, string>> = {
 
 /** D4-64: the measurement of record, the app's GpuFlowSolver in the app's engine scene. */
 export const P1_RECORD = 'solver-130k-app';
-/** The same solver in the W0 bench scene: continuity with PHYSICS P1's wording, never the verdict. */
+/** The same solver in the W0 bench scene: PHYSICS P1's wording, for continuity; never the verdict. */
 export const P1_BENCH = 'solver-130k-bench';
 /** The W0 spike kernel's 130k-16x8 in the bench scene: the calibration against M34's 1.277 ms/it. */
 export const P1_SPIKE = 'spike-130k-16x8';
