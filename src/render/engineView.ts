@@ -21,6 +21,7 @@ import {
   Vector3,
   type WebGPURenderer,
 } from 'three/webgpu';
+import { uniform } from 'three/tsl';
 import { DEFAULT_CYCLE_INPUTS, type CycleInputs } from '../contracts/cycle';
 import type { EngineDefinition } from '../contracts/engine';
 import {
@@ -56,8 +57,22 @@ import { buildEngineScene, type EngineScene } from './engineScene';
 import { createLookUniforms, createMaterials, type LookUniforms } from './materials';
 import { createPassTimer, type PassTimer } from './passTimer';
 import { createFlowViz, type FlowViz } from './flowViz';
-import { FIELD_EXTENTS, type CpuFlowField } from '../contracts/flow';
+import { createFlowCompute, type FlowCompute } from './flowCompute';
+import {
+  FIELD_EXTENTS,
+  type CpuFlowField,
+  type FlowField,
+  type FlowFieldSource,
+} from '../contracts/flow';
 import { FLOW_VIZ_MODES, lookModeFor, type FlowVizModeId } from '../flow/viz/modes';
+import type { FieldQuantityId } from '../flow/viz/fields';
+import { flowSeedZones, visualDtS } from '../flow/viz/seeding';
+import {
+  GLOW_EMISSIVITY,
+  GLOW_PARTS,
+  glowSceneRadiance,
+  hotPartTemperatures,
+} from '../flow/viz/glow';
 import { createPipeline, type LookPipeline, type PostDebug } from './post';
 import { LOOK_PRESETS, SHUTTER_1000, type LookMode, type LookPresetId } from './presets';
 import { createRendererOnDevice } from './rendererOnDevice';
@@ -118,7 +133,29 @@ export interface EngineViewStats {
   readonly profile: RenderProfileId;
   /** The 3D passes' resolution relative to the canvas (1 in `quality`). */
   readonly renderScale: number;
+  readonly flow: FlowStats;
 }
+
+/** The flow visuals' state and GPU cost (D4-2: their time is subtracted from the solver's). */
+export interface FlowStats {
+  readonly mode: FlowVizModeId | null;
+  /** Where the drawn field comes from (null: none bound). */
+  readonly source: FlowFieldSource | null;
+  readonly quantity: FieldQuantityId | null;
+  readonly dilation: number;
+  readonly particles: number;
+  /** Median GPU ms of the flow render passes ("Flow ..."), outside `timings.gpuTotal` (P4). */
+  readonly renderMs: number;
+  /** Median GPU ms of the flow compute pass (gradient + particles), null before one resolves. */
+  readonly computeMs: number | null;
+  /** D4-2's measured flow-visual time: render + compute, 0 with the flow off. */
+  readonly visualsMs: number;
+}
+
+/** GPU particles drawn (2^15: streaks fill the ducts at the default view, well inside 2 ms). */
+export const FLOW_PARTICLES = 32768;
+const FLOW_LIFE = { minS: 2.5, spanS: 1.5 } as const;
+const DEFAULT_DILATION = 1 / 200;
 
 export interface EngineView {
   readonly renderer: WebGPURenderer;
@@ -135,10 +172,19 @@ export interface EngineView {
   /** The render profile (D3-7): `performance` follows the GPU time with the render scale. */
   setProfile(id: RenderProfileId): void;
   setCameraPose(position: readonly number[], target: readonly number[]): void;
-  /** The field the flow visuals draw (w2/flowviz): the MOCK raster or a solver readback. */
+  /** The field the flow visuals draw (w2/flowviz): a CPU field (the MOCK raster, a readback). */
   setFlowField(field: CpuFlowField): void;
+  /**
+   * The live solver's field (GpuFlowSolver.fields(), the same device): its resample textures
+   * are drawn as the solver rewrites them (D0-4). Replaces any CPU field.
+   */
+  setFlowSolverField(field: FlowField): void;
   /** A flow-visual mode (src/flow/viz/modes.ts), which also sets its look mode; null = none. */
   setFlowMode(id: FlowVizModeId | null): void;
+  /** The cut plane's quantity (null: the mode's own). */
+  setFlowQuantity(id: FieldQuantityId | null): void;
+  /** Time dilation of the particles: simulated seconds per wall second (default 1/200). */
+  setFlowTimeScale(dilation: number): void;
   /** Look-dev A/B switches (e.g. caps or culling off) for timing comparisons. */
   setDebugFlags(flags: DebugFlags): void;
   /** Advances the simulation clock by dt seconds and renders one frame. */
@@ -299,8 +345,6 @@ async function assemble(
     ),
   );
   scene.main.add(stand.group);
-  const flowViz: FlowViz = createFlowViz(FIELD_EXTENTS.near);
-  scene.main.add(flowViz.group);
   scene.rotors.add(studio.rotorLights);
 
   const camera = new PerspectiveCamera(30, o.width / o.height, 0.05, 200);
@@ -321,6 +365,39 @@ async function assemble(
       ? { legacyTraa: true }
       : { rotorMotion: { lpStep: uniforms.lpStep, hpStep: uniforms.hpStep } }),
   });
+
+  // the flow visuals (w2/flowviz): raw compute on the view's device, drawn by three
+  const flowCompute: FlowCompute = await createFlowCompute({
+    device: device.device,
+    count: FLOW_PARTICLES,
+    zones: flowSeedZones(def),
+    lifeMinS: FLOW_LIFE.minS,
+    lifeSpanS: FLOW_LIFE.spanS,
+    timestamps: timing,
+  });
+  const flowViz: FlowViz = createFlowViz({
+    renderer,
+    compute: flowCompute,
+    extent: FIELD_EXTENTS.near,
+  });
+  flowViz.attach(post.flowDeps);
+  const schlierenRange = uniform(FLOW_VIZ_MODES.schlieren.schlierenRangeRad);
+  const nacelleR = Math.max(...def.flowpath.curves.nacelleOuter.points.map((p) => p.r));
+  post.attachFlow({
+    scene: flowViz.scene,
+    haze: flowViz.hazeNode(post.flowDeps),
+    schlieren: flowViz.schlierenNode(post.flowDeps),
+    schlierenRangeRad: schlierenRange,
+    engineBox: { x0: FIELD_EXTENTS.near.xMin, x1: FIELD_EXTENTS.near.xMax, r: nacelleR + 0.02 },
+  });
+  let flowMode: FlowVizModeId | null = null;
+  let flowQuantity: FieldQuantityId | null = null;
+  let dilation = DEFAULT_DILATION;
+  const applyFlowMode = () => {
+    const m = flowMode === null || flowCompute.binding === null ? null : FLOW_VIZ_MODES[flowMode];
+    flowViz.setMode(m, flowQuantity);
+    post.setFlowComposite(m === null ? 'off' : m.schlieren ? 'schlieren' : m.composite);
+  };
 
   const cycle = createMockCycle(def);
   cycle.reset('groundIdle');
@@ -374,6 +451,24 @@ async function assemble(
   let hidden: Object3D[] = [];
   const swapped = new Map<Mesh, Mesh['material']>();
   const flatMaterial = new MeshBasicNodeMaterial({ color: 0x808080 });
+
+  const flowStats = (): FlowStats => {
+    const on = flowMode !== null && flowCompute.binding !== null;
+    const r = timer.medians().flow;
+    const renderMs = on && Number.isFinite(r) ? r : 0;
+    const computeMs = on ? flowCompute.medianMs() : null;
+    const m = flowMode === null ? null : FLOW_VIZ_MODES[flowMode];
+    return {
+      mode: flowMode,
+      source: flowCompute.binding?.source ?? null,
+      quantity: m?.cutPlane === true ? (flowQuantity ?? m.quantity) : null,
+      dilation,
+      particles: flowCompute.count,
+      renderMs,
+      computeMs,
+      visualsMs: on ? renderMs + (computeMs ?? 0) : 0,
+    };
+  };
 
   const view: EngineView = {
     renderer,
@@ -429,12 +524,30 @@ async function assemble(
       camera.updateProjectionMatrix();
     },
     setFlowField(field) {
-      flowViz.setField(field);
+      const was = flowCompute.binding?.source;
+      flowViz.bindField(flowCompute.bindCpu(field));
+      if (was !== field.source) flowCompute.resetParticles();
+      applyFlowMode();
+    },
+    setFlowSolverField(field) {
+      const was = flowCompute.binding?.source;
+      flowViz.bindField(flowCompute.bindSolver(field));
+      if (was !== field.source) flowCompute.resetParticles();
+      applyFlowMode();
     },
     setFlowMode(id) {
-      const m = id === null ? null : FLOW_VIZ_MODES[id];
-      flowViz.setQuantity(m?.cutPlane === true ? m.quantity : null);
+      flowMode = id;
+      applyFlowMode();
       if (id !== null) view.setMode(lookModeFor(id));
+    },
+    setFlowQuantity(id) {
+      flowQuantity = id;
+      applyFlowMode();
+    },
+    setFlowTimeScale(d) {
+      if (!(d > 0 && d <= 1)) throw new Error(`flow time scale ${String(d)} must be in (0, 1]`);
+      dilation = d;
+      flowViz.setDilation(d);
     },
     setDebugFlags(f) {
       flags = { ...f };
@@ -548,7 +661,23 @@ async function assemble(
         a.rotation.x = wedge.center - wedge.halfWidth;
         b.rotation.x = wedge.center + wedge.halfWidth;
       }
-      flowViz.update(wedge.center, wedge.halfWidth, wedge.halfWidth > 1e-3);
+      // the hot parts' blackbody glow from the cycle's temperatures (src/flow/viz/glow.ts)
+      const metal = hotPartTemperatures(cycleSpeeds.stations);
+      for (const part of GLOW_PARTS) {
+        const [r, g, b] = glowSceneRadiance(metal[part], GLOW_EMISSIVITY[part]);
+        uniforms.glow[part].value.set(r, g, b);
+      }
+      const radPerPx = (2 * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(1, heightPx);
+      flowViz.update(wedge.center, wedge.halfWidth, wedge.halfWidth > 1e-3, radPerPx);
+      if (flowMode !== null && flowCompute.binding !== null) {
+        const m = FLOW_VIZ_MODES[flowMode];
+        flowCompute.run({
+          dtSimS: visualDtS(dtS, dilation),
+          dtWallS: Math.min(dtS, 0.1),
+          particles: m.particleOpacity > 0,
+          gradient: m.haze > 0 || m.schlieren,
+        });
+      }
       // the static shadow map follows the engine only while it moves (mode transitions)
       if (cut !== lastCut || explode !== lastExplode)
         for (const l of studio.shadowLights) l.shadow.needsUpdate = true;
@@ -615,6 +744,7 @@ async function assemble(
         timestamps: timer.enabled,
         profile,
         renderScale: scaleState.scale,
+        flow: flowStats(),
       };
     },
     beginTimingRun() {
@@ -626,6 +756,7 @@ async function assemble(
     async dispose() {
       post.dispose();
       flowViz.dispose();
+      flowCompute.dispose();
       flatMaterial.dispose();
       scene.dispose();
       studio.dispose();

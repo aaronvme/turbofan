@@ -23,7 +23,8 @@ const gaussian: DensityGradient = (_x, r) => ({
 });
 
 /** The closed form: eps_y(b) = K d/db integral rho dz = -2 K A sqrt(pi) (b / s) exp(-b^2/s^2). */
-const exact = (b: number) => (-2 * K * A * Math.sqrt(Math.PI) * b * Math.exp(-(b * b) / (S * S))) / S;
+const exact = (b: number) =>
+  (-2 * K * A * Math.sqrt(Math.PI) * b * Math.exp(-(b * b) / (S * S))) / S;
 
 const basis = { right: [1, 0, 0], up: [0, 1, 0] } as const;
 

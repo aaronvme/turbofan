@@ -6,6 +6,13 @@
 //   -> TRAA -> [depth of field, cinematic presets only] -> vignette + bloom
 //   -> AgX tone mapping + sRGB (outputColorTransform)
 //
+// The flow visuals (w2/flowviz, src/render/flowViz.ts) join through attachFlow: their "Flow
+// Overlay" pass (the cut plane and the particles, depth-tested against the scene and rotor
+// depths), the heat haze's background shift and the schlieren image, each in a pipeline of its
+// own (as the cinematic one: swapping output nodes left TRAA on a stale target). D4-76: the
+// data modes composite after the tone map, in display space; Realistic before it, in
+// scene-linear light like the engine. With the flow off, the frame is the pipeline above alone.
+//
 // Rotational blur: a rotor seen through an open shutter is the time average of the rotor
 // image over the angle it turns, delta = omega T_open (src/geometry/motion.ts).
 // - The fan (LD-1, pass-4 W1L-I3): stochastic time sampling in the rotor pass itself. The fan
@@ -29,6 +36,7 @@ import {
   HalfFloatType,
   Matrix4,
   RenderPipeline,
+  SRGBColorSpace,
   Vector2,
   Vector4,
   type RenderTarget,
@@ -36,6 +44,7 @@ import {
   type Node,
   type PerspectiveCamera,
   type Scene,
+  AgXToneMapping,
   type UniformNode,
   type WebGPURenderer,
 } from 'three/webgpu';
@@ -55,6 +64,7 @@ import {
   round,
   output,
   pass,
+  renderOutput,
   rtt,
   screenCoordinate,
   screenSize,
@@ -74,6 +84,23 @@ import { traa } from 'three/addons/tsl/display/TRAANode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { installTraaResolve } from './traaResolve';
+import type { FlowPostDeps } from './flowViz';
+
+/** How the flow visuals join the frame (D4-76): none, scene-linear, display space, schlieren. */
+export type FlowCompositeMode = 'off' | 'scene' | 'display' | 'schlieren';
+
+export interface FlowHooks {
+  /** The "Flow Overlay" scene (premultiplied colour, its own depth). */
+  readonly scene: Scene;
+  /** Per pixel: the haze's background shift in uv (xy). */
+  readonly haze: Node<'vec4'>;
+  /** Per pixel: the schlieren's eps (up, right), rad. */
+  readonly schlieren: Node<'vec4'>;
+  /** The knife-edge cut-off a/f, rad (eps of +-this is white / black). */
+  readonly schlierenRangeRad: UniformNode<'float', number>;
+  /** The engine silhouette: hits inside x in [x0, x1], r <= r (schlieren mode). */
+  readonly engineBox: { readonly x0: number; readonly x1: number; readonly r: number };
+}
 
 export type PostDebug = 'rotorAlpha' | 'rotorBlur' | 'ao' | 'visible' | 'velocity' | null;
 
@@ -112,6 +139,12 @@ export interface LookPipeline {
   readonly fanRect: UniformNode<'vec4', Vector4>;
   /** Depth of field on (cinematic presets) or off (default: it is not drawn at all). */
   setCinematic(on: boolean): void;
+  /** What the flow visuals read from this pipeline (src/render/flowViz.ts). */
+  readonly flowDeps: FlowPostDeps;
+  /** Builds the flow pipelines on the flow visuals' scene and nodes. */
+  attachFlow(hooks: FlowHooks): void;
+  /** Which flow pipeline renders (D4-76); 'off' is the plain pipeline. */
+  setFlowComposite(mode: FlowCompositeMode): void;
   /**
    * The resolution of the 3D passes, the composite and TRAA relative to the drawing buffer
    * (D3-7, the performance profile); the output pass upsamples TRAA's result.
@@ -467,6 +500,77 @@ export function createPipeline(
   let cinematic = false;
   let renderScale = 1;
 
+  const flowDeps: FlowPostDeps = {
+    sceneDepth: sceneDepth as unknown as FlowPostDeps['sceneDepth'],
+    rotorDepth: rotorDepth as unknown as FlowPostDeps['rotorDepth'],
+    viewZOf,
+    camProjInv: camProjInv as unknown as FlowPostDeps['camProjInv'],
+    camWorld: camWorld as unknown as FlowPostDeps['camWorld'],
+    cameraPosition: cameraPosition as unknown as FlowPostDeps['cameraPosition'],
+  };
+  let flowComposite: FlowCompositeMode = 'off';
+  let flow: {
+    pass: ReturnType<typeof pass>;
+    haze: ReturnType<typeof rtt>;
+    schlieren: ReturnType<typeof rtt>;
+    pipelines: Record<Exclude<FlowCompositeMode, 'off'>, RenderPipeline>;
+  } | null = null;
+  const attachFlow = (h: FlowHooks) => {
+    if (flow !== null) throw new Error('post: attachFlow twice');
+    const flowPass = pass(h.scene, camera);
+    flowPass.name = 'Flow Overlay';
+    const ov = flowPass.getTextureNode('output');
+    const hazeTex = rtt(h.haze, null, null, { type: HalfFloatType });
+    hazeTex.name = 'Flow Haze';
+    const schTex = rtt(h.schlieren, null, null, { type: HalfFloatType });
+    schTex.name = 'Flow Schlieren';
+    // the engine passes first: the beauty (TRAA's chain) is the first operand everywhere, so
+    // the scene pass has rendered before the flow nodes read its depth
+    const over = (base: Node<'vec4'>): Node<'vec4'> =>
+      vec4(base.rgb.mul(float(1).sub(ov.a)).add(ov.rgb), 1);
+    // Realistic: the haze shifts what TRAA resolved, the overlay joins in linear light
+    const scenePipe = new RenderPipeline(renderer);
+    const traaSampler = traaTex as unknown as { sample(uv: Node<'vec2'>): Node<'vec4'> };
+    const beautyHazed = traaSampler.sample(screenUV.add(hazeTex.sample(screenUV).xy));
+    scenePipe.outputNode = vignette(over(beautyHazed));
+    // D4-76: the data colours after the tone map, in display space
+    const display = () =>
+      renderOutput(vignette(traaNode), AgXToneMapping, SRGBColorSpace) as unknown as Node<'vec4'>;
+    const displayPipe = new RenderPipeline(renderer);
+    displayPipe.outputNode = over(display());
+    displayPipe.outputColorTransform = false;
+    // schlieren: the knife-edge grey (Settles 2001, eq. 3.5), the engine a dim silhouette
+    const schPipe = new RenderPipeline(renderer);
+    schPipe.outputNode = Fn(() => {
+      const beauty = display();
+      const eps = schTex.sample(screenUV).x;
+      const grey = float(0.5).add(eps.mul(0.5).div(h.schlierenRangeRad)).clamp(0, 1);
+      const suv = screenUV;
+      const ndc = vec2(suv.x.mul(2).sub(1), float(1).sub(suv.y.mul(2)));
+      const hv = camProjInv.mul(vec4(ndc, sceneDepth.sample(suv).r.min(rotorDepth.sample(suv).r), 1));
+      const pw = camWorld.mul(vec4(hv.xyz.div(hv.w), 1)).xyz;
+      const inBox = pw.x
+        .greaterThan(h.engineBox.x0)
+        .and(pw.x.lessThan(h.engineBox.x1))
+        .and(length(pw.yz).lessThan(h.engineBox.r));
+      return vec4(select(inBox, beauty.rgb.mul(0.22), vec3(grey)), 1);
+    })();
+    schPipe.outputColorTransform = false;
+    flow = {
+      pass: flowPass,
+      haze: hazeTex,
+      schlieren: schTex,
+      pipelines: { scene: scenePipe, display: displayPipe, schlieren: schPipe },
+    };
+    applyFlowScale();
+  };
+  const applyFlowScale = () => {
+    if (flow === null) return;
+    flow.pass.setResolutionScale(renderScale);
+    flow.haze.setResolutionScale(0.5 * renderScale);
+    flow.schlieren.setResolutionScale(0.5 * renderScale);
+  };
+
   return {
     pipeline,
     fanRect,
@@ -475,6 +579,11 @@ export function createPipeline(
     bokehScale,
     setCinematic: (on) => {
       cinematic = on && !settings.debug;
+    },
+    flowDeps,
+    attachFlow,
+    setFlowComposite: (m) => {
+      flowComposite = m;
     },
     setRenderScale: (scale) => {
       if (scale === renderScale) return;
@@ -491,6 +600,7 @@ export function createPipeline(
         Math.floor(drawing.y * scale),
       );
       aoPass.resolutionScale = 0.5 * scale;
+      applyFlowScale();
     },
     render: (withTraa = true, linear = false) => {
       // the rotor motion vectors' view-projections, unjittered (TRAA jitters the camera only
@@ -505,12 +615,19 @@ export function createPipeline(
         debugPipeline(withTraa, linear).render();
         return;
       }
-      (cinematic ? cinePipeline : pipeline).render();
+      const flowPipe = flow !== null && flowComposite !== 'off' ? flow.pipelines[flowComposite] : null;
+      (cinematic ? cinePipeline : (flowPipe ?? pipeline)).render();
     },
     dispose: () => {
       pipeline.dispose();
       cinePipeline.dispose();
       for (const p of debugPipelines.values()) p.dispose();
+      if (flow !== null) {
+        for (const p of Object.values(flow.pipelines)) p.dispose();
+        flow.pass.dispose();
+        flow.haze.dispose();
+        flow.schlieren.dispose();
+      }
       compositeTex.dispose();
     },
   };

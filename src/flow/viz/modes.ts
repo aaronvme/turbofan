@@ -79,8 +79,12 @@ export function cropAlpha(c: CutPlaneCrop, x: number, r: number): number {
 
 const CROP = nearFieldCrop(ENGINE_DEFINITION);
 
-/** The schlieren's default sensitivity: a/f = 100 microradians (a jet-plume setting). */
-const SCHLIEREN_RANGE_RAD = 1e-4;
+/**
+ * The schlieren's default sensitivity: a/f = 500 microradians. A hot core jet deflects light by
+ * about K rho_inf (delta g / shear width) x path ~ 2.3e-4 x 1.2 x (0.6 / 0.05 m) x 0.3 m ~ 1e-3
+ * rad, so this keeps its shear layers inside the grey scale (a tenth of it saturated them).
+ */
+const SCHLIEREN_RANGE_RAD = 5e-4;
 
 export const FLOW_VIZ_MODES: Readonly<Record<FlowVizModeId, FlowVizMode>> = {
   realistic: {

@@ -49,8 +49,8 @@ const radiusAt = (curve: Polyline, x: number): number => {
 };
 
 /**
- * Where particles are born, from the flowpath: an intake slab upstream of the highlight (inside
- * 0.9 of its radius, where the capture streamtube is), and the entries of the bypass duct and of
+ * Where particles are born, from the flowpath: an intake slab just upstream of the highlight
+ * (inside 0.9 of its radius: air about to enter), and the entries of the bypass duct and of
  * the core (the booster), each 5 % in from its walls. Air from the intake slab reaches both
  * ducts by itself; the duct zones keep them filled within a particle's life. Weights: the share
  * of births (a visual density choice, not a mass-flow split).
@@ -60,7 +60,7 @@ export function flowSeedZones(def: EngineDefinition): SeedZone[] {
   const hl = fp.curves.nacelleInner.points[0];
   if (hl === undefined) throw new Error('flowSeedZones: no nacelle highlight');
   const zones: SeedZone[] = [
-    { id: 'intake', weight: 0.5, x0: hl.x - 0.9, x1: hl.x - 0.25, r0: 0, r1: 0.9 * hl.r },
+    { id: 'intake', weight: 0.5, x0: hl.x - 0.45, x1: hl.x - 0.1, r0: 0, r1: 0.9 * hl.r },
   ];
   for (const [id, comp, weight, depth] of [
     ['bypass', 'bypassDuct', 0.32, 0.12],

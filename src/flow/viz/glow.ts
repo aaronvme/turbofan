@@ -32,7 +32,14 @@ export const GLOW_ASSUMPTIONS = {
   sceneKeyIntensity: 2.6,
 } as const;
 
-export const GLOW_PARTS = ['hptVane', 'hptBlade', 'lptVane', 'lptBlade', 'exhaust', 'plug'] as const;
+export const GLOW_PARTS = [
+  'hptVane',
+  'hptBlade',
+  'lptVane',
+  'lptBlade',
+  'exhaust',
+  'plug',
+] as const;
 export type GlowPart = (typeof GLOW_PARTS)[number];
 
 /** Each glowing part's emissivity: the HPT's coated airfoils, the rest oxidised metal. */
