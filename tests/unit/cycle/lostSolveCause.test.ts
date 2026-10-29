@@ -68,6 +68,8 @@ describe('W2F-I1: the lost-solve cause', { timeout: 120_000 }, () => {
     b.ctl.lose = 'nonPhysical';
     b.m.step(0.1, inputs);
     expect(warn).toHaveBeenCalledTimes(3);
+    // (the reset's own first snapshot solves the gas path, so the solver must work again)
+    b.ctl.lose = 'none';
     b.m.reset('groundIdle', ISA_SLS);
     expect(b.m.lostSolveCause()).toBeNull();
     warn.mockRestore();
