@@ -21,8 +21,8 @@ DONE (round 2, in the order asked)
 - f9ee742 docs: PHYSICS.md ledger rows (tracers are a visualization device; laser sheet; mean-field schlieren and haze, no shimmer; the glow's assumptions); GPU_FACTS M49-M53; LOOKDEV.md "Flow visuals" with the screenshot table.
 
 Indicative ms per pass (D4-42 style back to back, 1080p, threeQuarterFront, Realistic, a reference builder's CPU tests running; not D0-1)
-- Flow visuals 1.28 ms (median of 3 paired runs, 1.16-1.56): render passes ("Flow Overlay" + "Flow Haze [ RTT ]") 1.11, compute 0.17. Within D4-2's 2 ms.
-- P4's render total with the flow off/on: 8.21 / 8.66 ms, paired change median +0.46 ms, but one pair was a +5.8 ms outlier and one −0.52: noise at this load. Not conclusive either way; see NEXT 1.
+- Flow visuals 1.18 ms (the gate run's 3 paired runs: 1.15, 1.18, 1.22): render passes ("Flow Overlay" + "Flow Haze [ RTT ]") 0.99-1.06, compute 0.16. Within D4-2's 2 ms. An earlier run: 1.28 (1.16-1.56).
+- P4's render total with the flow off/on (the gate run): 7.99/8.02, 7.59/7.53, 7.38/7.78 ms, paired change median +0.03 ms: unchanged within noise (an earlier run had a +5.8 ms outlier pair). Indicative only; see NEXT 1.
 - Other views at vsync in the shared Chrome (DVFS-inflated, D4-45): cutaway 0.59-0.79 ms, side Realistic 1.8-3.0 ms (long jet streaks' overdraw), schlieren side 2.7 ms (not budget-gated).
 
 Screenshots (`docs/look-dev/flow/`)
@@ -45,4 +45,10 @@ GOTCHAS
 - `src/lookdev/flowPanel.ts` imports `tools/perf/solverPerf.ts` (the solver's timing start state) for `?field=solver`: look-dev only, never the app.
 - Dev port 5193 (the Vite child outlives a stopped npx: kill the node PID listening on it). Nothing is left running.
 
-GATES (filled in below)
+GATES @eddce14 (the code at 4848367; later commits are docs and screenshots)
+- npm run typecheck: clean.
+- npm run lint: clean (ESLint --max-warnings 0 + Prettier).
+- npm run coverage: 108 files, 2016 passed + 11 expected fail; lines 99.51 %, statements 98.55 %; thresholds met (exit 0). Run at 097a569+ (src/render, excluded from coverage, changed after).
+- npm run test:mesh: 2 files, 29 passed.
+- npm run test:gpu: 12 files, 67 passed (64 + tests/gpu/flowParticles.test.ts's 3).
+- npm run test:browser: 10 files, 30 passed (28 + 2 new in flowViz.test.ts), 0 WebGPU errors.
