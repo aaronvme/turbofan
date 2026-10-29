@@ -403,17 +403,26 @@ export function createPipeline(
   if (settings.debug === 'rotorBlur')
     pipeline.outputNode = vec4(rotorBlur.r.div(Math.PI), rotorColor.a, 0, 1);
   if (settings.debug === 'ao') pipeline.outputNode = vec4(vec3(aoTex.r), 1);
-  // what TRAA reprojects with (rotor motion included): |velocity| in pixels / 32, red x, green y
-  if (settings.debug === 'velocity')
+  // what TRAA reprojects with (rotor motion included), linear (no tone map or sRGB, so a test
+  // reads it back exactly, tests/browser/rotorMotion.test.ts): red and green 0.5 + the
+  // velocity in pixels (NDC, y up) / 64, blue 1 on a visible rotor pixel
+  if (settings.debug === 'velocity') {
+    const t = screenCoordinate;
+    const onRotor = rotorColor
+      .load(t)
+      .a.greaterThan(0.001)
+      .and(rotorDepth.load(t).r.lessThan(sceneDepth.load(t).r));
     pipeline.outputNode = vec4(
       (sceneVelocity as unknown as { load(t: Node<'vec2'>): Node<'vec4'> })
-        .load(screenCoordinate)
-        .xy.abs()
-        .mul(screenSize)
-        .mul(0.5 / 32),
-      0,
+        .load(t)
+        .xy.mul(screenSize)
+        .mul(0.5 / 64)
+        .add(0.5),
+      select(onRotor, float(1), float(0)),
       1,
     );
+    pipeline.outputColorTransform = false;
+  }
   // the chain without TRAA (built on first use): the fan-blur reference test averages
   // un-accumulated frames (tests/browser/fanBlur.test.ts)
   const debugPipelines = new Map<string, RenderPipeline>();

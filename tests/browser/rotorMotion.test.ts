@@ -125,3 +125,118 @@ describe('W1V-I1 (b): TRAA reprojects the turning rotors', () => {
     expect(control.moving, rows.join('\n')).toBeGreaterThan(control.floor + MARGIN);
   });
 });
+
+// W2L-I1 (critic pass 8): the test above cannot see the motion vectors (with them dropped our
+// resolve throws the rotor history away, and its output is close to the TRAA-off still the
+// bound compares against). This one checks the vectors themselves, against the images: the
+// velocity debug view (linear, signed, src/render/post.ts) after one moving frame, and two
+// TRAA-off stills before and after it, the spools at shutter 0 so the stills are noise-free.
+// Where the velocity is right, the earlier still at u - v(u) shows what the later still shows
+// at u (the rotor turned rigidly; the half-pitch wrap lands on the next blade along, the same
+// shape). Bound, stated before measuring: over the visible rotor pixels, the warp error with
+// the shipped vectors at most WARP_RATIO of both the zero and the flipped vector's error (so
+// `noRotorMotion` and a sign error each fail it; both controls are run and must fail).
+// Only the rotor pixels whose image moved count (MOVED: a displayed change of 16/255 at zero
+// vector): a drum or a disk face turns into itself and says nothing about the vector. (The
+// first measurement over every rotor pixel: shipped 7.1, zero 8.1, flipped 12.9 /255.)
+const WARP_RATIO = 0.6;
+const MOVED = 16;
+
+describe('W2L-I1: the rotor motion vectors are the rotors image motion', () => {
+  let view: EngineView | null = null;
+  afterAll(async () => {
+    if (view !== null) await view.dispose();
+  });
+
+  it('the shipped vectors warp the previous still onto the current one; zero and flipped do not', async () => {
+    const c = document.createElement('canvas');
+    c.width = W;
+    c.height = H;
+    document.body.appendChild(c);
+    view = await createEngineView({
+      gpu: navigator.gpu,
+      canvas: c,
+      definition: ENGINE_DEFINITION,
+      width: W,
+      height: H,
+      dpr: 1,
+      quality: 'high',
+      debug: 'velocity',
+    });
+    const v = view;
+    // renders one frame of dt and reads the canvas back before it is presented
+    const read = (dt: number): Uint8ClampedArray => {
+      v.frame(dt);
+      const copy = document.createElement('canvas');
+      copy.width = W;
+      copy.height = H;
+      const ctx = copy.getContext('2d');
+      if (ctx === null) throw new Error('no 2d context');
+      ctx.drawImage(c, 0, 0);
+      return ctx.getImageData(0, 0, W, H).data;
+    };
+    const lum = (px: Uint8ClampedArray, x: number, y: number): number => {
+      const i = 4 * (Math.min(H - 1, Math.max(0, y)) * W + Math.min(W - 1, Math.max(0, x)));
+      return 0.2126 * (px[i] ?? 0) + 0.7152 * (px[i + 1] ?? 0) + 0.0722 * (px[i + 2] ?? 0);
+    };
+    const measure = async (flags: DebugFlags) => {
+      const still = { ...flags, noTraa: true, linear: true };
+      v.setDebugFlags(still);
+      v.setPreset(CUTAWAY_FAN_CLOSE.preset);
+      v.setShutter(0);
+      if (CUTAWAY_FAN_CLOSE.camera && CUTAWAY_FAN_CLOSE.target)
+        v.setCameraPose(CUTAWAY_FAN_CLOSE.camera, CUTAWAY_FAN_CLOSE.target);
+      await settle(v, 8);
+      const before = read(0);
+      v.setDebugFlags(flags);
+      const vel = read(1 / 60);
+      v.setDebugFlags(still);
+      const after = read(0);
+      await nextFrame();
+      let n = 0;
+      const err = { shipped: 0, zero: 0, flipped: 0 };
+      for (let y = 0; y < H; y++)
+        for (let x = 0; x < W; x++) {
+          const i = 4 * (y * W + x);
+          if ((vel[i + 2] ?? 0) < 128) continue;
+          // pixels, screen x right and y down (the view encodes NDC y up)
+          const vx = (((vel[i] ?? 0) - 127.5) / 255) * 64;
+          const vy = -(((vel[i + 1] ?? 0) - 127.5) / 255) * 64;
+          const now = lum(after, x, y);
+          const still = Math.abs(now - lum(before, x, y));
+          // only where the rotor's image moved (a blade edge, not a drum or a disk face,
+          // which turn into themselves)
+          if (still < MOVED) continue;
+          err.shipped += Math.abs(now - lum(before, Math.round(x - vx), Math.round(y - vy)));
+          err.zero += still;
+          err.flipped += Math.abs(now - lum(before, Math.round(x + vx), Math.round(y + vy)));
+          n++;
+        }
+      return {
+        n,
+        shipped: err.shipped / n,
+        zero: err.zero / n,
+        flipped: err.flipped / n,
+      };
+    };
+    const ok = (r: { shipped: number; zero: number; flipped: number }) =>
+      r.shipped <= WARP_RATIO * Math.min(r.zero, r.flipped);
+    const shipped = await measure({});
+    const zeroed = await measure({ noRotorMotion: true });
+    const flipped = await measure({ rotorMotionScale: -1 });
+    const f = (r: { n: number; shipped: number; zero: number; flipped: number }) =>
+      `${String(r.n)} rotor px, warp error ${r.shipped.toFixed(2)} (zero ${r.zero.toFixed(2)}, flipped ${r.flipped.toFixed(2)}) /255`;
+    const rows = [
+      `shipped: ${f(shipped)}`,
+      `control noRotorMotion: ${f(zeroed)}`,
+      `control rotorMotionScale -1: ${f(flipped)}`,
+    ];
+    await commands.writeFile('test-results/rotorMotionWarp.txt', `${rows.join('\n')}\n`);
+    console.warn(`W2L-I1 rotor motion warp\n${rows.join('\n')}`);
+    expect(v.stats().errors).toEqual([]);
+    expect(shipped.n, rows.join('\n')).toBeGreaterThan(5000);
+    expect(ok(shipped), rows.join('\n')).toBe(true);
+    expect(ok(zeroed), rows.join('\n')).toBe(false);
+    expect(ok(flipped), rows.join('\n')).toBe(false);
+  });
+});
