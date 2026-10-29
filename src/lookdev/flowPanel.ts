@@ -169,6 +169,10 @@ export async function createFlowPanel(
       <div class="ticks">${l.ticks.map((t) => `<span style="left:${(100 * t.at).toFixed(2)}%">${t.label}</span>`).join('')}</div>
       <div class="badge">${provenanceLabel(l.source)}</div>`;
   };
+  const showMs = () => {
+    const f = view.stats().flow;
+    $('flow-ms').textContent = mode === null ? 'off' : `GPU ${f.visualsMs.toFixed(2)} ms`;
+  };
   const sync = () => {
     for (const b of buttons)
       b.setAttribute('aria-pressed', String((b.dataset.mode ?? 'off') === (mode ?? 'off')));
@@ -185,6 +189,7 @@ export async function createFlowPanel(
         ? 'Pick a mode to see the air.'
         : flowModeNote(mode, dilation, quantity ?? undefined);
     drawLegend();
+    showMs();
   };
 
   const api: FlowPanel = {
@@ -198,8 +203,7 @@ export async function createFlowPanel(
       solver.step({ gpuTimeBudgetMs: budget, maxIterations: 1000 });
     },
     refresh() {
-      const f = view.stats().flow;
-      $('flow-ms').textContent = mode === null ? 'off' : `GPU ${f.visualsMs.toFixed(2)} ms`;
+      showMs();
     },
     onKey(key) {
       if (key === 'f') {
