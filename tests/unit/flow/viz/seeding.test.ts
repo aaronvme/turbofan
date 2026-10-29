@@ -120,7 +120,7 @@ describe('flowSeedZones (from the flowpath: the intake, the bypass duct and the 
 describe('time dilation, streaks and fades', () => {
   it('advances the particles by dilation x the frame time, so 300 m/s at 1/200 reads as 1.5 m/s', () => {
     expect(visualDtS(1 / 60, 1 / 200)).toBeCloseTo(1 / 12000, 15);
-    expect(300 * visualDtS(1, 1 / 200)).toBeCloseTo(1.5, 12);
+    expect((300 * visualDtS(0.05, 1 / 200)) / 0.05).toBeCloseTo(1.5, 12);
     // a long frame (a tab switch) is capped: particles do not jump through walls
     expect(visualDtS(2, 1 / 200)).toBeCloseTo(0.1 / 200, 15);
   });

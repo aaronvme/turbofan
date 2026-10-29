@@ -61,9 +61,13 @@ describe('glowSceneRadiance (blackbody colour x emissivity x luminance, in scene
     expect(sceneLuminance(hi) / sceneLuminance(lo)).toBeGreaterThan(10);
   });
 
-  it('is invisible below the Draper point (under 1e-6 of a white wall under the key light)', () => {
+  it('is invisible below the Draper point (798 K): under one 8-bit step of a white wall under the key', () => {
+    // a white Lambert wall under the key has radiance intensity / pi; the first 8-bit sRGB step
+    // above black is 1 / (255 x 12.92) in linear light
     const wall = a.sceneKeyIntensity / Math.PI;
-    expect(sceneLuminance(glowSceneRadiance(750, 1)) / wall).toBeLessThan(1e-6);
+    expect(sceneLuminance(glowSceneRadiance(790, 1)) / wall).toBeLessThan(1 / (255 * 12.92));
+    // and shows (a dull red) by 1100 K
+    expect(sceneLuminance(glowSceneRadiance(1100, 1)) / wall).toBeGreaterThan(0.01);
     expect(glowSceneRadiance(300, 1)).toEqual([0, 0, 0]);
   });
 });
