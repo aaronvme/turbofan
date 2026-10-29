@@ -17,6 +17,22 @@ Regenerate with `node tools/lookdev/capture.ts --no-timing` (own headed Chrome t
 | `06-fan-takeoff.jpg` | `fanTakeoff`, 1/1000 s | 30 degrees per exposure, 8 time copies: the fan reads as a smooth disc, no blade-edge teeth at the hub |
 | `07-hot-section.jpg` | `hotSection` (cutaway close-up) | Combustor liner and dome, HPT and LPT disks and blades (10 span sections), heat tint graded along x, TRF struts, plug |
 
+## Flow visuals (w2/flowviz round 2: the air made visible)
+
+Run the look-dev page with `?flow=realistic|cutaway|schlieren|data` (`&field=solver` draws the live GPU solver, `&dilation=200` the slow motion, `&domain=full` the uncropped plane); keys `f` (mode), `[` `]` (slow motion), `m` (cut-plane quantity), `n` (crop). The flow panel (top left) shows the mode, the slow-motion factor, the cut-plane quantity, where the field comes from (an amber MOCK badge or a green live-solver one) and the flow visuals' GPU ms; the legend (bottom right) is drawn from the cut plane's own LUT stops. Every layer is derived from the bound field (PHYSICS.md 1); nothing is synthesized.
+
+| File (`docs/look-dev/flow/`) | What it shows |
+|---|---|
+| `ui-realistic.jpg` | Realistic at the default view, take-off MOCK field: tracer streaks drawn into the intake and leaving the nozzles, ×1/200 |
+| `ui-data.jpg` | Data (Mach on viridis) on the cutaway faces, laser-sheet tracers on the faces, the legend |
+| `ui-schlieren.jpg` | Knife-edge schlieren (a/f 500 µrad), side on: the hot core jet's shear layers (light above, dark below), the bypass layer, the intake; the engine a silhouette |
+| `ui-solver-cutaway.jpg` | The live `GpuFlowSolver` field (130k cells) on the cut plane, labelled as the solver. It runs from the solver's timing start state, not an engine solution (the coupling's body forces are W3's) |
+| `realistic.png`, `cutaway.png`, `schlieren.png`, `data.png` | The browser test's frames of each mode (960 × 540, MOCK) |
+| `solver-data.png`, `solver-cutaway.png` | The browser test's frames on the live solver field |
+| `glow-hotsection.png` | The hot section at take-off: the HPT/LPT airfoils' blackbody glow (a faint warm lift, physically dim) |
+
+Not done or not right yet: the MOCK field's inflow ahead of the lip converges about ten times faster than continuity allows, which piled tracers on the axis, so the intake tracers are born inside the lip; the haze is a mean-field refraction (3006 of 518400 pixels change side on: physically about a pixel), so there is no shimmer; particles live in the near field only (they fade out at x = 5 m); the cinematic (depth-of-field) presets draw no flow layer.
+
 ## Look-dev round 5 (w2/lookdev-5: W2L-I1..I5, P4's last 0.5 ms, the pass-8 visual notes)
 
 All eight shots (00-07) were regenerated at the end; the round-4 set is in `docs/look-dev/before/`. Every timing below is **indicative**: back to back (D4-42's measure), paired and interleaved, a reference builder's CPU tests on the machine, never the official D0-1 run.
