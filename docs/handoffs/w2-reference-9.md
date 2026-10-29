@@ -20,7 +20,7 @@ KERNEL MIRROR (for w2/solver)
 - The GPU engine-stability test takes the d463 rule in D4-72's form (L2 of p', residual) when D4-63 is decided.
 
 NEXT
-1. The face-limited d463 rerun with both norms was running at the stop (`reports/scratch/r10/logs/d463_face2.log`): read its rows 1-3.
+1. Face-limited d463 under D4-72 (logs/d463_face2.log): L2 1.43x, residual 11.2x, max 8.05x; fails (b).
 2. Gates at this HEAD: coverage, test:mesh, test:ladder. test:ladder's d463 now prints the L2 row; expected (a) ~1.7 pass, (b) ~12x fail (the pin holds).
 3. The orchestrator's decisions (a)-(c).
 
