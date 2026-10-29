@@ -66,5 +66,5 @@ GOTCHAS
 GATES @2fd76f8 (+ the lint fix in the handoff commit)
 - npm run typecheck: clean.
 - npm run lint: clean (ESLint --max-warnings 0 + Prettier), after the client.ts fix in the handoff commit.
-- unit: tests/unit/shell (16) and tests/unit/hud (18) pass; W2F-I1 (3) and gasPathHold pass.
+- unit (tests/unit/shell + hud + cycle, after the lint fix): 259 passed + 5 expected fail, exit 0.
 - Not run this round: coverage, test:mesh, test:gpu, test:browser (NEXT 1-2).
