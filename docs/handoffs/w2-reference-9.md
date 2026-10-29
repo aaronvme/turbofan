@@ -1,46 +1,40 @@
-w2/reference-9: STOP-CLEAN early (orchestrator, for an official timing). Investigation only: no code, test or SOLVER.md change yet. (From main 22655d3; HEAD = the commit of this handoff.)
+w2/reference-9: D4-63 diagnosed (the round-8 hypothesis refuted), pinned and its rule stated; no fix (it is a scheme change: decision needed); D4-62's 12.2 tolerances written. (From main 22655d3; HEAD = the commit of this handoff.)
 
 DONE
-- Setup: `npm ci` and `npm run mesh` ran clean in this worktree (public/mesh/*.bin and manifest.json are generated, not committed).
-- Read: CLAUDE.md, SOLVER.md (all of it), the w2-reference and w2-solver-int handoffs, LOG.md D4-29/34/36/51/52/55/62/63, critic passes 9/10 on R/J (W2R-I9..I12, N16).
-- A D4-63 repro in the f64 oracle (scratch only, gitignored, still on disk in this worktree):
-  - reports/scratch/r9/common.ts: the shipped 130k asset (f32 metrics) at GpuFlowSolver's defaults (THERMALLY_PERFECT, ISA SLS at rest, minMach = M_cut = 0.003, CFL 0.8), and engine-stability.test.ts's wave (isothermal 0.1 % p wave, cos(6 pi x_n) exp(-(r / 0.3 r_max)^2)). Env switches: PRE (0/1), MINMACH, MACHCUT, CFL, LIMITER (sharp/smooth), AMP.
-  - reports/scratch/r9/grow.ts: prints max |rho'| and max |p'| over their first, the residual and the block/(i, j)/x/r of max |p'| every EVERY iterations.
-  - reports/scratch/r9/blocks.ts: the 12 blocks, sizes, extents and BC per face.
-  - Run as `N=2000 EVERY=50 node --import ./tools/mesh/ts-resolve.mjs reports/scratch/r9/grow.ts` from the worktree root.
-  - 240 ms/iteration alone; 640-730 ms with three runs side by side (2000 iterations: 8 min alone).
+- 3de1b43 (TDD) the D4-63 repro on the 130k asset as a ladder case: `tests/ladder/cases/d463.ts` (the engine default, the 0.1 % wave of engine-stability.test.ts, 2000 iterations, checkpoints every 100) and `tests/ladder/d463.test.ts`: a passing signature (finite, max |p'| < 100x its first) beside the rule as `it.fails` (D4-65's split form, one shared run).
+- ac52db7 SOLVER.md 10, "D4-63, the rest state on the engine mesh": the checks, the diagnosis and the pre-stated rule (below).
+- e1436e2 SOLVER.md 12.2, D4-62: the f32 error-model derivation, then the flux-scale rows B <= 2e-10, E-L5 <= 3e-7, E-L9a <= 3e-11 (10x the measured GPU errors 1.27e-11 / 2.67e-8 / 2.46e-12, rounded up; was 1e-3). Tightening only; SOLVER.md only.
 
-FINDINGS SO FAR (partial runs, stopped at 100-150 iterations)
-| run | 50 | 100 | 150 | where max abs p' sits |
-|---|---|---|---|---|
-| engine default, AMP 1e-3 (the repro) | rho 0.974, p 0.979, res 9.08 | rho 1.510, p 2.439, res 12.4 | rho 2.367, p 3.702, res 22.4 | upstream block, i = 2 (next to the INFLOW face imin), x -6.9 m, r 1.76 -> 1.13 -> 0.90 (moving to the axis) |
-| the same at AMP 1e-6 | rho 0.960, p 0.944, res 2.5e-2 | rho 0.903, p 0.962, res 4.7e-2 | (stopped) | plume-core at the axis (no inlet growth) |
-| plain scheme (PRE=0, CFL 1.5), AMP 1e-3 | rho 0.907, p 0.928 | rho 0.829, p 1.005 | (stopped) | plume-core / upstream axis |
-- The oracle reproduces the GPU numbers (1.510 at 100 = engine-stability's trace).
-- **It is amplitude-dependent, so not a linear mode of the scheme about rest.** At 1e-6 nothing grows by 100 iterations, and the residual ratio between the two amplitudes is 361, not 1000, at 50 iterations.
-- **It sits at the inflow boundary**, not at the lips, interfaces or far field: the upstream block's first cells beside imin (INFLOW, BC 4), moving towards the axis. (The upstream block is 42 x 97, x [-8.22, -0.80], r [0.015, 8.39]; imin inflow, jmin axis, jmax far field.)
-- The plain scheme does not grow by 100.
-- Working hypothesis (NOT yet tested). It is W2R-I12's beta jump at the inflow boundary.
-  - Linearised at rest the inflow ghost is pressure-release: p0 = p_inf gives p'_b = -rho sigma^2 / 2, which is second order. The ghost velocity is the characteristic's sigma = max(0, -(p'_s / (rho c) + u_n,s)), with the physical rho c, not the preconditioned characteristics the far field got (D4-22).
-  - With a 101 Pa wave the cell-to-ghost jump lifts beta^2 by its dp term in the first column (beta 2.7e-2, critic pass 10), while the interior stays at beta = M_cut = 0.003.
-  - The face between them gets M_ref = (beta_L + beta_R) / 2, about 0.015. The interior cell then sits at beta / M_ref of about 0.2, under-damped, where SOLVER.md 10's 1D limit is about 0.5 to 0.6, below CFL 0.8.
-  - At AMP 1e-6 the dp term is below minMach^2 everywhere, so there is no jump, and nothing grows.
+DIAGNOSIS (D4-63; numbers in SOLVER.md 10)
+- The oracle reproduces the GPU: max |rho'| / first 1.51 at 100, 10.4 at 1000, 13.6 at 2000; residual 12.4 -> 129.
+- Refuted: the inflow ghost's beta jump / face M_ref / physical rho c characteristic. Where the max sits the column has beta 0.03-0.06 and beta / M_ref 0.82-1.08 (no jump). On the upstream-block stand-in (engine numbers to 4 digits at 100) the inflow remapped to the far field, a preconditioned inflow characteristic, the dp term blind to physical ghosts and face beta max/min all change max |p'| at 200 by <= 5 %. CFL 0.4 follows CFL 0.8 in pseudo-time: semi-discrete, so a step limit cannot help.
+- Part 1, nonlinear (amp 1e-3, preconditioned): the dp-lifted beta gives pseudo-velocities 5-15 m/s; the radial wave focuses on the axis (20x at 270 upstream, 12x at 600 in plume-core) and deposits entropy, frozen at rest (rho' 13.6x against p' 8x at 2000). In the upstream block alone the pulse decays (0.23 at 2000).
+- Part 2, linear (amp 1e-6, and the plain scheme at 1e-3): max |p'| 2.8-4x and the residual x6-7 by 1000 in the core duct (x 0.6-1.6 m), no entropy. Transient or slow mode: open (round 8's "1e-6 does not grow" stopped at 100).
+- No fix ran: none of the brief's local remedies reaches either part. A remedy is a scheme change -> decision.
 
-NEXT (in order)
-1. Confirm the hypothesis cheaply, with 300-iteration runs at AMP 1e-3, one at a time or at most 2 in parallel (the machine has ~1.6 GB free; each run is ~150 MB):
-   - CFL 0.4;
-   - MACHCUT = 1 and/or limiter smooth;
-   - the inflow face remapped to the far field (`bcRemap: { 4: 3 }`) or given the preconditioned characteristics;
-   - the beta^2 dp term off for faces to physical ghosts (or beta_face = min / max instead of the mean).
-   Also log beta per cell in upstream i = 0..4 and beta / M_ref on their faces.
-2. A power iteration about rest (renormalise U every iteration; the rest state is an exact zero). Use an isentropic start, so that the neutral, frozen entropy mode (delta eta is frozen to first order at rest) does not mask the result. Do it at small amplitude, where it is linear, and at 1e-3 with beta frozen from the 1e-3 state, to separate the linear beta-jump mode from the nonlinearity.
-3. Pin the repro as an `it.fails` in the oracle unit suite (a coarse stand-in if 130k x 2000 is too slow for `npm test`: a small inflow + axis + far-field box at the same settings that shows the same growth). TDD commit first.
-4. The pre-stated rule into SOLVER.md before any fix. Use D4-45's 2000-iteration window (W2R-N16). Then the fix and the rule. Then D4-62 (the 12.2 E/B derivation first, then the rows) and the gates.
+THE RULE (SOLVER.md 10, stated before any fix)
+- Adopt a D4-63 fix only if (1) the d463 case keeps max |p'| <= 2x its first over 1000-2000, the residual over 1000-2000 <= its value at 100, finite; and (2) every passing row still passes (L1-L7, L8 velocity + steadiness, L9 values, 12.1/12.2).
+- Outcome now: fails (1) (late max 8.0x, residual 10.4x). The plain scheme fails it too (3.3x at 1000, residual 6.7x), so the bound goes to the orchestrator.
+
+DECISIONS NEEDED
+- (a) D4-63's remedy, a scheme change: candidates are a beta^2 rule without the dp-driven nonlinearity at rest (or a larger floor: minMach 0.02 cut the stand-in's focus from 5.4x to 2.3x), and, for part 2, the plain scheme's core-duct behaviour (first: a power iteration about rest on the 130k mesh, the N13 method).
+- (b) Whether the rule's 2x late bound stands, given that the plain scheme fails it.
+- (c) D4-62's GPU side: the solver round applies the new rows (below).
+
+KERNEL MIRROR (for w2/solver)
+- No kernel change: the oracle's scheme is unchanged this round.
+- D4-62: `tests/gpu/oracle.test.ts` E-L5 / E-L9a `fluxScaleError` against 3e-7 / 3e-11 (in place of TOL_RESIDUAL 1e-3 and E-L5's 1e-6); `tests/gpu-ladder/ladder.test.ts` B's residual row against 2e-10.
+- D4-63: when a fix is decided, its oracle change is mirrored in WGSL and the GPU engine-stability test gets the d463 rule.
+
+NEXT
+1. The orchestrator's decisions (a)-(c).
+2. The power iteration about rest on the 130k mesh, amplitude-independent (isentropic start, renormalised), to settle part 2.
+3. Carried: W2R-I9/I10/I12, N15-N19 (pass 9/10).
 
 GOTCHAS
-- Kill only your own runs: `Get-CimInstance Win32_Process -Filter "Name='node.exe'"`, filtered on the command line containing `reports/scratch/r9`.
-- The repro's wave is isothermal. Its entropy part (about 0.29 of the density amplitude) is frozen at rest, so max |rho'| should relax towards about 0.29 of the first, not 0.
-- Self-brake usage was 51 % at the stop.
+- Scratch (gitignored, on disk): reports/scratch/r9/{grow2.ts, standin.ts, ref/ (switchable oracle copy: R9_BETA nophys|noin, R9_FACE max|min, R9_INFLOW pre), logs/}. Run from the worktree root with `node --import ./tools/mesh/ts-resolve.mjs`. 130k: ~240 ms/it alone, ~800 with three runs; the stand-in: ~14 ms/it.
+- The d463 ladder case runs 2000 iterations on 130k: ~6-8 min alone in test:ladder.
+- max |rho'| mixes entropy (frozen at rest) and acoustics; grow2.ts prints the entropy part rho' - p'/c^2 separately.
 
 GATES
-- Not run (no code changed since main 22655d3).
+- see below (filled at the gate run)
