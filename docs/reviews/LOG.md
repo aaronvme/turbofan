@@ -3341,3 +3341,15 @@ None.
 **Orchestrator questions:**
 - (mm) W2R-I17: E-L9a at 1e-10 rather than 3e-11, with the norm's f32 reduction added to §12.2's model, decided before the solver round adopts the rows (no test uses 3e-11 yet)?
 - (nn) W2R-I18, for D4-69/D4-70: should the D4-63 rule judge a volume-weighted energy (p′ and kinetic) with a decay requirement over a 2000-iteration window, instead of max |p′| and the cell-mean residual? The builder's own logs show the linear part decaying in that norm (0.37 / 0.47 at 1000) while max |p′| grows 2.8-3.3×.
+- **Merged into main @9e4933e (w2/lookdev-5 @4538f0f) and @e6c6326 (w2/reference-9 @bcacc0a, the reviewed commit; the builder has moved on to 9a9dd28, which is unreviewed), plus critic pass 11 @a049709.** Both got MERGE. Gates on the merged tree, run in the foreground: typecheck and lint clean, mesh 29, test:gpu 64/64. The critic's trial merges ran the full suites.
+- **D4-71 (pass 11 question mm): E-L9a's tolerance is 1e-10.** The value 3e-11 sat inside the f32 rounding of the norm it compares (W2R-I17), so it could fail for rounding alone. 1e-10 is above that floor, consistent with D4-62's ten-times-measured-error model.
+- **D4-72 (question nn): the D4-63 rule is stated in the volume-weighted energy (L2) norm.**
+  - The reason is the definition of "non-growing", not the data. In axisymmetric coordinates, a converging cylindrical acoustic wave amplifies physically towards the axis, roughly as 1/√r, so the pointwise max |p′| can grow while the wave's energy decays.
+  - The standard stability notion for a discretisation is a bounded energy norm.
+  - The rule becomes: from 1000 to 2000 iterations, the volume-weighted L2 of p′ is ≤ 2× its first and the residual is ≤ its value at 100. Max |p′| is still reported.
+  - This is the case D4-70 anticipated, and it rests on that definition: the energy norm is the measure, the 2× bound is kept, and the D4-68 nonlinear part still has to meet it.
+- **D4-73 (question oo): yes, fix the bench's focus emulation** (W2L-I7). D3-6's blur rule must take effect in official capture, ab and bench runs.
+  - The official P4 and P1 results stand: their rAF watchers saw no occlusion signature, and occlusion is the rule that would have caught a hidden window.
+  - The fix goes into the next tools/kernel round.
+- **D4-74 (question pp): MARGIN is not widened after seeing a test at its bound** (W2L-I8). Make the cutaway close-up measurement robust instead: average over N frames, or derive the bound from a measured distribution, with the rationale stated. W2L-I6 (vectors at half length, NDC vs UV) is fixed in the same round.
+- **D4-75 (question qq): yes, record P4's margin.** It is 6.96 ms official against 8.0, a 1.04 ms margin. The indicative session-to-session drift here is up to about 2×, so only official runs count.
