@@ -162,6 +162,8 @@ export interface FlowViz {
   setDilation(d: number): void;
   /** Hides the particles whatever the mode (a debug A/B). */
   setParticlesHidden(hidden: boolean): void;
+  /** No haze whatever the mode (a debug A/B). */
+  setHazeOff(off: boolean): void;
   /** D4-76: the cut plane over the full near-field raster instead of the mode's crop. */
   setFullDomain(full: boolean): void;
   /** Follows the cutaway wedge (the planes lie on its faces) and the camera's pixel angle. */
@@ -226,6 +228,9 @@ export function createFlowViz(o: {
   /** 1: display-encoded white streaks (D4-76 modes); 0: scene-linear radiance (Realistic). */
   const display = uniform(0);
   const radPerPxU = uniform(5e-4);
+  /** The mode's haze strength (1 = the physical Gladstone-Dale deflection; 0 = none). */
+  const hazeGain = uniform(0);
+  let hazeOff = false;
   const sheet = { on: uniform(0), faceA: uniform(0), faceB: uniform(0) };
   const crop = {
     on: uniform(0),
@@ -557,6 +562,7 @@ export function createFlowViz(o: {
       if (quantity !== null && quantity !== built && deps !== null) buildPlane(quantity);
       opacity.value = m?.particleOpacity ?? 0;
       display.value = m?.composite === 'display' ? 1 : 0;
+      hazeGain.value = hazeOff ? 0 : (m?.haze ?? 0);
       sheet.on.value = m?.cutPlane === true ? 1 : 0;
       applyCrop();
       streaks.visible = (m?.particleOpacity ?? 0) > 0 && !particlesHidden;
@@ -564,6 +570,10 @@ export function createFlowViz(o: {
     setFullDomain(full) {
       fullDomain = full;
       applyCrop();
+    },
+    setHazeOff(off) {
+      hazeOff = off;
+      hazeGain.value = off ? 0 : (mode?.haze ?? 0);
     },
     setParticlesHidden(h) {
       particlesHidden = h;
@@ -587,7 +597,7 @@ export function createFlowViz(o: {
         const m = march(dp, HAZE_STEPS);
         // hazeShiftPx: eps (t_bg - t_gas) / t_bg over the pixel's angle, then px to uv (y down)
         const k = max(m.w.sub(m.z), 0).div(max(m.w, 1e-3)).div(radPerPxU);
-        const px = m.xy.mul(k);
+        const px = m.xy.mul(k).mul(hazeGain);
         return vec4(px.x.div(screenSize.x), px.y.negate().div(screenSize.y), 0, 1);
       })();
     },

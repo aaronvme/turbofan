@@ -200,6 +200,34 @@ describe('flow visuals', () => {
       if (dr >= 3 && dr > db) lifted++;
     }
     v.setDebugFlags({});
+
+    // the heat haze (Realistic): the background seen through the hot jets shifts by the
+    // Gladstone-Dale deflection of the field's density gradient, a pixel or so; side on, against
+    // the studio, with the particles off so only the refraction differs
+    v.setPreset('side');
+    v.setThrottle(1, true);
+    v.setFlowMode('realistic');
+    const hazeFrame = (off: boolean) => {
+      v.setDebugFlags({ noFlowParticles: true, ...(off ? { noHaze: true } : {}) });
+      settle(40);
+      return pixels(c).px;
+    };
+    const flat = hazeFrame(true);
+    const hazy = hazeFrame(false);
+    v.setDebugFlags({});
+    let shifted = 0;
+    for (let i = 0; i < flat.length; i += 4) {
+      const d = Math.max(
+        Math.abs((hazy[i] ?? 0) - (flat[i] ?? 0)),
+        Math.abs((hazy[i + 1] ?? 0) - (flat[i + 1] ?? 0)),
+        Math.abs((hazy[i + 2] ?? 0) - (flat[i + 2] ?? 0)),
+      );
+      if (d >= 2) shifted++;
+    }
+    await annotate(
+      `[look] heat haze: ${String(shifted)} of ${String(flat.length / 4)} pixels changed by >= 2/255 (side view, take-off MOCK field)`,
+    );
+    expect(shifted).toBeGreaterThan(0);
     await annotate(
       `[look] D4-76: ${String(onMap)} of ${String(changed)} sampled cut-plane pixels on the viridis LUT within 3/255 (${(onMap / changed).toFixed(3)}); glow: ${String(lifted)} pixels red-lifted by >= 3/255, total red +${String(red)}`,
     );

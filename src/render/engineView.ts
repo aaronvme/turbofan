@@ -244,6 +244,8 @@ export interface DebugFlags {
   readonly noGlow?: boolean;
   /** The flow modes without their particles (the cut plane's colour check, D4-76). */
   readonly noFlowParticles?: boolean;
+  /** The flow modes without the heat haze (its A/B). */
+  readonly noHaze?: boolean;
 }
 
 const FPS = 60;
@@ -564,6 +566,7 @@ async function assemble(
     setDebugFlags(f) {
       flags = { ...f };
       flowViz.setParticlesHidden(f.noFlowParticles === true);
+      flowViz.setHazeOff(f.noHaze === true);
       hidden = [];
       if (f.hide !== undefined && f.hide !== '') {
         // matched against "main:<name>" / "rotors:<name>", so a pattern can pick one pass
