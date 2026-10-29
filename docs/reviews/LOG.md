@@ -3065,3 +3065,14 @@ I re-checked each pass-10 finding on 2026-10-28. I read the diff 6ed8d81..9e1257
 - **N8: FIXED** (c673d65): the test calls a visible `skip()` without timestamps.
 
 **Verdict w2/solver-fix @9e1257b: MERGE.** 0 open findings. `bench:p1` is ready for the orchestrator's quick smoke, then the quiet official run. D4-66 expects a miss at about 120 it/s.
+- **P1 official at main 22655d3 (D4-64 measure of record), 2026-10-28 22:06-22:18.**
+  - Conditions: AC throughout, plan Balanced, no agents, Aaron confirmed the machine quiet. D0-1 protocol: 3 configs × 3 repetitions in rotated order, 10 s warm-up + 60 s each. All runs were VALID.
+  - **solver-130k-app: 1.448 ms/it, 142 it/s at 60.0 fps** (frame p99 17.3 ms, 0 long frames). **P1 FAIL by 5%** against ≥ 150.
+  - Beside it: spike-130k-16x8 297 it/s (1.306 ms/it), which reproduces M34's official 299 it/s, so the harness is calibrated. solver-130k-bench 120 it/s (2.642 ms/it, the W0 bench scene).
+  - This is the quiet run, so the miss counts and P1's logged decision is due (D4-67). The JSON is committed as `docs/bench/p1-2026-10-28-2205-official.json`.
+- **D4-67: P1's logged decision. The 130k mesh is kept, and the 5% gap is closed through the frame budget and the kernel; 80k is the fallback.**
+  - **Why:** the solver's it/s is set by D4-2's budget, min(5, 15 − render − visuals) − resample. With render 8.50 ms (P4) that budget is about 2.4 iterations per frame.
+    - P4's own pre-registered 0.5 ms (look-dev round 5) goes straight to the solver: about +0.35 it/frame, roughly +20 it/s.
+    - A kernel-tuning pass on the 3-dispatch kernel (1.448 ms/it; the β pass and the halo work are the candidates) adds more.
+    - The 80k mesh (about 0.85 ms/it, about 4 it/frame) costs fidelity the 130k mesh was sized for (plan, D2-5), so it is the fallback, not the first remedy.
+  - **The rule:** re-measure P1 officially after look-dev round 5 and one kernel-tuning round. If it is still under 150 it/s, switch the default to the 80k mesh (already generated, meeting every mesh requirement), with 130k as the "high" preset, and record both.
