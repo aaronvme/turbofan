@@ -22,7 +22,12 @@ import {
   type WebGPURenderer,
 } from 'three/webgpu';
 import { uniform } from 'three/tsl';
-import { DEFAULT_CYCLE_INPUTS, type CycleInputs } from '../contracts/cycle';
+import {
+  DEFAULT_CYCLE_INPUTS,
+  type CycleInputs,
+  type CycleSource,
+  type CycleState,
+} from '../contracts/cycle';
 import type { EngineDefinition } from '../contracts/engine';
 import {
   buildEngineGeometry,
@@ -127,6 +132,11 @@ export interface EngineViewStats {
   readonly lpBlurDeg: number;
   readonly errors: readonly GpuErrorReport[];
   readonly cycleLabel: typeof MOCK_LABEL;
+  /**
+   * What drives the spools and the glow (w2/app-ui, flagged edit): the view's own MOCK cycle, or
+   * the state the app sets from the transient model (setCycleState).
+   */
+  readonly cycleSource: CycleSource;
   /** Rolling medians of GPU ms per pass and CPU ms per frame (W1G-I2). */
   readonly timings: PassMedians;
   readonly timestamps: boolean;
@@ -167,6 +177,12 @@ export interface EngineView {
   setMode(mode: LookMode, immediate?: boolean): void;
   /** Throttle lever 0..1; `settle` jumps to the MOCK steady state instead of spooling. */
   setThrottle(lever: number, settle?: boolean): void;
+  /**
+   * w2/app-ui (flagged edit): the cycle state that drives the spools and the hot-part glow, set
+   * by the app every frame from the transient model; null returns to the view's own MOCK cycle
+   * (the look-dev pages and the benches never set it).
+   */
+  setCycleState(state: CycleState | null, source?: CycleSource): void;
   setShutter(angleDeg: number): void;
   setCinematic(on: boolean): void;
   /** The render profile (D3-7): `performance` follows the GPU time with the render scale. */
@@ -414,6 +430,7 @@ async function assemble(
   let lever = 0;
   let settled = mockSteadyState(def, 0);
   let settle = true;
+  let external: { state: CycleState; source: CycleSource } | null = null;
   let lp = 0;
   let hp = 0;
   let shutterDeg = SHUTTER_1000;
@@ -436,7 +453,7 @@ async function assemble(
     fuelLever: 'run',
     throttleLever: lever,
   });
-  const speeds = () => (settle ? settled : cycle.state());
+  const speeds = (): CycleState => external?.state ?? (settle ? settled : cycle.state());
   // what the camera draws (W1V-I2): objects on a layer the camera does not see (the rotor
   // lights' shadow proxies) are skipped, and the fan's depth pre-pass is counted apart
   const fanDepthCopies = new Set<Object3D>(scene.fanTimeCopies.map((c) => c.depth));
@@ -515,6 +532,9 @@ async function assemble(
       lever = Math.max(0, Math.min(1, l));
       settle = s;
       if (s) settled = mockSteadyState(def, lever);
+    },
+    setCycleState(state, source = 'model') {
+      external = state === null ? null : { state, source };
     },
     setShutter(a) {
       shutterDeg = a;
@@ -613,7 +633,7 @@ async function assemble(
     frame(dtS) {
       const t0 = performance.now();
       timer.beginFrame();
-      if (!settle) cycle.step(Math.min(dtS, 0.1), inputs());
+      if (!settle && external === null) cycle.step(Math.min(dtS, 0.1), inputs());
       const cycleSpeeds = speeds();
       spoolFactor = spoolDisplayFactor(spoolFactor, mode === 'exploded', dtS);
       const st = {
@@ -757,6 +777,7 @@ async function assemble(
         lpBlurDeg: (uniforms.lpBlur.value * 180) / Math.PI,
         errors,
         cycleLabel: MOCK_LABEL,
+        cycleSource: external?.source ?? 'mock',
         timings: timer.medians(),
         timestamps: timer.enabled,
         profile,

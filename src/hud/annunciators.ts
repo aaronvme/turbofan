@@ -71,7 +71,12 @@ export function flowAnnunciation(flow: FlowStatus): Annunciation {
         detail: flow.error ?? 'no WebGPU solver',
       };
     case 'initialising':
-      return { id: 'flow', level: 'advisory', text: 'SOLVER INIT', detail: 'compiling, uploading the mesh' };
+      return {
+        id: 'flow',
+        level: 'advisory',
+        text: 'SOLVER INIT',
+        detail: 'compiling, uploading the mesh',
+      };
     case 'running':
       return { id: 'flow', level: 'normal', text: 'SOLVER RUNNING', detail: `${flow.mode} mode` };
     case 'diverged':
@@ -89,8 +94,18 @@ export function flowAnnunciation(flow: FlowStatus): Annunciation {
 export function provenanceBadges(s: SnapshotSources): Annunciation[] {
   const cycle: Annunciation =
     s.cycle === 'model'
-      ? { id: 'cycle', level: 'normal', text: 'CYCLE: MODEL', detail: 'the transient cycle model (src/cycle)' }
-      : { id: 'cycle', level: 'caution', text: 'CYCLE: MOCK', detail: 'a labelled stand-in, not the model' };
+      ? {
+          id: 'cycle',
+          level: 'normal',
+          text: 'CYCLE: MODEL',
+          detail: 'the transient cycle model (src/cycle)',
+        }
+      : {
+          id: 'cycle',
+          level: 'caution',
+          text: 'CYCLE: MOCK',
+          detail: 'a labelled stand-in, not the model',
+        };
   const flow: Annunciation =
     s.flow === 'solver'
       ? { id: 'field', level: 'normal', text: 'FIELD: SOLVER', detail: 'the live GPU solver' }

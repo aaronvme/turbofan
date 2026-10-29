@@ -19,13 +19,18 @@ export type ToWorker =
       readonly height: number;
       readonly dpr: number;
     }
-  | { readonly type: 'resize'; readonly width: number; readonly height: number; readonly dpr: number }
+  | {
+      readonly type: 'resize';
+      readonly width: number;
+      readonly height: number;
+      readonly dpr: number;
+    }
   | { readonly type: 'command'; readonly message: SimCommandMessage }
   | { readonly type: 'orbit'; readonly input: OrbitInput }
   | { readonly type: 'camera'; readonly preset: CameraPresetId }
   | { readonly type: 'field'; readonly source: FieldChoice };
 
-export type CameraPresetId = 'threeQuarterFront' | 'side' | 'hero' | 'rear';
+export type CameraPresetId = 'threeQuarterFront' | 'side' | 'hero' | 'hotSection';
 
 /** What one frame cost (ms) and what D4-2 planned for the solver. */
 export interface FrameBudget {
