@@ -1,4 +1,4 @@
-w2/reference-9: D4-63 diagnosed (the round-8 hypothesis refuted), pinned and its rule stated; no fix (it is a scheme change: decision needed); D4-62's 12.2 tolerances written. (From main 22655d3; HEAD = the commit of this handoff.)
+w2/reference-9: STOP-CLEAN at the self-brake (test:ladder not run). D4-63 diagnosed (the round-8 hypothesis refuted), pinned and its rule stated; no fix (it is a scheme change: decision needed); D4-62's 12.2 tolerances written. (From main 22655d3; HEAD = the commit of this handoff.)
 
 DONE
 - 3de1b43 (TDD) the D4-63 repro on the 130k asset as a ladder case: `tests/ladder/cases/d463.ts` (the engine default, the 0.1 % wave of engine-stability.test.ts, 2000 iterations, checkpoints every 100) and `tests/ladder/d463.test.ts`: a passing signature (finite, max |p'| < 100x its first) beside the rule as `it.fails` (D4-65's split form, one shared run).
@@ -36,5 +36,9 @@ GOTCHAS
 - The d463 ladder case runs 2000 iterations on 130k: ~6-8 min alone in test:ladder.
 - max |rho'| mixes entropy (frozen at rest) and acoustics; grow2.ts prints the entropy part rho' - p'/c^2 separately.
 
-GATES
-- see below (filled at the gate run)
+GATES @eb5f92b (src/ unchanged since main 22655d3; this round adds tests/ladder d463 and SOLVER.md text)
+- npm run typecheck: clean
+- npm run lint: clean (ESLint --max-warnings 0, Prettier)
+- npm run coverage: 99 files passed; 1917 passed / 11 expected fail; thresholds met (exit 0)
+- npm run test:mesh: 2 files, 29 passed
+- npm run test:ladder: NOT RUN (self-brake at 82 % usage; STOP-CLEAN). The new d463 case is the only change to it: run it first (`npx vitest run -c vitest.ladder.config.ts tests/ladder/d463.test.ts`, ~6-8 min); expected: the signature passes and the it.fails rule fails as pinned (the scratch run of the same computation: late max |p'| 8.0x, residual 10.4x its value at 100).
