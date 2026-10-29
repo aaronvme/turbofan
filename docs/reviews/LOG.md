@@ -3353,3 +3353,8 @@ None.
   - The fix goes into the next tools/kernel round.
 - **D4-74 (question pp): MARGIN is not widened after seeing a test at its bound** (W2L-I8). Make the cutaway close-up measurement robust instead: average over N frames, or derive the bound from a measured distribution, with the rationale stated. W2L-I6 (vectors at half length, NDC vs UV) is fixed in the same round.
 - **D4-75 (question qq): yes, record P4's margin.** It is 6.96 ms official against 8.0, a 1.04 ms margin. The indicative session-to-session drift here is up to about 2×, so only official runs count.
+- **D4-76 (w2/flowviz @89ef843, PARTIAL at the cap): Data-mode colours composite after tone mapping, in display space.**
+  - A data colour map (viridis, inferno, CIELAB diverging) must show its stated colours. AgX tone mapping, exposure and bloom would distort them and break the legend.
+  - Standard practice: the scientific overlay is drawn after the cinematic pipeline, unaffected by it.
+  - In Data and Cutaway modes, the cut plane is cropped to the engine's near field (a few diameters), so the far-field slab doesn't cover the studio. The full domain stays available as an option.
+  - Realistic and Schlieren keep their physically based paths.
