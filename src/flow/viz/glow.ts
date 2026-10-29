@@ -17,7 +17,8 @@
 // Physically this is dim: steel shows nothing below the Draper point (~800 K) and only a dull red
 // at 1100 K, far below a lit studio. Restrained by physics, not by a gain.
 
-import type { StationId, StationState } from '../../contracts/cycle';
+import type { StationState } from '../../contracts/cycle';
+import type { StationId } from '../../contracts/stations';
 import { blackbodyLinearSrgb, blackbodyLuminance } from './optics';
 
 export const GLOW_ASSUMPTIONS = {
