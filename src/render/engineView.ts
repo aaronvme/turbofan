@@ -55,6 +55,9 @@ import { createMockCycle, mockSteadyState, MOCK_LABEL } from '../mocks/mockCycle
 import { buildEngineScene, type EngineScene } from './engineScene';
 import { createLookUniforms, createMaterials, type LookUniforms } from './materials';
 import { createPassTimer, type PassTimer } from './passTimer';
+import { createFlowViz, type FlowViz } from './flowViz';
+import { FIELD_EXTENTS, type CpuFlowField } from '../contracts/flow';
+import { FLOW_VIZ_MODES, lookModeFor, type FlowVizModeId } from '../flow/viz/modes';
 import { createPipeline, type LookPipeline, type PostDebug } from './post';
 import { LOOK_PRESETS, SHUTTER_1000, type LookMode, type LookPresetId } from './presets';
 import { createRendererOnDevice } from './rendererOnDevice';
@@ -132,6 +135,10 @@ export interface EngineView {
   /** The render profile (D3-7): `performance` follows the GPU time with the render scale. */
   setProfile(id: RenderProfileId): void;
   setCameraPose(position: readonly number[], target: readonly number[]): void;
+  /** The field the flow visuals draw (w2/flowviz): the MOCK raster or a solver readback. */
+  setFlowField(field: CpuFlowField): void;
+  /** A flow-visual mode (src/flow/viz/modes.ts), which also sets its look mode; null = none. */
+  setFlowMode(id: FlowVizModeId | null): void;
   /** Look-dev A/B switches (e.g. caps or culling off) for timing comparisons. */
   setDebugFlags(flags: DebugFlags): void;
   /** Advances the simulation clock by dt seconds and renders one frame. */
@@ -292,6 +299,8 @@ async function assemble(
     ),
   );
   scene.main.add(stand.group);
+  const flowViz: FlowViz = createFlowViz(FIELD_EXTENTS.near);
+  scene.main.add(flowViz.group);
   scene.rotors.add(studio.rotorLights);
 
   const camera = new PerspectiveCamera(30, o.width / o.height, 0.05, 200);
@@ -419,6 +428,14 @@ async function assemble(
       camera.lookAt(target.x, target.y, target.z);
       camera.updateProjectionMatrix();
     },
+    setFlowField(field) {
+      flowViz.setField(field);
+    },
+    setFlowMode(id) {
+      const m = id === null ? null : FLOW_VIZ_MODES[id];
+      flowViz.setQuantity(m?.cutPlane === true ? m.quantity : null);
+      if (id !== null) view.setMode(lookModeFor(id));
+    },
     setDebugFlags(f) {
       flags = { ...f };
       hidden = [];
@@ -531,6 +548,7 @@ async function assemble(
         a.rotation.x = wedge.center - wedge.halfWidth;
         b.rotation.x = wedge.center + wedge.halfWidth;
       }
+      flowViz.update(wedge.center, wedge.halfWidth, wedge.halfWidth > 1e-3);
       // the static shadow map follows the engine only while it moves (mode transitions)
       if (cut !== lastCut || explode !== lastExplode)
         for (const l of studio.shadowLights) l.shadow.needsUpdate = true;
@@ -607,6 +625,7 @@ async function assemble(
     },
     async dispose() {
       post.dispose();
+      flowViz.dispose();
       flatMaterial.dispose();
       scene.dispose();
       studio.dispose();
