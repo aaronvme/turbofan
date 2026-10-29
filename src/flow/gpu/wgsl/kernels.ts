@@ -26,7 +26,7 @@
 // Bitwise symmetry: every face flux is computed by one call site (one loop over the tile's i- and
 // j-faces) and every slope by one call site, from primitives that every tile computes with the same
 // code from the same U (an interface ghost is its neighbour block's cell, consToPrim of the same
-// bits), so both blocks of an interface see the same face states.
+// bits at the same call site, haloPrim), so both blocks of an interface see the same face states.
 import { GHOST_LAYERS } from '../../reference/solverMesh';
 import type { GasModel } from '../../reference/gas';
 import type { GpuLayout, Tile } from '../layout';
@@ -214,13 +214,18 @@ fn cellPrim(c: u32) -> Prim {
   return consToPrim(Uin[2u * c], Uin[2u * c + 1u].xy, geo[CELL_GEO + c].x);
 }
 
-// the primitives of extended index e: a cell, or a ghost from its source cell(s) and BC (section 5)
+// the primitives of extended index e: a cell, or a ghost from its source cell(s) and BC (section 5).
+// A cell's own primitives and a ghost's first source come from one cellPrim call site (W2I-N1): an
+// interface ghost is its neighbour block's cell, and both blocks must see that cell's bits whatever
+// the compiler fuses differently at two sites. (A slip wall's second source has a site of its own:
+// its faces carry the wall flux, never an interface's.)
 fn haloPrim(e: u32) -> Prim {
-  if (e < P.nCells) { return cellPrim(e); }
-  let g = e - P.nCells;
+  let ghost = e >= P.nCells;
+  let g = select(0u, e - P.nCells, ghost);
   let r0 = topoAt(GHOSTS + 2u * g);
+  let s = cellPrim(select(e, r0.x, ghost));
+  if (!ghost) { return s; }
   let r1 = topoAt(GHOSTS + 2u * g + 1u);
-  let s = cellPrim(r0.x);
   var s1 = s;
   if (r0.z == 1u) { s1 = cellPrim(r0.y); }
   return ghostPrim(r0, r1, s, s1);
