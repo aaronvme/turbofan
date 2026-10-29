@@ -445,12 +445,12 @@ Protocol: the same mesh (the row's, below; always with f32 metrics, the numbers 
 | case | N | must hold |
 |---|---|---|
 | A. quiescent ambient, real mesh (the 130k asset, f32 metrics); plain and preconditioned tracking and physical time | 1, 100 | every state value bitwise 0 |
-| B. uniform M 0.5, real mesh, walls remapped to far field | 100 | max |u − u∞| ≤ 10 × the oracle's (the oracle's is a property of the f32 metrics, 12.3); the residual over the flux scale (below) |
+| B. uniform M 0.5, real mesh, walls remapped to far field | 100 | max |u − u∞| ≤ 10 × the oracle's (the oracle's is a property of the f32 metrics, 12.3); the residual over the flux scale ≤ 2e-10 (below, D4-62) |
 | C. smooth field (acoustic pulse + swirl + a hot fuel-air spot, `smoothPerturbation`) in the closed box (`closedBoxMesh`: three wiggled 20 × 12 blocks over 0.6 × 0.15 m with a max/max and a min/min interface, slip walls and the axis, D4-12), plain tracking (`closedBoxOptions('tracking')`, CFL 1.5) | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
 | C-pre. the same, **preconditioned tracking at the engine's settings** (`closedBoxOptions('preconditioned')`: minMach = M_cut = 0.003, so β², the δU update, the D4-20 scaling and the default CFL of §10 are all exercised) | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
 | C, physical time (SSP-RK3, the oracle's dt) | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
 | D. Sod tube (ladder L2 set-up), physical time | 100 | L1 relative error of ρ′ and p′ ≤ 1e-3 (limiter switches, 12.1) |
-| E. a blockage + source cell set (ladder L5/L8/L9 set-ups) | 10 | e_q ≤ 1e-4; the residual over the flux scale (below) |
+| E. a blockage + source cell set (ladder L5/L8/L9 set-ups) | 10 | e_q ≤ 1e-4; the residual over the flux scale ≤ 3e-7 (E-L5) and 3e-11 (E-L9a) (below, D4-62) |
 | S. ladder L8's sink (`sinkCase({ minMach: 0.003 }, 'f32')`: 64 × 24 polar mesh, slip wall inside, the preconditioned far field outside, the point-implicit sink source), preconditioned tracking from the ambient at rest | 1 / 10 / 100 | e_q ≤ 1e-5 / 1e-4 / 1e-3 |
 | any other row (A, C, C-pre, C physical, D, S) | any | the residual L2 within 1e-3 relative of the oracle's: |r_GPU − r_ref| / r_ref ≤ 1e-3 |
 
@@ -461,6 +461,20 @@ Protocol: the same mesh (the row's, below; always with f32 metrics, the numbers 
 ```
 
 r_flux is the density residual's L2 (§11) with every face's mass flux counted positive. It is the oracle's, in f64, at the compared state: `ReferenceSolver.residualFluxScale()`, the tracking residual's face fluxes (every block; interface faces counted once per side, as the residual assembles them; `tests/unit/flow/solver.test.ts` checks it against the face-by-face sum). Without volume sources r_ref ≤ r_flux (the triangle inequality, per cell), so the flux-scale form is looser by the factor r_flux / r_ref, which is exactly the cancellation that made the residual form ill-posed. r_ref is the stage-1 residual of the last iteration and r_flux the state after it; for a scale, that one-iteration offset does not matter. Measured by w2/solver (round 2): E-L5 is 1.05e-3 over the residual and 2.7e-8 over the flux scale, and E-L9a is 6.6e-9 and 2.5e-12.
+
+**The flux-scale tolerances (decision D4-62, round 9; tightening only).** At the 1e-3 of D4-48 rows B and E could not fail: r_flux / r_ref is 3.9e4 on E-L5 and 1.15e10 on B (W2R-I11), so E-L5 would pass a GPU residual 39× the oracle's. D4-62 sets each row's tolerance from the f32 error model, at ten times the measured error on the flux scale. *The model.* The GPU's density residual differs from the oracle's by the f32 rounding of what it sums: each flow face carries the gauge flux G_f of §14.4 (F_f less the free stream's flux, exact zero for the free stream), evaluated in a few dozen f32 operations of relative step ε = 6e-8, and §14.6(a) sums a cell's faces compensated, so the sum adds nothing of that order. The cell's error is then k ε Σ_f |b_f G_f,ρ| with k = O(1), and over the flux scale
+```
+|r_GPU − r_ref| / r_flux ≈ k ε r_G / r_flux        r_G = r_flux with G_f in place of F_f
+```
+(plus the part of the stored states' own difference after N iterations, which is of the same order for a stable smooth run). So the model bounds the row by k ε r_G / r_flux ≤ k ε, and r_G / r_flux is a property of the set-up: about 1 where the free stream is at rest (E-L5 and E-L9a, u∞ = 0, G = F), far below 1 where the faces carry mostly the free stream (B, a uniform M 0.5 stream whose gauge fluxes are the f32 metric defect of §12.3). The measurements: E-L5 2.67e-8 = 0.45 ε, at the bound; B 1.27e-11, the free stream removed by the gauges; E-L9a 2.46e-12, far below the bound (its mass fluxes at 10 iterations are mostly exact in f32, or their roundings cancel; the model does not resolve it). An upper bound of k ε would leave B and E-L9a 1e4-1e5 × slack, the failure D4-62 is about, so the tolerance is per row: **ten times the measured error, rounded up to one significant figure.** The measurements are the GPU's in the merged `test:gpu` of critic pass 10 (2026-10-28, Dawn; LOG.md "Critic pass 10") and the w2-solver-int handoff (B), with the kernel of record (§14.3-14.6, the D4-44 mirror):
+
+| row | measured, over the flux scale | tolerance (was 1e-3) | margin to 1e-3 |
+|---|---|---|---|
+| B (uniform M 0.5, real mesh, 100 iterations) | 1.27e-11 | **2e-10** | 5e6 × tighter |
+| E-L5 (blockage duct, 10 iterations) | 2.67e-8 | **3e-7** | 3300 × tighter |
+| E-L9a (rotor disk sources, 10 iterations) | 2.46e-12 | **3e-11** | 3e7 × tighter |
+
+Each row stays 10-16× above its measurement, D4-62's margin. A kernel change that moves the GPU's f32 arithmetic (operand order, a new f32 form) re-measures the three numbers and restates the rows through the orchestrator; a row is never loosened to pass. The residual-over-residual rows of the other cases (1e-3) are unchanged, and E-L5's extra 1e-6 over the flux scale (round 2) is subsumed by 3e-7. *Kernel side (the solver's tests follow §12, D4-62):* `tests/gpu/oracle.test.ts` (E-L5, E-L9a: `fluxScaleError` against these values in place of `TOL_RESIDUAL` and the 1e-6) and `tests/gpu-ladder/ladder.test.ts` (B's residual row).
 
 Basis: f32 has a relative step of 6e-8; one iteration rounds each face flux and cell update a few dozen times, and the gauges keep that relative to the perturbation, so one iteration lands near 1e-6 and growth is at most linear over N for a stable smooth run. The f32-storage experiment in `tests/ladder/f32.test.ts` (the oracle with its state rounded to f32 after every stage) measures the storage part of this on the rows' own set-ups, and the table must sit ≥ 10× above it. Measured (2026-10-27, `tests/ladder/oracle.ts` set-ups, f32 metrics, after 1 / 10 / 100 iterations):
 
