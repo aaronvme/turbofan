@@ -1,0 +1,48 @@
+// Critic pass 11 (W2L-I5 / D3-6): does a window blur reach a page that Playwright launched?
+// Playwright's Chromium sends Emulation.setFocusEmulationEnabled({ enabled: true }) for every main
+// frame of a non-default context (playwright-core coreBundle.js, FrameSession._initialize), which
+// is what tools/lookdev/capture.ts, ab.ts, variantAb.ts and spikes/bench/run.ts get from
+// chromium.launch() + browser.newPage(). This probe counts window blur events and reads
+// document.hasFocus() on page 1 while a second Chrome takes the OS focus, first with Playwright's
+// defaults, then with focus emulation switched off on page 1 (the control: it shows that the OS
+// focus really moved).
+// Run: copy to a .mjs file anywhere that resolves @playwright/test, then `node <file>`.
+import { chromium } from '@playwright/test';
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const html = 'data:text/html,<title>focus-probe</title><body>focus probe</body>';
+const install = (p) =>
+  p.evaluate(() => {
+    window.__b = 0;
+    window.__f = 0;
+    addEventListener('blur', () => window.__b++);
+    addEventListener('focus', () => window.__f++);
+  });
+const read = (p) =>
+  p.evaluate(() => ({ blurs: window.__b, focuses: window.__f, hasFocus: document.hasFocus() }));
+
+const b1 = await chromium.launch({ channel: 'chrome', headless: false, args: ['--window-position=40,40'] });
+const b2 = await chromium.launch({ channel: 'chrome', headless: false, args: ['--window-position=240,240'] });
+try {
+  const p1 = await b1.newPage();
+  await p1.goto(html);
+  const p2 = await b2.newPage();
+  await p2.goto(html);
+  const round = async () => {
+    await p1.bringToFront();
+    await wait(1000);
+    await install(p1);
+    const before = await read(p1);
+    await p2.bringToFront();
+    await wait(2000);
+    return { before, after: await read(p1) };
+  };
+  const defaults = await round();
+  const cdp = await p1.context().newCDPSession(p1);
+  await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: false });
+  const emulationOff = await round();
+  console.log(JSON.stringify({ defaults, emulationOff }, null, 1));
+} finally {
+  await b1.close();
+  await b2.close();
+}
