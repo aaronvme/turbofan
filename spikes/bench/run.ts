@@ -3,10 +3,13 @@
 //
 //   npm run bench:throughput [-- --quick] [-- --only=130k-16x8,...] [-- --port=5181] [-- --seed=N]
 //   npm run bench:worker     [-- --quick] [-- --only=main-idle,worker-idle,...]
-//   npm run bench:p1         [-- --quick] [-- --only=solver-130k]
-//     P1 (D4-54): the app's GpuFlowSolver on the shipped 130k asset at D4-2's budget inside the
-//     1080p bench scene, next to the W0 spike kernel's 130k-16x8 (M34's reference row), the two
-//     rotated as one group; prints the P1 verdict and writes docs/bench/p1-<date>-<HHMM>-<protocol>.json
+//   npm run bench:p1         [-- --quick] [-- --only=solver-130k-app,...]
+//     P1 (D4-54, D4-64; spikes/lib/p1.ts): the app's GpuFlowSolver on the shipped 130k asset at
+//     D4-2's budget inside the app's own 1080p engine scene (solver-130k-app: the measurement of
+//     record, spikes/p1), the same in the W0 1080p bench scene beside it (solver-130k-bench), and
+//     the W0 spike kernel's 130k-16x8 (M34's calibration row), the three rotated as one group, a
+//     fresh page (and device) for every run; prints the P1 verdict on the record row and writes
+//     docs/bench/p1-<date>-<HHMM>-<protocol>.json
 //
 // Starts a Vite dev server, launches the installed Chrome headed and maximized (Playwright,
 // whose default switches include --disable-backgrounding-occluded-windows: an occluded window
@@ -14,8 +17,9 @@
 // an idle rAF probe, then runs 3 repetitions of the sweep in a seeded, rotated order
 // (spikes/lib/order.ts), each configuration a warm-up then one run, with Chrome brought to the
 // front (CDP Page.bringToFront) before each. A run that shows the occlusion signature or a
-// hidden or blurred page (spikes/lib/validity.ts, D3-6), or that stalls past its timeout
-// (spikes/lib/timeout.ts, W0G-N6), is rerun once; a configuration with a run still invalid is
+// hidden or blurred page (spikes/lib/validity.ts, D3-6), that reports a GPU error or a
+// non-finite solver state (spikes/lib/p1.ts solverValidity, W2I-I2), or that stalls past its
+// timeout (spikes/lib/timeout.ts, W0G-N6), is rerun once; a configuration with a run still invalid is
 // reported INVALID, without numbers. A slow load is a warning next to its numbers. Records the conditions (D0-1/D0-3: power source, power plan and Windows power
 // mode, CPU load before, during and after, other processes using the GPU before and after, GPU
 // name, driver and refresh rate, adapter features/limits, Chrome version and command line,
@@ -32,6 +36,15 @@ import type { ThroughputResult } from '../throughput/main.ts';
 import type { WorkerBenchResult } from '../worker/main.ts';
 import { aggregateRuns, type RunResult } from '../lib/benchRun.ts';
 import { orderEffect, sweepOrder } from '../lib/order.ts';
+import {
+  P1_PAGES,
+  p1Configs,
+  p1TimeoutMs,
+  p1Verdict,
+  sceneOf,
+  solverValidity,
+  type P1Scene,
+} from '../lib/p1.ts';
 import { benchFileName, parseBenchArgs, protocolLabel, type Protocol } from '../lib/protocol.ts';
 import { median } from '../lib/stats.ts';
 import { THRESHOLDS } from '../../src/contracts/thresholds.ts';
@@ -89,38 +102,6 @@ function throughputConfigs(protocol: Protocol): PageConfig[] {
       particles: 65536,
     })),
   );
-}
-
-/**
- * P1 (D4-54): the production solver (GpuFlowSolver, its own D4-2 scheduler at solverBudgetMs's
- * 5 ms in this scene, the resample counted) and, as the run's calibration against M34's official
- * 1.277 ms/it, the W0 spike kernel's 130k-16x8 at its 7 ms budget. One group: the two rotate.
- */
-function p1Configs(protocol: Protocol): PageConfig[] {
-  const scene = { protocol, particles: 65536 };
-  return [
-    {
-      id: 'solver-130k',
-      group: 'p1',
-      solver: 'production',
-      // unused by the production solver (the shipped asset, its default tile)
-      grid: { ni: 0, nj: 0 },
-      blocks: { bi: 0, bj: 0 },
-      tile: { x: 16, y: 8 },
-      iterations: 'adaptive',
-      ...scene,
-    },
-    {
-      id: 'spike-130k-16x8',
-      group: 'p1',
-      solver: 'spike',
-      grid: { ni: 512, nj: 256 },
-      blocks: { bi: 4, bj: 3 },
-      tile: { x: 16, y: 8 },
-      iterations: 'adaptive',
-      ...scene,
-    },
-  ];
 }
 
 /** Same scene + compute, fixed 3 iterations per frame so both modes carry the same GPU load. */
@@ -308,13 +289,18 @@ const PREBUNDLE = [
   'three/addons/loaders/GLTFLoader.js',
   'three/addons/loaders/HDRLoader.js',
   'three/addons/tsl/display/BloomNode.js',
+  // the app's engine scene (the P1 page, src/render/post.ts)
+  'three/addons/tsl/display/DepthOfFieldNode.js',
+  'three/addons/tsl/display/GTAONode.js',
+  'three/addons/tsl/display/TRAANode.js',
+  'three/addons/tsl/utils/TAAUtils.js',
 ];
 
 function devServer(port: number, headers?: Record<string, string>): InlineConfig {
   return {
     logLevel: 'warn',
     optimizeDeps: {
-      entries: ['spikes/throughput/index.html', 'spikes/worker/index.html'],
+      entries: ['spikes/throughput/index.html', 'spikes/worker/index.html', 'spikes/p1/index.html'],
       include: PREBUNDLE,
     },
     server: { port, strictPort: true, host: '127.0.0.1', ...(headers ? { headers } : {}) },
@@ -524,7 +510,43 @@ async function main(): Promise<void> {
       const cpuLoadDuring = cpuBusyFraction(before, cpus());
       const run = onlyRun(r.runs);
       return {
-        validity: runValidity(run, r.pageHiddenMs, r.pageBlurs),
+        validity: combineValidity([
+          runValidity(run, r.pageHiddenMs, r.pageBlurs),
+          solverValidity(r),
+        ]),
+        cpuLoadDuring,
+        run,
+        result: r,
+      };
+    };
+    // P1: a fresh page for every run, so every run gets a fresh device: the app's engine scene
+    // (spikes/p1, the record) or the W0 bench scene (the throughput page)
+    const p1Pages: Partial<Record<P1Scene, unknown>> = {};
+    const runP1: PageRun = async (config) => {
+      const scene = sceneOf(config.scene);
+      await page.goto(`${base}${P1_PAGES[scene]}`);
+      await refocus();
+      const app = scene === 'app';
+      const info = app
+        ? await page.evaluate(() => window.__p1?.ready)
+        : await page.evaluate(() => window.__bench?.ready);
+      p1Pages[scene] ??= info;
+      const before = cpus();
+      const r = (
+        app
+          ? await page.evaluate((c) => window.__p1?.run(c as never), config)
+          : await page.evaluate((c) => window.__bench?.run(c as never), config)
+      ) as ThroughputResult;
+      const cpuLoadDuring = cpuBusyFraction(before, cpus());
+      if (app) await page.evaluate(() => window.__p1?.dispose());
+      else await page.evaluate(() => window.__bench?.dispose());
+      if (r.scene !== scene) throw new Error(`${config.id}: ran in scene ${r.scene}, not ${scene}`);
+      const run = onlyRun(r.runs);
+      return {
+        validity: combineValidity([
+          runValidity(run, r.pageHiddenMs, r.pageBlurs),
+          solverValidity(r),
+        ]),
         cpuLoadDuring,
         run,
         result: r,
@@ -547,23 +569,27 @@ async function main(): Promise<void> {
       await page.evaluate(() => window.__workerBench?.dispose());
       const run = onlyRun(w.frame.runs);
       return {
-        validity: runValidity(run, w.pageHiddenMs, w.pageBlurs),
+        validity: combineValidity([
+          runValidity(run, w.pageHiddenMs, w.pageBlurs),
+          solverValidity(w.frame),
+        ]),
         cpuLoadDuring,
         run,
         result: w,
       };
     };
 
-    // P1 runs on the throughput page (the same scene)
-    const onThroughputPage = kind !== 'worker';
+    // the throughput sweep keeps one page; P1 loads one per run (runP1)
+    const onThroughputPage = kind === 'throughput';
     if (onThroughputPage) {
       await page.goto(`${base}/spikes/throughput/index.html`);
       await refocus();
       pageInfo = await page.evaluate(() => window.__bench?.ready);
     }
-    const pageRun = onThroughputPage ? runThroughput : runWorker;
-    // W0G-N6: a stalled run is abandoned after this; the page is then reloaded before going on
-    const timeoutMs = runTimeoutMs(single);
+    const pageRun = kind === 'throughput' ? runThroughput : kind === 'p1' ? runP1 : runWorker;
+    // W0G-N6: a stalled run is abandoned after this; the page is then reloaded before going on.
+    // A P1 run's time includes its fresh page's load.
+    const timeoutMs = kind === 'p1' ? p1TimeoutMs(single) : runTimeoutMs(single);
     const reloadPage = async () => {
       const target = onThroughputPage ? `${base}/spikes/throughput/index.html` : 'about:blank';
       const reloaded = await withTimeout(
@@ -689,14 +715,10 @@ async function main(): Promise<void> {
       }
     }
     if (kind === 'p1') {
-      // P1's verdict on the production row (PHYSICS 3.4); a miss counts only after a quiet re-run
-      const p1 = results.find((r) => r.id === 'solver-130k')?.aggregate;
+      // P1's verdict on the app scene's row of record (D4-64), the bench scene's beside it
       const min = THRESHOLDS.P1.values.minIterationsPerS.value;
-      process.stdout.write(
-        p1
-          ? `P1 (>= ${min} it/s at 130k inside the 1080p scene): ${p1.itPerSec >= min ? 'PASS' : 'FAIL'} at ${p1.itPerSec.toFixed(0)} it/s (${fmt(p1.solverMsPerIt, 3)} ms/it, ${p1.fps.toFixed(1)} fps)${args.protocol.name === 'quick' ? ' - indicative only (--quick)' : ''}\n`
-          : 'P1: no valid solver-130k aggregate\n',
-      );
+      for (const line of p1Verdict(results, min, args.protocol.name === 'quick'))
+        process.stdout.write(`${line}\n`);
     }
     process.stdout.write(
       effect
@@ -715,7 +737,7 @@ async function main(): Promise<void> {
         ...(chromeCmd.error ? { chromeCommandLineError: chromeCmd.error } : {}),
         chromeGpu: gpuPage,
         display,
-        page: pageInfo,
+        page: kind === 'p1' ? p1Pages : pageInfo,
         cpuLoadAfter: await cpuLoadOver(2000),
         gpuBusyAfter: gpuBusyOthers(),
         finished: new Date().toISOString(),

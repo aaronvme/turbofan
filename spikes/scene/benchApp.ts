@@ -1,5 +1,6 @@
 // The benchmark app shared by spike (a) (throughput, main thread), spike (d) (main thread
-// vs worker) and the official P1 run (`npm run bench:p1`, D4-54). Per frame, in queue order:
+// vs worker) and the official P1 run's W0 bench-scene rows (`npm run bench:p1`, D4-54; its row of
+// record runs in the app's engine scene, spikes/p1/main.ts, D4-64). Per frame, in queue order:
 //   1. raw compute pass: k solver iterations, timestamped;
 //   2. raw compute pass: resample the state into the rgba16float flow texture, timestamped;
 //   3. three: TSL particle compute (samples the flow texture), then the scene + bloom.
@@ -15,6 +16,7 @@ import {
   GpuErrorLog,
   requestSimDevice,
   type GpuErrorReport,
+  type SimDevice,
 } from '../../src/gpu/device';
 import { runProductionSolver } from './productionRun';
 import { detectQuantumNs } from '../../src/gpu/timestamps';
@@ -30,6 +32,7 @@ import {
   type RunResult,
 } from '../lib/benchRun';
 import { freestream } from '../lib/gas';
+import { sceneOf, type P1Scene } from '../lib/p1';
 import { consToPrim, gaugeContext, initialState } from '../lib/initial';
 import { buildGhosts, cellMetrics, makeLayout, makeNodes, type Tile } from '../lib/mesh';
 import { IterationScheduler } from '../lib/scheduler';
@@ -47,8 +50,11 @@ export interface BenchConfig {
   readonly tile: Tile;
   /** The production solver's budget per frame, ms, in place of D4-2's solverBudgetMs (a probe). */
   readonly budgetMs?: number;
-  /** The scene of a production run: the W0 bench scene (default) or the app's EngineView. */
-  readonly scene?: 'bench' | 'app';
+  /**
+   * The scene: the W0 bench scene (default, BenchApp) or the app's engine scene, which only the
+   * P1 page runs (spikes/p1/main.ts). BenchApp throws on 'app' and on anything else (W2I-I2 b).
+   */
+  readonly scene?: P1Scene;
   /** 'adaptive' = IterationScheduler at the 7 ms budget; a number = fixed per frame. */
   readonly iterations: 'adaptive' | number;
   readonly protocol: ProtocolTimes;
@@ -72,6 +78,8 @@ export interface AdapterReport {
 export interface ConfigResult {
   readonly id: string;
   readonly solver: 'spike' | 'production';
+  /** The scene the run was measured in. */
+  readonly scene: P1Scene;
   readonly cells: number;
   readonly grid: BenchConfig['grid'];
   readonly blocks: BenchConfig['blocks'];
@@ -92,12 +100,39 @@ export interface ConfigResult {
   readonly stateFinite: boolean;
   readonly maxAbsGaugePressurePa: number;
   readonly gpuErrors: readonly GpuErrorReport[];
+  /** Production runs: the frames whose density residual read back non-finite (W2I-I2 a). */
+  readonly nonFiniteResiduals?: number;
+  /** Production runs: GpuFlowSolver.status() at the end. */
+  readonly solverStatus?: { readonly status: string; readonly error: string | null };
   /**
    * The measured runs on the rendering thread's frame clock, with that thread's
    * performance.timeOrigin, so the page can match main-thread long tasks to the runs in both
    * modes (a worker has its own time origin).
    */
   readonly measured: { readonly timeOrigin: number; readonly from: number; readonly to: number };
+}
+
+/** The adapter as the bench records it (D0-1 conditions). */
+export function adapterReport(sim: SimDevice): AdapterReport {
+  const limits: Record<string, number> = {};
+  for (const key in sim.adapter.limits) {
+    const v = (sim.adapter.limits as unknown as Record<string, unknown>)[key];
+    if (typeof v === 'number') limits[key] = v;
+  }
+  return { ...sim.info, features: [...sim.features].sort(), limits };
+}
+
+/**
+ * A rejected three timestamp resolve (W2I-N7) goes to the run's GPU errors, which make the run
+ * INVALID (spikes/lib/p1.ts solverValidity): its render timings are incomplete.
+ */
+export function timestampFailure(log: GpuErrorLog, what: string): (e: unknown) => void {
+  return (e) => {
+    log.sink({
+      kind: 'unknown',
+      message: `${what}: ${e instanceof Error ? e.message : String(e)}`,
+    });
+  };
 }
 
 const DOMAIN = { x0: -1, x1: 3, r1: 1.5 };
@@ -153,12 +188,7 @@ export class BenchApp {
     // updates, which an OffscreenCanvas could not take anyway).
     renderer.setPixelRatio(1);
     renderer.setSize(width, height, false);
-    const limits: Record<string, number> = {};
-    for (const key in sim.adapter.limits) {
-      const v = (sim.adapter.limits as unknown as Record<string, unknown>)[key];
-      if (typeof v === 'number') limits[key] = v;
-    }
-    const adapter: AdapterReport = { ...sim.info, features: [...sim.features].sort(), limits };
+    const adapter = adapterReport(sim);
     return new BenchApp(
       renderer,
       sim.device,
@@ -172,6 +202,11 @@ export class BenchApp {
   }
 
   async run(config: BenchConfig, raf: (cb: (t: number) => void) => void): Promise<ConfigResult> {
+    if (sceneOf(config.scene) === 'app') {
+      throw new Error(
+        `${config.id}: BenchApp runs the W0 bench scene only; scene 'app' runs on the P1 page (spikes/p1/main.ts)`,
+      );
+    }
     if (config.solver === 'production') return this.runProduction(config, raf);
     const { device } = this;
     const { ni, nj } = config.grid;
@@ -258,8 +293,14 @@ export class BenchApp {
         scene.frame(last === null ? 1 / 60 : Math.min(0.1, (t - last) / 1000));
         last = t;
         if (rec.phase === 'run') {
-          void this.renderer.resolveTimestampsAsync('render').then(keep(renderMs));
-          void this.renderer.resolveTimestampsAsync('compute').then(keep(threeComputeMs));
+          void this.renderer
+            .resolveTimestampsAsync('render')
+            .then(keep(renderMs))
+            .catch(timestampFailure(this.log, 'three render timestamps'));
+          void this.renderer
+            .resolveTimestampsAsync('compute')
+            .then(keep(threeComputeMs))
+            .catch(timestampFailure(this.log, 'three compute timestamps'));
         }
         if (rec.frame(t, k, callbackAt) === 'done') {
           resolve(rec);
@@ -298,6 +339,7 @@ export class BenchApp {
     const result: ConfigResult = {
       id: config.id,
       solver: 'spike',
+      scene: 'bench',
       cells: layout.nCells,
       grid: config.grid,
       blocks: config.blocks,
@@ -331,12 +373,14 @@ export class BenchApp {
     raf: (cb: (t: number) => void) => void,
   ): Promise<ConfigResult> {
     const renderer = this.renderer;
+    const log = this.log;
     return runProductionSolver({
       device: this.device,
       config,
       raf,
       size: this.size,
-      errors: () => this.log.reports,
+      errors: () => log.reports,
+      sceneName: 'bench',
       scene: (flowTexture, isRun) => {
         const scene = createBenchScene(renderer, {
           flowA: flowTexture,
@@ -358,16 +402,22 @@ export class BenchApp {
         return {
           render: (dtS) => {
             scene.frame(dtS);
-            void renderer.resolveTimestampsAsync('render').then(
-              keep(runRenderMs, (ms) => {
-                lastRender = ms;
-              }),
-            );
-            void renderer.resolveTimestampsAsync('compute').then(
-              keep(runComputeMs, (ms) => {
-                lastCompute = ms;
-              }),
-            );
+            void renderer
+              .resolveTimestampsAsync('render')
+              .then(
+                keep(runRenderMs, (ms) => {
+                  lastRender = ms;
+                }),
+              )
+              .catch(timestampFailure(log, 'three render timestamps'));
+            void renderer
+              .resolveTimestampsAsync('compute')
+              .then(
+                keep(runComputeMs, (ms) => {
+                  lastCompute = ms;
+                }),
+              )
+              .catch(timestampFailure(log, 'three compute timestamps'));
           },
           renderMs: () => lastRender,
           flowVisualsMs: () => lastCompute,
