@@ -96,6 +96,11 @@ export interface PostSettings {
   };
   /** three r186's own TRAA resolve (tests: the pre-W1V-I1 pipeline). */
   readonly legacyTraa?: boolean;
+  /**
+   * The pre-round-5 scene pass: colour, view normal and velocity targets (24 B per sample)
+   * instead of colour alone (look-dev A/B of P4's cut, `?gbuffer=legacy`).
+   */
+  readonly legacyGbuffer?: boolean;
 }
 
 export interface LookPipeline {
@@ -138,15 +143,25 @@ export function createPipeline(
 
   const scenePass = pass(main, camera);
   scenePass.name = 'Opaque';
-  // the targets are rgba16float, so the view normal is stored as is (GTAO samples it: it
-  // needs a texture node, not an unpack expression)
-  scenePass.setMRT(mrt({ output, normal: vec4(normalView, 1), velocity }));
+  // P4 (round 5): the scene pass writes its colour and depth only. Its view normal and
+  // velocity targets were two more rgba16float writes per sample (24 B instead of 8) over a
+  // fragment-heavy pass, for data the depth already holds: GTAO reconstructs the normal from
+  // the depth (three's GTAONode without a normal node), and TRAA's velocity is the camera's
+  // reprojection of the depth's world point (below; the main pass is static but for the
+  // exploded and cutaway transitions, which TRAA's variance clip handles as it did a moving
+  // camera before W1V-I1)
+  const motion = settings.rotorMotion;
+  const lean =
+    settings.legacyGbuffer !== true && settings.legacyTraa !== true && motion !== undefined;
+  scenePass.setMRT(lean ? mrt({ output }) : mrt({ output, normal: vec4(normalView, 1), velocity }));
   const sceneColor = scenePass.getTextureNode('output');
   const sceneDepth = scenePass.getTextureNode('depth');
-  const sceneNormal = scenePass.getTextureNode('normal');
-  const sceneVelocity = scenePass.getTextureNode('velocity');
+  const sceneNormal = lean ? null : scenePass.getTextureNode('normal');
+  // lean: a stand-in texture node whose per-texel load (what TRAA reads) is replaced below
+  const sceneVelocity = lean ? texture(sceneDepth.value) : scenePass.getTextureNode('velocity');
 
-  const aoPass = ao(sceneDepth, sceneNormal, camera);
+  // three types the normal as required; its GTAONode reconstructs it from the depth when null
+  const aoPass = ao(sceneDepth, sceneNormal as unknown as Node, camera);
   aoPass.resolutionScale = 0.5;
   // 8 fixed samples: 6 with the noise rotated every frame (TRAA averaging it) put a 0.11 tile
   // into the hero's fan-blur check (0.03 with these), so GTAO was not cut (LOD round 2)
@@ -309,16 +324,27 @@ export function createPipeline(
   // rotor velocity is computed there and costs no pass of its own.
   const prevViewProj = uniform(new Matrix4());
   const currViewProj = uniform(new Matrix4());
+  const currViewProjInv = uniform(new Matrix4());
   let havePrev = false;
-  const motion = settings.rotorMotion;
   if (motion !== undefined) {
     const velocityNode = sceneVelocity as unknown as {
       load(texel: Node<'vec2'>): Node<'vec4'>;
     };
     const baseLoad = velocityNode.load.bind(velocityNode);
+    // the camera's motion at a static scene texel: its depth's world point (unprojected with
+    // the unjittered view-projection, so a still camera gives exactly zero, as three's
+    // velocity does) projected with the previous frame's
+    const cameraLoad = (texel: Node<'vec2'>): Node<'vec4'> => {
+      const size = vec2(sceneDepth.size(int(0)) as unknown as Node<'ivec2'>);
+      const uvT = texel.floor().add(0.5).div(size);
+      const ndc = vec2(uvT.x.mul(2).sub(1), float(1).sub(uvT.y.mul(2)));
+      const w = currViewProjInv.mul(vec4(ndc, sceneDepth.load(texel).r, 1));
+      const q = prevViewProj.mul(vec4(w.xyz.div(w.w), 1));
+      return vec4(ndc.sub(q.xy.div(q.w)), 0, 0);
+    };
     velocityNode.load = (texel) =>
       Fn(() => {
-        const sceneVel = baseLoad(texel);
+        const sceneVel = lean ? cameraLoad(texel) : baseLoad(texel);
         const rd = rotorDepth.load(texel).r;
         const sd = sceneDepth.load(texel).r;
         const isRotor = rotorColor.load(texel).a.greaterThan(0.001).and(rd.lessThan(sd));
@@ -472,6 +498,7 @@ export function createPipeline(
       camera.updateMatrixWorld();
       if (havePrev) prevViewProj.value.copy(currViewProj.value);
       currViewProj.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      currViewProjInv.value.copy(currViewProj.value).invert();
       if (!havePrev) prevViewProj.value.copy(currViewProj.value);
       havePrev = true;
       if (!withTraa || linear) {

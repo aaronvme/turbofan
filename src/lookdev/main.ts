@@ -123,6 +123,8 @@ async function main(): Promise<void> {
     quality: params.get('quality') === 'test' ? 'test' : 'high',
     profile: params.get('profile') === 'performance' ? 'performance' : 'quality',
     debug: (params.get('debug') as PostDebug) ?? null,
+    // look-dev A/B of round 5's P4 cut (tools/lookdev/variantAb.ts)
+    legacyGbuffer: params.get('gbuffer') === 'legacy',
   });
   const controls = new OrbitControls(view.camera, canvas);
   controls.enableDamping = true;

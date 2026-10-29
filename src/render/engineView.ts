@@ -81,6 +81,8 @@ export interface EngineViewOptions {
    * only), the negative control of tests/browser/rotorMotion.test.ts.
    */
   readonly legacyTraa?: boolean;
+  /** Look-dev A/B only: the pre-round-5 scene pass targets (colour, normal, velocity). */
+  readonly legacyGbuffer?: boolean;
 }
 
 export interface EngineViewStats {
@@ -300,6 +302,7 @@ async function assemble(
     bloomStrength: 0.06,
     bloomThreshold: 1.6,
     debug: o.debug ?? null,
+    ...(o.legacyGbuffer === true ? { legacyGbuffer: true } : {}),
     ...(o.legacyTraa === true
       ? { legacyTraa: true }
       : { rotorMotion: { lpStep: uniforms.lpStep, hpStep: uniforms.hpStep } }),
