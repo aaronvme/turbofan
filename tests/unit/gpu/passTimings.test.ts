@@ -163,7 +163,9 @@ describe('flow-visual passes (D4-2: outside P4, inside the flow-visuals budget)'
     expect(m.gpuTotal).toBe(4);
     r.beginRun();
     r.push(sumByGroup([{ label: 'Opaque', ms: 4 }]), 1, 0.5);
-    expect(r.endRun()).toEqual([{ gpu: sumByGroup([{ label: 'Opaque', ms: 4 }]), cpu: 1, flow: 0.5 }]);
+    expect(r.endRun()).toEqual([
+      { gpu: sumByGroup([{ label: 'Opaque', ms: 4 }]), cpu: 1, flow: 0.5 },
+    ]);
   });
 
   it('count 0 when a frame has none', () => {
