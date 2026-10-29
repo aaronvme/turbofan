@@ -3026,3 +3026,42 @@ None.
 - **D4-66 (question ll): P1 is expected to miss in the app's scene (about 120 it/s).** The arithmetic: render 8.5 ms back to back (P4), so D4-2 gives the solver min(5, 15 − 8.5 − 2) − 0.66 ms resample ≈ 3.8 ms, which is 2 iterations at 1.29 ms.
   - The official run decides it. If it misses, P1's own rule applies: a logged decision between the 80k mesh and a half-rate solver, made on measured numbers (80k ≈ 0.8 ms/it would give about 4 iterations per frame).
   - P4's last 0.5 ms (look-dev round 5) feeds the same budget.
+
+### Re-verification @9e1257b (w2/solver-fix, from main 6ed8d81)
+
+I re-checked each pass-10 finding on 2026-10-28. I read the diff 6ed8d81..9e1257b and ran the suites one at a time in the builder worktree, whose tracked files are unchanged. I ran no `bench:*`.
+
+**Gates at 9e1257b:**
+- typecheck and lint: clean.
+- `npm run coverage`: 99 files, 1917 passed + 11 expected fail (761 s). Lines 99.60 %, statements 98.70 %, functions 99.65 %, branches 87.76 %. By directory (lines): src/flow/reference 100, thermo 100, cycle 99.58, geometry 99.59, flow/gpu 99.74.
+- `tests/unit/spikes`: 16 files, 136 passed (p1.test.ts among them).
+- `test:gpu`: 11 files, **64 passed** (59 s). Every 12.2 row equals pass 10's to the printed digit, and engine stability is 0.998 … 1.510.
+- `test:gpu-ladder`: **12 passed + 1 expected fail** (317 s). The L9a value row passes at 3.56e-6 (finite, spread 1.31e-5 reported), and the expected fail is the steadiness pin.
+- `test:browser`: 9 files, **26 passed** (170 s, port 5190, strictPort). Nothing is left listening.
+- `test:mesh` and `test:ladder`: not run. No file they cover changed.
+
+**Probes:**
+- N1, bitwise, my probe (f07f57e against 9e1257b, 130k, perfState): **0 of 1,040,272 words differ, all finite**, in preconditioned (50), plain (200) and physical (50).
+- M4 (every ghost taking cell 0's β) against `test:gpu` at 9e1257b: now **killed by 2 tests**, C-pre and the new preconditioned interface variant.
+
+**Each finding:**
+- **W2I-I1: FIXED** (D4-65, 5442ebc). `l9aCase()` runs the case once and two tests share it.
+  - The value row passes only when the value is finite and < 1e-4, every window sample is finite, and the spread is finite. A regression, a NaN, a GPU error (afterEach) or a timeout therefore fails it.
+  - The `it.fails` asserts only spread ≤ tol/10, and its comment says to fold the steadiness back into the value row once it passes.
+  - The CPU ladder is unchanged (visible FAIL, D4-57).
+- **W2I-I2: FIXED** (D4-64, daa8229 TDD / 491868b / 3c2f1e0).
+  - (a) `solverValidity` (`spikes/lib/p1.ts`) makes a run INVALID on any GPU error, a non-finite state, a non-finite resolved residual on any frame, or a solver not `running` at the end. It is combined with D3-6 for every kind, and `p1Verdict` gives no verdict on an INVALID or missing record row.
+  - (b) The row of record is `solver-130k-app`: EngineView at 1920 × 1080, DPR 1, defaults, `FLOW_SOLVER_LIMITS`. The bench scene and the spike run beside it, with a fresh page per run. `sceneOf` throws on an unknown scene, BenchApp throws on 'app', the P1 page throws on anything but production + 'app', and run.ts throws when a result's `scene` differs from the one requested.
+  - (c) spikes/README now has the commands, the rows, the INVALID rule and estimated durations.
+  - (d) The reset is kept, with the D4-63 reason, and the per-frame residual check now catches a divergence between resets.
+  - Remaining caution, not a finding: as the handoff says, nobody has driven `runP1` end to end. The orchestrator's `--quick --only=solver-130k-app` smoke is the first run.
+- **N1: FIXED** (2a27ceb). There is one `cellPrim` site for a cell and a ghost's first source, and it is bitwise as before (probe). The slip wall's second source keeps its own site, which never meets an interface.
+- **N2: FIXED** (c673d65 TDD / 7ee6bd8). The callback runs after the solver's own updates, inside try/catch, and its error goes to console.error. The test confirms the status stays `running` with a throwing consumer.
+- **N3: FIXED** (6f848ef). `compareSides` counts each side's non-finite state and half-float texture values.
+- **N4: FIXED** (b450694). The interface, tile-shape and D4-50 packed tests run plain and preconditioned (`it.each(MODES)`), and M4 now has 2 killers. The suggested oracle comparison on the real mesh was not added. It was optional, and I do not carry it.
+- **N5: FIXED** (6f848ef): about 0.42 at β/M_ref 8.9.
+- **N6: FIXED** (491868b): every `frameAt` key at or below a resolved frame is dropped.
+- **N7: FIXED** (491868b): all three-timestamp resolves have a `.catch` that logs a GPU error, which makes the run INVALID.
+- **N8: FIXED** (c673d65): the test calls a visible `skip()` without timestamps.
+
+**Verdict w2/solver-fix @9e1257b: MERGE.** 0 open findings. `bench:p1` is ready for the orchestrator's quick smoke, then the quiet official run. D4-66 expects a miss at about 120 it/s.
