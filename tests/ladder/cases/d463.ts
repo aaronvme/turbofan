@@ -101,6 +101,11 @@ export async function runD463(k: D463Case) {
     energy.push(now.l2 / first.l2);
     residual.push(s.stats.residualDensityL2Volume);
     residualMean.push(s.stats.residualDensityL2);
+    // progress on stderr (the ladder reads only stdout's result line): the run takes about an hour
+    if (done % 1000 === 0)
+      process.stderr.write(
+        `${k.id} ${done}: L2(p') x${(now.l2 / first.l2).toFixed(4)} max |p'| x${(now.max / first.max).toFixed(3)} resV ${s.stats.residualDensityL2Volume.toExponential(4)}\n`,
+      );
     if (!Number.isFinite(pressure[pressure.length - 1])) break;
   }
   const finite =
