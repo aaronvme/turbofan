@@ -3358,3 +3358,18 @@ None.
   - Standard practice: the scientific overlay is drawn after the cinematic pipeline, unaffected by it.
   - In Data and Cutaway modes, the cut plane is cropped to the engine's near field (a few diameters), so the far-field slab doesn't cover the studio. The full domain stays available as an option.
   - Realistic and Schlieren keep their physically based paths.
+- **D4-77 (w2/reference-9 round 10 @a1313a3): rule (b)'s residual is restated in the same volume-weighted norm as D4-72, consistently with it.**
+  - **Round 10's evidence:**
+    - The linear part is a decaying non-normal transient: over 20k iterations at 1e-6, the pseudo-energy fell in 99 of 100 windows, L2(p′) ended at 0.022× its first, and max |p′| peaked at 4.98× before ending at 0.35×.
+    - The spectral radius is 1 from neutral entropy/vortical modes only. The stand-in Arnoldi carries no pressure in its leading vector.
+    - Yet that decaying case fails the unweighted residual rule, at 11.9×.
+  - **So the unweighted residual does not measure growth.** It is dominated by the r-weighted scheme's tiny near-axis cells.
+  - Rule (b) becomes: the volume-weighted L2 residual from 1000 to 2000 iterations is ≤ its value at iteration 100. This rests on the definition: the same energy norm as (a), and the standard convergence monitor. It is a change after seeing data, logged as such, and it does not loosen (a).
+- **D4-78 (round 10, the nonlinear part and the scheme):**
+  - K = 0 (D4-68) is not adopted: it goes NaN and breaks C-pre and L8. The face-limited Δp also fails the rule, so the Δp term does not cause the nonlinear part. β² stays as it is (K = 1, the neighbour Δp), and the kernel needs no change.
+  - Under the energy rule, (a) passes: the contract case 1.72× and the linear part 0.51×.
+  - The next reference round:
+    - implements D4-77;
+    - re-runs the d463 case. If (a) and the restated (b) pass, D4-63 closes without a scheme change: max-norm geometric focusing plus a non-normal transient. If (b) still fails, come back with data for a floor or a scheme change;
+    - runs the full gates and the ladder.
+  - The smooth limiter's real growing far-field mode (1.00289 per iteration) is recorded as further support for D4-55 (keep sharp).
