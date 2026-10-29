@@ -1,35 +1,49 @@
-w2/reference-9 round 10: STOP-CLEAN at the self-brake (usage 79-84 %). D4-68 has no adoptable form, D4-69 is a decaying non-normal transient, and D4-72's rule is in the d463 case. coverage, test:mesh and test:ladder were not run (no src/ change). (From bcacc0a; HEAD = the commit of this handoff.)
+w2/reference-9 round 11: DONE. D4-77 is implemented, and D4-63 is NOT closed: the restated rule (b) still fails, for the contract case (2.61x) and narrowly for the linear part (1.09x). No scheme change. (From a1313a3; HEAD = the commit of this handoff.)
 
-DONE (round 10)
-- 9a9dd28 D4-68 in SOLVER.md 10 (table there). Not adopted. K = 0: the D4-63 case is NaN at ~190 iterations, C-pre is NaN by 10, and L8 fails (velocity 11.1 %, steadiness 0.071). L7 is unchanged (0.0131 / 0.0016 / 1.048). The face-limited Δp (max |p'_R - p'_L| of the MUSCL face states) keeps C-pre and S, but fails rule 1 like the contract (max |p'| 8.05x, residual 11.2x). The Δp term is not the nonlinear part's cause: at beta = M_cut a wave p' carries u ~ p'/(rho beta c), and the pseudo-time nonlinearity p'/(rho beta^2 c^2) is bounded only by the M^2 term or a floor.
-- 0d7ec78 D4-72: `tests/ladder/cases/d463.ts` rule (a) is now the volume-weighted L2 of p' (<= 2x its first over 1000-2000), (b) is unchanged (residual <= its value at 100), and row 3 reports max |p'|. `d463.test.ts` keeps `it.fails`, because the contract fails (b) (round 9's log: L2 1.72x, inside the bound; residual 11.9x). D4-69's verdict is in SOLVER.md 10. D4-71: SOLVER.md 12.2 E-L9a is 1e-10.
+DONE (round 11)
+- 2d3a592 (TDD) / 8ed4497: `IterationStats.residualDensityL2Volume` in the oracle, sqrt(sum_c bV (R_rho/(bV))^2 / sum_c bV) of stage 1, beside the cell mean `residualDensityL2`. A monitor only: R, the update and every other stat are unchanged. Test: `tests/unit/flow/solver.test.ts` "reports the density residual of stage 1 in both norms" (both norms against a brute-force sum of residual() to 1e-14, plain and preconditioned, with blockage; 0 at rest; the two norms differ). After the TDD commit, its preconditioned branch is taken at the pulse, as in the flux-scale test, because the 10 % wave at M_cut is NaN after 3 iterations. That was a setup fix, not a tolerance change.
+- 0a61c73: D4-77 in `tests/ladder/cases/d463.ts`. Row 2 (rule b) is the volume-weighted residual, and the new row 4 reports the cell mean. `d463.test.ts` prints row 4 and keeps `it.fails`. SOLVER.md 10 states the rule in force (D4-72 + D4-77), and 11 defines the monitor.
+- 4e7b02a: SOLVER.md 10, D4-77's results, the location, the minMach 0.02 scratch trial, and the candidates.
 
-D4-69 VERDICT (SOLVER.md 10 has the numbers)
-- A non-normal transient, not a mode. On the 130k mesh, engine default, isentropic 1e-6, 20k iterations renormalised: the pseudo-energy E_tau falls in 99 of 100 windows (one rise of 3e-4). L2(p') is 0.47-0.51 over 1000-2000 and 0.022 at 20k. Max |p'| peaks at 4.98x (3600) and is 0.35x at 20k. The residual is 12.9x its value at 100 over 1000-2000, 28x at its peak, and 2.1x at 20k.
-- Spectral radius 1, from the neutral entropy/vortical family. Core-duct stand-in Arnoldi (linear, wall/outflow ends): leading 1 + 4.5e-7 per iteration, pressure-free. Every Ritz value that carries pressure is <= 0.99999. The late vector of the full-mesh run sits in the core duct beside the plug, core(492,0), and decays at 0.999984 per iteration.
-- Rule under D4-72: (a) passes for the contract (1.72) and for the linear part (0.51). (b) fails for both, because the residual (the unweighted mean of (R/V)^2) is not an energy norm and weights the small core cells.
+D4-77 RESULTS (SOLVER.md 10 has the table; `reports/scratch/r11/diag.ts`, logs in `r11/logs`)
+- The contract case (1e-3, isothermal; the ladder gives the same numbers): (a) L2(p') 1.717, pass. (b) weighted residual **2.614, FAIL** (3.55 at 100, 9.28 at 1500). Reported: cell mean 11.95, max |p'| 8.39. These reproduce round 9 (2.44 / 5.43 / 12.44).
+- The linear part (1e-6, isentropic): (a) 0.505, pass. (b) **1.092, FAIL**: flat at 0.81-1.09 from 200 to 2000. Reported: cell mean 12.19, max 3.57. On round 10's 20k vector the weighted residual is **0.14x** its value at 100, while the cell mean is still 2.10x. So it is non-growing in D4-70's sense, and fails the window only because it decays slowly.
+- Where the weighted residual sits (the contract, 1000-2000): the far-field block's interior, 31-55 % (r 2.4-4.7 m, x 1.8-7.9 m, not the outer boundary row). Then plume-bypass, 15-19 %, and plume-outer, 9-14 %. Per unit volume the plume blocks carry 8-12x the mean, and no cell carries more than 2 %. The cell mean sits in the core block instead (40-78 %, V ~ 1e-6).
+- Scratch trial, not the contract: minMach = M_cut = 0.02 (D4-59's setting). (a) 0.778: the nonlinear L2 growth is gone. (b) **1.435, FAIL**: flat at 1.2-1.4 from 300 on. Max 4.21, cell mean 15.85.
 
-DECISIONS NEEDED
-- (a) Rule 1b's residual: keep it as stated (then D4-63 stays open, since the linear transient alone fails it), or restate it in an energy-weighted residual (D4-70/D4-72 logic). Not changed here.
-- (b) The nonlinear part has no local Δp fix. Candidates (scheme/contract changes): a larger floor (round 9: minMach 0.02 cut the stand-in's focus 5.4x -> 2.3x) or an amplitude-aware beta^2.
-- (c) Found on the way: the smooth limiter (D4-25) with a far field has a real growing pressure-free mode, 1.00289 per iteration at the far-field/wall corner (the sharp limiter decays). The core block alone, with a far field at imin, goes to NaN from the 1e-3 pulse at K = 1 too (the far field under a finite pseudo-velocity at M_cut).
+DECISIONS NEEDED (D4-63)
+- (a) Rule (b)'s window. Every run whose energy decays (the linear part, the floored case) fails (b), with a weighted residual that is flat over 1000-2000. A decay-in-the-limit test (D4-70's definition) would separate them from growth, for example: the weighted residual's max over 2000-4000 at most its max over 1000-2000. That is a window change, which D4-70 reserves to a logged decision. The contract would still have to pass it.
+- (b) The nonlinear part: its L2(p') goes to 1.72x while the linear part halves, and its residual to 2.6x. The candidates:
+  - a beta floor: minMach 0.02 fixes (a) but not (b), and R fails its rule 2 at 0.02 (D4-59). An amplitude-aware beta^2 is the narrower form, not run.
+  - a local time-step limit (cap tau where p'/(rho beta^2 c^2) per step is large, or limit tau's neighbour ratio): not run. It cannot change the linear part's transient.
 
 KERNEL MIRROR (for w2/solver)
-- beta^2 unchanged: min(1, max(M^2, minMach^2, K |dp|/(rho c^2))), K = 1, dp = the largest |p'_nb - p'_c| over the four face neighbours (ghosts included). No D4-63 fix was adopted, so there is no scheme change to mirror.
-- D4-62 / D4-71: `tests/gpu/oracle.test.ts` E-L5 / E-L9a `fluxScaleError` against 3e-7 / **1e-10**; `tests/gpu-ladder/ladder.test.ts` B's residual row against 2e-10.
-- The GPU engine-stability test takes the d463 rule in D4-72's form (L2 of p', residual) when D4-63 is decided.
+- No scheme change. beta^2 is unchanged: min(1, max(M^2, minMach^2, K |dp|/(rho c^2))), K = 1, dp the largest |p'_nb - p'_c| over the four face neighbours.
+- I19: the kernel takes D4-62 / D4-71's tolerances in its GPU tests only. `tests/gpu/oracle.test.ts` E-L5 / E-L9a `fluxScaleError` against 3e-7 / **1e-10**, and `tests/gpu-ladder/ladder.test.ts` B's residual row against 2e-10.
+- New monitor (oracle-side, SOLVER.md 11): `residualDensityL2Volume`. The kernel needs it only if the GPU engine-stability test takes the D4-63 rule (D4-72 + D4-77) once D4-63 is decided. It would be a second reduction in stage 1 (sum R^2/(bV) and sum bV) or a host-side sum over a read-back. `FlowStepStats` (src/contracts/flow.ts) has only the cell mean, so adding it there is a contracts change. Not done here.
 
 NEXT
-1. Face-limited d463 under D4-72 (logs/d463_face2.log): L2 1.43x, residual 11.2x, max 8.05x; fails (b).
-2. Gates at this HEAD: coverage, test:mesh, test:ladder. test:ladder's d463 now prints the L2 row; expected (a) ~1.7 pass, (b) ~12x fail (the pin holds).
-3. The orchestrator's decisions (a)-(c).
+1. The orchestrator's decisions (a) and (b) above.
+2. If (a) moves the window: run the d463 case to 4000 (about 15 min alone, boosted), and flip the pin only if the rule as decided passes.
 
 GOTCHAS
-- Scratch (gitignored): `reports/scratch/r10/`. It holds `ref/solver.ts` (a copy with `R10_K`, `R10_DP=face`, and public tau/beta2) and `redirect.mjs` (a resolve hook: run `node --import ./tools/mesh/ts-resolve.mjs --import ./reports/scratch/r10/redirect.mjs ...`, or NODE_OPTIONS for the ladder's child processes, as in `rows.sh`). It also holds `power.ts` (the renormalised power iteration, E_tau), `arnoldi.ts` + `eig.ts` (hqr, self-tested), `bound.ts`, and `logs/`.
-- **This machine runs background node on the E-cores: 775 ms/it on 130k. Raise to AboveNormal (`r10/boost.sh`) for 215 ms/it.**
-- Arnoldi is invalid with a far field at rest (the sign switch on u_n) and with the sharp limiter (only homogeneous). Use the power iteration there. Scale matvec vectors by their full amplitude, not by p' (a velocity-only vector leaves the linear range).
+- Scratch (gitignored), `reports/scratch/r11/`:
+  - `diag.ts` (env AMP, START iso | isentropic, MINMACH, N, EVERY) is the case's start and norms, plus residual() per block. residual() does not perturb the run, because the next stage 1 recomputes the same.
+  - `bin20k.ts` reads r10's 20k vector.
+  - `blocks.ts` gives block sizes.
+  - `boost.ps1` / `boosttree.ps1` raise only this worktree's node processes: diag runs, and the ladder's forks with their runCase children under this worktree's vitest. The r10 `boost.sh` raises EVERY node process on the machine, so don't use it beside other builders.
+- Boosted speed is 216-223 ms/it on 130k (2000 iterations in about 7.5 min). Unboosted it is 680-775 ms/it. With the tree booster the full ladder took 722 s.
 
-GATES @0d7ec78 (src/ unchanged since bcacc0a; tests/ladder d463 and docs only)
+GATES @4e7b02a (the src change is the oracle's monitor only)
 - npm run typecheck: clean
 - npm run lint: clean (ESLint --max-warnings 0, Prettier)
-- npm run coverage / test:mesh / test:ladder: NOT RUN (self-brake). Last: coverage 1917 passed / 11 expected fail, test:mesh 29 passed (@eb5f92b; src/ is unchanged since).
+- npm run coverage: 99 files, 1918 passed / 11 expected fail. Lines 99.6 % overall; src/flow/reference 100 %, src/thermo 100 %, src/cycle 99.58 %, src/geometry 99.59 % (781 s)
+- npm run test:mesh: 29 passed
+- npm run test:ladder: 12 files passed, 3 failed (15). Tests: 13 passed, 3 failed, 1 expected fail (722 s). These are the known failures of record, unchanged:
+  - L8: convergence 37500 at the cap. Velocity 0.449 % and steadiness 1.96e-5 pass.
+  - L9a: Euler work 8.86e-6, but steadiness 1.062e-5 against 1e-5 (D4-57) and convergence at the cap 20000.
+  - L9b: disk 0.80 % and steadiness 2.5e-5 pass, convergence at the cap 20000.
+- Ladder table (the main rows):
+  - L1 quiescent 0.000; L1 M 0.5 f64 2.0e-13; L2 L1(rho) 0.0028 and shock offset 0.23; L3 0.0021; L4 supersonic 0.0028 and choked 0.0010; L4 shock 0.0164 with steadiness 2.6e-4; L5 8.4e-4 (948 its); L6 3.0e-4 / 4.7e-15 / 2.9e-5 / 5.4e-8.
+  - L7 0.0131 falling (0.135 / 0.044 / 0.013), Cd 0.0016, ratio 1.048. The 12.2 C / C-pre / C physical / S rows all pass; floor 1.59e-4 / 1.10e-3.
+  - D4-63: signature 12.26 (pass); (a) 1.717 (pass); (b) 2.614 (fail, the expected fail as pinned); reported max |p'| 8.393 and cell mean 11.95.
