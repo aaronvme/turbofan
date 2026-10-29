@@ -100,12 +100,15 @@ const A_T0 = 200;
 const A_T1 = 2400;
 const A_N = 64;
 
-/** A streak is the particle's path over this much wall time (a short film exposure), s. */
-export const STREAK_S = 0.05;
+/**
+ * A streak is the particle's path over this much wall time, s (a long film exposure of smoke
+ * tracers: at 1/200 the intake's 150 m/s draws 19 cm, so the streaks read as flow lines).
+ */
+export const STREAK_S = 0.25;
 /** The longest streak drawn, m (a fast jet at a fast dilation stays a streak, not a line). */
-const MAX_STREAK_M = 0.3;
+const MAX_STREAK_M = 0.45;
 /** Half the streak's width, px (of the flow pass's target). */
-const HALF_WIDTH_PX = 1.25;
+const HALF_WIDTH_PX = 1;
 /** Gladstone-Dale K at 550 nm (the photopic peak), m^3/kg. */
 const K_GD = gladstoneDaleK(550);
 /** A rotor surface hides the flow layer only when it is this much nearer, m. */

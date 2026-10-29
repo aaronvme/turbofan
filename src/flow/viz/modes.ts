@@ -89,7 +89,7 @@ const SCHLIEREN_RANGE_RAD = 5e-4;
 export const FLOW_VIZ_MODES: Readonly<Record<FlowVizModeId, FlowVizMode>> = {
   realistic: {
     label: 'Realistic',
-    particleOpacity: 0.25,
+    particleOpacity: 0.18,
     cutPlane: false,
     quantity: 'speed',
     haze: 1,

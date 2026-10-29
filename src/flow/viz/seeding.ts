@@ -49,10 +49,12 @@ const radiusAt = (curve: Polyline, x: number): number => {
 };
 
 /**
- * Where particles are born, from the flowpath: an intake slab just upstream of the highlight
- * (inside 0.9 of its radius: air about to enter), and the entries of the bypass duct and of
- * the core (the booster), each 5 % in from its walls. Air from the intake slab reaches both
- * ducts by itself; the duct zones keep them filled within a particle's life. Weights: the share
+ * Where particles are born, from the flowpath: an intake slab just inside the highlight (to
+ * 0.9 of the inlet radius: the air ahead of it is left out, because the MOCK field's inflow
+ * there converges about ten times faster than continuity allows and piles tracers on the axis), and the entries of the bypass duct and of
+ * the core (the booster), each 5 % in from its walls, and the core nozzle's last 25 cm. Air from the intake slab reaches both
+ * ducts by itself; the duct zones keep them filled within a particle's life, and a slab at the
+ * end of the core nozzle feeds the core jet (the slowest particles never reach it). Weights: the share
  * of births (a visual density choice, not a mass-flow split).
  */
 export function flowSeedZones(def: EngineDefinition): SeedZone[] {
@@ -60,18 +62,28 @@ export function flowSeedZones(def: EngineDefinition): SeedZone[] {
   const hl = fp.curves.nacelleInner.points[0];
   if (hl === undefined) throw new Error('flowSeedZones: no nacelle highlight');
   const zones: SeedZone[] = [
-    { id: 'intake', weight: 0.5, x0: hl.x - 0.45, x1: hl.x - 0.1, r0: 0, r1: 0.9 * hl.r },
+    {
+      id: 'intake',
+      weight: 0.4,
+      x0: hl.x + 0.03,
+      x1: hl.x + 0.3,
+      r0: 0,
+      r1: 0.9 * radiusAt(fp.curves.nacelleInner, hl.x + 0.03),
+    },
   ];
-  for (const [id, comp, weight, depth] of [
-    ['bypass', 'bypassDuct', 0.32, 0.12],
-    ['core', 'booster', 0.18, 0.06],
+  // [zone, component, at its start (or its end), weight, depth m]
+  for (const [id, comp, atEnd, weight, depth] of [
+    ['bypass', 'bypassDuct', false, 0.3, 0.12],
+    ['core', 'booster', false, 0.15, 0.06],
+    ['coreJet', 'exhaust', true, 0.15, 0.25],
   ] as const) {
     const c = fp.components.find((k) => k.id === comp);
     if (c === undefined) throw new Error(`flowSeedZones: no ${comp}`);
-    const hub = radiusAt(fp.curves[c.hub], c.xStart);
-    const casing = radiusAt(fp.curves[c.casing], c.xStart);
+    const x0 = atEnd ? c.xEnd - depth : c.xStart;
+    const hub = radiusAt(fp.curves[c.hub], x0);
+    const casing = radiusAt(fp.curves[c.casing], x0);
     const m = 0.05 * (casing - hub);
-    zones.push({ id, weight, x0: c.xStart, x1: c.xStart + depth, r0: hub + m, r1: casing - m });
+    zones.push({ id, weight, x0, x1: x0 + depth, r0: hub + m, r1: casing - m });
   }
   return zones;
 }

@@ -22,7 +22,7 @@ import {
   type ParticleRecord,
 } from '../../src/flow/viz/particleKernel';
 import type { MeridionalSampler } from '../../src/flow/viz/particles';
-import { flowSeedZones, hashRng } from '../../src/flow/viz/seeding';
+import { flowSeedZones, hashRng, SPEED_FADE } from '../../src/flow/viz/seeding';
 import { seedParticle } from '../../src/flow/viz/particles';
 import { GpuErrorLog, requestSimDevice, type SimDevice } from '../../src/gpu/device';
 import { mockSteadyState } from '../../src/mocks/mockCycle';
@@ -168,6 +168,7 @@ describe('flow visual kernels on Dawn (MOCK takeoff field)', () => {
     let maxPos = 0;
     let maxVel = 0;
     let maxAlpha = 0;
+    let maxLife = 0;
     for (let i = 0; i < n; i++) {
       const before = readParticle(start, i);
       const g = readParticle(got, i);
@@ -188,7 +189,8 @@ describe('flow visual kernels on Dawn (MOCK takeoff field)', () => {
       );
       maxPos = Math.max(maxPos, dTh * want.r);
       maxVel = Math.max(maxVel, ...g.vel.map((v, k) => Math.abs(v - (want.vel[k] ?? 0))));
-      maxAlpha = Math.max(maxAlpha, Math.abs(g.alpha - want.alpha), Math.abs(g.life - want.life));
+      maxAlpha = Math.max(maxAlpha, Math.abs(g.alpha - want.alpha));
+      maxLife = Math.max(maxLife, Math.abs(g.life - want.life));
     }
     // f32 against f64 can only disagree on a test that lands within rounding of its threshold
     // (fluid fraction 0.5, the field's end): at most 1 in 1000
@@ -200,7 +202,10 @@ describe('flow visual kernels on Dawn (MOCK takeoff field)', () => {
     // (measured 1.7e-6 m and 0.027 m/s; a 10 % swirl-step mutant gives 7e-3 m)
     expect(maxPos).toBeLessThan(1e-5);
     expect(maxVel).toBeLessThan(0.25);
-    expect(maxAlpha).toBeLessThan(1e-4);
+    // the alpha follows the speed through the speed fade, whose slope is at most 1.5 / 35 per
+    // m/s (smoothstep over SPEED_FADE): the velocity bound times that slope
+    expect(maxAlpha).toBeLessThan((0.25 * 1.5) / (SPEED_FADE[1] - SPEED_FADE[0]));
+    expect(maxLife).toBeLessThan(1e-6);
   });
 
   it('keeps every particle finite and alive over 300 steps (5 s of frames)', async () => {

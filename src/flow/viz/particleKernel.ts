@@ -12,6 +12,8 @@
 import type { FieldExtent } from '../../contracts/flow';
 import {
   advectParticle,
+  FADE,
+  FADE_IN_MAX_S,
   MIN_FLUID,
   particleAlpha,
   type MeridionalSampler,
@@ -59,8 +61,6 @@ export function packParticleParams(p: ParticleParams): ArrayBuffer {
   return buf;
 }
 
-/** The fade-in / fade-out share of a life (particles.ts FADE). */
-const FADE = 0.15;
 const AXIS_R = 1e-4;
 
 export function particleKernelWgsl(): string {
@@ -84,6 +84,7 @@ const PI = 3.14159265358979;
 const TWO_PI = 6.28318530717959;
 const AXIS_R = ${AXIS_R};
 const FADE = ${FADE};
+const FADE_IN_MAX_S = ${FADE_IN_MAX_S};
 
 fn pcg(v: u32) -> u32 {
   let state = v * 747796405u + 2891336453u;
@@ -204,7 +205,8 @@ fn particleMain(@builtin(global_invocation_id) gid: vec3u) {
   let speed = length(v3);
   let u = age / life;
   let edge = clamp(min(P.ext.y - x, P.ext.w - r) / P.tex.z, 0.0, 1.0);
-  var alpha = smooth01(0.0, FADE, u) * (1.0 - smooth01(1.0 - FADE, 1.0, u)) * smooth01(0.0, 1.0, edge);
+  let fadeIn = min(FADE * life, FADE_IN_MAX_S);
+  var alpha = smooth01(0.0, fadeIn, age) * (1.0 - smooth01(1.0 - FADE, 1.0, u)) * smooth01(0.0, 1.0, edge);
   alpha = alpha * smooth01(P.fade.x, P.fade.y, speed) * select(0.0, 1.0, alive(v));
   parts[i] = Particle(vec4f(x, r, th, age), vec4f(life, alpha, 0.0, 0.0), vec4f(v3, speed));
 }

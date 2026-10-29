@@ -128,7 +128,12 @@ const smooth = (e0: number, e1: number, v: number): number => {
 };
 
 /** Fraction of a particle's life spent fading in and out. */
-const FADE = 0.15;
+export const FADE = 0.15;
+/**
+ * The fade-in never takes longer than this, s: a particle born in a fast jet leaves the field
+ * within half a second, and a fade-in of 15 % of its life would hide it for all of that.
+ */
+export const FADE_IN_MAX_S = 0.12;
 
 /**
  * Opacity of a particle aged `age` of `life` seconds; `edge` is its distance to where it must
@@ -136,5 +141,6 @@ const FADE = 0.15;
  */
 export function particleAlpha(age: number, life: number, edge: number): number {
   const u = age / life;
-  return smooth(0, FADE, u) * (1 - smooth(1 - FADE, 1, u)) * smooth(0, 1, edge);
+  const fadeIn = Math.min(FADE * life, FADE_IN_MAX_S);
+  return smooth(0, fadeIn, age) * (1 - smooth(1 - FADE, 1, u)) * smooth(0, 1, edge);
 }

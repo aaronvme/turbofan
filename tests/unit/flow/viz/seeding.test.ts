@@ -58,17 +58,18 @@ describe('flowSeedZones (from the flowpath: the intake, the bypass duct and the 
   const fp = ENGINE_DEFINITION.flowpath;
   const highlight = fp.curves.nacelleInner.points[0];
 
-  it('has the three zones, with positive weights that sum to 1', () => {
-    expect(zones.map((z) => z.id)).toEqual(['intake', 'bypass', 'core']);
+  it('has the four zones, with positive weights that sum to 1', () => {
+    expect(zones.map((z) => z.id)).toEqual(['intake', 'bypass', 'core', 'coreJet']);
     for (const z of zones) expect(z.weight).toBeGreaterThan(0);
     expect(zones.reduce((s, z) => s + z.weight, 0)).toBeCloseTo(1, 12);
   });
 
-  it('puts the intake zone upstream of the highlight, inside its radius', () => {
+  it('puts the intake zone just inside the highlight, ahead of the spinner, inside its radius', () => {
     const z = byId.intake;
     expect(z).toBeDefined();
     if (z === undefined || highlight === undefined) return;
-    expect(z.x1).toBeLessThan(highlight.x);
+    expect(z.x0).toBeGreaterThan(highlight.x);
+    expect(z.x1).toBeLessThan(fp.curves.spinner.points[0]?.x ?? -Infinity);
     expect(z.r0).toBe(0);
     expect(z.r1).toBeLessThan(highlight.r);
     expect(z.r1).toBeGreaterThan(0.5 * highlight.r);
@@ -91,6 +92,10 @@ describe('flowSeedZones (from the flowpath: the intake, the bypass duct and the 
     }
     // the core annulus lies below the bypass one
     expect(byId.core?.r1 ?? 0).toBeLessThan(byId.bypass?.r0 ?? 0);
+    // the jet slab ends at the core nozzle exit, between the plug and the nozzle
+    const ex = fp.components.find((k) => k.id === 'exhaust');
+    expect(byId.coreJet?.x1).toBeCloseTo(ex?.xEnd ?? NaN, 12);
+    expect(byId.coreJet?.r0 ?? 0).toBeGreaterThan(0);
   });
 
   it('every zone lies inside the near field the particles live in', () => {
