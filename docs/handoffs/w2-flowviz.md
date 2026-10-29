@@ -58,8 +58,9 @@ GOTCHAS
 - On screen, Mach uses γR(T) of air, with FAR ignored; `deriveQuantities` uses FAR. The difference is about 1 % in the core jet. Either bake a 2D LUT or label it.
 - `node_modules` and the mesh come from `npm ci && npm run mesh`, done in this worktree. Dev port 5193 was not used, and no server or Chrome is left running.
 
-GATES (WIP; numbers in the final reply / below)
+GATES @0bc9e65 (WIP)
 - npm run typecheck: clean. eslint on the touched files: clean.
 - tests/unit/flow/viz: 36 passed. tests/browser/flowViz.test.ts: 1 passed (0 WebGPU errors).
-- Full lint, coverage, test:mesh, test:gpu, test:browser: see the commit that updates this section.
+- @0bc9e65: npm run lint clean (ESLint + Prettier); npm run coverage: 103 files, 1967 passed + 11 expected fail, lines 99.45 %, statements 98.54 %, thresholds met.
+- NOT run (usage brake): npm run test:mesh, npm run test:gpu (no GPU-kernel code touched), the full npm run test:browser (only flowViz.test.ts ran; engineView.ts changed, so the full browser suite must run before merge).
 - Indicative visuals ms: not measured (no flow pass group yet; NEXT 7). The cut plane is one full-screen-ish quad pair with 3 texture reads per pixel, expected well under 0.5 ms.
