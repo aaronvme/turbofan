@@ -3091,3 +3091,253 @@ I re-checked each pass-10 finding on 2026-10-28. I read the diff 6ed8d81..9e1257
   
   A spectral radius above 1 is a mode, an instability to fix, with the location from the eigenvector. Growth that saturates and decays with all eigenvalues inside is a non-normal transient.
 - **D4-70 (the 2× bound): round 9's rule stands as pre-stated** and is not loosened after the data. If D4-69 proves a decaying non-normal transient, any change to the rule's window must rest on the definition of "non-growing" (decay in the limit) and comes back as a logged decision with that evidence.
+
+## Critic pass 11: w2/lookdev-5 @4538f0f
+
+I reviewed `0bb473f..4538f0f` against main f7110a5 on 2026-10-29. Since 0bb473f main changed only LOG.md, so the merged tree's code is the branch's code byte for byte (checked: `git diff 4538f0f` of the merged tree is empty outside `docs/reviews`).
+
+In scope:
+- W2L-I1..I5;
+- the P4 change: the scene pass writes colour and depth only, GTAO rebuilds the normal from the depth, and TRAA's camera velocity comes from the depth;
+- the visual notes: the satin nacelle, 8 fan copies beyond half a pitch (W2L-N5), the spinner stripe (W2L-N4), the transport stand, the section caps;
+- the official records at 4538f0f (P4 and P1).
+
+Checklists: typescript-reviewer, silent-failure-hunter and pr-test-analyzer, applied by my own reading, and the three.js/WebGPU pitfalls in GPU_FACTS. I ran no bench, `ab.ts`, `variantAb.ts` or official capture.
+
+New probes (each header says how to run it):
+- `w2l-gbuffer.browser.probe.ts.txt`: the shipped (lean) scene pass against `legacyGbuffer`, TRAA-converged, beauty and AO, in four views at 1920 × 1080, plus the exploded transition;
+- `w2l-rotor-mutants.sh.txt`: five mutants of the rotor motion vectors against the new W2L-I1 test;
+- `w2l-focus.probe.mjs.txt`: whether a window blur reaches a page Playwright launched.
+
+**Gates.** typecheck, lint, coverage and test:mesh ran in the builder worktree; its tracked files were unchanged afterwards. The browser suite ran there too, on its own Playwright Chrome at port 5190. The reference builder's ladder shared the CPU.
+- typecheck: clean. lint (ESLint + Prettier): clean.
+- `npm run coverage`: 100 files, 1931 passed + 11 expected fail (786 s). Lines 99.60 %, statements 98.71 %, branches 87.77 %, functions 99.65 %; thresholds pass. **`src/geometry` 99.59 % lines** (branches 90.38 %); thermo 100, cycle 99.58, flow/reference 100.
+- `test:mesh`: 29 passed.
+- `test:browser`: 9 files, **27 passed** (205 s), 0 WebGPU errors. This is the first full run at the code tip by anyone but the orchestrator; the handoff's was stopped.
+  - W2L-I1: shipped 30.05 against zero 58.46 and flipped 58.96 /255, over 7989 moved pixels: ratio 0.51 against the bound 0.6.
+  - W1V-I1 tiles, moving against the bound (floor + 6): cutaway 35 / 36; **cutawayFanClose 8 / 8, exactly at the bound** (W2L-I8, below); exploded 5 / 11; explodedFanClose 9 / 13; hotSection 0 / 6. The legacy control is 33 against 7, so it fails as it must.
+  - fanBlur: worst tiles 0.063 (idle) / 0.041 (hero) / 0.051 (take-off) in motion.
+
+**W2L-I2..I5: fixed in the code, with one gap that is not the builder's (W2L-I7).**
+- *I2:*
+  - `abSummary` drops a pair with an INVALID side and records `reps` and `dropped`;
+  - `combineValid` gives a config's medians over its VALID runs, with `runsUsed`;
+  - `p4Verdict` is INVALID when the default config's back-to-back run is INVALID, and the capture exits 1 on it.
+  
+  Unit-tested, including the pass-8 scenario (the official A/B's INVALID rep 0).
+- *D4-42 in `p4Verdict`:* back to back decides, vsync is judged beside it, official needs the protocol and AC throughout, and the busy fraction is in the result. Correct.
+- *I3:* the watcher pushes its open interval on stop (`main.ts:279`), and coverage under half the run's display intervals is INVALID. In the official run every back-to-back run was VALID, with no watcher warnings. The page-side push itself has no test (W2L-N12).
+- *I4:* `os.ts` reads Win32_Battery around every run in `capture.ts` and `ab.ts`.
+  - `powerValidity`: battery is INVALID when official, a warning otherwise; an unknown source is a warning and never counts as AC.
+  - `acThroughout` accepts AC or no battery.
+  - The BatteryStatus mapping (`system.ts:10-15`) is conservative: 4/5 count as battery, 11 as unknown.
+  - The reads run between runs, outside the warm-up, so PowerShell's start does not land in a timed window.
+- *I5:* blurs are counted (`main.ts:236-240`) and passed as D3-6's `pageBlurs` at both pacings. The watcher's INVALID is D3-6's occlusion signature, and its 2.5-interval stretch is a warning. That matches D4-46.
+
+**W2L-I1: the new test can fail on the named failure modes, but its controls prove nothing beyond its own formula.**
+- *The test:* the velocity debug view is linear and signed (±32 px in 8 bits, 0.25 px steps). It is the same overridden `velocityNode.load` TRAA reads (`post.ts:345-368`, and `:442` for the debug view), so it tests the vectors TRAA uses. The earlier TRAA-off still, sampled at u − v(u), must match the later still at u wherever the image moved by ≥ 16/255.
+- *It fails without the vectors:* with v = 0 the "shipped" error equals the zero error, and 1 ≤ 0.6 is false. A dropped `load` override (lean mode would then read the depth as velocity) or a sign error fails too.
+- *The controls are tautological.* Under `noRotorMotion`, shipped = zero = flipped exactly (72.64 = 72.64 = 72.64 in my run; the handoff's "73.4 = 73.4"), so `ok` is false by arithmetic for any implementation. Under `rotorMotionScale: -1`, the control's "shipped" and "flipped" are the main run's errors swapped (61.60 / 30.09 against 30.05 / 58.96). So it fails whenever the main assertion passes. Neither is evidence of sensitivity beyond the formula.
+- *Each control also runs at a later rotor phase,* because every `measure()` advances the spools by 1/60: 7989, 14691 and 8049 moved pixels.
+- *What the real sensitivity is,* with five mutants of plausible bugs: my `w2l-rotor-mutants.sh.txt` (each against `-t W2L-I1` alone; the ratio is shipped / min(zero, flipped), bound 0.6):
+  - **M1, half the turn back (`back × 0.5`): SURVIVES**, 31.14 against 58.46 / 55.33 (ratio 0.56), almost the shipped 30.05;
+  - M2, 1.5 × the turn back: killed, 37.20 (0.68);
+  - M3, the HP and LP steps swapped: killed, 49.24 (0.87);
+  - M4, the wrap at a full pitch instead of half: killed, 58.34 (1.00);
+  - M5, the vector's y flipped: killed, 39.00 (0.97 against the flipped 40.39).
+  
+  So the test sees the spool, the wrap, the sign of either axis and an overshoot, but not a vector half as long. That is the factor between an NDC and a UV delta, the convention `offsetUV = v · (0.5, −0.5)` depends on (W2L-I6).
+- *The moved-pixel selection* was added after a failing measurement (7.1 / 8.1 / 12.9 over every rotor pixel). It is principled: drums and disk faces turn into themselves, so they carry no information about the vector. It is symmetric in the vector, because it is chosen from the two stills only. And the flipped baseline is not selected on. I accept it.
+- *Margin:* 0.49 (handoff) and 0.51 (mine) against 0.6.
+- *What the vectors buy:* LOOKDEV records that a moving TRAA frame against a converged TRAA frame at rest changes 2.3 % of pixels with the vectors and 2.3 % without. So at this pose the tight clip, not the reprojection, removes W1V-I1's ghosting, and the vectors' visible benefit is unshown. Worth keeping in mind before spending more on them.
+
+**The P4 change is correct, and its picture cost is confined to depth edges and the exploded transition.**
+- *GTAO's normal from the depth.* `ao(sceneDepth, null, camera)` takes three r186's `getNormalFromDepth` (PostProcessingUtils.js:89-117). It is the 5-tap reconstruction that, per axis, takes the neighbour with the better linear extrapolation, which is the standard defence against silhouette halos. At half-resolution GTAO it reads the full-resolution depth (`textureSize` of the depth, so the taps are full-resolution texels). three applies TRAA's jitter to the whole pipeline, so GTAO's inverse projection is the jittered one the depth was drawn with.
+  - The probe, lean against legacy, beauty TRAA-converged, pixels whose luminance differs by > 0.04: side 0.006 %, three-quarter 0.016 %, **cutaway 0.162 %** (worst tile 7 %), hot section 0.028 %. In the AO view: 0.004 / 0.004 / 0.019 / 0.015 %. No 16 px tile is over 25 % anywhere.
+  - In the cutaway the differences are one-pixel outlines along the cut faces' silhouettes, where the depth steps. Thin geometry (the stand's tubes, the vanes edge-on, the struts) shows nothing visible.
+  - So the LOOKDEV statement "differs ... only at depth edges ... no difference shows in the shots" is right.
+- *TRAA's camera velocity from the depth (`post.ts:337-344`).* It unprojects the texel centre at the scene depth with the unjittered inverse view-projection and reprojects with the previous one. The result is an NDC delta current − previous, the convention three's velocity and our resolve use (offset · (0.5, −0.5)), and the same as the rotor path, which W1V-I1 validated.
+  - The depth is WebGPU's [0, 1] z, which three's WebGPU projection produces, with no logarithmic or reversed depth.
+  - Unprojecting a jittered depth with the unjittered matrix shifts the point by the sub-pixel jitter. That is second order in the camera's motion, and zero for a still camera up to f32 rounding (about 1e-7 NDC, 1e-4 px), not "exactly zero" (W2L-N9).
+  - Rotor texels still take the rotor velocity (`select(isRotor, …)`), and TRAA reads velocity only through `load` (TRAANode.js:554, `traaResolve.ts:126`), so the stand-in `texture(sceneDepth.value)` is never sampled as velocity.
+- *What the lean pass loses: per-object motion.* three's velocity node tracked each mesh's previous world matrix. The lean pass treats every main-pass texel as static, which holds except during the exploded and cutaway transitions (the handoff's question).
+  - The probe, `setMode('exploded')` at dt 1/60, TRAA frame against the TRAA-off still of the same instant: at frame 15, lean 0.79 % of pixels / 3 tiles against legacy 0.76 % / 4; **at frame 30, lean 1.02 % / 16 tiles against legacy 0.96 % / 7**.
+  - The variance clip contains it (edge-thin differences, no trails in the diff images). But the transition does lag more, and only while the parts move, about a second per mode change. Acceptable for a ~0.8 ms P4 cut. LOOKDEV should say it with the number, not "handled as it did any moving object" (W2L-N9).
+- *The saving* is measured paired and indicative (−0.76 ms over 4 of 4 pairs; −0.80 to −0.92 ms opaque in HEAD against main). It is consistent with two fewer rgba16float writes per fragment in a bandwidth-bound pass.
+
+**The official records at 4538f0f.**
+- Back to back, default: 6.96 ms, every run VALID, AC before and after every run, GPU busy 0.71, errors 0. Vsync beside it: 12.02 ms (FAIL beside it, not deciding), which is the DVFS picture D4-42 accepted.
+- P4 PASS stands under D4-42.
+- One caution for the orchestrator: the official level dropped 1.54 ms from main's official 8.50, while the paired saving is 0.76-0.86 ms, so about half the drop is session-level. A future official re-run could read about 7.7 ms. It still passes, with about 0.3 ms margin rather than 1.0.
+- P1 157 it/s is the orchestrator's record. Its JSON (`docs/bench/p1-2026-10-28-2353-official.json`) is committed here; I did not re-run it.
+
+**Visual review, 00-07 against before/ (round 4's set), viewed at full size and in crops: a step better in three places, unchanged in the rest, and still CG against "premium product render of a real engine".**
+- Better:
+  - **06** (W2L-N5): the coarse diagonal dot screen over the take-off disc is replaced by a much finer, more even texture. It is reduced, not "gone" (a fine regular dot texture remains over the upper disc, with speckles at the right).
+  - **The spinner stripe** reads in 00, 01 and 05 (W2L-N4). At take-off (06) it blurs into a soft pale swirl, which is right for 30°.
+  - **The stand** reads as a shop frame: blue-grey tube, cross members, yellow swivel forks, a tow bar.
+  - **02** shows a softbox highlight on the nacelle's upper skin.
+- Unchanged or new defects:
+  1. **The nacelle** (00, 01, 03) still reads as matte white. The satin change shows only in 02's single highlight. In 00 and 01 the barrel has no strip highlight, no environment reflection and no tonal variation, and the doors and latches are drawn outlines. LOOKDEV's "the softboxes' long highlights read on the skin (02, 00)" holds for 02 only.
+  2. **The moving fan** is still the largest gap. 05 keeps its torn rectangular slivers where the booster shows through; 00 keeps the stipple in its lower half and the staircase breakup at lower right; 06 has the fine dot texture above.
+  3. **New in 02: a stippled band on the floor along both rails of the lifted frame.** The probe's AO view shows it is GTAO's own noise (8 fixed samples, no spatial filter) in the 10 cm gap under the tubes. It is the same in the legacy pipeline (side AO 0.004 % different), so it comes from the stand's new geometry, not from the P4 change (W2L-N13).
+  4. **The stand's scale and load path.**
+     - The casters are 90 mm wheels under a 2.3 t engine; shop stands use 150-200 mm casters or pneumatic tyres.
+     - The tow bar is a plank hanging 12-18 cm above the floor with no hitch or eye (02).
+     - The engine still rides on saddles under the cowl skins, the rear one under the core cowl, a non-structural door, rather than at its mounts.
+  5. **The cutaway** (03, 07): the caps are a little darker inside, but they still read as flat salmon, and the gloss gradient is not visible at these distances. The blades and vanes are shells, the combustor is a lumpy tube, 07's sandpaper speckle remains on every metal surface, and no heat tint reads.
+  6. **04:** the parts float with no fixture, and they are untextured grey.
+  7. No rotor AO or self-shadow: the fan face reads flat.
+- **Verdict on the visuals:** LOOKDEV's "still CG-like" list is honest and complete. Its round-5 claims overstate two things (06 "gone", the nacelle highlight "02, 00"). This round fixed the notes it was given at the level of the notes. The premium-render bar is still not met: the fan in motion, the nacelle's surface and the cutaway's materials are what read as CG.
+
+### Blocking
+None.
+
+### Important
+- **W2L-I7: D3-6's blur rule (W2L-I5) is probably inert under Playwright: its Chromium emulates a focused page.**
+  - playwright-core sends `Emulation.setFocusEmulationEnabled({ enabled: true })` for every main frame of a non-default context (`coreBundle.js:39024`, FrameSession._initialize). That is what `chromium.launch()` + `browser.newPage()` gives `capture.ts:156-166`, `ab.ts:178-190`, `variantAb.ts:57-63` and `spikes/bench/run.ts:459-468`.
+  - The DevTools feature behind it ("Emulate a focused page") exists so that a page does not see blur when focus moves elsewhere. So `window` blur and `document.hasFocus()` stop reporting OS focus.
+  - Every `pageBlurs` in `docs/bench/` is 0 (21 records).
+  - My probe could not settle it at runtime: `bringToFront()` on a second Playwright Chrome did not take the OS focus (Windows' foreground lock), so both rounds read 0 blurs, the emulation-off control included. The finding rests on the code.
+  - The failure scenario: an official P4 or P1 run with the Chrome window visible but unfocused is VALID. The occlusion signature still catches a covered or minimised window, but not this case, and D3-6 meant to.
+  - Fix:
+    - after `newPage()`, send `Emulation.setFocusEmulationEnabled({ enabled: false })` through a CDP session in the three look-dev tools and the bench;
+    - sample `document.hasFocus()` at the start and end of each run (INVALID when false);
+    - check it once by hand: click another window during a 10 s indicative run, and the run must come out INVALID.
+  - The bench half is the orchestrator's (question oo).
+- **W2L-N2 raised to Important (W2L-I8): the W1V-I1 tile test sits at its bound.**
+  - `rotorMotion.test.ts:31` (MARGIN 6): cutawayFanClose moves 8 tiles against the floor 2 + 6, here and in the builder's runs (8-9 against 8; the handoff says it "flaked once"). The cutaway is 35 against 36.
+  - The failure scenario: a merge-gate `test:browser` fails on this test with no code change, and someone widens the margin after the fact.
+  - Fix, as pass 8 said: name the cut faces as the source (the half-pitch wrap breaks where the cut hides the next blade). Then either exclude a band of tiles at the cut faces, stated before the run, or widen MARGIN with that reason now, before it flakes at a merge. W2L-I1's new warp test is now the real check of the vectors, so this test only has to show "no ghosting".
+- **W2L-I6: the W2L-I1 test passes rotor vectors at half their length** (`rotorMotion.test.ts:129-242`; the error at `:210`).
+  - Mutant M1 (`post.ts` `back` × 0.5) passes at 31.14 against 58.46 / 55.33 (ratio 0.56 ≤ 0.6), next to the shipped 30.05. A half-length vector is the classic NDC-against-UV slip (the resolve's `offsetUV = v · (0.5, −0.5)`).
+  - The likely reason: the pose's wrapped per-frame turn is small. At idle the fan turns about 7 pitches a frame, so what is left after the half-pitch wrap depends on the phase, and the error is taken with `Math.round` sampling. When the image moves a pixel or two, half the vector is within rounding of the full one. The 30/255 floor of the shipped vectors says the same.
+  - The failure scenario: a velocity convention change (NDC to UV, or a /2 in the reprojection) passes the merge gate, and TRAA reprojects the rotors by half their motion: a smear behind every blade in the cutaway and the exploded close-ups.
+  - Fix, stated before measuring:
+    - set the step through `lpPhase` (or `rotorMotionScale` on a dt that makes the wrapped turn about 0.3 pitch) so the moved pixels move ≥ 4 px, and print the |v| percentiles;
+    - sample the earlier still bilinearly;
+    - add the half and 1.5 × vectors as baselines that must also lose, `shipped ≤ 0.6 × min(zero, flipped, half, 1.5×)`.
+  - The two existing controls can stay, but the handoff and LOOKDEV should not call them evidence: they fail by arithmetic (above).
+
+### Nits
+- **W2L-N8.** `materials.ts:96-99`: FAN_TIME_SAMPLES is 8, but its comment still says "6, not 8 (LOD round 2) ... fewer per frame hold the fan-blur bounds". The count per frame is now `fanTimeCopies` (motion.ts).
+- **W2L-N9.** `post.ts:3`'s pipeline header still lists the main pass as "(colour, normal, velocity)". `post.ts:335-336` and LOOKDEV say a still camera gives "exactly zero"; it is zero up to f32 rounding. LOOKDEV's "the exploded and cutaway transitions ... handled as it did any moving object" should give the probe's number (16 tiles against 7 at frame 30).
+- **W2L-N10.** `capture.ts:327`: `gpuBusyMedian` takes `busy[floor(n/2)]`, the upper of the two middle values when a config has an even number of valid runs (one INVALID of 3). Use the mean of the middle two, as a median.
+- **W2L-N11.** GPU errors do not make a run INVALID in `capture.ts` or `ab.ts`; they are only recorded. `variantAb.ts:120` does it (`v.valid && run.errors === 0`). A pass that failed validation renders less and is cheaper, and could PASS P4. Make `errors > 0` INVALID in both, as W2I's bench now does.
+- **W2L-N12.** W2L-I3's page-side half, the push of the open interval at `main.ts:279`, has no test. `timing.test.ts` feeds `pacedValidity` its deltas directly. Move the watcher into a small pure helper (start, tick, stop returning deltas) and unit-test the stop.
+- **W2L-N13.** The stand (visual items 3-4): either lift the frame on 150 mm casters, which widens the gap where GTAO's noise shows and is truer to a 2.3 t load, or soften the AO there. Rest the tow bar on the floor or fold it up, and say in LOOKDEV that the saddles bearing on the cowls are a display cradle, not a transport stand's mount adapters.
+- **W2L-N14.** LOOKDEV round 5: "06's dot screen is gone" should say reduced; "long highlights ... (02, 00)" should say 02.
+- Pass-8 carry-overs: **W2L-N3** (back-to-back CPU time per frame) is recorded, not done. **N6** (culling's timeout) and **N7** (`optimizeDeps`) are open; the browser suite passed here without either biting. N1, N4 and N5 are fixed.
+
+**Trial merge 1** (detached at bd59f07 = main f7110a5 + this pass's probes):
+- `git merge --no-ff --no-commit w2/lookdev-5` is clean: 40 files, no conflicts, and the merged code equals 4538f0f's.
+- typecheck and lint: clean.
+- My two browser probes and the five mutants ran on this tree (above).
+- The unit, coverage, mesh and browser numbers are the tip's above, from identical inputs.
+
+**Verdict w2/lookdev-5 @4538f0f: MERGE.** B 0, I 3 (I6, I7, I8), N 7 new (N8-N14), with N2/N3/N6/N7 carried.
+- The tools that decide P4 now keep INVALID runs out, check the power source, and follow D3-6 and D4-46 as written.
+- The P4 cut is correct and costs pixels only at depth edges and in the exploded transition.
+- The gates are green, with test:browser at 27/27.
+- I6 and I8 go to the next look-dev round, before W2L-I1's test is relied on as the guard of the vectors. I7's look-dev half goes there too; its bench half is question (oo).
+- **Orchestrator questions:**
+  - (oo) W2L-I7: switch off Playwright's focus emulation in `spikes/bench/run.ts` too, so D3-6's blur rule can fire for P1 and P2? Or drop the blur rule for supervised official runs and say so in D3-6?
+  - (pp) W2L-I8: may the cutaway close-up's MARGIN be widened now, with the cut faces as the stated reason, or must the band at the cut faces be excluded instead?
+  - (qq) P4's official margin: the 6.96 ms includes about 0.7 ms of session-level speed (above). Note it beside P4, so a future official re-run at about 7.7 ms is not read as a regression.
+
+## Critic pass 11: w2/reference-9 @bcacc0a
+
+I reviewed `22655d3..bcacc0a` against main f7110a5 on 2026-10-29 with `git show` and `git diff`; since 22655d3 main changed only docs (the P1 JSON and LOG). The reference builder is working in its worktree in parallel, so I ran everything in a detached checkout of bcacc0a (`.claude/worktrees/critic-r9`, own `npm ci`, removed afterwards). The builder's scratch (`reports/scratch/r9`, gitignored) I read in place and did not run.
+
+In scope: the D4-63 investigation (SOLVER.md §10, "D4-63, the rest state on the engine mesh"), its pre-stated rule and the `it.fails` pin (`tests/ladder/cases/d463.ts`, `tests/ladder/d463.test.ts`), and D4-62's §12.2 flux-scale tolerances. No scheme or kernel change.
+
+**Gates at bcacc0a (detached checkout, one suite at a time).**
+- typecheck: clean. lint (ESLint + Prettier): clean.
+- `npm run coverage`: 99 files, 1917 passed + 11 expected fail (783 s). Lines 99.60 %, statements 98.70 %, branches 87.76 %, functions 99.65 %; thresholds pass. `src/flow/reference` 100 % lines (branches 88.75 %), geometry 99.59, cycle 99.58, thermo 100. The src tree is main's: the round adds only `tests/ladder` and docs, and the unit suite does not include the ladder.
+- `test:mesh`: 29 passed.
+- `test:ladder`, the new case only (`tests/ladder/d463.test.ts`, the one ladder change; run on the trial-merge tree, whose `tests/ladder`, `src/flow` and SOLVER.md equal bcacc0a's): **1 passed + 1 expected fail** (1597 s, with the reference builder's power-iteration run on the CPU beside it). The signature passes (finite, checkpoint peak 12.26 < 100), and the rule fails as pinned: (a) **8.393** against ≤ 2, (b) **11.95** against ≤ 1. A first attempt was cut by my own 25-minute wrapper at 1498 s with the builder's d463 run in parallel. There the signature FAILED visibly while the pin counted as an expected fail, which is D4-65's split doing its job (W2R-N24).
+
+**Pre-statement: the rule was stated before any fix, and its bound was not chosen on the data.**
+- 1292f3f (22:05) is the first WIP handoff: 100-150-iteration runs only, and the inflow hypothesis.
+- 3de1b43 (22:47, TDD) adds the case and the pin with the rule's constants: `D463_LATE_PRESSURE_BOUND = 2`, "engine-stability's GROWTH" (`tests/gpu/engine-stability.test.ts:34` on main, GROWTH = 2), the late window 1000-2000 and the residual at most its value at 100.
+- ac52db7 (22:59) writes the rule into SOLVER.md §10 with the diagnosis and the outcome.
+- The scratch logs date the data: the engine's long default run (`logs/base2000.log`) finished at 22:57, the plain scheme to 1000 (`plain1000.log`) at 22:56, the 1e-6 run (`amp6_1000.log`) at 22:58. The pin's comment quotes the default run at 1100 iterations, so the rule was written while that run stood near 1100 and before the plain and 1e-6 runs ended.
+- So it is pre-stated in D4-63's sense (before any fix) and its 2× is inherited, not tuned. It was not blind to the base case, which it is meant to fail.
+
+**The investigation: sound for what it refutes; the stand-in represents the engine only early on.**
+- *The oracle repro* matches the GPU (1.510 at 100, engine-stability's trace) and the logs show it (`base2000.log`: ρ 1.510 / 10.40 / 13.60 and p 2.439 / 4.255 / 8.020 at 100 / 1000 / 2000).
+- *The round-8 hypothesis is refuted correctly.* Where the early maximum sits, β/M_ref is 0.82-1.08 (no jump), and the max moves to the axis, not along the inflow column. Every inflow variant changes max |p′| at 200 by ≤ 5 % on the stand-in.
+- *Semi-discrete:* CFL 0.4 follows CFL 0.8 in pseudo-time (2.16 at 180 against 2.19 at 90). That is what local time stepping predicts for a semi-discrete process, so a step limit cannot help. This covers the early, nonlinear part.
+- *Does the stand-in represent the engine mesh?* The upstream block alone, built from the asset's own nodes with its imax a slip wall, with the engine's x0, x1 and r1 for the wave. It matches the engine to 4 digits at 100 (1.510 / 2.439 at (2, 64)) and at 200 (5.43). Then it decays (0.96 at 1000, 0.23 at 2000), while the engine grows in the plume-core and core blocks. So it stands in for the upstream block's first ~200-270 iterations, where the round-8 hypothesis put the growth, and nowhere else. Every inflow variant was judged at 200. That is enough to refute the hypothesis, because the late maximum sits 7-9 m downstream of the inflow. But it says nothing about the rule's 1000-2000 window (W2R-N21).
+- *The two parts:* the nonlinear part (the Δp term lifts β, pseudo-velocities 5-15 m/s, axis focusing, entropy frozen at rest) and the linear part (core duct, x 0.6-1.6 m, no entropy) are both what the logs show.
+- *But the logs also hold a norm the report leaves out* (W2R-I18). `grow2.ts` prints E = sqrt(Σ V_r p′²) over its first, the volume-weighted L2 of p′:
+  - **plain scheme: 0.517 at 100, 0.480 at 500, 0.497 at 600, 0.365 at 1000**, while max |p′| rises 1.0 → 3.3;
+  - **amplitude 1e-6, preconditioned: 0.560 at 100 → 0.469 at 1000**, while max |p′| rises 0.96 → 2.76;
+  - the default at 1e-3: 0.718 / 1.020 / 1.317 / 1.470 / 1.372 / 1.268 at 100 / 200 / 1000 / 1100 / 1500 / 2000.
+  
+  So in the linear part the volume-weighted L2 decays while the max and the cell-mean residual grow. That is the signature of a pulse gathering into the core duct's small cells (the report's own "transient" reading), and it is evidence for D4-69, measured and not reported. The nonlinear default does grow in L2 too, but only to 1.27-1.47×.
+
+**D4-62's tolerances: the arithmetic is right, the model justifies E-L5 only, and E-L9a's sits at the f32 floor of the norm itself.**
+- *The arithmetic:* ten times the measured value, rounded up to one figure: B 1.27e-11 → 2e-10, E-L5 2.67e-8 → 3e-7, E-L9a 2.46e-12 → 3e-11. The margins are 15.7 / 11.2 / 12.2×. The measurements are mine, from pass 10's merged `test:gpu` and `test:gpu-ladder` (LOG lines "12.2 rows" and "B").
+- *What the model derives:* the face-flux arithmetic bounds the row by k ε r_G/r_flux ≤ k ε. E-L5 measures 0.45 ε, at that bound, so its tolerance follows from the model. B and E-L9a sit 1e4-1e5 below kε, which the text says it cannot resolve, so their tolerances are empirical: ten times one measurement on one driver. That is what D4-62 asked for ("ten times the measured ... error"). The text should call it that, not a derivation (W2R-I17).
+- *What the model leaves out* is the norm's own f32 reduction. r_GPU comes from per-tile f32 tree sums of R² over 16 × 8 tiles (`kernels.ts:677-683`), summed in f64 on the CPU (`residualFromPartials`). Only the per-cell face sums are compensated (§14.6(a)); the norm is not. That reduction carries about 0.5-4 u of r_GPU (u = 2⁻²⁴ = 6.0e-8: the squares' rounding, 7 tree levels, and the halving under the square root). Over the flux scale this term is u r_ref/r_flux times that:
+  - E-L9a: r_flux/r_ref is 2.7e3, so the term is 1.1e-11-8.8e-11. **The tolerance 3e-11 sits inside that band;** it is 1.4 u of r_ref. The measured 2.46e-12 is 0.11 u, below the norm's typical rounding.
+  - B (r_flux/r_ref 1.15e10) and E-L5 (3.9e4) have this term at 2e-17 and 6e-12, far under their tolerances.
+- *Can they fail?* Yes, all three. B fails at |r_GPU − r_ref| > 2.3 r_ref, E-L5 at > 1.2 % of r_ref, and E-L9a at > 1.4 u of r_ref. E-L9a can also fail with correct arithmetic (W2R-I17).
+- *The kernel side* still checks the old values (W2R-I19).
+
+### Blocking
+None.
+
+### Important
+- **W2R-I17: E-L9a's 3e-11 is inside the f32 rounding of the norm it compares** (SOLVER.md §12.2, the D4-62 table and its model paragraph, bcacc0a:477-489).
+  - The failure scenario: the kernel-tuning round D4-67 names changes the tile shape or the reduction (D2-5's 16 × 8 is a tuning parameter). The tile sums of R² reorder, r_GPU moves by about one u with correct arithmetic, and E-L9a fails. Then "a row is never loosened to pass" forbids the fix, so the row blocks a correct kernel.
+  - Fix, before the solver round adopts the rows:
+    - add the norm's reduction term to the model, about 4 u r_ref/r_flux (the worst case for 128-cell tiles);
+    - take each row's tolerance as max(10 × the measured value, that term rounded up): E-L9a **1e-10** (still 1e7× tighter than 1e-3, and 40× its measurement), B and E-L5 unchanged;
+    - or compute the row's r_GPU in f64 from read-back per-cell residuals, which removes the term.
+  - Main's tests do not use 3e-11 yet (W2R-I19), so this tightens nothing in force. It is the orchestrator's call (question mm).
+- **W2R-I18: the rule judges growth in the norms that weight the smallest cells most, and does not ask for decay** (SOLVER.md §10, "The rule for any D4-63 fix", bcacc0a:402; `d463.ts:65-71`).
+  - (a) *It can fail a stable scheme.* Max |p′| and the cell-mean density residual (§11: mean over cells of (R/(bV))², with no volume weight) are dominated by the core duct's and the axis's small cells. A pulse gathering into them raises both while the field's volume-weighted L2 falls. The builder's logs (above) show exactly that for the linear part: plain 3.3× and 1e-6 2.76× in max |p′|, with E at 0.365 and 0.469. So rule (1) may be unpassable by any non-growing scheme, which is the question D4-70 leaves to D4-69's evidence. The bound itself comes from a constant whose comment limits it to 100 iterations: GROWTH = 2 at `engine-stability.test.ts:28-34` reads "It is not a bound for longer runs: the scheme's pseudo-time transient lifts the oracle's max |p'| to 20x ... by 270 iterations".
+  - (b) *It can pass a non-decaying state.* A field that settles to a neutral oscillation at, say, 1.5× its first with a flat residual passes both parts. In the app that is a persistent flicker of the flow field from rest. D4-70 defines non-growing as "decay in the limit", which nothing in the rule tests. The window (1000-2000) is also 1000 iterations, not W2R-N16's 2000.
+  - Fix (rule changes come back as logged decisions under D4-70):
+    - `d463.ts` reports E (and the kinetic part, ½ Σ V ρ|u′|², for an acoustic energy) in `extra`, beside max |p′|;
+    - D4-69's long run and power iteration report the same norms;
+    - the orchestrator decides whether the rule judges a volume-weighted energy with a decay requirement (E or the residual at 2N at most half of its value at N, over 2000-4000, or a measured spectral radius below 1). That replaces max |p′| (a loosening, so it needs D4-69's evidence), and the decay requirement is a tightening (question nn).
+- **W2R-I19 (kernel side): D4-62 is in SOLVER.md only; main's tests still check 1e-3 and 1e-6.**
+  - `tests/gpu/oracle.test.ts:328-329` (E-L5: `TOL_RESIDUAL` 1e-3 and 1e-6), `:388` (E-L9a: `TOL_RESIDUAL`), and `tests/gpu-ladder/ladder.test.ts`'s B residual row (1e-3).
+  - The failure scenario: until the solver round lands, §12.2 states rows that no test checks, and the rows still cannot fail. That is the defect D4-62 exists to remove.
+  - Fix: the next solver round sets the three expects to §12.2's values (with W2R-I17's E-L9a), in the same commit that cites D4-62.
+  - On my trial merge, the current GPU passes the new values: E-L5 2.67e-8 against 3e-7, E-L9a 2.46e-12 against 3e-11, and B 1.266e-11 against 2e-10. These are pass 10's numbers to every printed digit (the kernel is deterministic)..
+
+### Nits
+- **W2R-N20.** Rule (2)'s list of §12 rows (bcacc0a:402: "C, C-pre, C physical, D, S and the f32-storage table") leaves out A, B and E. A (the quiescent ambient, bitwise 0 on the real mesh in every mode) is the row most relevant to a rest-state fix. Say "every §12.1/§12.2 row".
+- **W2R-N21.** SOLVER.md §10 should state the stand-in's scope: it matches the engine through ~200 iterations, then decays while the engine grows elsewhere, and every inflow variant was judged at 200. One full-engine run of the far-field remap (`REMAP=4:3`) to 2000, about 8 minutes alone, would show that the late window does not depend on the inflow either.
+- **W2R-N22.** `d463.test.ts:9-15`: `row(k)` throws on a missing row, and inside the `it.fails` a throw counts as the expected failure. So a refactor that drops rows 1-2 turns the pin into a silent pass, while the signature (row 0) stays green. Assert `rows.length === 3` in the signature test.
+- **W2R-N23.** The handoff reports gates "@eb5f92b" with test:ladder NOT RUN, so the committed d463 test had never run. It does now: 1 passed + 1 expected fail, rule values 8.393 / 11.95.
+
+- **W2R-N24.** `d463.test.ts` takes 1597 s with one other CPU job (the builder's `power.ts`) and more than 1498 s beside a second 130k oracle. The handoff says 6-8 min alone. The ladder's cap is 30 min (`vitest.ladder.config.ts:15-16`, `spawn.ts:22`), and `test:ladder` runs its files in forks side by side, so a loaded full ladder can time this case out: a visible signature FAIL, not a silent pass. Give it its own cap with the reason (about 3× the loaded time, as W2R-N15 asked for L7), or checkpoint less often.
+- **W2R-N25.** SOLVER.md §10's outcome ("8.0× late max, residual 10.4× its value at 100") quotes the 2000-iteration endpoint. The rule and the committed case take the window's maximum: **8.39× and 11.95×**. Quote the case's numbers.
+
+**Trial merge 2** (on trial merge 1 as a scratch commit, so this is main + w2/lookdev-5 + w2/reference-9, the likely merge order):
+- `git merge --no-ff --no-commit bcacc0a` is clean: 4 files, and SOLVER.md merges without conflict (lookdev-5 does not touch it).
+- typecheck and lint: clean.
+- `test:gpu`: 11 files, **64 passed** (54 s). Its E rows print 2.67e-8 and 2.46e-12 over the flux scale.
+- `test:gpu-ladder -t "12.2 B"`: passed, with the residual over r_flux 1.266e-11 and max |u − u∞| 1.95e-5 against 10 × 1.49e-5.
+- `test:mesh`: 29 passed. `test:ladder`, d463: as above, run on this tree.
+- I did not re-run coverage: this tree differs from 4538f0f only in docs and `tests/ladder`, and the unit config includes only `tests/unit` and `src` tests, so its inputs are trial merge 1's.
+- **Restored:** the merge was aborted and my worktree is back on `critic` at bd59f07, clean. The builders' tracked files are unchanged: lookdev-5 is at 4538f0f, and reference-9's worktree was not touched (the detached checkout `critic-r9` is removed).
+
+**Verdict w2/reference-9 @bcacc0a: MERGE.** B 0, I 3 (I17, I18, I19), N 6 (N20-N25).
+- The diagnosis is sound for what it refutes, and its rule was stated before any fix.
+- The pin runs as designed: the signature passes and the rule fails as pinned, with the D4-65 split shown working.
+- D4-62's rows can now fail.
+- I17's E-L9a value and I19's kernel-side expects must land together in the solver round. Until then nothing in force changes. I18 goes into D4-69/D4-70.
+
+**Kernel-side items (w2/solver's next round):**
+1. W2R-I19: `tests/gpu/oracle.test.ts` E-L5 / E-L9a `fluxScaleError` against §12.2's values, and `tests/gpu-ladder/ladder.test.ts` B's residual row against 2e-10. Use E-L9a's value from question (mm).
+2. When a D4-63 fix is decided, its WGSL mirror, plus the d463 rule on the GPU's `engine-stability.test.ts`.
+
+**Orchestrator questions:**
+- (mm) W2R-I17: E-L9a at 1e-10 rather than 3e-11, with the norm's f32 reduction added to §12.2's model, decided before the solver round adopts the rows (no test uses 3e-11 yet)?
+- (nn) W2R-I18, for D4-69/D4-70: should the D4-63 rule judge a volume-weighted energy (p′ and kinetic) with a decay requirement over a 2000-iteration window, instead of max |p′| and the cell-mean residual? The builder's own logs show the linear part decaying in that norm (0.37 / 0.47 at 1000) while max |p′| grows 2.8-3.3×.
