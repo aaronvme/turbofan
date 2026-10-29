@@ -50,3 +50,13 @@ export function spoolDisplayFactor(factor: number, stopped: boolean, dtS: number
   if (q >= 1) return 1;
   return q * q * (3 - 2 * q);
 }
+
+/**
+ * Fan time copies per frame (W2L-N5): 6 for an exposure within half a blade pitch (the
+ * default view at idle, 6.4 degrees: P4's cost), 8 for a wider one (06 at take-off carried a
+ * dot screen with 6), one for a still; never more than the copies built.
+ */
+export function fanTimeCopies(spanRad: number, pitchRad: number, built: number): number {
+  if (!(spanRad > 1e-5)) return 1;
+  return Math.min(built, spanRad <= pitchRad / 2 ? 6 : 8);
+}

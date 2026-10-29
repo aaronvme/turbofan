@@ -14,6 +14,7 @@
 import {
   BackSide,
   BoxGeometry,
+  CylinderGeometry,
   Color,
   DirectionalLight,
   DoubleSide,
@@ -45,7 +46,7 @@ import {
   vec2,
   vec3,
 } from 'three/tsl';
-import type { StandLayout } from '../geometry/stand';
+import type { StandBox, StandLayout } from '../geometry/stand';
 
 /** Floor height, m (the nacelle's lowest point is ~0.95 m below the axis). */
 export const FLOOR_Y = -1.32;
@@ -277,18 +278,34 @@ export async function createStudio(renderer: WebGPURenderer): Promise<Studio> {
 export function createStandMesh(layout: StandLayout): { group: Group; dispose(): void } {
   const group = new Group();
   group.name = 'stand';
-  const mat = new MeshStandardNodeMaterial({ color: 0x1c1d1f, roughness: 0.48, metalness: 0.15 });
+  // satin industrial paint on steel (a shop's blue-grey engine stand), black rubber pads and
+  // wheels, the swivel forks and the tow bar in safety yellow (round 5, critic pass 8)
+  const mat = new MeshStandardNodeMaterial({ color: 0x1f2a36, roughness: 0.38, metalness: 0.1 });
+  const rubber = new MeshStandardNodeMaterial({ color: 0x0b0b0c, roughness: 0.85, metalness: 0 });
+  const yellow = new MeshStandardNodeMaterial({
+    color: 0xb08a12,
+    roughness: 0.42,
+    metalness: 0.05,
+  });
   const geometries: { dispose(): void }[] = [];
-  const add = (g: BoxGeometry | ExtrudeGeometry, name: string) => {
+  const add = (
+    g: BoxGeometry | ExtrudeGeometry | CylinderGeometry,
+    name: string,
+    material: MeshStandardNodeMaterial = mat,
+  ) => {
     geometries.push(g);
-    const m = new Mesh(g, mat);
+    const m = new Mesh(g, material);
     m.name = name;
     m.castShadow = true;
     m.receiveShadow = true;
     group.add(m);
     return m;
   };
-  for (const [k, s] of layout.saddles.entries()) {
+  const sectors = [
+    ...layout.saddles.map((s, k) => [s, `stand-saddle-${String(k)}`, mat] as const),
+    ...layout.pads.map((s, k) => [s, `stand-pad-${String(k)}`, rubber] as const),
+  ];
+  for (const [s, name, material] of sectors) {
     // an annular sector about the bottom, in the (z, y) cross-section, extruded along x
     const a0 = -Math.PI / 2 - s.halfAngle;
     const a1 = -Math.PI / 2 + s.halfAngle;
@@ -303,19 +320,57 @@ export function createStandMesh(layout: StandLayout): { group: Group; dispose():
     // the shape's x is the engine's z and its extrusion the engine's x
     g.rotateY(Math.PI / 2);
     g.translate(s.x - s.width / 2, 0, 0);
-    add(g, `stand-saddle-${String(k)}`);
+    add(g, name, material);
   }
-  for (const [k, b] of [...layout.posts, ...layout.rails].entries()) {
+  const box = (b: StandBox, name: string, material = mat) => {
     const size = [b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]] as const;
     const g = new BoxGeometry(size[0], size[1], size[2]);
     g.translate((b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2);
-    add(g, `stand-frame-${String(k)}`);
+    add(g, name, material);
+  };
+  for (const [k, b] of [...layout.posts, ...layout.rails, ...layout.braces].entries())
+    box(b, `stand-frame-${String(k)}`);
+  box(layout.towBar, 'stand-tow-bar', yellow);
+  for (const [k, c] of layout.casters.entries()) {
+    const wheel = new CylinderGeometry(c.radius, c.radius, c.width, 20);
+    // the wheel's axle along z
+    wheel.rotateX(Math.PI / 2);
+    wheel.translate(c.x, c.y, c.z);
+    add(wheel, `stand-caster-${String(k)}`, rubber);
+    // the swivel fork from the axle up to the frame's underside
+    const top = c.y + c.radius + 0.008;
+    box(
+      {
+        min: [c.x - 0.05, c.y, c.z - c.width / 2 - 0.012],
+        max: [c.x + 0.05, top, c.z - c.width / 2],
+      },
+      `stand-fork-${String(k)}a`,
+      yellow,
+    );
+    box(
+      {
+        min: [c.x - 0.05, c.y, c.z + c.width / 2],
+        max: [c.x + 0.05, top, c.z + c.width / 2 + 0.012],
+      },
+      `stand-fork-${String(k)}b`,
+      yellow,
+    );
+    box(
+      {
+        min: [c.x - 0.06, top, c.z - 0.06],
+        max: [c.x + 0.06, c.y + c.radius + 0.055 - 1e-3, c.z + 0.06],
+      },
+      `stand-plate-${String(k)}`,
+      yellow,
+    );
   }
   return {
     group,
     dispose: () => {
       for (const g of geometries) g.dispose();
       mat.dispose();
+      rubber.dispose();
+      yellow.dispose();
     },
   };
 }

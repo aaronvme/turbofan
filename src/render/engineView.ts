@@ -30,7 +30,12 @@ import {
 } from '../geometry/engineGeometry';
 import { cutawayWedge, wrapAngle } from '../geometry/cutaway';
 import { easeInOut, explodeOffsets } from '../geometry/explode';
-import { advanceAngle, shutterBlurAngle, spoolDisplayFactor } from '../geometry/motion';
+import {
+  advanceAngle,
+  fanTimeCopies,
+  shutterBlurAngle,
+  spoolDisplayFactor,
+} from '../geometry/motion';
 import { screenRectOfBox, type Box3Like } from '../geometry/screenRect';
 import { closedViewVisibility } from '../geometry/visibility';
 import {
@@ -496,7 +501,10 @@ async function assemble(
       uniforms.fanSeed.value = (fanFrame * 0.7548776662466927) % 1;
       const nCopies = Math.max(
         1,
-        Math.min(scene.fanTimeCopies.length, flags.fanCopies ?? scene.fanTimeCopies.length),
+        Math.min(
+          scene.fanTimeCopies.length,
+          flags.fanCopies ?? fanTimeCopies(fanSpan, fanPitch, scene.fanTimeCopies.length),
+        ),
       );
       uniforms.fanCopies.value = fanLive ? nCopies : 1;
       scene.fanTimeCopies.forEach((c, k) => {
