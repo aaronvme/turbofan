@@ -3373,3 +3373,16 @@ None.
     - re-runs the d463 case. If (a) and the restated (b) pass, D4-63 closes without a scheme change: max-norm geometric focusing plus a non-normal transient. If (b) still fails, come back with data for a floor or a scheme change;
     - runs the full gates and the ladder.
   - The smooth limiter's real growing far-field mode (1.00289 per iteration) is recorded as further support for D4-55 (keep sharp).
+- **D4-79 (w2/reference-9 round 11 @a5d86dd): rule (b) judges decay in the limit, per D4-70, with the evidence it requires.**
+  - **Round 11's results with D4-77's weighted residual:**
+    - contract case: (a) 1.717 pass, (b) 2.614 fail;
+    - linear part: (a) 0.505 pass, (b) 1.092 fail. Its weighted residual stays flat through 2000 iterations, then falls to 0.14× by 20000;
+    - the contract case's residual grows in the far-field interior and the plume blocks, not at the axis.
+  - A decaying non-normal transient can fail any early window, so the 1000-2000 window does not test "non-growing" (decay in the limit, D4-70).
+  - **Rule (b) becomes:** run each d463 case to 20k iterations. The weighted residual at 20k must be ≤ its value at 10k and ≤ its value at iteration 100. Rule (a) is unchanged and is also checked at 20k.
+  - **Next round, timeboxed to one round:**
+    - run the contract case to 20k;
+    - if (a) and the new (b) pass, close D4-63 with no scheme change;
+    - if not, trial a local time-step limit from the measured β/M_ref (the standard remedy; the 1D limit is in SOLVER.md §10) under the same rule;
+    - a β floor such as minMach 0.02 is the last resort: it raises L7's iteration ratio to 1.78 and L8 to 0.754%.
+  - D4-63 must be closed before W3's coupling. It does not block W2's flow visuals or app shell.
