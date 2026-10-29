@@ -125,6 +125,11 @@ const K_GD = gladstoneDaleK(550);
 /** A rotor surface hides the flow layer only when it is this much nearer, m. */
 const ROTOR_SLACK_M = 0.08;
 /**
+ * The static scene's slack, m: the stator vanes straddle the cut faces too (they are hidden
+ * blade by blade, not cut), so they get the rotors' slack; the section caps lie on the plane.
+ */
+const SCENE_SLACK_M = ROTOR_SLACK_M;
+/**
  * In the cut modes the particles are lit as by a laser sheet (the experimental technique): only
  * those within this distance of a cut face show, so they trace the flow over the section
  * instead of filling the open wedge, m.
@@ -261,17 +266,17 @@ export function createFlowViz(o: {
 
   let deps: FlowPostDeps | null = null;
   /**
-   * True where this fragment lies behind the engine: the static scene's surface (1 cm of slack:
-   * the plane lies exactly on the section caps) or a rotor's by more than ROTOR_SLACK_M (the
-   * rows at the cut faces straddle them, and their shutter blur smears them across the section:
-   * they must not hide the data, but the fan in front of it still does).
+   * True where this fragment lies behind the engine: a static or rotor surface nearer by more
+   * than the slack (the plane lies exactly on the section caps; the rows at the cut faces
+   * straddle them, and the rotors' shutter blur smears them across the section: they must not
+   * hide the data, but the fan in front of it still does).
    */
   const behindEngine = (viewZ: Node<'float'>): Node<'bool'> => {
     if (deps === null) throw new Error('flowViz: attach() before drawing');
     const t = screenCoordinate.xy;
     const ds = deps.sceneDepth.load(t).r;
     const dr = deps.rotorDepth.load(t).r;
-    const behindScene = ds.lessThan(1).and(viewZ.lessThan(deps.viewZOf(ds).sub(0.01)));
+    const behindScene = ds.lessThan(1).and(viewZ.lessThan(deps.viewZOf(ds).sub(SCENE_SLACK_M)));
     const behindRotor = dr.lessThan(1).and(viewZ.lessThan(deps.viewZOf(dr).sub(ROTOR_SLACK_M)));
     return behindScene.or(behindRotor);
   };
