@@ -2,7 +2,7 @@
 // shipped 130k asset: init, step(budget), the four rgba16float render textures (D0-4: gauge
 // ratios, exact ambient outside the fluid), the snapshot status (W1F-I1) and provenance (W1F-N1),
 // zero validation errors (P3).
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fromHalfBits } from '../../src/contracts/half';
 import { FIELD_EXTENTS, type FieldTexturePair, type FlowSolver } from '../../src/contracts/flow';
 import { nextSnapshot } from '../../src/contracts/sim';
@@ -87,7 +87,11 @@ describe('GpuFlowSolver (the FlowSolver contract)', () => {
     expect(solver.step({ gpuTimeBudgetMs: 5, maxIterations: 0 }).iterationsThisStep).toBe(0);
   });
 
-  it('D4-54: reports every timed frame (its iterations, solver and resample GPU time) to onFrameTiming', async () => {
+  it('D4-54: reports every timed frame (its iterations, solver and resample GPU time) to onFrameTiming', async ({
+    skip,
+  }) => {
+    // a device without timestamps times no frame: a visible skip, not a vacuous pass (W2I-N8)
+    if (!sim.hasTimestamps) skip('no timestamp-query on this device');
     const seen: FrameTiming[] = [];
     const s2 = new GpuFlowSolver({
       onFrameTiming: (t) => {
@@ -105,12 +109,42 @@ describe('GpuFlowSolver (the FlowSolver contract)', () => {
       await flush(sim.device);
     }
     s2.dispose();
-    if (!sim.hasTimestamps) return;
     // init's resample (field version 1, no iterations), then the four steps, each by its version
     expect(seen.map((t) => t.frame)).toEqual([1, ...versions]);
     expect(seen.map((t) => t.iterations)).toEqual([0, ...its]);
     for (const t of seen) expect(t.resampleMs).toBeGreaterThan(0);
     for (const t of seen.slice(1)) expect(t.solverMs).toBeGreaterThan(0);
+  });
+
+  it('W2I-N2: a throwing onFrameTiming is reported, and stops neither the solver nor its scheduler', async ({
+    skip,
+  }) => {
+    if (!sim.hasTimestamps) skip('no timestamp-query on this device: onFrameTiming never fires');
+    const reported: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+      reported.push(a.map(String).join(' '));
+    });
+    const s3 = new GpuFlowSolver({
+      onFrameTiming: () => {
+        throw new Error('a consumer bug');
+      },
+    });
+    try {
+      const { asset } = await shippedAsset();
+      await s3.init({ device: sim.device, mesh: asset, definition: ENGINE_DEFINITION });
+      for (let k = 0; k < 4; k++) {
+        s3.step({ gpuTimeBudgetMs: 5, maxIterations: 3 });
+        await flush(sim.device);
+      }
+      expect(s3.status()).toMatchObject({ status: 'running', error: null });
+      expect(s3.msPerIteration).not.toBeNull();
+      expect(s3.resampleGpuMs).not.toBeNull();
+      expect(reported.length).toBeGreaterThan(0);
+      expect(reported[0]).toMatch(/onFrameTiming threw.*a consumer bug/);
+    } finally {
+      spy.mockRestore();
+      s3.dispose();
+    }
   });
 
   it('hands out the same textures for its lifetime and labels them as the solver (W1F-N1)', async () => {
