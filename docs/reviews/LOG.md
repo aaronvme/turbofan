@@ -3389,3 +3389,12 @@ None.
 - **D4-80 (w2/app-ui @6762716, PARTIAL at the cap): the four new dev dependencies are accepted.** They are pinned exactly: @testing-library/react 16.3.3, @testing-library/dom 10.4.2, @testing-library/user-event 14.6.8 and happy-dom 21.0.4.
   - This is the standard React Testing Library stack, which the plan's react-testing approach calls for. They are dev-only and not bundled.
   - The critic checks the lockfile change and that no install scripts were added.
+- **D4-81 (w2/reference-9 round 12 @36ea10e, at the cap): D4-63 needs a scheme change, and the candidates are ordered.**
+  - Under D4-79's long-run rule the contract case **grows for real**: L2(p′) 1.27× at 2000, 4.36× at 10k, 5.39× at 15k; weighted residual 3.55 at 100, 8.73 at 10k, 10.0 at 15k.
+  - The growth sits in the far-field interior and the plume blocks, where the app's coupled field will be near rest. So it blocks W3, and no change to the rule's window can close it.
+  - The local time-step limit (round 12's screen) tracks the baseline, so it is not adopted. **Its scratch patch is still applied, uncommitted, in the worktree's src: the next round reverts it first.**
+  - **Next round, all under the D4-79 rule** (20k-iteration runs; every currently passing row still passes; R is excluded because it is the sharp limiter's known floor, pinned):
+    1. a plain-scheme long run of the contract case, to confirm the preconditioning is the source;
+    2. a **global M_cut tied to the domain's peak velocity** (the standard Weiss-Smith/Turkel floor; D4-59's rationale), tried at 0.02 then 0.05. D4-59 found 0.02 kept every other row passing (L7 ratio 1.78 ≤ 3, L8 0.754%). It was rejected there only on R's convergence, which D4-55/D4-58 later traced to the limiter, so that criterion was wrong for R;
+    3. only if both fail, come back with data for a deeper change.
+  - The kernel mirrors the adopted M_cut, as a parameter: D4-40's adapter default.
