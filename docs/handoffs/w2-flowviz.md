@@ -1,66 +1,48 @@
-w2/flowviz: PARTIAL (STOP-CLEAN on the usage brake). The pure flow-visual math is done and tested; the cut plane is drawn from the MOCK field; particles, haze/schlieren, glow, legend and the timer are NOT built yet (from main 1eb1e62; HEAD: see `git log -1`, the handoff commit)
+w2/flowviz: round 2 DONE (the air is visible, driven by the live GPU solver's textures or the labelled MOCK; every handoff NEXT item built; a polish list below) (from main 1eb1e62; round 1 stopped at 89ef843; HEAD: see `git log -1`, the handoff commit)
 
-DONE
-- ac66b6e (TDD) `tests/unit/flow/viz/*.test.ts`: 36 tests, committed before the code.
-- 88525c6 `src/flow/viz/particles.ts` (particles.test.ts):
-  - Particles are advected in (x, r, θ) by the solver's u_x, u_r, u_θ (midpoint RK2, dθ/dt = u_θ/max(r, 1e-4)), so r is exact in pure swirl. A step through the axis reflects (r → −r, θ + π).
-  - They are drawn at (x, r cos θ, r sin θ) with the PHYSICS.md 2.1 frame: θ = 0 is +y, θ = π/2 is +z.
-  - `velocity3D` gives the streak direction.
-  - Checked against analytic fields: uniform flow, solid body, free vortex, a helix, and u_r = kr, whose error falls 4× per halving (second order).
-  - The particle dies outside the field or where the fluid fraction is < 0.5.
-  - Seeding: seeded mulberry32 and uniform-by-area annular zones split by weight. `particleAlpha` fades in, out and at the edge.
-- `src/flow/viz/optics.ts` (optics.test.ts):
-  - Edlén 1966 refractivity: 2.77e-4 at 589 nm, so the Gladstone–Dale K = 2.26e-4 m³/kg (within 1 % of Merzkirch). Also `refractiveIndex` and the small-angle `hazeDeflectionRad`.
-  - Planck: the Wien peak checks, and σT⁴/π to 0.1 %.
-  - CIE 1931 colour from the Wyman–Sloan–Shirley 2013 fit: illuminant A comes out at (0.4476, 0.4074) ± 0.005.
-  - `blackbodyLinearSrgb` (out-of-gamut colours lifted with white) and `blackbodyLuminance` (cd/m²).
-- `src/flow/viz/colormaps.ts`:
-  - viridis and inferno (Zucker's CC0 polynomial fits) are within 0.02 of matplotlib at 0, 0.5 and 1, and rise monotonically in L*.
-  - The diverging map is built in CIELAB, with L* symmetric to within 1.5.
-  - `bakeLut` makes the 256-texel GPU LUT; `niceTicks` gives the legend's 1-2-5 ticks.
-- `src/flow/viz/fields.ts`: p, ρ, T, Mach and |u|.
-  - p and ρ are shown as log2 of the ratio to the ambient, on the diverging map.
-  - Mach uses the thermally perfect a = sqrt(γ(T, FAR) R T).
-  - Each quantity has its contour step. ISA a = 340.3 m/s is checked.
-- `src/flow/viz/modes.ts`:
-  - Realistic, Cutaway, Schlieren and Data, each mapped to a look mode with `lookModeFor`.
-  - `synthesized: []` is pinned by a test (honesty).
-  - `FLOW_VISUALS_BUDGET_MS = 2` (D4-2).
-- 892367a PHYSICS.md §1: fidelity-ledger rows for the flow visuals and for the hot-part glow, which is derived and rests on a metal-temperature assumption.
-- 0bc9e65 `src/render/flowViz.ts`: the cut-plane display.
-  - The near-extent field is painted on the two faces of the cutaway wedge. Solid texels are alpha-tested away, where the caps show the metal. Colour comes from the LUT, with anti-aliased contours (fwidth).
-  - `EngineView.setFlowField(cpu)` and `setFlowMode(id)` are added; the mode also sets its look mode. This round feeds the field through DataTextures (HalfFloat).
-  - Proven by `tests/browser/flowViz.test.ts`: every mode renders with 0 WebGPU errors, the Data and Cutaway frames gain more than 0.02 mean chroma, and it writes `docs/look-dev/flow/{realistic,cutaway,schlieren,data}.png` (960×540, MOCK takeoff field). Realistic and Schlieren look like the plain engine: those modes are not built yet.
+DONE (round 2, in the order asked)
+- e791f14 (TDD) the failing tests first: `tests/unit/flow/viz/{seeding,schlieren,glow,legend}.test.ts`, the flow pass group in `tests/unit/gpu/passTimings.test.ts`, the D4-76 composite and crop in `colormaps.test.ts`. Two of my own TDD expectations were wrong and were fixed, not loosened: `visualDtS(1, ...)` contradicted the 0.1 s frame cap the same test asserts, and "invisible below the Draper point" is now stated as below one 8-bit display step of a lit white wall (the first version guessed 1e-6; the real figure is 4e-6 at 750 K).
+- 3c8fc20 the pure modules:
+  - `src/gpu/passTimings.ts` (flagged contract edit, minimal): passes named "Flow ..." (`isFlowPass`) are left out of every render group and of `gpuTotal`, so P4 stays "render excluding the solver and flow visuals" (D4-2); `sumFlowMs` and `PassMedians.flow`, `FrameSample.flow?` (optional, so no tool changes).
+  - `src/flow/viz/seeding.ts`: the PCG hash (Jarzynski & Olano 2020) and its 24-bit float stream (the kernel's RNG, mirrored), the seed zones from the flowpath (inside the lip, bypass and core entries, the core nozzle's last 25 cm), dilation, streak length, speed and edge fades.
+  - `src/flow/viz/schlieren.ts`: the line-of-sight deflection eps = K ∫ grad⊥ρ ds through the axisymmetric field, checked against the Gaussian column's closed form (four impact parameters, 2nd-order convergence, a ray stopped by a surface keeps half), the knife-edge image (Settles 2001 eq. 3.5), the haze's apparent shift.
+  - `src/flow/viz/glow.ts`: metal temperatures from the station temperatures (HPT cooled toward T3, phi = 0.6, assumed), grey-body radiance in scene units (studio at 1000 lux, assumed), all assumptions in one exported object and in the ledger.
+  - `src/flow/viz/legend.ts`: the legend model (LUT stops, ticks inside the range, log2 quantities labelled as ratios, the schlieren's µrad grey scale), `provenanceLabel`, `flowModeNote` (what a mode shows, derived from what).
+  - `src/flow/viz/modes.ts`: `composite` ('scene' Realistic, 'display' the data modes, D4-76), `crop` (D4-76's near field from the definition: lip − 0.6 m to plug tip + 0.9 m, r ≤ 1.15 × the nacelle's radius), `schlierenRangeRad` (500 µrad, reasoned in the comment).
+- 6ab1736 `src/flow/viz/particleKernel.ts`: the particle and density-gradient WGSL kernels and the particle step's f64 TS mirror. `tests/gpu/flowParticles.test.ts` (Dawn): one GPU step against the TS step on the MOCK take-off raster, 4096 particles: 0 branch mismatches, positions 1.7e-6 m, velocities 0.027 m/s (bounds 1e-5 m and 0.25 m/s, justified in the test); a 10 % swirl-step mutant fails at 7e-3 m. 300 steps stay finite and in the field; the gradient kernel equals the central differences, zero across walls.
+- 48ac9bd..92cfe1b the render side:
+  - `src/render/flowCompute.ts`: the field binding (the solver's `FlowField` textures as they are, or a CPU field uploaded into our own textures: the MOCK fallback and the tests; `source` travels with it), one timestamped "Flow compute" pass per frame (gradient + 32768 particles), a particle readback for inspection.
+  - `src/render/flowViz.ts`: every layer reads the bound textures through ExternalTextures. The cut plane (LUT bytes with NoColorSpace, contours, the D4-76 crop, the full-domain option) and the streaks (camera-facing capsules from the particle buffer via `injectGpuBuffer`, length |u| × dilation × 0.25 s capped at 0.45 m, a laser sheet of ±3 cm at the cut faces in the cut modes, a dark halo in the display modes, opacity ∝ 1/length beyond 12 cm in Realistic) are in the "Flow Overlay" scene, depth-tested by hand against the scene and rotor depths with 8 cm of slack (4848367: rows and vanes straddling the faces, and the rotors' shutter blur, must not hide the data; the fan in front still does). The haze and schlieren raymarch the gradient texture along each pixel's ray (32 and 96 samples, half resolution, a fixed per-pixel jitter: no synthetic flicker).
+  - `src/render/post.ts`: `attachFlow` builds three more pipelines (as the cinematic one): Realistic (haze-shifted TRAA output + overlay in linear light, then AgX), display (D4-76: `renderOutput` first, then the overlay in display space), schlieren (knife-edge grey, the engine a dim silhouette). With the flow off the frame is the old pipeline exactly.
+  - `src/render/engineView.ts`: `setFlowField` (CPU), `setFlowSolverField` (GpuFlowSolver.fields()), `setFlowMode`, `setFlowQuantity`, `setFlowTimeScale`, `setFlowFullDomain`, `readFlowParticles`; `stats().flow` (mode, source, quantity, dilation, render/compute/visuals ms); the glow uniforms set every frame from the cycle state; debug flags `noGlow`, `noFlowParticles`, `noHaze` for the A/B checks. `src/render/materials.ts`: `LookUniforms.glow` on the HPT/LPT airfoils, the core nozzle and the plug.
+  - `spikes/p1/appScene.ts`: hands the view's measured flow-visual ms to D4-2's `solverBudgetMs` (null while no flow mode is set, so P1's record is unchanged).
+- 23e6693, df53ed1 the look-dev page: `src/lookdev/flowPanel.ts` (mode segmented control, slow-motion slider ×1/1000..×1/10, cut-plane quantity, provenance badge, flow GPU ms, the "what is shown" note; `?field=solver` runs the live solver on the view's device from its timing start state, stepped at D4-2's budget) and the legend (bottom right, from the LUT stops; dataviz: text in text tokens, round ticks, unit, provenance).
+- 4e34bc3, 167e8a8 `tests/browser/flowViz.test.ts` (3 tests): every mode, 0 WebGPU errors, frames saved; D4-76: 68 % of sampled cut-plane pixels within 3/255 of a viridis LUT entry (round 1 through AgX: none); glow A/B: 15732 px red-lifted at take-off; haze A/B: 3006 px change side on; the live solver's textures drawn and labelled 'solver'; [timing] the default preset at 1080p back to back.
+- f9ee742 docs: PHYSICS.md ledger rows (tracers are a visualization device; laser sheet; mean-field schlieren and haze, no shimmer; the glow's assumptions); GPU_FACTS M49-M53; LOOKDEV.md "Flow visuals" with the screenshot table.
+
+Indicative ms per pass (D4-42 style back to back, 1080p, threeQuarterFront, Realistic, a reference builder's CPU tests running; not D0-1)
+- Flow visuals 1.28 ms (median of 3 paired runs, 1.16-1.56): render passes ("Flow Overlay" + "Flow Haze [ RTT ]") 1.11, compute 0.17. Within D4-2's 2 ms.
+- P4's render total with the flow off/on: 8.21 / 8.66 ms, paired change median +0.46 ms, but one pair was a +5.8 ms outlier and one −0.52: noise at this load. Not conclusive either way; see NEXT 1.
+- Other views at vsync in the shared Chrome (DVFS-inflated, D4-45): cutaway 0.59-0.79 ms, side Realistic 1.8-3.0 ms (long jet streaks' overdraw), schlieren side 2.7 ms (not budget-gated).
+
+Screenshots (`docs/look-dev/flow/`)
+- `ui-realistic.jpg`, `ui-data.jpg`, `ui-schlieren.jpg`, `ui-solver-cutaway.jpg`: the look-dev page with the flow panel and legend (Chrome via the MCP, 1925 × 1001).
+- `realistic.png`, `cutaway.png`, `schlieren.png`, `data.png`, `solver-data.png`, `solver-cutaway.png`, `glow-hotsection.png`: the browser test's frames (960 × 540). `timing.json`: the timing pairs.
 
 NEXT (in order)
-1. GPU particles (the main missing piece). Port `advectParticle`, `seedParticle` and `particleAlpha` to a WGSL or TSL compute pass over a storage buffer of (x, r, θ, age).
-   - Sample the D0-4 velocity texture; mirror u_r and u_θ across the axis like `sampleCpuField`.
-   - Dawn test: the GPU step must match the TS step on the MOCK raster.
-   - Render: instanced, camera-facing streak quads along `velocity3D`, length ∝ |u| dt_visual, additive or soft-alpha, `particleAlpha`.
-   - Seed zones: upstream disc, bypass and core inlet, from the flowpath (`geo.walls`).
-   - Time dilation: dt_visual = dilation × dt_frame, with a UI control. Something like 1/200 at takeoff, so 300 m/s reads as about 1.5 m/s.
-2. Solver textures: `GpuFlowSolver.fields()` returns GPUTextures on the same device. Wrap them with three's ExternalTexture (tests/browser/interop.test.ts already does this) instead of the DataTextures. Then re-run the browser test with `source: 'solver'`.
-3. Data colours after tone mapping. The cut plane currently goes through AgX, so its colours are desaturated against the legend LUT (see `cutaway.png`: pale yellow). Draw it in an overlay after `outputColorTransform`, or apply the inverse; the legend must match the pixels.
-4. Legend (UI overlay, the `dataviz` skill): a gradient from `bakeLut`, `niceTicks(spec.min, spec.max, 5)`, the unit, and a 'MOCK' or 'solver' badge.
-5. Schlieren and haze:
-   - Schlieren: screen-space |∇ρ| of the ρ gauge texture, raymarched through the axisymmetric field along the view ray. It needs ρ = ρ∞(1 + g) and Gladstone–Dale K from optics.ts, shown on a grey map.
-   - Haze: offset the background UV by `hazeDeflectionRad` × (distance to the background) / (px per rad), only in the plume (far extent).
-6. Blackbody glow: emissive on the nozzle, plug and LPT exit from the cycle's T5, plus a stated cooling offset for the HPT. Use `blackbodyLinearSrgb` × `blackbodyLuminance` × the camera exposure; it is physically dim below about 900 K. Keep it restrained.
-7. Timer and budget:
-   - Add a `flow` pass group to `src/gpu/passTimings.ts` RULES (name the passes "Flow ..."). Measure back to back (D4-42) at the default preset; ≤ 2 ms is required.
-   - Check P4 unchanged with the flow mode off, and that the scheduler (`src/flow/gpu/scheduler.ts solverBudgetMs`) gets the measured visuals ms.
-8. Polish: fade the plane beyond the nacelle (r > about 1.2 m) with alpha hash and TRAA, so the far-field slab does not cover the studio. Add a "What's simulated" data entry from `FLOW_VIZ_MODES`.
+1. P4 with the flow passes present: run the official D0-1 capture (orchestrator, quiet machine) with the flow off and with Realistic on, and confirm P4 holds and the flow visuals stay ≤ 2 ms. This round only ran indicative pairs (above).
+2. Check the core annulus in Data after 4848367 (static airfoils now get the rotors' 8 cm slack so the vanes straddling the faces no longer hide the plane); if parts of the stand or the far cowl edge get painted over in some view, cut the airfoils at the faces instead (as a cutaway model would).
+3. The far field: particles die at x = 5 m and the haze and schlieren march the near field only. March the far texture past it (the plume to 32 m) and let particles continue into it.
+4. W3's coupled solver field: re-shoot the screenshots on the live solver once body forces drive it (today it runs from its timing start state, so its field is weak; the MOCK carries the look).
+5. Polish: TRAA for the overlay (it is not accumulated, so streaks shimmer by the jitter), a hover probe of the plane's value under the cursor (dataviz interaction), the cinematic (DoF) presets with a flow layer, a far-field seed zone for the entrained ambient air.
 
 GOTCHAS
-- vitest 5 browser: import `commands` and `page` from `'vitest/browser'` (not `@vitest/browser/context`). `commands.writeFile(path, b64, 'base64')` paths are relative to the project root. `page.screenshot` captures the whole runner UI, so it is not used.
-- `src/thermo/gas.ts gamma()` throws outside 200–3500 K: the Mach LUT spans 200–2400 K.
-- The cut plane is at the wedge faces, not the wedge centre: the centre faces the camera edge-on (the wedge opens toward the camera).
-- On screen, Mach uses γR(T) of air, with FAR ignored; `deriveQuantities` uses FAR. The difference is about 1 % in the core jet. Either bake a 2D LUT or label it.
-- `node_modules` and the mesh come from `npm ci && npm run mesh`, done in this worktree. Dev port 5193 was not used, and no server or Chrome is left running.
+- White streaks on viridis yellow (or any light colour) are invisible: the display modes draw a dark halo round each light core. Do not remove it without another contrast cue.
+- The MOCK field's inflow ahead of the lip converges about 10× faster than continuity allows (u_r ≈ −131 m/s at x = −1 m, r = 0.3 m against u_x 99): tracers seeded there pile onto the axis and burst at the spinner. The intake zone is inside the lip for that reason. A MOCK issue for its owner, not fixed here.
+- A page in the background gets no rAF: the look-dev loop stops (particles stay unborn). Bring the MCP page to the front (`select_page` with `bringToFront`) before reading anything.
+- The MCP screenshot tool cannot write into the worktree; it saves to a temp path and the file is copied.
+- `three` RTT passes are labelled "<name> [ RTT ]"; anything named "Flow ..." is a flow pass and outside P4. An unclassified pass "" (~0.5-0.8 ms) shows once per view creation in the browser suite, with every label of that frame empty: the studio's PMREM bake, not a flow pass.
+- `src/lookdev/flowPanel.ts` imports `tools/perf/solverPerf.ts` (the solver's timing start state) for `?field=solver`: look-dev only, never the app.
+- Dev port 5193 (the Vite child outlives a stopped npx: kill the node PID listening on it). Nothing is left running.
 
-GATES @0bc9e65 (WIP)
-- npm run typecheck: clean. eslint on the touched files: clean.
-- tests/unit/flow/viz: 36 passed. tests/browser/flowViz.test.ts: 1 passed (0 WebGPU errors).
-- @0bc9e65: npm run lint clean (ESLint + Prettier); npm run coverage: 103 files, 1967 passed + 11 expected fail, lines 99.45 %, statements 98.54 %, thresholds met.
-- NOT run (usage brake): npm run test:mesh, npm run test:gpu (no GPU-kernel code touched), the full npm run test:browser (only flowViz.test.ts ran; engineView.ts changed, so the full browser suite must run before merge).
-- Indicative visuals ms: not measured (no flow pass group yet; NEXT 7). The cut plane is one full-screen-ish quad pair with 3 texture reads per pixel, expected well under 0.5 ms.
+GATES (filled in below)
