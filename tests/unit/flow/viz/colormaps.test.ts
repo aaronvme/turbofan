@@ -87,13 +87,25 @@ describe('cut-plane quantities', () => {
   const ambient = { pPa: 101325, rhoKgPerM3: 1.225, tK: 288.15, fuelAirRatio: 0 };
 
   it('derives Mach from the thermally perfect speed of sound (ISA SLS: a = 340.3 m/s)', () => {
-    const q = deriveQuantities({ ...ambient, uxMPerS: 170.15, urMPerS: 0, uthetaMPerS: 0, fluidFraction: 1 });
+    const q = deriveQuantities({
+      ...ambient,
+      uxMPerS: 170.15,
+      urMPerS: 0,
+      uthetaMPerS: 0,
+      fluidFraction: 1,
+    });
     expect(q.mach).toBeCloseTo(0.5, 2);
     expect(q.speed).toBeCloseTo(170.15, 9);
   });
 
   it('includes the swirl in the speed', () => {
-    const q = deriveQuantities({ ...ambient, uxMPerS: 3, urMPerS: 0, uthetaMPerS: 4, fluidFraction: 1 });
+    const q = deriveQuantities({
+      ...ambient,
+      uxMPerS: 3,
+      urMPerS: 0,
+      uthetaMPerS: 4,
+      fluidFraction: 1,
+    });
     expect(q.speed).toBeCloseTo(5, 12);
   });
 
