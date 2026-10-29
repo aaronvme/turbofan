@@ -80,7 +80,20 @@ describe('T-s diagram', () => {
     const s = createCycleModel().reset('groundIdle');
     const d = tsDiagram(s.stations);
     const at = (id: string) => d.core.find((p) => p.id === id);
-    expect(d.core.map((p) => p.id)).toEqual(['2', '21', '24', '25', '3', '4', '41', '45', '49.5', '5', '8', '9']);
+    expect(d.core.map((p) => p.id)).toEqual([
+      '2',
+      '21',
+      '24',
+      '25',
+      '3',
+      '4',
+      '41',
+      '45',
+      '49.5',
+      '5',
+      '8',
+      '9',
+    ]);
     expect(at('3')?.ttK).toBeGreaterThan(at('2')?.ttK ?? Infinity);
     expect(at('4')?.sJPerKgK).toBeGreaterThan((at('3')?.sJPerKgK ?? 0) + 500);
     expect(at('5')?.ttK).toBeLessThan(at('4')?.ttK ?? 0);
@@ -149,7 +162,9 @@ describe('callout layout', () => {
       { id: 'a', x: 300, y: 300, visible: true, priority: 0 },
       { id: 'b', x: 300, y: 300, visible: true, priority: 0 },
     ];
-    expect(layoutCallouts(anchors, size, vp)).toEqual(layoutCallouts([...anchors].reverse(), size, vp));
+    expect(layoutCallouts(anchors, size, vp)).toEqual(
+      layoutCallouts([...anchors].reverse(), size, vp),
+    );
     expect(leaderEnd({ x: 0, y: 0 }, { x: 10, y: 10, w: 5, h: 5 })).toEqual({ x: 10, y: 10 });
   });
 });
@@ -210,19 +225,22 @@ describe('format', () => {
 
 describe('annunciators', () => {
   it('D4-17: a held solve is a warning with its count and W2F-I1 cause', () => {
-    const a = gasPathAnnunciation({ gasPathSolve: { status: 'held', lostSolves: 3 } }, 'Newton stalled');
+    const a = gasPathAnnunciation(
+      { gasPathSolve: { status: 'held', lostSolves: 3 } },
+      'Newton stalled',
+    );
     expect(a.level).toBe('warning');
     expect(a.detail).toMatch(/3 lost/);
     expect(a.detail).toMatch(/Newton stalled/);
-    expect(gasPathAnnunciation({ gasPathSolve: { status: 'matched', lostSolves: 0 } }, null).level).toBe(
-      'normal',
-    );
-    expect(gasPathAnnunciation({ gasPathSolve: { status: 'matched', lostSolves: 2 } }, 'x').level).toBe(
-      'caution',
-    );
-    expect(gasPathAnnunciation({ gasPathSolve: { status: 'subIdle', lostSolves: 0 } }, null).level).toBe(
-      'advisory',
-    );
+    expect(
+      gasPathAnnunciation({ gasPathSolve: { status: 'matched', lostSolves: 0 } }, null).level,
+    ).toBe('normal');
+    expect(
+      gasPathAnnunciation({ gasPathSolve: { status: 'matched', lostSolves: 2 } }, 'x').level,
+    ).toBe('caution');
+    expect(
+      gasPathAnnunciation({ gasPathSolve: { status: 'subIdle', lostSolves: 0 } }, null).level,
+    ).toBe('advisory');
   });
 
   it('names the set flags, the solver status and every mock part', () => {
@@ -238,11 +256,19 @@ describe('annunciators', () => {
     };
     expect(flagAnnunciations({ flags }).map((a) => a.text)).toEqual(['SURGE', 'EGT EXCEEDANCE']);
     const base = { mode: 'tracking' as const, stats: null, reduction: null };
-    expect(flowAnnunciation({ ...base, status: 'lost', error: 'device lost' }).level).toBe('warning');
-    expect(flowAnnunciation({ ...base, status: 'diverged', error: 'nan' }).text).toBe('SOLVER DIVERGED');
+    expect(flowAnnunciation({ ...base, status: 'lost', error: 'device lost' }).level).toBe(
+      'warning',
+    );
+    expect(flowAnnunciation({ ...base, status: 'diverged', error: 'nan' }).text).toBe(
+      'SOLVER DIVERGED',
+    );
     expect(flowAnnunciation({ ...base, status: 'running', error: null }).level).toBe('normal');
-    expect(flowAnnunciation({ ...base, status: 'initialising', error: null }).text).toBe('SOLVER INIT');
-    expect(flowAnnunciation({ ...base, status: 'unavailable', error: null }).level).toBe('advisory');
+    expect(flowAnnunciation({ ...base, status: 'initialising', error: null }).text).toBe(
+      'SOLVER INIT',
+    );
+    expect(flowAnnunciation({ ...base, status: 'unavailable', error: null }).level).toBe(
+      'advisory',
+    );
     expect(provenanceBadges({ cycle: 'model', flow: 'mock' }).map((b) => b.text)).toEqual([
       'CYCLE: MODEL',
       'FIELD: MOCK',

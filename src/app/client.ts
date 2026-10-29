@@ -24,7 +24,11 @@ export function startClient(canvas: HTMLCanvasElement): Client {
   const post = (m: ToWorker, transfer: Transferable[] = []) => {
     worker.postMessage(m, transfer);
   };
-  useApp.setState({ post: (m) => post(m) });
+  useApp.setState({
+    post: (m) => {
+      post(m);
+    },
+  });
   worker.onmessage = (e: MessageEvent<FromWorker>) => {
     useApp.getState().receive(e.data);
   };

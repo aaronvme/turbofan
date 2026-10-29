@@ -30,9 +30,7 @@ describe('createSimCore', () => {
   it('applies valid commands in seq order and echoes the last applied seq', () => {
     const core = mockCore();
     expect(core.command({ seq: 0, command: { type: 'setThrottle', lever: 0.5 } })).toEqual([]);
-    expect(core.command({ seq: 1, command: { type: 'setViewMode', mode: 'cutaway' } })).toEqual(
-      [],
-    );
+    expect(core.command({ seq: 1, command: { type: 'setViewMode', mode: 'cutaway' } })).toEqual([]);
     const s = core.snapshot({ flow: NO_FLOW, flowSource: 'none' });
     expect(s.lastCommandSeq).toBe(1);
     expect(s.inputs.throttleLever).toBe(0.5);
@@ -84,7 +82,10 @@ describe('createSimCore', () => {
     const core = mockCore();
     core.command({
       seq: 0,
-      command: { type: 'setRenderState', render: { overlays: { tsDiagram: true }, quality: 'low' } },
+      command: {
+        type: 'setRenderState',
+        render: { overlays: { tsDiagram: true }, quality: 'low' },
+      },
     });
     expect(core.view.overlays.tsDiagram).toBe(true);
     expect(core.view.overlays.particles).toBe(DEFAULT_UI_STATE.overlays.particles);
