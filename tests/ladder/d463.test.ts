@@ -2,9 +2,13 @@
 import { describe, expect, it } from 'vitest';
 import { runCase, type CaseResult } from './spawn';
 
+// D4-79's 20000 iterations on the 130k mesh: 216-223 ms per iteration with the process alone at
+// AboveNormal (about 75 min), 680-775 ms on a loaded machine (round 11), so up to about 4.3 h.
+const D463_TIMEOUT_MS = 6 * 3_600_000;
+
 describe('D4-63: the rest state on the 130k engine mesh', () => {
   let result: Promise<CaseResult> | undefined;
-  const once = (): Promise<CaseResult> => (result ??= runCase('d463'));
+  const once = (): Promise<CaseResult> => (result ??= runCase('d463', D463_TIMEOUT_MS));
   const row = async (k: number) => {
     const r = (await once()).rows[k];
     if (r === undefined) throw new Error(`no row ${k}`);
@@ -15,9 +19,13 @@ describe('D4-63: the rest state on the 130k engine mesh', () => {
   };
 
   // The companion (D4-65's form): a NaN, a timeout or a blow-up fails here, not hidden by the pin.
-  it("signature: finite for 2000 iterations, max |p'| below 100x its first", async () => {
-    expect((await row(0)).pass).toBe(true);
-  });
+  it(
+    "signature: finite for 20000 iterations, max |p'| below 100x its first",
+    async () => {
+      expect((await row(0)).pass).toBe(true);
+    },
+    D463_TIMEOUT_MS,
+  );
 
   // KNOWN-FAIL (D4-63, round 9): the pulse does not decay. The upstream block focuses it on the axis
   // (5.4x at 200, 20x at 270, then it falls) and the plume-core block's axis cells keep it: max |p'|
@@ -28,17 +36,16 @@ describe('D4-63: the rest state on the 130k engine mesh', () => {
   // (1e-6) is a decaying transient of the pseudo-energy that still fails this window (D4-69).
   // Under D4-72 (the L2 of p') round 9's run has 1.72x over 1000-2000, inside the bound. Under
   // D4-77 (round 11) the residual is volume-weighted too, and the pin still fails on it: 2.61x its
-  // value at 100 (9.28 against 3.55 at 1500; the far-field and plume blocks, not the axis), where
-  // the cell mean is 11.9x. The linear part alone (1e-6, isentropic) fails it narrowly, 1.09x: its
-  // weighted residual is flat over 100-2000 and 0.14x by 20000 (SOLVER.md 10, D4-77's results).
+  // value at 100 over 1000-2000 (the far-field and plume blocks, not the axis). D4-79 (round 12)
+  // judges decay in the limit instead: the weighted residual at 20000 against its values at 10000
+  // and at 100, with (a) also at 20000.
   it.fails(
-    "rule (D4-72, D4-77): L2(p') <= 2x its first and the volume-weighted residual below its value at 100, over 1000-2000",
+    "rule (D4-72, D4-79): L2(p') <= 2x its first over 1000-2000 and at 20000; the volume-weighted residual at 20000 <= its values at 10000 and at 100",
     async () => {
-      const a = await row(1);
-      const b = await row(2);
-      await row(3); // max |p'|, reported beside the rule (D4-72)
-      await row(4); // the cell-mean residual, reported beside the rule (D4-77)
-      expect(a.pass && b.pass).toBe(true);
+      const gated = [await row(1), await row(2), await row(3), await row(4)];
+      for (let k = 5; k <= 9; k++) await row(k); // reported beside the rule
+      expect(gated.every((r) => r.pass === true)).toBe(true);
     },
+    D463_TIMEOUT_MS,
   );
 });
