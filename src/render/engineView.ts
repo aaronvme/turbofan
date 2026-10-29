@@ -238,6 +238,10 @@ export interface DebugFlags {
   readonly noRotorMotion?: boolean;
   /** Scales the rotor motion vectors' spool steps (a probe of their sign and size). */
   readonly rotorMotionScale?: number;
+  /** No hot-part thermal emission (the glow's A/B, tests/browser/flowViz.test.ts). */
+  readonly noGlow?: boolean;
+  /** The flow modes without their particles (the cut plane's colour check, D4-76). */
+  readonly noFlowParticles?: boolean;
 }
 
 const FPS = 60;
@@ -554,6 +558,7 @@ async function assemble(
     },
     setDebugFlags(f) {
       flags = { ...f };
+      flowViz.setParticlesHidden(f.noFlowParticles === true);
       hidden = [];
       if (f.hide !== undefined && f.hide !== '') {
         // matched against "main:<name>" / "rotors:<name>", so a pattern can pick one pass
@@ -667,7 +672,8 @@ async function assemble(
       // the hot parts' blackbody glow from the cycle's temperatures (src/flow/viz/glow.ts)
       const metal = hotPartTemperatures(cycleSpeeds.stations);
       for (const part of GLOW_PARTS) {
-        const [r, g, b] = glowSceneRadiance(metal[part], GLOW_EMISSIVITY[part]);
+        const [r, g, b] =
+          flags.noGlow === true ? [0, 0, 0] : glowSceneRadiance(metal[part], GLOW_EMISSIVITY[part]);
         uniforms.glow[part].value.set(r, g, b);
       }
       const radPerPx = (2 * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(1, heightPx);
@@ -677,7 +683,7 @@ async function assemble(
         flowCompute.run({
           dtSimS: visualDtS(dtS, dilation),
           dtWallS: Math.min(dtS, 0.1),
-          particles: m.particleOpacity > 0,
+          particles: m.particleOpacity > 0 && flags.noFlowParticles !== true,
           gradient: m.haze > 0 || m.schlieren,
         });
       }

@@ -79,7 +79,7 @@ export function createPassTimer(
       list.push({ label: l.label, ms });
       if (passGroupOf(l.label) === 'other' && !isFlowPass(l.label) && !unclassified.has(l.label)) {
         unclassified.add(l.label);
-        console.warn(`pass timer: unclassified pass "${l.label}" (${ms.toFixed(3)} ms) DEBUG ${[...inspector.labels.values()].filter((x) => x.frame === l.frame).map((x) => x.label).join("|")}`);
+        console.warn(`pass timer: unclassified pass "${l.label}" (${ms.toFixed(3)} ms)`);
       }
     }
     for (const [f, list] of [...byFrame].sort((a, b) => a[0] - b[0])) {

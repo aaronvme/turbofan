@@ -547,7 +547,9 @@ export function createPipeline(
       const grey = float(0.5).add(eps.mul(0.5).div(h.schlierenRangeRad)).clamp(0, 1);
       const suv = screenUV;
       const ndc = vec2(suv.x.mul(2).sub(1), float(1).sub(suv.y.mul(2)));
-      const hv = camProjInv.mul(vec4(ndc, sceneDepth.sample(suv).r.min(rotorDepth.sample(suv).r), 1));
+      const hv = camProjInv.mul(
+        vec4(ndc, sceneDepth.sample(suv).r.min(rotorDepth.sample(suv).r), 1),
+      );
       const pw = camWorld.mul(vec4(hv.xyz.div(hv.w), 1)).xyz;
       const inBox = pw.x
         .greaterThan(h.engineBox.x0)
@@ -615,7 +617,8 @@ export function createPipeline(
         debugPipeline(withTraa, linear).render();
         return;
       }
-      const flowPipe = flow !== null && flowComposite !== 'off' ? flow.pipelines[flowComposite] : null;
+      const flowPipe =
+        flow !== null && flowComposite !== 'off' ? flow.pipelines[flowComposite] : null;
       (cinematic ? cinePipeline : (flowPipe ?? pipeline)).render();
     },
     dispose: () => {

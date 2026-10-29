@@ -97,7 +97,9 @@ describe('flow visuals', () => {
     for (const v of views) await v.dispose();
   });
 
-  it('renders every mode with zero WebGPU errors on the MOCK field; data colours are the LUT colours (D4-76)', async () => {
+  it('renders every mode with zero WebGPU errors on the MOCK field; data colours are the LUT colours (D4-76)', async ({
+    annotate,
+  }) => {
     const c = canvas();
     const v = await createEngineView({
       gpu: navigator.gpu,
@@ -137,13 +139,21 @@ describe('flow visuals', () => {
     await v.device.device.queue.onSubmittedWorkDone();
     expect(v.stats().errors).toEqual([]);
     const base = bases.cutaway;
-    const data = shots.data;
+    // D4-76's colour check on the plane alone (the particles' white cores and dark halos are
+    // off the map by design)
+    v.setPreset('cutaway');
+    v.setThrottle(1, true);
+    v.setDebugFlags({ noFlowParticles: true });
+    v.setFlowMode('data');
+    settle(60);
+    const data = pixels(c).px;
+    v.setDebugFlags({});
     if (base === undefined || data === undefined) throw new Error('missing frames');
     expect(chroma(data) - chroma(base)).toBeGreaterThan(0.02);
     expect(chroma(shots.cutaway ?? base) - chroma(base)).toBeGreaterThan(0.02);
     // D4-76: of the pixels the cut plane changed, most are a colour of the viridis LUT within
-    // 3/255 per channel (the rest: contour lines, particles, the faded edges). Through AgX they
-    // were desaturated far off the map (round 1: none within 3/255)
+    // 3/255 per channel (the rest: contour lines and the faded edges). Through AgX they were
+    // desaturated far off the map (round 1: none within 3/255)
     const lut = bakeLut(FIELD_QUANTITIES[FLOW_VIZ_MODES.data.quantity].colormap);
     let changed = 0;
     let onMap = 0;
@@ -165,6 +175,36 @@ describe('flow visuals', () => {
     }
     expect(changed).toBeGreaterThan(2000);
     expect(onMap / changed).toBeGreaterThan(0.5);
+
+    // the hot parts' blackbody glow (src/flow/viz/glow.ts) at take-off: an A/B of the hot
+    // section with and without the emission. It is physically dim (the HPT's coated vanes at
+    // ~1150 K are a few % of a lit white wall), so it shows only as a red lift, and only there
+    v.setFlowMode(null);
+    v.setPreset('hotSection');
+    v.setThrottle(1, true);
+    v.setMode('cutaway', true);
+    const glowFrame = (off: boolean) => {
+      v.setDebugFlags(off ? { noGlow: true } : {});
+      settle(60);
+      return pixels(c);
+    };
+    const without = glowFrame(true).px;
+    const withGlow = glowFrame(false);
+    await commands.writeFile('docs/look-dev/flow/glow-hotsection.png', withGlow.png, 'base64');
+    let red = 0;
+    let lifted = 0;
+    for (let i = 0; i < without.length; i += 4) {
+      const dr = (withGlow.px[i] ?? 0) - (without[i] ?? 0);
+      const db = (withGlow.px[i + 2] ?? 0) - (without[i + 2] ?? 0);
+      red += dr;
+      if (dr >= 3 && dr > db) lifted++;
+    }
+    v.setDebugFlags({});
+    await annotate(
+      `[look] D4-76: ${String(onMap)} of ${String(changed)} sampled cut-plane pixels on the viridis LUT within 3/255 (${(onMap / changed).toFixed(3)}); glow: ${String(lifted)} pixels red-lifted by >= 3/255, total red +${String(red)}`,
+    );
+    expect(red).toBeGreaterThan(0);
+    expect(lifted).toBeGreaterThan(50);
   });
 
   it('draws the live GpuFlowSolver textures on the view device, labelled as the solver', async () => {

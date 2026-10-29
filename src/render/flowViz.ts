@@ -160,6 +160,8 @@ export interface FlowViz {
   setMode(mode: FlowVizMode | null, quantity?: FieldQuantityId | null): void;
   /** Time dilation: the particles' simulated seconds per wall second. */
   setDilation(d: number): void;
+  /** Hides the particles whatever the mode (a debug A/B). */
+  setParticlesHidden(hidden: boolean): void;
   /** Follows the cutaway wedge (the planes lie on its faces) and the camera's pixel angle. */
   update(cutCenter: number, cutHalf: number, open: boolean, radPerPx: number): void;
   /** The haze's background shift in uv (xy), built on the pipeline's depth (post.ts). */
@@ -297,6 +299,7 @@ export function createFlowViz(o: {
   let quantity: FieldQuantityId | null = null;
   let built: FieldQuantityId | null = null;
   let mode: FlowVizMode | null = null;
+  let particlesHidden = false;
   const buildPlane = (id: FieldQuantityId) => {
     built = id;
     const spec = FIELD_QUANTITIES[id];
@@ -550,7 +553,11 @@ export function createFlowViz(o: {
         crop.rMax.value = c.rMax;
         crop.fade.value = c.fadeM;
       }
-      streaks.visible = (m?.particleOpacity ?? 0) > 0;
+      streaks.visible = (m?.particleOpacity ?? 0) > 0 && !particlesHidden;
+    },
+    setParticlesHidden(h) {
+      particlesHidden = h;
+      streaks.visible = (mode?.particleOpacity ?? 0) > 0 && !h;
     },
     setDilation(d) {
       dilation.value = d;
