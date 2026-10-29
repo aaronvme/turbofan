@@ -17,7 +17,7 @@ D4-79 RESULTS: the contract case (1e-3, isothermal), baseline
   - The weighted residual: 7.73 6.87 6.28 7.14 7.38 8.16 8.84 8.17 9.53 **8.73 (10000)** ... 9.65 **10.0 (15000)** 8.79, against 3.55 at 100.
   - Max |p'| / first: 10-30 after 3000.
 - **So the nonlinear part grows after D4-45's window.** That is growth, not slow decay. Rule (a) passes over 1000-2000 (1.717) and fails late (4-5x). Rule (b) fails against its value at 100 (2.5-2.8x through 16000); the comparison with its value at 10000 depends on the 20000 value.
-- The run was at 16000 at 07:25. Unattended, it finishes about 07:40 and writes the 20000 rows to `reports/ladder/D4-63-rest.json` (gitignored; the file there before then is round 11's) and its result line to `r12/logs/contract.out`. It is PID 2964, `node ... runCase.ts d463`.
+- The run did NOT finish: Claude Code killed it for low system memory after 16000 (its last line is in `contract.err`). `reports/ladder/D4-63-rest.json` is still round 11's. The 20000 rows need a rerun (about 75 min alone).
 
 THE TRIAL (D4-79's next step). NOT adopted and not committed: `reports/scratch/r12/trial-step-limit.patch`, applied in the working tree now. The next agent runs `git checkout src` to drop it, or keeps it for the run.
 - A local CFL limit from the measured mismatch:
@@ -32,7 +32,7 @@ THE TRIAL (D4-79's next step). NOT adopted and not committed: `reports/scratch/r
 - NOT run to 20000. `r12/trial.ts` is the runner, with the D4-79 rows plus where the energy and the residual sit. It is about 75 min alone.
 
 NEXT
-1. Read the baseline's 20000 rows from `reports/ladder/D4-63-rest.json` and `r12/logs/contract.out`.
+1. Rerun the baseline to 20000 for its rows (`runCase.ts d463`; killed at 16000 for low memory), unless the orchestrator takes the 16000 data as enough.
 2. The trial: with the patch applied, run `trial.ts` (AMP 1e-3) alone and boosted. Start it with the absolute path, so `r12/boost.ps1` matches it.
    - If it passes (a) and (b): add mismatchCflFactor's unit test (TDD), then run the linear part, the full ladder and coverage with it.
    - If it fails: `git checkout src` and hand back the data.
