@@ -148,7 +148,7 @@ describe('flow visuals', () => {
     settle(60);
     const data = pixels(c).px;
     v.setDebugFlags({});
-    if (base === undefined || data === undefined) throw new Error('missing frames');
+    if (base === undefined) throw new Error('missing frames');
     expect(chroma(data) - chroma(base)).toBeGreaterThan(0.02);
     expect(chroma(shots.cutaway ?? base) - chroma(base)).toBeGreaterThan(0.02);
     // D4-76: of the pixels the cut plane changed, most are a colour of the viridis LUT within
