@@ -278,18 +278,18 @@ export class GpuFlowSolver implements FlowSolver {
       void slot
         .read()
         .then(([solverMs, resampleMs]) => {
-          this.opts.onFrameTiming?.({
-            frame,
-            iterations: n,
-            solverMs: solverMs ?? NaN,
-            resampleMs: resampleMs ?? NaN,
-          });
           const sOk = solverMs !== undefined && Number.isFinite(solverMs);
           const rOk = resampleMs !== undefined && Number.isFinite(resampleMs);
           this.resampleMs = rOk ? resampleMs : null;
           // the frame's GPU time, the resample included (W2S-B-I3: the app's 15 ms split sees it)
           this.gpuTimeMs = sOk && rOk ? solverMs + resampleMs : null;
           if (sOk) this.scheduler.observe(n, solverMs, rOk ? resampleMs : undefined);
+          this.frameTiming({
+            frame,
+            iterations: n,
+            solverMs: solverMs ?? NaN,
+            resampleMs: resampleMs ?? NaN,
+          });
         })
         .catch((e: unknown) => {
           this.readFailed(e);
@@ -312,6 +312,20 @@ export class GpuFlowSolver implements FlowSolver {
         .finally(() => {
           rb.busy = false;
         });
+    }
+  }
+
+  /**
+   * The consumer's onFrameTiming, after the solver's own updates. Its error is the consumer's, not
+   * a device problem: it is reported, and the solver is not marked lost (W2I-N2).
+   */
+  private frameTiming(t: FrameTiming): void {
+    try {
+      this.opts.onFrameTiming?.(t);
+    } catch (e) {
+      console.error(
+        `GpuFlowSolver: onFrameTiming threw: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
 

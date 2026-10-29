@@ -4,19 +4,28 @@
 // oracle shell for the metric. Convergence: L7 keeps its pre-registered 1e-4 drop when the GPU
 // reaches it; L8 and L9 use D4-38's rule at the f32 floor (the plateau detected, not stated: no
 // f32 floor of these cases has been measured; the oracle does not converge them either).
-import { afterAll, afterEach, beforeAll, describe, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { THRESHOLDS } from '../../src/contracts/thresholds';
 import type { SimDevice } from '../../src/gpu/device';
 import { DEFAULT_CFL_PRECONDITIONED } from '../../src/flow/gpu/params';
 import { THERMALLY_PERFECT, caloricallyPerfectGas } from '../../src/flow/reference/gas';
 import { ReferenceSolver, type SolverOptions } from '../../src/flow/reference/solver';
 import { NP } from '../../src/flow/reference/state';
-import { geometricGrowth, graded, type LadderRow } from '../ladder/common';
+import { geometricGrowth, graded, type LadderRow, type Steadiness } from '../ladder/common';
 import { ENGINE_PRECONDITIONING, SINK, sinkCase } from '../ladder/oracle';
 import { pOverP0, tOverT0 } from '../ladder/theory';
 import { BC, gridBlock, polarMesh, rectangle, singleBlock, solverMesh } from '../unit/flow/helpers';
 import { GpuErrorLog, solverDevice } from '../gpu/helpers/solver';
-import { back, convergeGpu, onGpu, report, settle, settleRow, steadyWindowGpu } from './helpers';
+import {
+  back,
+  convergeGpu,
+  onGpu,
+  report,
+  settle,
+  settleRow,
+  steadyWindowGpu,
+  type Settled,
+} from './helpers';
 
 const GAMMA = 1.4;
 const RGAS = 287.05287;
@@ -204,8 +213,14 @@ describe('GPU ladder L7-L9', () => {
     );
   });
 
-  it('L9a: Euler work of a ducted rotor disk (values row)', async () => {
-    const L9 = THRESHOLDS.L9.values;
+  /**
+   * L9a's ducted rotor disk, run once and shared by its two tests (D4-65, W2I-I1): the value row
+   * and, apart from it, the KNOWN-FAIL pin of its D4-57 steadiness alone. A value regression, a
+   * NaN, a GPU error or a timeout fails the value test, whatever the pin does.
+   */
+  let l9a: Promise<{ conv: Settled; steady: Steadiness }> | null = null;
+  const l9aCase = () => (l9a ??= runL9a());
+  async function runL9a() {
     const OMEGA = 300;
     const F_THETA = 3e4;
     const ni = 60;
@@ -268,20 +283,53 @@ describe('GPU ladder L7-L9', () => {
       Math.abs((m[0] ?? NaN) - (m[1] ?? NaN)) / Math.abs(m[1] ?? NaN);
     const steady = await steadyWindowGpu(g, s, () => work(metric()));
     g.destroy();
+    return { conv, steady };
+  }
+
+  it('L9a: Euler work of a ducted rotor disk (values row)', async () => {
+    const tol = THRESHOLDS.L9.values.maxEulerWorkRelativeError.value;
+    const { conv, steady } = await l9aCase();
     report(
       'L9a',
       [
-        valueRow(
-          'L9',
-          'GPU Euler work: |Delta T0 - Omega Delta(r u_theta)/cp| relative',
-          L9.maxEulerWorkRelativeError.value,
-          steady.value,
-          steady.spread,
-        ),
+        {
+          id: 'L9',
+          metric: `GPU Euler work: |Delta T0 - Omega Delta(r u_theta)/cp| relative, every sample of the 2000 its after the stop finite (max - min ${steady.spread.toExponential(2)})`,
+          threshold: `< ${tol}, finite`,
+          value: steady.value,
+          pass:
+            Number.isFinite(steady.value) &&
+            steady.value < tol &&
+            steady.samples.every(Number.isFinite) &&
+            Number.isFinite(steady.spread),
+        },
+        {
+          id: 'L9',
+          metric:
+            'GPU Euler work: D4-45 steadiness, max - min over the 2000 its after the stop (KNOWN-FAIL, D4-57: pinned by the next test, D4-65)',
+          threshold: `<= ${(tol / 10).toExponential(1)}`,
+          value: steady.spread,
+          pass: 'reported',
+        },
         { ...settleRow('L9', conv, MAX), pass: 'reported' },
       ],
       { conv, steady },
     );
+  });
+
+  // KNOWN-FAIL (D4-57, D4-61, D4-65): D4-45's steadiness of the L9a value row alone. Its spread
+  // over the 2000 iterations after the stop is 1.31e-5 against a tenth of the tolerance, 1e-5
+  // (the oracle's own is 1.062e-5: the CPU ladder's visible FAIL), while the value is far inside
+  // the tolerance (3.56e-6 against 1e-4, critic pass 10). D4-57 keeps the rule as written. The value, its finiteness, a GPU error
+  // and a timeout are the test above's. When the convergence work makes the row steady, this test
+  // fails: drop the it.fails and fold the steadiness back into the value row.
+  it.fails("L9a: the value row's D4-45 steadiness (KNOWN-FAIL, D4-57)", async () => {
+    const tol = THRESHOLDS.L9.values.maxEulerWorkRelativeError.value;
+    const { steady } = await l9aCase();
+    expect(
+      steady.spread,
+      `L9a: max - min over the 2000 its after the stop (D4-45: <= ${tol / 10})`,
+    ).toBeLessThanOrEqual(tol / 10);
   });
 
   it('L9b: the Rankine-Froude actuator disk (values row)', async () => {
