@@ -24,9 +24,9 @@ The mesh-topology spike (c) lived on `w0/mesh-spike`; its successor is `tools/me
 | `npm run bench:worker` | 6 configurations (main/worker x idle, React 15 Hz, React 60 Hz), official protocol | ~23 min: 18 runs x 70 s = 21 min, page loads, the COOP/COEP check, +70 s per rerun |
 | `npm run bench:throughput -- --quick` | same sweep, 2 s warm-up + 1 s per run | ~2 min; "indicative, contaminated" |
 | `npm run bench:worker -- --quick` | same sweep, 2 s warm-up + 1 s per run | ~2 min; "indicative, contaminated" |
-| `npm run bench:p1` | **P1, the official command** (D4-64, below): 3 configurations, official protocol, a fresh page per run | ~13 min: 9 runs x (about 8 s of page load + 10 s warm-up + 60 s) = 11.7 min, ~1 min of setup, +80 s per rerun |
-| `npm run bench:p1 -- --quick` | same 3 configurations, 2 s warm-up + 1 s per run | ~3 min; "indicative, contaminated" |
-| `npm run bench:p1 -- --quick --only=solver-130k-app` | the smoke run: the record row only, 3 repetitions | ~1.5 min; "indicative, contaminated" |
+| `npm run bench:p1` | **P1, the official command** (D4-64, below): 3 configurations, official protocol, a fresh page per run | ~13 min (estimated, not yet run): 9 runs x (about 8 s of page load + 10 s warm-up + 60 s) = 11.7 min, ~1 min of setup, +80 s per rerun |
+| `npm run bench:p1 -- --quick` | same 3 configurations, 2 s warm-up + 1 s per run | ~3 min (estimated); "indicative, contaminated" |
+| `npm run bench:p1 -- --quick --only=solver-130k-app` | the smoke run: the record row only, 3 repetitions | ~1.5 min (estimated); "indicative, contaminated" |
 
 Options: `--only=130k-16x8,130k-8x8` (a subset, still rotated), `--port=N` (default 5181; the worker run also uses N+1 for the COOP/COEP server), `--seed=N` (replay a recorded run order). A smoke run of the harness itself, for a quiet window before the next official run, is `npm run bench:throughput -- --quick --only=130k-16x8` (about 15 s of runs: 3 repetitions of a 2 s warm-up and a 1 s run; each run times out after 33 s). The harness serves Vite on 127.0.0.1 and launches the installed Chrome headed and maximized through Playwright.
 
