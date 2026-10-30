@@ -19,7 +19,7 @@ D4-81 RESULTS (the contract case, 1e-3 isothermal, 20000 iterations; SOLVER.md 1
 | plain scheme, CFL 1.5 | 0.366 / 0.0735 / 0.0433 | 3.89e-2 / 9.63e-3 / 6.17e-3 | pass | pass (0.641, 0.159) |
 | global M_cut 0.02 | 0.778 / 0.524 / 0.488 | 1.806 / 0.771 / 0.404 | pass | pass (0.524, 0.223) |
 | global M_cut 0.05 | not run (0.02 passed) | | | |
-- Rule 2 (`npm run test:ladder` at 8447e99): every row that passed at 0.003 still passes at 0.02, with D4-59's values. L7 0.0109 falling (0.128 / 0.039 / 0.011), |Cd| 0.0013, ratio 1.779 <= 3. L8 0.754 %, steadiness 3.2e-5. f32 12/12 (C-pre 1.06e-6, S 2.02e-6 after 100). floor 4/4. L1-L6 and L9 are as of record. The failures are the known ones only: L8 convergence, L9a (Euler work tied to its steadiness 1.062e-5 > 1e-5, D4-57; convergence) and L9b convergence. Log: `reports/scratch/r13/logs/ladder.log`, with JSON copies in `logs/ladder-reports/`. See GATES for the ladder's own d463 row.
+- Rule 2 (`npm run test:ladder` at 8447e99): every row that passed at 0.003 still passes at 0.02, with D4-59's values. L7 0.0109 falling (0.128 / 0.039 / 0.011), |Cd| 0.0013, ratio 1.779 <= 3. L8 0.754 %, steadiness 3.2e-5. f32 12/12 (C-pre 1.06e-6, S 2.02e-6 after 100). floor 4/4. L1-L6 and L9 are as of record. The failures are the known ones only: L8 convergence, L9a (Euler work tied to its steadiness 1.062e-5 > 1e-5, D4-57; convergence) and L9b convergence. Log: `reports/scratch/r13/logs/ladder.log`, with JSON copies in `logs/ladder-reports/`. The ladder's own d463 run gives run 2's numbers (GATES).
 
 FOR THE ORCHESTRATOR
 - With the cut, the late decay is slow. L2(p') holds at 0.48-0.51 over 13000-20000, and the weighted residual at 0.33-0.42 over 15000-20000 (0.35 to 0.40 over the last 1000). D4-79 compares only the values at 100, 10000 and 20000, and it passes on them, but those values do not show decay over 15000-20000. The plain scheme falls to 0.04 over the same run.
@@ -41,7 +41,7 @@ GOTCHAS
 
 GATES @8447e99 (later commits are docs only)
 - npm run typecheck: clean. npm run lint: clean (ESLint --max-warnings 0, Prettier).
-- npm run test:ladder: every non-d463 file finished as listed above; the d463 file was still running at the time of writing.
+- npm run test:ladder (detached, 76 min): 12 files passed, 3 failed (15). Tests: 14 passed, 3 failed (17). The 3 are the known failures of record (L8 convergence; L9a's Euler work / steadiness 1.062e-5 / convergence; L9b convergence). The D4-63 file passes both its tests: signature 4.212, (a) 0.7779 / 0.4876, (b) 0.5236 / 0.2234, the same as run 2. Round 11's ladder had 13 passed, 3 failed and 1 expected fail; the expected fail was this pin.
 - npm run coverage, npm run test:mesh: not run yet.
 - `precondition.test.ts` alone: 18 passed, 3 expected fail.
 
