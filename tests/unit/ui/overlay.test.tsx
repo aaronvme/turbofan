@@ -170,6 +170,32 @@ describe('the drawn field in the overlay (D4-82)', () => {
   });
 });
 
+describe('the frame cost in the diagnostics (W2F-N5, the off-frame MOCK raster)', () => {
+  it('shows the worst and the held cycle step and the MOCK raster', async () => {
+    const d = diagnosticsOf();
+    mount(
+      snapshotOf(),
+      diagnosticsOf({
+        budget: { ...d.budget, cycleCpuMaxMs: 602.1, cycleCpuHeldMs: 551.2, mockRasterMs: 348.1 },
+      }),
+    );
+    render(<Overlay />);
+    await userEvent.click(screen.getByRole('button', { name: 'Diagnostics' }));
+    const panel = screen.getByRole('region', { name: 'Diagnostics' });
+    expect(within(panel).getByText('Held step (W2F-N5)')).toBeTruthy();
+    expect(panel.textContent).toContain('551');
+    expect(panel.textContent).toContain('worst 602');
+    expect(within(panel).getByText('MOCK raster (off frame)')).toBeTruthy();
+  });
+
+  it('shows no held row while no frame in the window was held', async () => {
+    mount(snapshotOf());
+    render(<Overlay />);
+    await userEvent.click(screen.getByRole('button', { name: 'Diagnostics' }));
+    expect(screen.queryByText('Held step (W2F-N5)')).toBeNull();
+  });
+});
+
 describe('the view dock (camera presets, tracers, the cut-plane field)', () => {
   it('a camera preset button sends the camera message', async () => {
     const post = mount(snapshotOf());
