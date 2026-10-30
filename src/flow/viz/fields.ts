@@ -10,16 +10,45 @@ export interface DerivedQuantities {
   readonly pPa: number;
   readonly rhoKgPerM3: number;
   readonly tK: number;
-  /** |u| over the thermally perfect speed of sound sqrt(gamma(T, FAR) R(FAR) T). */
+  /** |u| over air's thermally perfect speed of sound sqrt(gamma R T) (airGammaR). */
   readonly mach: number;
   /** |u| including the swirl, m/s. */
   readonly speed: number;
 }
 
+/**
+ * gamma R of air, J/(kg K), over T in [t0, t1] K at n points: the table the cut plane's shader
+ * samples (nearest entry) for its speed of sound. W2V-N11: deriveQuantities uses the same table,
+ * so the tested Mach is the drawn one. Air throughout, as the ledger states: the core jet's
+ * combustion products (FAR ~0.03) change gamma R by under 1 %, below the map's resolution.
+ */
+export const GAMMA_R_TABLE: {
+  readonly t0: number;
+  readonly t1: number;
+  readonly n: number;
+  readonly values: Float32Array;
+} = (() => {
+  const t0 = 200;
+  const t1 = 2400;
+  const n = 64;
+  const values = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const tK = t0 + ((t1 - t0) * i) / (n - 1);
+    values[i] = gamma(tK, 0) * gasConstant(0);
+  }
+  return { t0, t1, n, values };
+})();
+
+/** Air's gamma R at T, the table's nearest entry (as the shader's NearestFilter reads it). */
+export function airGammaR(tK: number): number {
+  const { t0, t1, n, values } = GAMMA_R_TABLE;
+  const u = Math.min(1, Math.max(0, (tK - t0) / (t1 - t0)));
+  return values[Math.round(u * (n - 1))] ?? Number.NaN;
+}
+
 export function deriveQuantities(s: FieldSample): DerivedQuantities {
   const speed = Math.hypot(s.uxMPerS, s.urMPerS, s.uthetaMPerS);
-  const far = Math.max(0, s.fuelAirRatio);
-  const a = Math.sqrt(gamma(s.tK, far) * gasConstant(far) * s.tK);
+  const a = Math.sqrt(airGammaR(s.tK) * Math.max(s.tK, 1));
   return { pPa: s.pPa, rhoKgPerM3: s.rhoKgPerM3, tK: s.tK, mach: speed / a, speed };
 }
 
@@ -74,11 +103,13 @@ export const FIELD_QUANTITIES: Readonly<Record<FieldQuantityId, FieldQuantitySpe
     colormap: 'viridis',
     contourStep: 0.1,
   },
+  // to 700 m/s: the take-off MOCK's expanded core jet reaches ~645 m/s, which sat flat at the
+  // top of a 600 m/s map (critic pass 12's visual note 4)
   speed: {
     label: 'Velocity magnitude',
     unit: 'm/s',
     min: 0,
-    max: 600,
+    max: 700,
     colormap: 'viridis',
     contourStep: 50,
   },

@@ -31,6 +31,22 @@ export interface DeflectionRay {
   readonly steps: number;
   /** The ray stops here (the first opaque surface), m along it; default unbounded. */
   readonly tMax?: number;
+  /**
+   * Where in each step the field is sampled, 0..1 (default 0.5: the midpoint rule). The shader
+   * uses a fixed per-pixel offset (marchOffset) so that neighbouring pixels' errors do not line
+   * up as bands; any offset converges to the same integral.
+   */
+  readonly offset?: number;
+}
+
+/**
+ * The march's per-pixel sample offset: three's interleavedGradientNoise (Jimenez 2014) of the
+ * pixel coordinate (the target's pixel centre), as src/render/flowViz.ts samples it. Fixed per
+ * pixel, no frame term: a flickering march would be a synthetic shimmer.
+ */
+export function marchOffset(px: number, py: number): number {
+  const fract = (v: number) => v - Math.floor(v);
+  return fract(52.9829189 * fract(0.06711056 * px + 0.00583715 * py));
 }
 
 export interface Deflection {
@@ -89,8 +105,9 @@ export function rayDeflection(ray: DeflectionRay, grad: DensityGradient, k: numb
   let w = 0;
   let wt = 0;
   const [o, d, R, U] = [ray.origin, ray.dir, ray.right, ray.up];
+  const offset = ray.offset ?? 0.5;
   for (let i = 0; i < ray.steps; i++) {
-    const t = t0 + (i + 0.5) * ds;
+    const t = t0 + (i + offset) * ds;
     const x = o[0] + t * d[0];
     const y = o[1] + t * d[1];
     const z = o[2] + t * d[2];

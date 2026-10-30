@@ -9,7 +9,9 @@
 import {
   FIELD_EXTENTS,
   FIELD_TEXTURE_FORMAT,
+  flowCouplingProblems,
   type CpuFlowField,
+  type FlowCoupling,
   type FieldExtent,
   type FieldReference,
   type FlowField,
@@ -32,6 +34,8 @@ import { median } from '../gpu/passTimings';
 /** The field the visuals draw: GPU textures on the view's device and where they came from. */
 export interface FlowFieldBinding {
   readonly source: FlowFieldSource;
+  /** D4-82: how far the field is the engine's answer (the badge). */
+  readonly coupling: FlowCoupling;
   readonly reference: FieldReference;
   readonly near: { readonly state: GPUTexture; readonly velocity: GPUTexture };
   /** Bumped on every rebind (three's ExternalTextures must follow). */
@@ -140,6 +144,8 @@ export async function createFlowCompute(o: {
   let frame = 0;
 
   const bind = (b: Omit<FlowFieldBinding, 'id'>): FlowFieldBinding => {
+    const problems = flowCouplingProblems(b);
+    if (problems.length > 0) throw new Error(`flow visuals: ${problems.join('; ')}`);
     binding = { ...b, id: nextId++ };
     groups = {
       particles: device.createBindGroup({
@@ -190,17 +196,29 @@ export async function createFlowCompute(o: {
       return binding;
     },
     bindSolver(field) {
+      // the kernels use the extent's bounds as well as its size (W2V-N19)
       const ext = field.extents.near;
-      if (ext.width !== e.width || ext.height !== e.height)
+      const same = (['width', 'height', 'xMin', 'xMax', 'rMin', 'rMax'] as const).every(
+        (k) => ext[k] === e[k],
+      );
+      if (!same)
         throw new Error('flow visuals: the solver near extent differs from FIELD_EXTENTS.near');
       // three may still sample our old textures in queued work: they go after the rebind
       const old = owned;
       owned = [];
-      const b = bind({ source: field.source, reference: field.reference, near: field.near });
+      const b = bind({
+        source: field.source,
+        coupling: field.coupling,
+        reference: field.reference,
+        near: field.near,
+      });
       for (const t of old) t.destroy();
       return b;
     },
     bindCpu(field) {
+      // checked before the upload, so a refused field leaks no textures
+      const problems = flowCouplingProblems(field);
+      if (problems.length > 0) throw new Error(`flow visuals: ${problems.join('; ')}`);
       const old = owned;
       owned = [
         upload(field.near.state, 'flow field state (cpu)'),
@@ -209,6 +227,7 @@ export async function createFlowCompute(o: {
       const [state, velocity] = owned as [GPUTexture, GPUTexture];
       const b = bind({
         source: field.source,
+        coupling: field.coupling,
         reference: field.reference,
         near: { state, velocity },
       });

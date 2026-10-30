@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { ENGINE_DEFINITION } from '../../../../src/engine/definition';
 import { blackbodyLuminance } from '../../../../src/flow/viz/optics';
 import {
+  createGlowRadianceCache,
   GLOW_ASSUMPTIONS,
   GLOW_PARTS,
   glowSceneRadiance,
@@ -69,5 +70,27 @@ describe('glowSceneRadiance (blackbody colour x emissivity x luminance, in scene
     // and shows (a dull red) by 1100 K
     expect(sceneLuminance(glowSceneRadiance(1100, 1)) / wall).toBeGreaterThan(0.01);
     expect(glowSceneRadiance(300, 1)).toEqual([0, 0, 0]);
+  });
+});
+
+// W2V-N14: the glow uniforms are set every frame; 12 blackbody integrals per frame cost 0.28 ms of
+// CPU at take-off, so a part's radiance is recomputed only when its temperature changes
+describe('createGlowRadianceCache', () => {
+  it('returns the exact radiance and integrates only on a new temperature or emissivity', () => {
+    let calls = 0;
+    const cache = createGlowRadianceCache((t, e) => {
+      calls++;
+      return glowSceneRadiance(t, e);
+    });
+    const a = cache('hptVane', 1148, 0.4);
+    expect(a).toEqual(glowSceneRadiance(1148, 0.4));
+    expect(cache('hptVane', 1148, 0.4)).toEqual(a);
+    expect(calls).toBe(1);
+    cache('lptVane', 1148, 0.4);
+    expect(calls).toBe(2);
+    expect(cache('hptVane', 1150, 0.4)).toEqual(glowSceneRadiance(1150, 0.4));
+    expect(calls).toBe(3);
+    cache('hptVane', 1150, 0.85);
+    expect(calls).toBe(4);
   });
 });

@@ -54,7 +54,10 @@ const alive = (v: MeridionalVelocity | null): v is MeridionalVelocity =>
 
 /**
  * One midpoint (RK2) step of dt seconds; null when the particle leaves the field or enters
- * solid, at the midpoint or at the end. A step through the axis reflects to the far side.
+ * solid, at the midpoint or at the end. The step is the plain midpoint rule in the full
+ * meridional plane, r of either sign, on the field's odd extension (sampleCpuField's ghost row:
+ * u_r and u_theta change sign across the axis). So a midpoint beyond the axis gives the end step
+ * the mirrored u_r (W2V-N12), and a step that ends beyond it is folded back to the far side.
  */
 export function advectParticle(
   p: Cylindrical,
@@ -63,19 +66,67 @@ export function advectParticle(
 ): Cylindrical | null {
   const v0 = sample(p.x, p.r);
   if (!alive(v0)) return null;
+  const q = midpointFrom(p, dt, v0, sample);
+  if (q === null || !alive(sample(q.x, q.r))) return null;
+  return q;
+}
+
+/** The midpoint step from p, whose field sample v0 is known (alive); the end is not checked. */
+function midpointFrom(
+  p: Cylindrical,
+  dt: number,
+  v0: MeridionalVelocity,
+  sample: MeridionalSampler,
+): Cylindrical | null {
   const mx = p.x + 0.5 * dt * v0.ux;
-  const mr = Math.abs(p.r + 0.5 * dt * v0.ur);
+  const mrSigned = p.r + 0.5 * dt * v0.ur;
+  const mr = Math.abs(mrSigned);
   const v1 = sample(mx, mr);
   if (!alive(v1)) return null;
+  // u_r is odd in r: beyond the axis the extension's radial velocity is the mirror's, negated;
+  // theta's rate u_theta / r is even (both odd), so it needs no sign
+  const ur = mrSigned < 0 ? -v1.ur : v1.ur;
   const x = p.x + dt * v1.ux;
-  let r = p.r + dt * v1.ur;
+  let r = p.r + dt * ur;
   let theta = p.theta + (dt * v1.ut) / Math.max(mr, AXIS_R);
   if (r < 0) {
     r = -r;
     theta += Math.PI;
   }
-  if (!alive(sample(x, r))) return null;
   return { x, r, theta };
+}
+
+/**
+ * W2V-I4: the frame's step dt as midpoint substeps that move at most `cellM` in (x, r) each, so the
+ * fluid checks (each substep's start, midpoint and end) are at most half a texel apart and a
+ * one-texel wall cannot be skipped. Each substep divides the time left evenly into steps no
+ * longer than cellM / |u_m| at its start (u_m the meridional speed). After `maxSubsteps` the rest
+ * of dt is dropped: a tracer that fast at that dilation falls behind the flow, never through a
+ * wall. One substep (motion under a texel) is exactly advectParticle.
+ */
+export function advectSubstepped(
+  p: Cylindrical,
+  dt: number,
+  sample: MeridionalSampler,
+  cellM: number,
+  maxSubsteps: number,
+): Cylindrical | null {
+  let q: Cylindrical = p;
+  let v = sample(p.x, p.r);
+  if (!alive(v)) return null;
+  let left = dt;
+  for (let k = 0; k < maxSubsteps && left > 0; k++) {
+    const um = Math.hypot(v.ux, v.ur);
+    const n = um * left > cellM ? Math.ceil((um * left) / cellM) : 1;
+    const h = left / n;
+    const next = midpointFrom(q, h, v, sample);
+    if (next === null) return null;
+    q = next;
+    left -= h;
+    v = sample(q.x, q.r);
+    if (!alive(v)) return null;
+  }
+  return q;
 }
 
 /** mulberry32: a small, fast, seeded PRNG in [0, 1) (deterministic tests; GPU uses a hash). */

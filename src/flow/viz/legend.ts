@@ -3,10 +3,10 @@
 // it as DOM, and the colour bar's stops come from the very LUT the cut plane samples, so the
 // legend matches the pixels (D4-76: those colours composite after the tone map, unchanged).
 
-import type { FlowFieldSource } from '../../contracts/flow';
+import type { FlowCoupling } from '../../contracts/flow';
 import { bakeLut, niceTicks } from './colormaps';
 import { FIELD_QUANTITIES, type FieldQuantityId } from './fields';
-import { FLOW_VIZ_MODES, type FlowVizModeId } from './modes';
+import { FLOW_VIZ_MODES, STREAK_EXPOSURE_S, STREAK_MAX_M, type FlowVizModeId } from './modes';
 
 export interface LegendTick {
   readonly value: number;
@@ -26,7 +26,8 @@ export interface Legend {
   readonly unit: string;
   readonly ticks: readonly LegendTick[];
   readonly stops: readonly LegendStop[];
-  readonly source: FlowFieldSource;
+  /** D4-82: how far the drawn field is the engine's answer (the badge under the bar). */
+  readonly coupling: FlowCoupling;
 }
 
 const STOPS = 16;
@@ -54,7 +55,7 @@ const RATIO_UNIT: Partial<Record<FieldQuantityId, string>> = { p: 'p / p∞', rh
 /** The legend of a flow mode (null: the mode draws no colour), for `quantity` or the mode's own. */
 export function legendFor(
   mode: FlowVizModeId,
-  source: FlowFieldSource,
+  coupling: FlowCoupling,
   quantity?: FieldQuantityId,
 ): Legend | null {
   const m = FLOW_VIZ_MODES[mode];
@@ -75,7 +76,7 @@ export function legendFor(
       unit: 'µrad',
       ticks,
       stops,
-      source,
+      coupling,
     };
   }
   const id = quantity ?? m.quantity;
@@ -91,14 +92,26 @@ export function legendFor(
     const k = 4 * Math.round((255 * i) / STOPS);
     return { at: i / STOPS, rgb: [lut[k] ?? 0, lut[k + 1] ?? 0, lut[k + 2] ?? 0] as const };
   });
-  return { title: spec.label, unit: ratio ?? spec.unit, ticks, stops, source };
+  return { title: spec.label, unit: ratio ?? spec.unit, ticks, stops, coupling };
 }
 
-/** What the badge on the legend and the flow panel says about the data. */
-export function provenanceLabel(source: FlowFieldSource): string {
-  return source === 'solver'
-    ? 'Live flow solver (GPU, 2D axisymmetric + swirl)'
-    : 'MOCK field (a synthetic stand-in, not simulated)';
+/**
+ * What the badge on the legend and the flow panel says about the data (D4-82). The solver's
+ * field is "uncoupled until W3": it runs without blade or combustor forces, so it is not this
+ * engine's flow, and only W3's coupled field may read as the live answer. `fallback` is why a
+ * MOCK stands in for the solver that was asked for (W2V-I6: visible, never silent).
+ */
+export function provenanceLabel(coupling: FlowCoupling, fallback: string | null = null): string {
+  switch (coupling) {
+    case 'coupled':
+      return 'Live flow solver (GPU, 2D axisymmetric + swirl), coupled to the cycle';
+    case 'uncoupled':
+      return 'Flow solver (uncoupled until W3): GPU, 2D axisymmetric + swirl; no blade or combustor forces';
+    case 'mock':
+      return fallback === null
+        ? 'MOCK field (a synthetic stand-in, not simulated)'
+        : `MOCK fallback (a synthetic stand-in): ${fallback}`;
+  }
 }
 
 /** "x1/200": the dilation as a slow-motion factor. */
@@ -109,11 +122,13 @@ export function dilationLabel(dilation: number): string {
 /**
  * What a mode shows and where each part comes from (the "What's simulated" line of the flow
  * panel, PHYSICS.md 1): every part is derived from the field, and `synthesized` is named.
+ * `tracers` overrides the mode's default (D4-83: Realistic has none unless asked for).
  */
 export function flowModeNote(
   mode: FlowVizModeId,
   dilation: number,
   quantity?: FieldQuantityId,
+  tracers?: boolean,
 ): string {
   const m = FLOW_VIZ_MODES[mode];
   const parts: string[] = [];
@@ -121,17 +136,20 @@ export function flowModeNote(
     parts.push(
       `Cut plane: ${FIELD_QUANTITIES[quantity ?? m.quantity].label.toLowerCase()} of the field`,
     );
-  if (m.particleOpacity > 0)
+  if (m.particleOpacity > 0 && (tracers ?? m.tracersByDefault))
     parts.push(
-      `${m.cutPlane ? 'laser-sheet tracers on the cut faces' : 'tracer streaks'} advected by its velocity, time ${dilationLabel(dilation)}`,
+      `${m.cutPlane ? 'laser-sheet tracers on the cut faces' : 'tracer streaks'} advected by its velocity, time ${dilationLabel(dilation)} (${String(STREAK_EXPOSURE_S)} s exposures, at most ${String(Math.round(STREAK_MAX_M * 100))} cm)`,
     );
-  if (m.haze > 0) parts.push('heat haze from its density gradient (Gladstone-Dale)');
+  if (m.haze > 0)
+    parts.push('heat haze from its density gradient (Gladstone-Dale; mean flow, no shimmer)');
   if (m.schlieren)
     parts.push(
       `knife-edge schlieren of its density (Gladstone-Dale, a/f ${String(Math.round(m.schlierenRangeRad * 1e6))} µrad; mean flow, no turbulence)`,
     );
   const synth =
-    m.synthesized.length === 0 ? 'nothing synthesized' : `synthesized: ${m.synthesized.join(', ')}`;
+    m.synthesized.length === 0
+      ? 'The visuals add nothing synthesized.'
+      : `The visuals synthesize: ${m.synthesized.join(', ')}.`;
   const s = parts.join('; ');
-  return `${s.charAt(0).toUpperCase()}${s.slice(1)}. Derived from the field; ${synth}.`;
+  return `${s.charAt(0).toUpperCase()}${s.slice(1)}. ${synth}`;
 }

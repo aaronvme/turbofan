@@ -92,3 +92,21 @@ export function glowSceneRadiance(
   const lum = emissivity * blackbodyLuminance(tK) * (a.sceneKeyIntensity / a.studioKeyLux);
   return [(c[0] * lum) / y, (c[1] * lum) / y, (c[2] * lum) / y];
 }
+
+/**
+ * W2V-N14: the glow uniforms are set every frame, and one radiance is a blackbody integral (471
+ * steps x 2). This keeps each part's last radiance and recomputes it only when its temperature
+ * or emissivity changes (a steady state costs nothing; a spool-up still updates every frame).
+ */
+export function createGlowRadianceCache(
+  compute: (tK: number, emissivity: number) => [number, number, number] = glowSceneRadiance,
+): (part: string, tK: number, emissivity: number) => [number, number, number] {
+  const last = new Map<string, { tK: number; emissivity: number; rgb: [number, number, number] }>();
+  return (part, tK, emissivity) => {
+    const hit = last.get(part);
+    if (hit !== undefined && hit.tK === tK && hit.emissivity === emissivity) return hit.rgb;
+    const rgb = compute(tK, emissivity);
+    last.set(part, { tK, emissivity, rgb });
+    return rgb;
+  };
+}

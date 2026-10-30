@@ -9,9 +9,10 @@
 // A second kernel takes the density gradient of the field once per frame for the schlieren
 // and the heat haze: (d g/dx, d g/dr, g, fluid fraction), g = (rho - rho_inf) / rho_inf (D0-4).
 
-import type { FieldExtent } from '../../contracts/flow';
+import type { CpuFieldTextures, FieldExtent } from '../../contracts/flow';
+import { fromHalfBits, toHalfBits } from '../../contracts/half';
 import {
-  advectParticle,
+  advectSubstepped,
   FADE,
   FADE_IN_MAX_S,
   MIN_FLUID,
@@ -26,6 +27,17 @@ export const PARTICLE_BYTES = 4 * PARTICLE_FLOATS;
 export const PARTICLE_WORKGROUP = 64;
 export const MAX_SEED_ZONES = 4;
 export const PARTICLE_PARAMS_BYTES = 160;
+/**
+ * W2V-I4: the most midpoint substeps one particle takes per frame, each at most one texel. 128 x
+ * 6.8 mm covers the panel's fastest x1/10 at 60 Hz up to 525 m/s (the core jet is ~450); beyond
+ * it a tracer falls behind the flow instead of tunnelling through a wall.
+ */
+export const MAX_SUBSTEPS = 128;
+
+/** The substep length: the extent's smaller texel side, m. */
+export function substepCellM(e: FieldExtent): number {
+  return Math.min((e.xMax - e.xMin) / e.width, (e.rMax - e.rMin) / e.height);
+}
 
 export interface ParticleParams {
   readonly extent: FieldExtent;
@@ -50,9 +62,9 @@ export function packParticleParams(p: ParticleParams): ArrayBuffer {
   const u = new Uint32Array(buf);
   const e = p.extent;
   f.set([e.xMin, e.xMax, e.rMin, e.rMax], 0);
-  f.set([e.width, e.height, EDGE_FADE_M, 0], 4);
+  f.set([e.width, e.height, EDGE_FADE_M, substepCellM(e)], 4);
   f.set([p.dtSimS, p.dtWallS, p.lifeMinS, p.lifeSpanS], 8);
-  f.set([SPEED_FADE[0], SPEED_FADE[1], 0, MIN_FLUID], 12);
+  f.set([SPEED_FADE[0], SPEED_FADE[1], MAX_SUBSTEPS, MIN_FLUID], 12);
   u.set([p.count, p.frame >>> 0, p.zones.length, 0], 16);
   p.zones.forEach((z, k) => {
     f.set([z.x0, z.x1, z.r0, z.r1], 20 + 4 * k);
@@ -67,9 +79,9 @@ export function particleKernelWgsl(): string {
   return /* wgsl */ `
 struct Params {
   ext: vec4f,    // xMin, xMax, rMin, rMax
-  tex: vec4f,    // width, height, edge fade m, 0
+  tex: vec4f,    // width, height, edge fade m, substep cell m
   time: vec4f,   // dt sim, dt wall, life min, life span
-  fade: vec4f,   // speed fade from, to, 0, min fluid
+  fade: vec4f,   // speed fade from, to, max substeps, min fluid
   counts: vec4u, // count, frame, zones, 0
   zones: array<vec4f, ${MAX_SEED_ZONES}>, // x0, x1, r0, r1
   weights: vec4f,
@@ -157,24 +169,35 @@ fn particleMain(@builtin(global_invocation_id) gid: vec3u) {
   } else if (age >= life) {
     respawn = true;
   } else {
-    let v0 = sampleV(x, r);
-    if (!alive(v0)) {
-      respawn = true;
-    } else {
-      let mx = x + 0.5 * dt * v0.x;
-      let mr = abs(r + 0.5 * dt * v0.y);
+    // W2V-I4: midpoint substeps of at most one texel each (particles.ts advectSubstepped)
+    var v = sampleV(x, r);
+    var left = dt;
+    let maxSub = u32(P.fade.z);
+    if (!alive(v)) { respawn = true; }
+    for (var k = 0u; k < maxSub && left > 0.0 && !respawn; k++) {
+      let um = length(v.xy);
+      var n = 1.0;
+      if (um * left > P.tex.w) { n = ceil(um * left / P.tex.w); }
+      let h = left / n;
+      let mx = x + 0.5 * h * v.x;
+      let mrs = r + 0.5 * h * v.y;
+      let mr = abs(mrs);
       let v1 = sampleV(mx, mr);
       if (!alive(v1)) {
         respawn = true;
       } else {
-        x = x + dt * v1.x;
-        r = r + dt * v1.y;
-        th = th + dt * v1.z / max(mr, AXIS_R);
+        // the odd extension across the axis (W2V-N12): u_r changes sign, u_theta / r does not
+        let ur = select(v1.y, -v1.y, mrs < 0.0);
+        x = x + h * v1.x;
+        r = r + h * ur;
+        th = th + h * v1.z / max(mr, AXIS_R);
         if (r < 0.0) {
           r = -r;
           th = th + PI;
         }
-        if (!alive(sampleV(x, r))) { respawn = true; }
+        left = left - h;
+        v = sampleV(x, r);
+        if (!alive(v)) { respawn = true; }
       }
     }
   }
@@ -253,7 +276,8 @@ export function stepParticle(
   if (p.age < 0 && age < 0) return { ...p, age, alpha: 0 };
   let state: { x: number; r: number; theta: number } | null = null;
   let life = p.life;
-  if (p.age >= 0 && age < life) state = advectParticle(p, params.dtSimS, sample);
+  if (p.age >= 0 && age < life)
+    state = advectSubstepped(p, params.dtSimS, sample, substepCellM(params.extent), MAX_SUBSTEPS);
   if (state === null) {
     const rng = hashRng(respawnSeed(index, params.frame) >>> 0);
     // respawnSeed is pcg(i * phi ^ pcg(frame)); hashRng's first draw hashes it once more, as
@@ -349,4 +373,66 @@ fn gradientMain(@builtin(global_invocation_id) gid: vec3u) {
   textureStore(outTex, vec2i(i, j), vec4f(gx, gr, c.x, c.y));
 }
 `;
+}
+
+/**
+ * The gradient kernel in TS (the oracle of the schlieren and haze march, W2V-I3): (d g/dx,
+ * d g/dr, g, fluid) per texel, 1/m, from a CPU field's f16 texels, rounded to f16 as the kernel's
+ * rgba16float target stores it.
+ */
+export function densityGradientRaster(field: CpuFieldTextures): Float32Array {
+  const e = field.extent;
+  const w = e.width;
+  const h = e.height;
+  const idx = (i: number, j: number) => {
+    const jj = Math.min(h - 1, Math.max(0, j < 0 ? -1 - j : j));
+    return 4 * (jj * w + Math.min(w - 1, Math.max(0, i)));
+  };
+  const g = (i: number, j: number) => fromHalfBits(field.state[idx(i, j) + 1] ?? 0);
+  const fl = (i: number, j: number) => fromHalfBits(field.velocity[idx(i, j) + 3] ?? 0);
+  const invDx = w / (e.xMax - e.xMin);
+  const invDr = h / (e.rMax - e.rMin);
+  const f16 = (v: number) => fromHalfBits(toHalfBits(v));
+  const out = new Float32Array(4 * w * h);
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      const im = Math.max(i - 1, 0);
+      const ip = Math.min(i + 1, w - 1);
+      const jp = Math.min(j + 1, h - 1);
+      const c = fl(i, j);
+      const wallX = Math.min(fl(im, j), fl(ip, j), c) < 0.5;
+      const wallR = Math.min(fl(i, j - 1), fl(i, jp), c) < 0.5;
+      const gx = wallX ? 0 : ((g(ip, j) - g(im, j)) * invDx) / (ip - im);
+      const gr = wallR ? 0 : ((g(i, jp) - g(i, j - 1)) * invDr) / (jp - (j - 1));
+      out.set([f16(gx), f16(gr), f16(g(i, j)), f16(c)], 4 * (j * w + i));
+    }
+  }
+  return out;
+}
+
+/** A bilinear, clamp-to-edge sample of the gradient raster at (x, r): the march's sampler. */
+export function sampleGradientRaster(
+  raster: Float32Array,
+  e: FieldExtent,
+  x: number,
+  r: number,
+): { gx: number; gr: number; g: number; fluid: number } {
+  const fx = ((x - e.xMin) / (e.xMax - e.xMin)) * e.width - 0.5;
+  const fr = ((r - e.rMin) / (e.rMax - e.rMin)) * e.height - 0.5;
+  const i0 = Math.floor(fx);
+  const j0 = Math.floor(fr);
+  const tx = Math.min(1, Math.max(0, fx - i0));
+  const tr = Math.min(1, Math.max(0, fr - j0));
+  const at = (i: number, j: number, c: number) =>
+    raster[
+      4 *
+        (Math.min(e.height - 1, Math.max(0, j)) * e.width + Math.min(e.width - 1, Math.max(0, i))) +
+        c
+    ] ?? 0;
+  const lerp = (c: number) => {
+    const a = at(i0, j0, c) + tx * (at(i0 + 1, j0, c) - at(i0, j0, c));
+    const b = at(i0, j0 + 1, c) + tx * (at(i0 + 1, j0 + 1, c) - at(i0, j0 + 1, c));
+    return a + tr * (b - a);
+  };
+  return { gx: lerp(0), gr: lerp(1), g: lerp(2), fluid: lerp(3) };
 }

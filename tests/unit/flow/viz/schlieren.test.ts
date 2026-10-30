@@ -8,6 +8,7 @@ import {
   HAZE_MIN_SHIFT_PX,
   hazeShiftPx,
   knifeEdgeIntensity,
+  marchOffset,
   rayCylinderSpan,
   rayDeflection,
   type DensityGradient,
@@ -133,5 +134,47 @@ describe('heat-haze shift of the background', () => {
     // a background in front of the gas is not displaced by it
     expect(hazeShiftPx(1e-3, 4, 3, fov, h)).toBe(0);
     expect(HAZE_MIN_SHIFT_PX).toBeGreaterThan(0);
+  });
+});
+
+// W2V-I3: the TSL march (src/render/flowViz.ts) samples each step at a fixed per-pixel offset
+// (three's interleaved gradient noise), not at the midpoint; the TS model takes the same offset,
+// so tests/browser/flowViz.test.ts can compare the rendered eps with it ray for ray
+describe('the march offset (the shader mirror)', () => {
+  const ray = {
+    origin: [0.5, 0.2, -3] as const,
+    dir: [0, 0, 1] as const,
+    ...basis,
+    xMin: -1,
+    xMax: 2,
+    rMax: 1.5,
+    steps: 96,
+  };
+
+  it('defaults to the midpoint rule; any offset in [0, 1) converges to the same integral', () => {
+    expect(rayDeflection({ ...ray, offset: 0.5 }, gaussian, K)).toEqual(
+      rayDeflection(ray, gaussian, K),
+    );
+    const lo = rayDeflection({ ...ray, offset: 0 }, gaussian, K).ey;
+    const hi = rayDeflection({ ...ray, offset: 0.999 }, gaussian, K).ey;
+    expect(lo).not.toBe(hi);
+    expect(Math.abs(lo - exact(0.2))).toBeLessThan(2e-3 * Math.abs(exact(0.3)));
+    expect(Math.abs(hi - exact(0.2))).toBeLessThan(2e-3 * Math.abs(exact(0.3)));
+  });
+
+  it("is three's interleavedGradientNoise of the pixel coordinate", () => {
+    const ign = (x: number, y: number) => {
+      const f = (v: number) => v - Math.floor(v);
+      return f(52.9829189 * f(0.06711056 * x + 0.00583715 * y));
+    };
+    for (const [x, y] of [
+      [0.5, 0.5],
+      [240.5, 135.5],
+      [479.5, 269.5],
+    ] as const) {
+      expect(marchOffset(x, y)).toBeCloseTo(ign(x, y), 12);
+      expect(marchOffset(x, y)).toBeGreaterThanOrEqual(0);
+      expect(marchOffset(x, y)).toBeLessThan(1);
+    }
   });
 });
