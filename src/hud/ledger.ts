@@ -32,13 +32,15 @@ export function ledgerKind(status: string): LedgerKind {
   return 'other';
 }
 
+// a cell may hold an escaped pipe (`\|u\|`): split on the unescaped ones only, then unescape
+// (W2A-N4: the flow-visuals row lost everything after its "\|u\|")
 const splitRow = (line: string): string[] =>
   line
     .trim()
     .replace(/^\|/, '')
-    .replace(/\|$/, '')
-    .split('|')
-    .map((c) => c.trim());
+    .replace(/(?<!\\)\|$/, '')
+    .split(/(?<!\\)\|/)
+    .map((c) => c.replace(/\\\|/g, '|').trim());
 
 /** The rows of the first table under the "Fidelity ledger" heading. */
 export function parseFidelityLedger(markdown: string): LedgerRow[] {

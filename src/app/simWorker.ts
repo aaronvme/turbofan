@@ -213,6 +213,11 @@ function startRaster(a: App): Worker | null {
 
 /** Asks for a new MOCK raster when N1 moved or the last is old (one in flight at a time). */
 function refreshMock(a: App, state: CycleState, nowMs: number) {
+  // W2A-N7: a raster worker that never answers is given up on, visibly
+  if (a.raster !== null && a.rasterDue.timedOut(nowMs)) {
+    a.raster.terminate();
+    rasterOnFrame(a, 'MOCK raster worker did not answer: rasterizing on the frame');
+  }
   if (a.fields === null || !a.rasterDue.due(state.n1Percent, nowMs)) return;
   a.rasterDue.requested(state.n1Percent, nowMs);
   if (a.raster === null) {

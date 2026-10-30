@@ -64,7 +64,18 @@ export function flagAnnunciations(cycle: Pick<CycleState, 'flags'>): Annunciatio
     .map((k) => ({ id: k, level: FLAG_TEXT[k][0], text: FLAG_TEXT[k][1] }));
 }
 
-export function flowAnnunciation(flow: FlowStatus): Annunciation {
+/**
+ * The flow solver's status; `drawn` false: a running solver that is not drawn is idle (it is not
+ * stepped, W2A-N8), not "running" at 0 iterations.
+ */
+export function flowAnnunciation(flow: FlowStatus, drawn = true): Annunciation {
+  if (flow.status === 'running' && !drawn)
+    return {
+      id: 'flow',
+      level: 'normal',
+      text: 'SOLVER IDLE',
+      detail: 'started, not drawn: not stepped',
+    };
   switch (flow.status) {
     case 'unavailable':
       return {
@@ -98,13 +109,8 @@ export type FieldLinkView = FlowLinkState;
 
 function fieldBadge(flow: SnapshotSources['flow'], link: FieldLinkView | null): Annunciation {
   if (flow === 'solver') {
-    if (link?.coupling === 'uncoupled')
-      return {
-        id: 'field',
-        level: 'advisory',
-        text: 'FIELD: solver (uncoupled until W3)',
-        detail: provenanceLabel('uncoupled'),
-      };
+    // only a link that says so is coupled: an unknown coupling reads the conservative way
+    // (W2A-N3), as the dock's legend does
     if (link?.coupling === 'coupled')
       return {
         id: 'field',
@@ -112,7 +118,12 @@ function fieldBadge(flow: SnapshotSources['flow'], link: FieldLinkView | null): 
         text: 'FIELD: SOLVER (coupled)',
         detail: provenanceLabel('coupled'),
       };
-    return { id: 'field', level: 'normal', text: 'FIELD: SOLVER', detail: 'the live GPU solver' };
+    return {
+      id: 'field',
+      level: 'advisory',
+      text: 'FIELD: solver (uncoupled until W3)',
+      detail: provenanceLabel('uncoupled'),
+    };
   }
   if (flow === 'mock') {
     if (link !== null && link.fallback !== null)

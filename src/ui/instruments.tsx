@@ -117,7 +117,7 @@ export function EngineDisplay({ snapshot }: { readonly snapshot: SimSnapshot }) 
       <header className="panel-head">
         <h2>Engine</h2>
         <span className="tag" title="The FADEC mode and the control loop that sets fuel flow">
-          {c.fadec.mode.toUpperCase()} · {c.fadec.limiter}
+          {c.fadec.mode.toUpperCase()} · {fmt.limiterText(c.fadec.limiter)}
         </span>
       </header>
       <div className="dials">
@@ -165,9 +165,10 @@ export function EngineDisplay({ snapshot }: { readonly snapshot: SimSnapshot }) 
             </dd>
           </div>
           <div>
-            <dt>Start</dt>
+            {/* no start in progress: the burner's state (W2A-N8: not "Start lit") */}
+            <dt>{c.startPhase === 'none' ? 'Burner' : 'Start'}</dt>
             <dd className="word">
-              {c.startPhase === 'none' ? (c.combustorLit ? 'lit' : 'off') : c.startPhase}
+              {c.startPhase === 'none' ? (c.combustorLit ? 'lit' : 'out') : c.startPhase}
             </dd>
           </div>
         </dl>

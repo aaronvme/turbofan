@@ -16,6 +16,8 @@ export interface ClientOptions {
 }
 
 export function startClient(canvas: HTMLCanvasElement, options: ClientOptions = {}): Client {
+  // a new worker: nothing of the last one's session may pass for this one's (W2A-N11)
+  useApp.getState().resetSession();
   const app = useApp.getState();
   if (!('gpu' in navigator)) {
     app.setConnection({ state: 'unsupported', message: 'This browser has no WebGPU.' });

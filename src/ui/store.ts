@@ -52,6 +52,12 @@ export interface AppStore {
   setUnits: (u: UnitSystem) => void;
   togglePanel: (p: PanelId) => void;
   openPanel: (p: PanelId) => void;
+  /**
+   * A new worker (W2A-N11): forgets the last one's connection, snapshot, diagnostics, trails,
+   * faults and field choice, so nothing of it passes for the new one's. The viewer's own
+   * settings (units, panels) stay.
+   */
+  resetSession: () => void;
   receive: (m: FromWorker) => void;
   setConnection: (c: Connection) => void;
 }
@@ -95,6 +101,20 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   openPanel: (p) => {
     set((s) => ({ panels: { ...s.panels, [p]: true } }));
+  },
+  resetSession: () => {
+    set({
+      connection: { state: 'booting' },
+      snapshot: null,
+      diagnostics: null,
+      anchors: [],
+      trails: { fan: [], hpc: [] },
+      gpuErrors: [],
+      gpuErrorCount: 0,
+      simStopped: null,
+      refused: [],
+      field: 'mock',
+    });
   },
   setConnection: (connection) => {
     set({ connection });

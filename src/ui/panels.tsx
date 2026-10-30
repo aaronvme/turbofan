@@ -303,10 +303,11 @@ export function FidelityPanel() {
 function BudgetBar({ d }: { readonly d: AppDiagnostics }) {
   const b = d.budget;
   const frame = SOLVER_BUDGET.frameMs;
+  // `shown` null: not measured (an undrawn solver shows a dash, not 0.00 ms; W2A-N8)
   const parts = [
-    { id: 'render', label: 'Render', ms: b.renderGpuMs ?? 0 },
-    { id: 'flow', label: 'Flow visuals', ms: b.flowVisualsGpuMs },
-    { id: 'solver', label: 'Solver', ms: b.solverGpuMs ?? 0 },
+    { id: 'render', label: 'Render', ms: b.renderGpuMs ?? 0, shown: b.renderGpuMs },
+    { id: 'flow', label: 'Flow visuals', ms: b.flowVisualsGpuMs, shown: b.flowVisualsGpuMs },
+    { id: 'solver', label: 'Solver', ms: b.solverGpuMs ?? 0, shown: b.solverGpuMs },
   ];
   const total = parts.reduce((t, p) => t + p.ms, 0);
   return (
@@ -332,7 +333,7 @@ function BudgetBar({ d }: { readonly d: AppDiagnostics }) {
               <span className="swatch" data-part={p.id} />
               {p.label}
             </dt>
-            <dd>{fmt.ms(p.ms)} ms</dd>
+            <dd>{fmt.ms(p.shown)} ms</dd>
           </div>
         ))}
         <div>
@@ -401,7 +402,7 @@ export function DiagnosticsPanel({
   const setField = useApp((s) => s.setField);
   const link = diagnostics?.field ?? null;
   const gas = gasPathAnnunciation(snapshot.cycle, diagnostics?.lostSolveCause ?? null);
-  const flow = flowAnnunciation(snapshot.flow);
+  const flow = flowAnnunciation(snapshot.flow, snapshot.sources.flow === 'solver');
   const st = snapshot.flow.stats;
   return (
     <section className="panel diagnostics" aria-label="Diagnostics" data-reserve>
@@ -474,7 +475,12 @@ export function DiagnosticsPanel({
         <div>
           <dt>Drawn</dt>
           <dd className="wrap">
-            {link === null ? 'no field bound yet' : provenanceLabel(link.coupling, link.fallback)}
+            {link === null
+              ? 'no field bound yet'
+              : field !== link.asked
+                ? // the choice is on its way (the solver starts, then binds; W2A-N1)
+                  `${provenanceLabel(link.coupling, link.fallback)} (switching to the ${field === 'solver' ? 'solver' : 'MOCK'}…)`
+                : provenanceLabel(link.coupling, link.fallback)}
           </dd>
         </div>
       </dl>

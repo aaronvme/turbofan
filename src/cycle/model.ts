@@ -791,7 +791,9 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
       ? { ...conditionsOf(inp), vbvFraction: this.e.calibration.vbv.maxFraction }
       : conditionsOf(inp);
     if (!(this.lit && this.pct2() >= SUBIDLE_N2_PERCENT && this.wf > 0)) {
-      // a genuine sub-idle state: a start, a windmill, a shutdown
+      // a genuine sub-idle state: a start, a windmill, a shutdown. It ends a held episode, so
+      // the next loss above sub-idle is logged as a new one (W2A-N6)
+      this.holding = false;
       this.held = this.subIdle(c);
       return this.held;
     }

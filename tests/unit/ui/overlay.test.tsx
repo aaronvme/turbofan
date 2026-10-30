@@ -53,7 +53,7 @@ describe('the overlay (RTL)', { timeout: TIMEOUT_MS }, () => {
     const s = snapshotOf();
     const post = mount(s);
     render(<Overlay />);
-    const lever = screen.getByRole('slider', { name: 'Thrust lever' }) as HTMLInputElement;
+    const lever = screen.getByRole<HTMLInputElement>('slider', { name: 'Thrust lever' });
     // an ArrowUp: one step from the value the lever shows now
     const press = () => {
       fireEvent.change(lever, {
