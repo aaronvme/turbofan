@@ -1,3 +1,27 @@
+w2/reference-9 round 13: WIP (D4-81 in order). Run 1, the plain scheme, passes D4-79's (a) and (b): the preconditioning is the source of the growth. Run 2, the global M_cut 0.02, is running. (From c2d7c9f; HEAD = the commit of this handoff.)
+
+DONE (round 13)
+- Step 0: round 12's scratch patch is reverted (`git checkout` of precondition.ts and solver.ts; the copy stays in `reports/scratch/r12/trial-step-limit.patch`).
+- 87c5210: the d463 case takes a scheme (`D463Case.lowMachPreconditioning`: absent = the engine's 0.003, null = plain). `cases/d463plain.ts` is the plain run.
+- c03c87c (TDD), 1413b3d: `lowMachPreconditioning.globalMachCut`, off by default. It raises minMach and M_cut to the cut (beta, the far field's beta and the flux scaling). M_cut >= 1 stays off, minMach >= 1 stays plain, and an invalid cut throws. The test is `precondition.test.ts` "takes a global M_cut ...".
+- 3313910: `cases/d463mcut02.ts` and `d463mcut05.ts`.
+- f504d9c: SOLVER.md 10, D4-81's plan, written before the runs.
+- dc38608: run 1's results, in SOLVER.md 10's D4-81 table.
+
+D4-81 RESULTS (the contract case, 20000 iterations)
+- Plain scheme (CFL 1.5): (a) 0.366 over 1000-2000 and 0.0433 at 20000; (b) 0.641 against 10000 and 0.159 against 100. Weighted residual 3.89e-2 / 9.63e-3 / 6.17e-3 at 100 / 10000 / 20000. PASS. L2(p') falls from 0.365 at 1000 to 0.07 at 10000.
+- M_cut 0.02: running (`reports/scratch/r13/logs/mcut02.*`).
+
+NEXT
+1. Finish run 2 (M_cut 0.02). If it passes (a) and (b): run the full ladder with the cut on every preconditioned run, plus the linear part. If it fails: run 3 (0.05).
+2. The gates at the final commit.
+
+GOTCHAS
+- Long runs: `reports/scratch/r13/runcase.ps1 -Case <name> -Tag <tag>` started via `Start-Process powershell.exe ... -WindowStyle Hidden`. It writes `logs/<tag>.{out,err,status}`. `runnpm.ps1 -Script <npm script> -Tag <tag>` does the same for npm scripts.
+- `npm run test:ladder`'s globalSetup clears `reports/ladder`. The run logs' `@@RESULT@@` lines keep each case's result.
+
+---
+
 w2/reference-9 round 12: STOP-CLEAN (WIP; the usage brake hit 84 %). D4-79 is implemented. D4-63 is NOT closed: after 2000 iterations the contract case grows in the energy norm. It is past (a)'s bound and its residual is above its value at 100 from 1000 to 16000. The local time-step trial is written (as a scratch patch) and screened, but not run to 20000. No scheme change. (From a5d86dd; HEAD = the commit of this handoff.)
 
 DONE (round 12)
