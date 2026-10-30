@@ -4,6 +4,8 @@
 
 import type { CycleState } from '../contracts/cycle';
 import type { FlowStatus, SnapshotSources } from '../contracts/sim';
+import type { FlowLinkState } from '../flow/viz/fieldLink';
+import { provenanceLabel } from '../flow/viz/legend';
 
 export type Level = 'normal' | 'advisory' | 'caution' | 'warning';
 
@@ -90,8 +92,53 @@ export function flowAnnunciation(flow: FlowStatus): Annunciation {
   }
 }
 
-/** The provenance badges: every mock part is named (W0C-I3). */
-export function provenanceBadges(s: SnapshotSources): Annunciation[] {
+/** What the badges read of the drawn field's link (D4-82): its coupling and any fallback. */
+export type FieldLinkView = FlowLinkState;
+
+function fieldBadge(flow: SnapshotSources['flow'], link: FieldLinkView | null): Annunciation {
+  if (flow === 'solver') {
+    if (link?.coupling === 'uncoupled')
+      return {
+        id: 'field',
+        level: 'advisory',
+        text: 'FIELD: solver (uncoupled until W3)',
+        detail: provenanceLabel('uncoupled'),
+      };
+    if (link?.coupling === 'coupled')
+      return {
+        id: 'field',
+        level: 'normal',
+        text: 'FIELD: SOLVER (coupled)',
+        detail: provenanceLabel('coupled'),
+      };
+    return { id: 'field', level: 'normal', text: 'FIELD: SOLVER', detail: 'the live GPU solver' };
+  }
+  if (flow === 'mock') {
+    if (link !== null && link.fallback !== null)
+      return {
+        id: 'field',
+        level: 'caution',
+        text: 'FIELD: MOCK fallback',
+        detail: provenanceLabel('mock', link.fallback),
+      };
+    return {
+      id: 'field',
+      level: 'caution',
+      text: 'FIELD: MOCK',
+      detail: 'a synthetic field scaled by the cycle state, not the solver',
+    };
+  }
+  return { id: 'field', level: 'advisory', text: 'FIELD: NONE', detail: 'no flow field bound' };
+}
+
+/**
+ * The provenance badges: every mock part is named (W0C-I3), the solver's field says it is
+ * uncoupled until W3, and a MOCK drawn in place of the solver says it is a fallback (D4-82).
+ */
+export function provenanceBadges(
+  s: SnapshotSources,
+  link: FieldLinkView | null = null,
+): Annunciation[] {
   const cycle: Annunciation =
     s.cycle === 'model'
       ? {
@@ -106,16 +153,16 @@ export function provenanceBadges(s: SnapshotSources): Annunciation[] {
           text: 'CYCLE: MOCK',
           detail: 'a labelled stand-in, not the model',
         };
-  const flow: Annunciation =
-    s.flow === 'solver'
-      ? { id: 'field', level: 'normal', text: 'FIELD: SOLVER', detail: 'the live GPU solver' }
-      : s.flow === 'mock'
-        ? {
-            id: 'field',
-            level: 'caution',
-            text: 'FIELD: MOCK',
-            detail: 'a synthetic field scaled by the cycle state, not the solver',
-          }
-        : { id: 'field', level: 'advisory', text: 'FIELD: NONE', detail: 'no flow field bound' };
-  return [cycle, flow];
+  return [cycle, fieldBadge(s.flow, link)];
+}
+
+/** W2V-I6 in the shell: a MOCK drawn instead of the solver asked for is annunciated, with why. */
+export function fieldFallbackAnnunciation(link: FieldLinkView | null): Annunciation | null {
+  if (link === null || link.fallback === null) return null;
+  return {
+    id: 'fieldFallback',
+    level: 'caution',
+    text: `MOCK FALLBACK: ${link.fallback}`,
+    detail: provenanceLabel('mock', link.fallback),
+  };
 }

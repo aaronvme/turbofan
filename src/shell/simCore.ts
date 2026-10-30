@@ -26,17 +26,14 @@ import {
   type SimCommandMessage,
   type SimSnapshot,
 } from '../contracts/sim';
-import {
-  DEFAULT_UI_STATE,
-  renderStateOf,
-  type RenderState,
-  type RenderStatePatch,
-} from '../contracts/ui';
+import type { RenderState, RenderStatePatch } from '../contracts/ui';
+import { APP_DEFAULT_VIEW, withViewMode } from './viewState';
 
 export interface SimCoreOptions {
   readonly cycle: CycleModel;
   /** Where the engine starts (default: ground idle, so the first frame shows a running engine). */
   readonly initial?: CycleInitialCondition;
+  /** The first render state (default: APP_DEFAULT_VIEW). */
   readonly view?: RenderState;
 }
 
@@ -61,12 +58,20 @@ export function inputsFor(initial: CycleInitialCondition, ambient = ISA_SLS): Cy
     : { ...DEFAULT_CYCLE_INPUTS, ambient };
 }
 
+/**
+ * A render-state patch over the view. A patch that changes the mode puts the tracers at the new
+ * mode's default (D4-83) unless it sets them itself.
+ */
 export function mergeRenderState(view: RenderState, patch: RenderStatePatch): RenderState {
+  const base =
+    patch.viewMode !== undefined && patch.viewMode !== view.viewMode
+      ? withViewMode(view, patch.viewMode)
+      : view;
   return {
-    ...view,
+    ...base,
     ...patch,
-    overlays: { ...view.overlays, ...patch.overlays },
-    colormaps: { ...view.colormaps, ...patch.colormaps },
+    overlays: { ...base.overlays, ...patch.overlays },
+    colormaps: { ...base.colormaps, ...patch.colormaps },
   };
 }
 
@@ -76,7 +81,7 @@ export function createSimCore(o: SimCoreOptions): SimCore {
   let inputs = inputsFor(initial);
   let state = cycle.reset(initial, inputs.ambient);
   let clock = INITIAL_CLOCK;
-  let view = o.view ?? renderStateOf(DEFAULT_UI_STATE);
+  let view = o.view ?? APP_DEFAULT_VIEW;
   let solverMode: SolverMode = 'tracking';
   let lastSeq = -1;
   let previous: SimSnapshot | null = null;
@@ -113,7 +118,8 @@ export function createSimCore(o: SimCoreOptions): SimCore {
         state = cycle.reset(c.initial, inputs.ambient);
         return [];
       case 'setViewMode':
-        view = { ...view, viewMode: c.mode };
+        // D4-83: the tracers start at the new mode's default
+        view = withViewMode(view, c.mode);
         return [];
       case 'setRenderState':
         view = mergeRenderState(view, c.render);

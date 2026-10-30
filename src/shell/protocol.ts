@@ -6,10 +6,18 @@
 
 import type { SimCommandMessage, SimSnapshot } from '../contracts/sim';
 import type { FlowFieldSource } from '../contracts/flow';
+import type { FlowLinkState } from '../flow/viz/fieldLink';
 import type { Anchor } from '../hud/callouts';
 import type { OrbitInput } from './orbit';
 
 export type FieldChoice = FlowFieldSource;
+
+/**
+ * The worker's cycle model: the reference calibration (the app), or the W1K-I2 part-power fit,
+ * whose slam is a known held-gas-path case (W2F-N5): the browser suite measures the held step's
+ * frame cost on it. Not a user setting.
+ */
+export type CycleChoice = 'reference' | 'partPowerFit';
 
 export type ToWorker =
   | {
@@ -18,6 +26,8 @@ export type ToWorker =
       readonly width: number;
       readonly height: number;
       readonly dpr: number;
+      /** Default 'reference'. */
+      readonly cycle?: CycleChoice;
     }
   | {
       readonly type: 'resize';
@@ -46,14 +56,30 @@ export interface FrameBudget {
   readonly msPerIteration: number | null;
   /** CPU ms of the cycle step this frame, rolling median. */
   readonly cycleCpuMs: number;
+  /** CPU ms of the cycle step, the worst frame of the rolling window (a held step shows here). */
+  readonly cycleCpuMaxMs: number;
+  /** CPU ms of the cycle step on frames whose gas path was held (W2F-N5), median; null: none. */
+  readonly cycleCpuHeldMs: number | null;
   /** CPU ms of the whole worker frame (sim + render submit), rolling median. */
   readonly frameCpuMs: number;
+  /** CPU ms of the whole worker frame, the worst of the rolling window. */
+  readonly frameCpuMaxMs: number;
+  /** CPU ms of the worker frame on held frames, median; null: none in the window. */
+  readonly frameCpuHeldMs: number | null;
+  /** CPU ms of the latest MOCK re-raster (null: none yet), and how many there have been. */
+  readonly mockRasterMs: number | null;
+  readonly mockRasters: number;
   /** Frames per second over the last second, from rAF timestamps. */
   readonly fps: number;
 }
 
 export interface AppDiagnostics {
   readonly budget: FrameBudget;
+  /**
+   * D4-82: the drawn field's link state (the coupling for the badge and the legend; W2V-I6: why
+   * the MOCK stands in for the solver asked for). null before the field is bound.
+   */
+  readonly field: FlowLinkState | null;
   /** W2F-I1: why the last matched solve was lost (null: none lost since the reset). */
   readonly lostSolveCause: string | null;
   /** The worker's own errors so far (GPU errors, a throwing step), newest last, at most 8. */

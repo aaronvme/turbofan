@@ -7,29 +7,35 @@
 // thread.
 //
 // Each frame: drain the commands, advance the clock and step the cycle model on the wall step
-// (src/shell/simCore.ts), hand the state to the view (spools, glow), run the solver at D4-2's
-// budget, min(5 ms, 15 ms - measured render - measured flow visuals) with a floor of 2
-// iterations (src/flow/gpu/scheduler.ts), render, and every third frame publish a snapshot whose
-// sources come from the models (W1F-N1). Device loss and GPU errors are posted as they happen,
-// never swallowed.
+// (src/shell/simCore.ts), hand the state to the view (spools, glow), and draw the field the viewer
+// chose through the field switch (src/shell/fieldSwitch.ts, D4-82): the labelled MOCK, or the live
+// solver, labelled uncoupled until W3, stepped at D4-2's budget, min(5 ms, 15 ms - measured render
+// - measured flow visuals) with a floor of 2 iterations (src/flow/gpu/scheduler.ts), while a flow
+// mode draws it. A solver that cannot start, is lost or diverged falls back to the MOCK at once,
+// with the reason in the diagnostics the badge reads (visible, never silent). Then render, and
+// every third frame publish a snapshot whose sources come from the models (W1F-N1). Device loss
+// and GPU errors are posted as they happen, never swallowed.
 
+import { PART_POWER_FIT_CALIBRATION, referenceEngine } from '../cycle/engine';
 import { createCycleModel } from '../cycle/model';
+import { withCalibration } from '../cycle/partPower';
 import { ENGINE_DEFINITION } from '../engine/definition';
 import { GpuFlowSolver } from '../flow/gpu/device/flowSolver';
 import { solverBudgetMs } from '../flow/gpu/scheduler';
 import { loadMeshAsset, parseMeshManifest } from '../flow/mesh/loader';
-import type { FlowVizModeId } from '../flow/viz/modes';
 import { FLOW_SOLVER_LIMITS, type GpuErrorReport } from '../gpu/device';
 import { anchorWorld, componentAnchors, projectPoint } from '../hud/anchors';
 import { createMockFlowField } from '../mocks/mockFlowField';
 import { createEngineView, type EngineView } from '../render/engineView';
 import { LOOK_PRESETS } from '../render/presets';
-import type { FlowSource, FlowStatus } from '../contracts/sim';
+import { sanitizeFlowStatus, type FlowStatus } from '../contracts/sim';
 import type { RenderState } from '../contracts/ui';
 import type { CycleState } from '../contracts/cycle';
 import { createSimCore, type SimCore } from '../shell/simCore';
+import { createFieldSwitch, type FieldSwitch } from '../shell/fieldSwitch';
+import { cutPlaneQuantity, flowModeFor } from '../shell/viewState';
 import { applyOrbit, orbitFromPose, orbitPose, type OrbitState } from '../shell/orbit';
-import type { AppDiagnostics, FieldChoice, FromWorker, ToWorker } from '../shell/protocol';
+import type { AppDiagnostics, CycleChoice, FromWorker, ToWorker } from '../shell/protocol';
 import type { Anchor } from '../hud/callouts';
 
 interface Scope {
@@ -49,20 +55,34 @@ const TIMINGS_EVERY = 15;
 /** The MOCK field is re-rasterized from the cycle state when N1 moved this far, %, or after 2 s. */
 const MOCK_FIELD_N1_STEP = 1.5;
 const MOCK_FIELD_MAX_AGE_MS = 2000;
+/** The frame-cost window, frames (2 s at 60 fps: a held episode's frames stay in view). */
+const COST_WINDOW = 120;
 const MAX_ERRORS = 8;
 
 const anchors = componentAnchors(ENGINE_DEFINITION);
 
+const median = (xs: readonly number[]): number | null => {
+  if (xs.length === 0) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)] ?? null;
+};
+
+/** The last `size` frames' ms, each tagged with whether the gas path was held (W2F-N5). */
 class Rolling {
-  private readonly xs: number[] = [];
-  push(x: number) {
-    this.xs.push(x);
-    if (this.xs.length > 30) this.xs.shift();
+  private readonly xs: { ms: number; held: boolean }[] = [];
+  constructor(private readonly size: number) {}
+  push(ms: number, held: boolean) {
+    this.xs.push({ ms, held });
+    if (this.xs.length > this.size) this.xs.shift();
   }
   median(): number {
-    if (this.xs.length === 0) return 0;
-    const s = [...this.xs].sort((a, b) => a - b);
-    return s[Math.floor(s.length / 2)] ?? 0;
+    return median(this.xs.map((x) => x.ms)) ?? 0;
+  }
+  max(): number {
+    return this.xs.reduce((m, x) => Math.max(m, x.ms), 0);
+  }
+  heldMedian(): number | null {
+    return median(this.xs.filter((x) => x.held).map((x) => x.ms));
   }
 }
 
@@ -71,11 +91,12 @@ interface App {
   core: SimCore;
   cycle: ReturnType<typeof createCycleModel>;
   flow: GpuFlowSolver;
-  flowReady: boolean;
   flowInitError: string | null;
-  field: FieldChoice;
-  boundField: FlowSource;
+  /** What is drawn (D4-82); null until the first MOCK raster is bound. */
+  fields: FieldSwitch | null;
   mockAt: { n1: number; t: number } | null;
+  mockRasterMs: number | null;
+  mockRasters: number;
   orbit: OrbitState;
   size: { width: number; height: number };
   appliedView: RenderState | null;
@@ -93,56 +114,45 @@ function pushError(a: App, message: string) {
   if (a.errors.length > MAX_ERRORS) a.errors.shift();
 }
 
-function flowModeFor(v: RenderState): FlowVizModeId | null {
-  switch (v.viewMode) {
-    case 'realistic':
-      return v.overlays.particles ? 'realistic' : null;
-    case 'cutaway':
-      return 'cutaway';
-    case 'schlieren':
-      return 'schlieren';
-    case 'data':
-      return 'data';
-    case 'exploded':
-      return null;
-  }
-}
-
 /** Applies the render state the core holds to the view (only what changed). */
 function applyView(a: App) {
   const v = a.core.view;
   const was = a.appliedView;
   if (was === v) return;
   a.appliedView = v;
-  if (was?.viewMode !== v.viewMode || was.overlays.particles !== v.overlays.particles) {
-    const fm = flowModeFor(v);
+  if (was?.viewMode !== v.viewMode) {
+    // D4-83: Realistic draws its haze and schlieren always, its tracers only when asked
+    const fm = flowModeFor(v.viewMode);
     a.view.setFlowMode(fm);
-    if (fm === null) a.view.setMode(v.viewMode === 'exploded' ? 'exploded' : 'realistic');
+    if (fm === null) a.view.setMode('exploded');
   }
+  if (was?.viewMode !== v.viewMode || was.overlays.particles !== v.overlays.particles)
+    a.view.setFlowTracers(v.overlays.particles);
+  const q = cutPlaneQuantity(v);
+  if (was === null || cutPlaneQuantity(was) !== q) a.view.setFlowQuantity(q);
   if (was?.quality !== v.quality)
     a.view.setProfile(v.quality === 'low' || v.quality === 'medium' ? 'performance' : 'quality');
   if (was?.particleTimeDilation !== v.particleTimeDilation)
     a.view.setFlowTimeScale(Math.min(1, 1 / v.particleTimeDilation));
 }
 
-function bindField(a: App, state: CycleState, nowMs: number) {
-  if (a.field === 'solver' && a.flowReady) {
-    if (a.boundField !== 'solver') {
-      a.view.setFlowSolverField(a.flow.fields());
-      a.boundField = 'solver';
-    }
-    return;
-  }
-  // the labelled MOCK, scaled by the cycle's own state (sources.flow says 'mock')
+/** The MOCK raster of the cycle's own state (labelled 'mock'), timed (W2 app-ui NEXT 4). */
+function rasterMock(a: App, state: CycleState, nowMs: number) {
+  const r0 = performance.now();
+  const field = createMockFlowField(ENGINE_DEFINITION, state, a.core.inputs.ambient);
+  a.mockRasterMs = performance.now() - r0;
+  a.mockRasters++;
+  a.mockAt = { n1: state.n1Percent, t: nowMs };
+  return field;
+}
+
+/** Re-rasterizes the MOCK when N1 moved MOCK_FIELD_N1_STEP or it is MOCK_FIELD_MAX_AGE_MS old. */
+function refreshMock(a: App, state: CycleState, nowMs: number) {
+  if (a.fields === null || a.mockAt === null) return;
   const stale =
-    a.mockAt === null ||
-    a.boundField !== 'mock' ||
     Math.abs(state.n1Percent - a.mockAt.n1) > MOCK_FIELD_N1_STEP ||
     nowMs - a.mockAt.t > MOCK_FIELD_MAX_AGE_MS;
-  if (!stale) return;
-  a.view.setFlowField(createMockFlowField(ENGINE_DEFINITION, state, a.core.inputs.ambient));
-  a.mockAt = { n1: state.n1Percent, t: nowMs };
-  a.boundField = 'mock';
+  if (stale) a.fields.setMock(rasterMock(a, state, nowMs));
 }
 
 function flowStatus(a: App): FlowStatus {
@@ -154,7 +164,8 @@ function flowStatus(a: App): FlowStatus {
       stats: null,
       reduction: null,
     };
-  return a.flow.status();
+  // a non-finite readback is a divergence, said as such (the snapshot carries finite data)
+  return sanitizeFlowStatus(a.flow.status());
 }
 
 function projectAnchors(a: App): Anchor[] {
@@ -169,7 +180,8 @@ function projectAnchors(a: App): Anchor[] {
   });
 }
 
-async function startSolver(a: App) {
+/** Starts the solver at boot (its status shows in the diagnostics); rejects with why it failed. */
+async function startSolver(a: App): Promise<GpuFlowSolver> {
   try {
     const manifest = parseMeshManifest(await (await fetch('/mesh/manifest.json')).json());
     const entry = manifest.specs['130k'];
@@ -177,10 +189,12 @@ async function startSolver(a: App) {
     const bytes = await (await fetch(`/mesh/${entry.file}`)).arrayBuffer();
     const { asset } = await loadMeshAsset(bytes, entry);
     await a.flow.init({ device: a.view.device.device, mesh: asset, definition: ENGINE_DEFINITION });
-    a.flowReady = true;
+    return a.flow;
   } catch (e) {
     a.flowInitError = e instanceof Error ? e.message : String(e);
     pushError(a, `flow solver: ${a.flowInitError}`);
+    a.flow.dispose();
+    throw e;
   }
 }
 
@@ -189,10 +203,9 @@ function loop(a: App) {
   let frame = 0;
   let renderMs: number | null = null;
   let flowVisualsMs: number | null = null;
-  let iterations = 0;
   let budget = 0;
-  const cycleMs = new Rolling();
-  const frameMs = new Rolling();
+  const cycleMs = new Rolling(COST_WINDOW);
+  const frameMs = new Rolling(COST_WINDOW);
   const stamps: number[] = [];
   let stats = a.view.stats();
   const tick = (t: number) => {
@@ -203,6 +216,7 @@ function loop(a: App) {
     stamps.push(t);
     while (stamps.length > 0 && t - (stamps[0] ?? t) > 1000) stamps.shift();
     applyView(a);
+    let held = false;
     if (!a.simFailed) {
       const c0 = performance.now();
       try {
@@ -214,15 +228,16 @@ function loop(a: App) {
         pushError(a, msg);
         post({ type: 'fatal', message: msg });
       }
-      cycleMs.push(performance.now() - c0);
+      held = a.core.state().gasPathSolve.status === 'held';
+      cycleMs.push(performance.now() - c0, held);
     }
     const state = a.core.state();
     a.view.setCycleState(state, a.cycle.source);
-    bindField(a, state, t);
-    if (a.flowReady) {
-      budget = solverBudgetMs({ renderMs, flowVisualsMs });
-      iterations = a.flow.step({ gpuTimeBudgetMs: budget, maxIterations: 1000 }).iterationsThisStep;
-    }
+    refreshMock(a, state, t);
+    budget = solverBudgetMs({ renderMs, flowVisualsMs });
+    // the drawn solver steps while a flow mode draws it; its health check runs every frame
+    const stepping = a.fields?.drawn() === 'solver' && flowModeFor(a.core.view.viewMode) !== null;
+    a.fields?.beforeFrame(stepping ? { gpuTimeBudgetMs: budget, maxIterations: 1000 } : null);
     const pose = orbitPose(a.orbit);
     a.view.setCameraPose(pose.position, pose.target);
     a.view.frame(Math.min(dt, 0.1));
@@ -232,21 +247,29 @@ function loop(a: App) {
       renderMs = m.frames > 0 && Number.isFinite(m.gpuTotal) ? m.gpuTotal : null;
       flowVisualsMs = stats.flow.mode === null ? null : stats.flow.visualsMs;
     }
-    frameMs.push(performance.now() - t0);
+    frameMs.push(performance.now() - t0, held);
     if (frame % PUBLISH_EVERY === 0) {
       const flow = flowStatus(a);
+      const drawn = a.fields?.drawn() ?? 'none';
       const diagnostics: AppDiagnostics = {
         budget: {
           renderGpuMs: renderMs,
           flowVisualsGpuMs: flowVisualsMs ?? 0,
-          solverGpuMs: flow.stats?.gpuTimeMs ?? null,
+          solverGpuMs: drawn === 'solver' ? (flow.stats?.gpuTimeMs ?? null) : null,
           solverBudgetMs: budget,
-          solverIterations: iterations,
+          solverIterations: stepping ? (flow.stats?.iterationsThisStep ?? 0) : 0,
           msPerIteration: a.flow.msPerIteration,
           cycleCpuMs: cycleMs.median(),
+          cycleCpuMaxMs: cycleMs.max(),
+          cycleCpuHeldMs: cycleMs.heldMedian(),
           frameCpuMs: frameMs.median(),
+          frameCpuMaxMs: frameMs.max(),
+          frameCpuHeldMs: frameMs.heldMedian(),
+          mockRasterMs: a.mockRasterMs,
+          mockRasters: a.mockRasters,
           fps: stamps.length,
         },
+        field: a.fields?.state() ?? null,
         lostSolveCause: a.cycle.lostSolveCause(),
         errors: [...a.errors],
         adapter: `${a.view.device.info.vendor} ${a.view.device.info.architecture}`.trim(),
@@ -256,7 +279,7 @@ function loop(a: App) {
       try {
         post({
           type: 'snapshot',
-          snapshot: a.core.snapshot({ flow, flowSource: a.boundField }),
+          snapshot: a.core.snapshot({ flow, flowSource: drawn }),
           diagnostics,
           anchors: projectAnchors(a),
           refused: a.refused.splice(0),
@@ -296,10 +319,16 @@ function handle(a: App, m: ToWorker) {
       return;
     }
     case 'field':
-      a.field = m.source;
-      a.mockAt = null;
+      // drawn once bound; a fallback and its reason are in the switch's state (D4-82)
+      void a.fields?.choose(m.source);
       return;
   }
+}
+
+function cycleOptions(c: CycleChoice) {
+  return c === 'partPowerFit'
+    ? { engine: withCalibration(referenceEngine(), PART_POWER_FIT_CALIBRATION) }
+    : {};
 }
 
 async function init(m: Extract<ToWorker, { type: 'init' }>) {
@@ -328,7 +357,7 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     preferredLimits: FLOW_SOLVER_LIMITS,
     onError,
   });
-  const cycle = createCycleModel();
+  const cycle = createCycleModel(cycleOptions(m.cycle ?? 'reference'));
   const core = createSimCore({ cycle });
   const preset = LOOK_PRESETS.threeQuarterFront;
   const a: App = {
@@ -336,11 +365,11 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     core,
     cycle,
     flow: new GpuFlowSolver(),
-    flowReady: false,
     flowInitError: null,
-    field: 'mock',
-    boundField: 'none',
+    fields: null,
     mockAt: null,
+    mockRasterMs: null,
+    mockRasters: 0,
     orbit: orbitFromPose(preset.camera, preset.target),
     size: { width: m.width, height: m.height },
     appliedView: null,
@@ -350,13 +379,27 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     simFailed: false,
   };
   appRef = a;
+  // the solver starts at boot (the diagnostics show its status) and is drawn only when chosen
+  const solver = startSolver(a);
+  // a failed start is already reported (the errors, the flow status), and the switch's fallback
+  // says so again if the solver is chosen: no unhandled rejection
+  solver.catch(() => undefined);
+  a.fields = await createFieldSwitch({
+    sink: view,
+    mock: rasterMock(a, core.state(), performance.now()),
+    solver: () => solver,
+    warn: (message) => {
+      console.warn(message);
+      pushError(a, message);
+    },
+  });
+  // messages wait in `pending` until the field is bound (a 'field' choice needs the switch)
   app = a;
   for (const p of pending.splice(0)) handle(a, p);
   post({
     type: 'ready',
     adapter: `${view.device.info.vendor} ${view.device.info.description}`.trim(),
   });
-  void startSolver(a);
   loop(a);
 }
 
