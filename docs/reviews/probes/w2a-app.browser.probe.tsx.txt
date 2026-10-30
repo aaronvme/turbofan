@@ -1,0 +1,156 @@
+// Critic pass 13 probe (w2/app-ui @f6ee8e2). Copy to tests/browser/w2a-app.test.tsx on the branch
+// and run `npx vitest run -c vitest.browser.config.ts tests/browser/w2a-app.test.tsx`.
+// It writes reports/critic13/probe/*.png and probe.json, and asserts what the critic observed:
+// 1. W2A-I3: the callouts' rendered boxes against the 132 x 34 px that layoutCallouts reserves
+//    (src/ui/panels.tsx LABEL), their rendered overlaps, and crossing leader lines, per mode.
+// 2. W2A-I4: Exploded -> Schlieren: the shots at +1.5 s (the suite's settle) and +6 s, with the
+//    sim time and the fps, to see whether the 1.4 s re-assembly has finished when the suite shoots.
+// 3. W2A-I5: five quick ArrowUp presses on the thrust lever (a controlled range input whose value
+//    comes back in the 20 Hz snapshot): the lever the worker ends with.
+// Observed at 1366 x 768 on the trial merge (2026-10-30): labels 147.3 x 36.7 px, Realistic's
+// Combustor x Bypass duct 1467 px2, 2 leader crossings per mode; Schlieren +1.5 s: no new snapshot
+// in either of two runs (0.00 s of sim; run 1's last one said 1 fps), +6 s: 4.82 s of sim at 45 fps
+// and the engine re-assembled; the lever: DOM "0" right after the presses, the worker 0.01.
+// A probe that starts failing after a fix means that finding is fixed.
+import { cleanup, render } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import { commands, page, userEvent } from 'vitest/browser';
+import type { ViewMode } from '../../src/contracts/ui';
+import { App } from '../../src/ui/App';
+import { useApp } from '../../src/ui/store';
+import '../../src/ui/global.css';
+
+const OUT = 'reports/critic13/probe';
+const sleep = (ms: number) =>
+  new Promise<void>((r) => {
+    setTimeout(r, ms);
+  });
+
+async function until(what: string, pred: () => boolean, timeoutMs = 60_000): Promise<void> {
+  const t0 = performance.now();
+  while (!pred()) {
+    const c = useApp.getState().connection;
+    if (c.state === 'failed' || c.state === 'lost' || c.state === 'unsupported')
+      throw new Error(`${what}: the app stopped (${c.state}: ${c.message})`);
+    if (performance.now() - t0 > timeoutMs) throw new Error(`${what}: not within ${timeoutMs} ms`);
+    await sleep(50);
+  }
+}
+
+const fresh = useApp.getState();
+async function boot() {
+  useApp.setState(fresh, true);
+  render(<App />);
+  await until('ready', () => {
+    const s = useApp.getState();
+    return s.connection.state === 'running' && s.snapshot !== null && s.diagnostics?.field != null;
+  });
+}
+
+async function toMode(mode: ViewMode) {
+  await page.getByRole('radio', { name: new RegExp(`^${mode}`, 'i') }).click();
+  await until(`mode ${mode}`, () => useApp.getState().snapshot?.view.viewMode === mode);
+}
+
+async function shot(name: string) {
+  const png = await page.screenshot({ save: false });
+  await commands.writeFile(`${OUT}/${name}.png`, png, 'base64');
+}
+
+const area = (a: DOMRect, b: DOMRect) =>
+  Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
+  Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+
+type Seg = [number, number, number, number];
+function crosses(p: Seg, q: Seg): boolean {
+  const o = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number) =>
+    Math.sign((bx - ax) * (cy - ay) - (by - ay) * (cx - ax));
+  const [a, b, c, d] = [p.slice(0, 2), p.slice(2), q.slice(0, 2), q.slice(2)] as [number, number][];
+  return (
+    o(...a, ...b, ...c) * o(...a, ...b, ...d) < 0 && o(...c, ...d, ...a) * o(...c, ...d, ...b) < 0
+  );
+}
+
+function callouts() {
+  const boxes = [...document.querySelectorAll('.callout')].map((el) => ({
+    name: el.querySelector('span')?.textContent ?? '',
+    r: el.getBoundingClientRect(),
+  }));
+  const reserved = [...document.querySelectorAll('[data-reserve]')].map((el) => ({
+    name: el.getAttribute('aria-label') ?? el.className,
+    r: el.getBoundingClientRect(),
+  }));
+  const overlaps: string[] = [];
+  boxes.forEach((a, i) => {
+    for (const b of boxes.slice(i + 1))
+      if (area(a.r, b.r) > 0) overlaps.push(`${a.name} x ${b.name}: ${area(a.r, b.r).toFixed(0)} px2`);
+    for (const p of reserved)
+      if (area(a.r, p.r) > 0) overlaps.push(`${a.name} x ${p.name}: ${area(a.r, p.r).toFixed(0)} px2`);
+  });
+  const segs = [...document.querySelectorAll('.leaders line')].map(
+    (l) => ['x1', 'y1', 'x2', 'y2'].map((k) => Number(l.getAttribute(k))) as Seg,
+  );
+  let crossings = 0;
+  segs.forEach((a, i) => {
+    for (const b of segs.slice(i + 1)) if (crosses(a, b)) crossings++;
+  });
+  return {
+    sizes: boxes.map((b) => `${b.name} ${b.r.width.toFixed(1)}x${b.r.height.toFixed(1)}`),
+    overlaps,
+    crossings,
+  };
+}
+
+describe('critic pass 13 probe (w2/app-ui)', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('callouts, the Exploded -> Schlieren shot, the lever', async () => {
+    await page.viewport(1366, 768);
+    await boot();
+    const record: Record<string, unknown> = {};
+    for (const mode of ['realistic', 'cutaway', 'data'] as const) {
+      await toMode(mode);
+      await sleep(2500);
+      record[`callouts ${mode}`] = callouts();
+    }
+
+    await toMode('exploded');
+    await sleep(3000);
+    await toMode('schlieren');
+    const sim0 = useApp.getState().snapshot?.clock.simTimeS ?? 0;
+    const stamp = () => ({
+      simS: Number(((useApp.getState().snapshot?.clock.simTimeS ?? 0) - sim0).toFixed(2)),
+      fps: useApp.getState().diagnostics?.budget.fps ?? null,
+    });
+    await sleep(1500);
+    record['schlieren +1.5 s'] = stamp();
+    await shot('schlieren-1.5s');
+    await sleep(4500);
+    record['schlieren +6 s'] = stamp();
+    await shot('schlieren-6s');
+
+    await toMode('realistic');
+    const lever = document.querySelector<HTMLInputElement>('input[type="range"]');
+    if (lever === null) throw new Error('no lever');
+    lever.focus();
+    await userEvent.keyboard('{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}');
+    const domRightAfter = lever.value;
+    await sleep(1000);
+    record.lever = {
+      domRightAfter,
+      workerAfter1s: useApp.getState().snapshot?.inputs.throttleLever ?? null,
+    };
+    await commands.writeFile(`${OUT}/probe.json`, `${JSON.stringify(record, null, 2)}\n`);
+    expect(useApp.getState().connection.state).toBe('running');
+    // the observed findings (each assertion fails once its finding is fixed)
+    const real = record['callouts realistic'] as ReturnType<typeof callouts>;
+    expect(real.sizes.every((s) => Number(s.split(' ').at(-1)?.split('x')[0]) > 132 + 8)).toBe(
+      true,
+    ); // I3: rendered wider than the 132 px the layout reserves
+    expect(real.overlaps.length + real.crossings).toBeGreaterThan(0); // I3
+    expect((record['schlieren +1.5 s'] as { simS: number }).simS).toBeLessThan(1.4); // I4
+    expect((record.lever as { workerAfter1s: number }).workerAfter1s).toBeLessThan(0.05); // I5
+  });
+});

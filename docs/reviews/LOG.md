@@ -3662,3 +3662,238 @@ Reviewed with `git show` and `git diff` only; the worktree's uncommitted scratch
 **Orchestrator questions (provisional):**
 - (rr) W2V-I1/I6: should `FlowField` carry a coupling state ('uncoupled' / 'coupled'), so the badge and the app shell can say it, with the MOCK fallback as the contract for w2/app-ui?
 - (ss) Visual: should Realistic default to haze and glow without tracers (tracers as a "smoke" option), and should the cut-plane crop be crisp rather than fogged?
+
+## Critic pass 13: w2/app-ui @f6ee8e2
+
+**Scope.**
+- Reviewed 2026-10-30: everything in `main..w2/app-ui` (23 commits, rounds 1 and 2; 59 files).
+  - The shell: `src/shell/{simCore,fieldSwitch,viewState,mockRaster,orbit,protocol}.ts`.
+  - The app: `src/app/{simWorker,mockRasterWorker,client}.ts`.
+  - The overlay: `src/ui/*` (App, store, instruments, charts, panels, dock, global.css) and `src/hud/*`.
+  - W2F-I1 in `src/cycle/matchedSolve.ts` and `model.ts`, and the flagged `src/render/engineView.ts` edit.
+  - The tests (unit, RTL, browser), the lockfile, LOOKDEV.md, and all 14 screenshots in `docs/look-dev/ui/`.
+- Checklists: typescript-reviewer, react-reviewer, silent-failure-hunter, pr-test-analyzer and security-review, applied by hand as one review.
+- Setup:
+  - The critic branch was fast-forwarded to main ca7ba94.
+  - The trial merge was `git merge --no-commit --no-ff w2/app-ui`. It merged clean; the tree is the branch's own plus main's LOG.
+  - The RTL dev deps were installed from the merged lockfile (`npm install --ignore-scripts`; 22 packages; the lockfile was left byte-identical).
+  - Gates, mutants and probes ran one at a time, each detached with a status file. Then I aborted the merge, and the critic branch is back at ca7ba94.
+  - The app-ui worktree was not touched. No dev server or MCP page was opened: the browser suite and the probe drive their own Chrome.
+- D4-84..D4-86 take the builder's three questions; nothing here contradicts them. D4-85's pixel cap is not in this branch (the client caps the DPR at 2), as D4-85 schedules it for the next round.
+
+**Gates (on the trial merge).**
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean, 18 s |
+| `npm run lint` (ESLint + Prettier) | clean, 71 s |
+| `npm run coverage` (own reportsDirectory) | 118 files, 2122 passed + 11 expected fail, exit 0, 832 s. Statements 98.36 %, branches 87.36 %, functions 99.34 %, lines 99.33 % |
+| `npm run test:mesh` | 2 files, 29 passed |
+| `npm run test:gpu` | 12 files, 68 passed, 60 s |
+| `npm run test:browser` | 12 files, 38 passed, 0 WebGPU errors, exit 0, 385 s, first run, 3.5 GB free. `docs/` stayed clean |
+
+- New modules: shell and hud are at 100 % lines, except `src/hud/anchors.ts` at 52 % (N10) and `src/shell/simCore.ts` at 91 %.
+- My run's W2F-N5 record (indicative):
+  - 178 lost solves;
+  - a held cycle step of 504 ms median, a held frame of 507 ms, the worst frame 947 ms;
+  - a matched step of 2.4 ms and a worker frame of 6.6 ms at the end.
+  - D4-84 owns this.
+
+**D4-80, the lockfile.**
+- The root entry pins @testing-library/dom 10.4.2, react 16.3.3, user-event 14.6.8 and happy-dom 21.0.4 exactly.
+- The diff only adds: 22 packages, all `dev: true`, each resolved from registry.npmjs.org with an integrity hash.
+- There is no `hasInstallScript`, and no existing entry changed. Accepted.
+
+**D4-82 and D4-83, adopted.**
+- *The fallback is visible on every field path.* The paths:
+  - a failed start: `startSolver` reports to the errors and the flow status; choosing the solver then falls back, with the reason;
+  - lost: a GPU error calls `reportGpuError`, so the status is `lost`, and the next `beforeFrame` falls back;
+  - diverged: `sanitizeFlowStatus`;
+  - a throwing step.
+  - The health check runs every frame, also when the solver is not stepped (Exploded).
+  - Device loss stops the loop and shows the fault screen.
+  - Each fallback shows on the badge ("FIELD: MOCK fallback"), on the annunciator ("MOCK FALLBACK: <reason>") and on the legend, and goes to `console.warn` and the errors list.
+- *The labels:*
+  - "FIELD: solver (uncoupled until W3)" (cyan) and the legend's "Flow solver (uncoupled until W3) … no blade or combustor forces";
+  - the Diagnostics note says the same;
+  - `1920-data-solver.jpg` shows it.
+- *D4-83:* `APP_DEFAULT_VIEW` has no tracers in Realistic, a mode switch resets them to the mode's default, and the Data plane starts on Mach.
+- *Provenance:*
+  - Nothing presents the MOCK or the uncoupled field as the coupled solver.
+  - The sources are derived: `sources.cycle` is `cycle.source`, `sources.flow` is `fields.drawn()`.
+  - The dock's legend falls back to "uncoupled" when the link is unknown.
+  - Two defaults are not conservative (N3).
+- *W2F-I1:*
+  - `attempt` keeps the last refusal's cause: a thrown error by its name and message, a residual not below 1e-6, a BPR ≤ 1.
+  - The model logs once per held episode, and a reset clears the cause.
+  - Stryker on `attempt` (src/cycle/matchedSolve.ts:48-65, the two suites): 23 mutants, 22 killed, 0 survived, 1 with no coverage (the non-Error throw's string). 95.65 %.
+- *Security:* no `innerHTML`, `dangerouslySetInnerHTML` or `eval`. The ledger is rendered as text, and the fetches are same-origin.
+
+**Mutants (by hand, on the trial merge;** script `docs/reviews/probes/w2a-mutants.sh.txt`; the file restored after each).
+- Killed, 12:
+  - M2: the switch binds any link's field;
+  - M3: a stale `choose` takes the link;
+  - M4: `beforeFrame` skips the link's health check;
+  - M5: no fallback annunciation;
+  - M6: the Annunciators drop the fallback;
+  - M7: the uncoupled badge reads "FIELD: SOLVER";
+  - M9: the held cause is hidden in a tooltip;
+  - M12: Realistic gets tracers by default;
+  - M15: the thrown error's name is lost from the cause;
+  - M16: a BPR in (0, 1] is accepted;
+  - M17: every lost step is logged;
+  - M18: a CSS mutant, `.strip { grid-column: 1 / 4 }`. The 1366 layout bar fails it: "T-s diagram overlaps Station strip" in all 6 states, so the layout check can fail.
+- Survived, 6:
+  - M1: the switch's `dead` guard removed. It is near-equivalent with the fake, which still reports `lost` after dispose (N5).
+  - M8: the dock's default coupling 'uncoupled' → 'coupled'. Unreachable in the app today (N3).
+  - M10: an equal seq is applied again (`<=` → `<`) (N5).
+  - M11: a refused command advances the echoed seq (N5).
+  - M13: the store ignores `device-lost` (I1).
+  - M14: `Status` never shows a fault (I1).
+- Not run: worker-level mutants (`simWorker.ts`). Only the browser suite reaches the worker, and it checks the success paths: the solver steps when drawn. Nothing checks that it stays idle while the MOCK is drawn, or a fallback inside the app.
+
+**Probes.**
+- `docs/reviews/probes/w2a-app.browser.probe.tsx.txt` (run twice, 35 s each, assertions on what was seen):
+  - the callouts' rendered size, overlaps and leader crossings;
+  - Exploded → Schlieren at +1.5 s and +6 s;
+  - five quick ArrowUp presses on the lever.
+- `w2a-contrast.py.txt`: the text tokens' WCAG contrast.
+
+### Blocking
+None.
+
+### Important
+- **W2A-I1: a worker fault outside the field switch is not annunciated, and the fault surfaces are untested.**
+  - Where:
+    - `src/ui/store.ts:108-115` keeps the connection `running` for a "cycle step failed" `fatal`, and only appends the message to `gpuErrors`;
+    - those, the worker's `errors` (GPU validation errors, "MOCK raster worker failed … rasterizing on the frame") and refused commands show only in the Diagnostics drawer's Errors list (`src/ui/panels.tsx:441`), which is closed by default.
+  - The failure: the cycle model throws (a bug).
+    - `simWorker.ts:257-267` stops the sim and keeps rendering. The clock freezes, and the spools keep turning on the frozen state with MATCHED in white.
+    - Nothing on screen says the simulation stopped. This is the silent case the handoff's "never silent" excludes.
+  - The tests:
+    - no test covers `receive` (`ready`, `device-lost`, `fatal`, `gpu-error`) or `Status`;
+    - M13 (device loss ignored) and M14 (no fault screen) survive.
+  - The fix:
+    - a warning annunciator "SIM STOPPED: <message>" from a store flag;
+    - a caution chip "GPU ERRORS (n)" that opens the drawer;
+    - RTL tests of `receive` and `Status` for each message.
+- **W2A-I2: the fan map draws no operating point at ground idle, the app's first view.**
+  - Where:
+    - `src/ui/charts.tsx:40` builds the fan's speed lines from 60 % up;
+    - `:157-168` draws the point at its raw coordinates.
+  - At idle the fan sits at W√θ/δ ≈ 65 kg/s and PR ≈ 1.02 (the strip's W2 65.3 kg/s, Pt13/Pt2 1.02). The 60 % line starts at about 150 kg/s, so the point and its trail fall outside the SVG.
+  - Every shot in `docs/look-dev/ui/` shows an empty fan map beside a live "SM 3.6 % · η 90.6 %".
+  - `tests/unit/hud/hud.test.ts:54` checks that the HPC point is inside the bounds, not the fan's.
+  - The fix:
+    - extend the fan's lines down to idle N1 where the model's map is defined;
+    - otherwise clamp the marker to the plot edge with an off-map cue ("N1 20 %, below the map");
+    - a test that both points are drawn inside the plot at idle and at take-off.
+  - See question (tt) on the SM itself.
+- **W2A-I3: the callouts collide, and the layout bar cannot see it.**
+  - Where: `layoutCallouts` reserves 132 × 34 px per label (`src/ui/panels.tsx:460`, `:481`). `.callout` (`src/ui/global.css:830-842`) adds 3/7 px of padding and a 1 px border without `box-sizing: border-box`.
+  - So each label renders 147.3 × 36.7 px (probe), and the module's no-collision guarantee is lost.
+  - Measured at 1366 × 768 in Realistic, the default view:
+    - Combustor × Bypass duct overlap by 1467 px²;
+    - Combustor × High-pressure turbine by 36 px²;
+    - High-pressure compressor × the Compressor maps panel by 66 px².
+  - The leader lines also cross: 2 crossings in each of Realistic, Cutaway and Data (visible in `1366-1`, `1366-4`, `1366-5`, `1920-2`).
+  - `tests/browser/app.test.tsx:145-146` leaves the callouts out of the layout bar, and the unit test checks the reserved boxes, not the rendered ones.
+  - The fix:
+    - lay out with the rendered size (`box-sizing: border-box` and a fixed height, or measure the labels);
+    - reject or swap placements whose leaders cross;
+    - add the rendered `.callout` rects (against each other and against the reserved blocks) to `layoutProblems`.
+- **W2A-I4: the Schlieren shots show the exploded engine. The first switch into a flow mode stalls the worker for longer than the suite's settle.**
+  - Where: `tests/browser/app.test.tsx:194-199` sleeps 1.5 s of wall time after the mode echo. The view's re-assembly takes 1.4 s of frame time (`TRANSITION_S`, clamped to 0.1 s per frame).
+  - The probe:
+    - in the 1.5 s after the Schlieren echo, no new snapshot arrived in either run (0.00 s of sim; run 1's last snapshot said 1 fps);
+    - at +6 s the sim had moved 4.82 s at 45 fps, and the engine was re-assembled (probe shot).
+  - So:
+    - (a) `1920-4-schlieren.jpg`, `1366-4-schlieren.jpg` and my run's show Exploded's layout under the Schlieren label, and `1366-2-cutaway.jpg` shows the wedge part open. The "looked at every shot" review missed it, and LOOKDEV.md's table presents them as the modes.
+    - (b) The viewer's first press of Schlieren (and of Cutaway) freezes the app for over a second. It is most likely the first-use node and pipeline compilation in the worker.
+  - The fix:
+    - shoot only after the view has settled: sim time ≥ `TRANSITION_S` past the echo at a steady frame rate, or a transition flag in the diagnostics;
+    - warm the flow modes' pipelines during boot, behind the spinner (question uu);
+    - re-shoot.
+- **W2A-I5: the thrust lever is a controlled input fed by the 20 Hz snapshot, so it rubber-bands.**
+  - Where: `src/ui/instruments.tsx:206-210` sets `value={inp.throttleLever}`, the snapshot's. After each change React restores the last echoed value.
+  - The probe: five quick ArrowUp presses on the focused lever. The DOM value right after is "0", and the worker ends at 0.01, not 0.05.
+  - So keyboard control advances by at most one step per snapshot. A drag shows the thumb snapping back to the last echo between moves (from the same revert; not measured).
+  - The fix:
+    - a local pending value, shown until `snapshot.lastCommandSeq` reaches the seq that was sent (the seq echo exists for this);
+    - an RTL test that two quick changes send 0.01 and then 0.02.
+
+### Nits
+- **W2A-N1:** `void a.fields?.choose(m.source)` (`src/app/simWorker.ts:360`) drops the promise.
+  - If `fallBack`'s `setFlowField` throws, it is an unhandled rejection, which never reaches `errors`.
+  - There is also no pending state: while the solver starts, the switch shows Solver pressed beside "Drawn: MOCK field".
+  - Fix: catch the rejection into `errors`, and show "starting…".
+- **W2A-N2:** a failed snapshot post (`simWorker.ts:316-326`) is only pushed to `errors`, and `errors` travel in the snapshot.
+  - So if every post fails (a DataCloneError), the overlay freezes with no message. `client.ts:37-43` has no `onmessageerror` either.
+  - Fix: post a `fatal` after a few consecutive failures, and handle `messageerror`.
+- **W2A-N3 (provenance hardening):**
+  - `fieldBadge` (`src/hud/annunciators.ts:114`) gives a solver of unknown coupling "FIELD: SOLVER" at the normal level. The conservative label is "uncoupled".
+  - The dock's default (`src/ui/dock.tsx:36`) is not pinned (M8).
+  - `setCycleState(state, source = 'model')` (`src/render/engineView.ts:558`) declares 'model' by default. W1F-N1 says derive it, so make it required.
+  - `stats().cycleLabel` stays `MOCK_LABEL` when the model drives the view (`:811`).
+- **W2A-N4:** `splitRow` (`src/hud/ledger.ts:40`) splits on escaped pipes.
+  - PHYSICS.md's flow-visuals row contains `\|u\|`, so the panel shows that row's source cut at "…edge (D4-83), \". It loses "|u|, composited after the tone map in display space (D4-76)".
+  - Fix: split on unescaped pipes and unescape them, with a test row.
+- **W2A-N5 (tests):**
+  - `simCore.test.ts` does not pin an equal seq (M10) or that a refused command leaves `lastCommandSeq` alone (M11).
+  - The "not resurrected" case (`fieldSwitch.test.ts:164-168`) passes without the `dead` guard (M1). Make the fake report `running` after `dispose()`, so the reason must be the original one.
+  - The app-level fallback (a failed start inside `<App/>`) has no browser case.
+- **W2A-N6:** `holding` is not cleared on the sub-idle path (`src/cycle/model.ts:795`).
+  - So a held episode, then sub-idle (a flameout), a relight and a second held episode logs nothing the second time. The cause is still recorded.
+- **W2A-N7:** the MOCK raster has no timeout.
+  - A raster worker that never answers leaves `inFlight` set (`src/shell/mockRaster.ts:28`), so the MOCK goes stale with no message.
+  - A reply's id is not checked against the request.
+- **W2A-N8 (text):**
+  - "RUN · idleFloor" shows a code identifier (`instruments.tsx:120`).
+  - "Start lit" at steady idle (`:170`) reads oddly.
+  - The callouts' T3, T45, T5, T8 and W13 have no unit, while T4 has one (`panels.tsx:483-500`).
+  - With no solver drawn, Diagnostics shows "Solver 0.00 ms" (`panels.tsx:268`; the dash is right) and the normal "SOLVER RUNNING" at 0 iterations (`annunciators.ts:83`; "idle" is right).
+  - A leftover `...([] as PlaneStationId[])` (`charts.tsx:276`).
+  - The T-s drops station 2's label at 1920 (`1920-1`…`-5`).
+- **W2A-N9 (contrast):** `--faint` (#6b7483) is 4.12:1 on the panel over the darkest backdrop and 3.26:1 over a mid studio grey (`w2a-contrast.py.txt`).
+  - That is below the 4.5:1 that global.css's header promises.
+  - It carries 9-11 px text: the station names, the detents, the lamps, the tags, the axis titles, the speed labels, and the Diagnostics note that explains "uncoupled until W3".
+- **W2A-N10:**
+  - `src/hud/anchors.ts` has 52 % line coverage: `projectPoint` (the callouts' projection and visibility, pure) has no unit test.
+  - `Callouts` measures every `[data-reserve]` element and sets state twice per snapshot (`panels.tsx:469-480`, at 20 Hz). Measure on resize and panel toggles instead.
+  - During the 1.4 s re-assembly from Exploded, the callouts show at the assembled anchors over the exploded parts.
+- **W2A-N11:** the store is a module singleton, and a Viewport remount resets only `post` (`client.ts:129`).
+  - So on a `cycle` change, the old snapshot, `running` and the `field` choice stay until the new worker answers. The browser suite works around this (handoff GOTCHAS).
+  - The boot spinner has no timeout (`App.tsx:50-56`).
+- **W2A-N12:** `docs/look-dev/ui/01-realistic-idle.jpg` is round 1's: tracers in Realistic, before D4-83. It sits among the current shots. Move it to a `before/` folder.
+
+### Visual review (all 14 shots, my run's 14 in `reports/ui/`, and the probe's)
+**Reads well:**
+- A restrained dark glass overlay, and one top bar.
+- The badge colours carry meaning: green for the model, amber for the MOCK, cyan for the uncoupled solver.
+- Tabular numerals line up in the dials, the readouts and the station strip.
+- The redline and amber arcs on the dials; the maps' dashed red surge lines and viridis trail.
+- A legend with its unit, round ticks and provenance line.
+- A drawer that scrolls without covering the columns.
+- The hierarchy reads: the engine display first, then the view, then the charts.
+
+**Does not read as the bar yet:**
+1. The empty fan map (I2).
+2. The colliding labels and crossing leaders (I3). The callouts also cluster on the core and cover the parts they label in Cutaway and Data. In Realistic they point through the opaque nacelle at hidden parts; consider only the fan and the nozzle there, and outward placement with longer leaders.
+3. Schlieren shot as an exploded engine, and the half-open cutaway (I4).
+4. The drawer is translucent over the purple plane, so its muted note sits on purple (`1366-6`, `1920-6`). Give it a more opaque or blurred backing.
+5. The thrust lever is a thin native range input with 9 px detent labels, not a quadrant lever.
+6. The station names are 9 px in `--faint` (N9).
+7. The T-s is a polyline between the stations. 3 → 4 is a chord beside its dashed Pt3 isobar; drawing the burner along the isobar would read as the cycle.
+8. The cut plane's ambient board runs behind the right column (W2V-I7, flowviz's, D4-86).
+
+The chrome is close to the target. The fan map, the callouts and the true Schlieren shot are what stand between it and the "ultra high level UI".
+
+**Verdict w2/app-ui @f6ee8e2: MERGE.**
+- B 0. I 5 (I1-I5), N 12 (N1-N12).
+- The gates are green on the trial merge, and test:browser passed on its first run.
+- D4-80, D4-82 and D4-83 are adopted as decided. No provenance violation.
+- I1-I5 go to the next app-ui round with D4-85's pixel cap. I4's re-shoot must come before the shots are shown.
+
+**Orchestrator questions:**
+- (tt) The fan's surge margin at ground idle reads 3.6 %, in amber: the cycle model's `surgeMarginFraction`, below the fan map's lowest (60 %) speed line, so off the drawn map. Is that number meaningful there? Should the UI show it as a caution, or mark it "below the map" until the part-power map backlog (D4-3) extends the fan map?
+- (uu) Who owns warming the flow modes' pipelines at boot (W2A-I4b): app-ui (calling each mode once behind the boot spinner) or the render/flowviz owner (a `warmUp()` on EngineView)?
