@@ -19,6 +19,8 @@ import {
 } from '../../../src/hud/compressorMap';
 import { tsDiagram } from '../../../src/hud/tsDiagram';
 import { layoutCallouts, leaderCrossings, leaderEnd, overlaps } from '../../../src/hud/callouts';
+import { calloutShownIn, componentAnchors, projectPoint } from '../../../src/hud/anchors';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 import { ledgerKind, parseFidelityLedger, stripMarkdown } from '../../../src/hud/ledger';
 import * as f from '../../../src/hud/format';
 import {
@@ -317,6 +319,63 @@ describe('callout layout', () => {
       for (const p of placed)
         for (const q of placed) if (p !== q) expect(overlaps(p.box, q.box)).toBe(false);
     }
+  });
+
+  it('W2A-I3: in Realistic only the parts the closed nacelle shows are called out; none in Exploded', () => {
+    const ids = componentAnchors(ENGINE_DEFINITION).map((a) => a.id);
+    expect(ids).toEqual(expect.arrayContaining(['fan', 'hpc', 'combustor', 'exhaust']));
+    expect(ids.filter((id) => calloutShownIn('realistic', id))).toEqual(
+      ids.filter((id) => id === 'fan' || id === 'exhaust'),
+    );
+    for (const mode of ['cutaway', 'schlieren', 'data'] as const)
+      expect(
+        ids.every((id) => calloutShownIn(mode, id)),
+        mode,
+      ).toBe(true);
+    expect(ids.some((id) => calloutShownIn('exploded', id))).toBe(false);
+  });
+
+  it('W2A-N10: projects a world point to CSS px, and hides one behind the camera or off screen', () => {
+    // a camera at z = 5 looking down -z with a 90 degree vertical field of view, aspect 2
+    const f = 1 / Math.tan(Math.PI / 4);
+    const near = 0.1;
+    const far = 100;
+    // column-major perspective (three's elements) times a view that moves the world by -5 in z
+    const proj = [
+      f / 2,
+      0,
+      0,
+      0,
+      0,
+      f,
+      0,
+      0,
+      0,
+      0,
+      -(far + near) / (far - near),
+      -1,
+      0,
+      0,
+      (-2 * far * near) / (far - near),
+      0,
+    ];
+    const vp = proj.slice();
+    // view translation (0, 0, -5): the last column picks up proj * t
+    vp[12] = 0;
+    vp[13] = 0;
+    vp[14] = (proj[10] ?? 0) * -5 + (proj[14] ?? 0);
+    vp[15] = (proj[11] ?? 0) * -5;
+    const centre = projectPoint(vp, [0, 0, 0], 800, 400);
+    expect(centre.visible).toBe(true);
+    expect(centre.x).toBeCloseTo(400, 9);
+    expect(centre.y).toBeCloseTo(200, 9);
+    // up is up the screen (CSS y down), right is right
+    const up = projectPoint(vp, [0, 1, 0], 800, 400);
+    expect(up.y).toBeCloseTo(200 - 200 / 5, 9);
+    expect(projectPoint(vp, [2, 0, 0], 800, 400).x).toBeCloseTo(400 + 400 * (2 / 5) * 0.5, 9);
+    // behind the camera, and outside the frustum
+    expect(projectPoint(vp, [0, 0, 10], 800, 400)).toMatchObject({ visible: false });
+    expect(projectPoint(vp, [50, 0, 0], 800, 400).visible).toBe(false);
   });
 
   it('is deterministic and ends leaders on the box edge', () => {
