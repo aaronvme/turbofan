@@ -2,7 +2,14 @@
 // model's stations, callout layout, the ledger parser, formatting and the annunciators.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { mapGeometry, niceTicks, pushTrail, scaleOf } from '../../../src/hud/compressorMap';
+import {
+  labelBox,
+  mapGeometry,
+  niceTicks,
+  placeSpeedLabels,
+  pushTrail,
+  scaleOf,
+} from '../../../src/hud/compressorMap';
 import { tsDiagram } from '../../../src/hud/tsDiagram';
 import { layoutCallouts, leaderEnd, overlaps } from '../../../src/hud/callouts';
 import { ledgerKind, parseFidelityLedger, stripMarkdown } from '../../../src/hud/ledger';
@@ -64,6 +71,40 @@ describe('compressor map geometry', () => {
     expect(t).toHaveLength(1);
     for (let k = 2; k < 6; k++) t = pushTrail(t, { correctedFlowKgPerS: k, pressureRatio: 2 }, 3);
     expect(t.map((p) => p[0])).toEqual([3, 4, 5]);
+  });
+
+  it("labels the speed lines without overlap: the HPC map's 95/100/105 crowd keeps its round line", () => {
+    // three line ends 4 px apart (the HPC map's top at the chart's size): only 100 is labelled
+    const crowd = [95, 100, 105].map((percent, k) => ({ percent, x: 250 + 3 * k, y: 30 - 4 * k }));
+    expect(placeSpeedLabels(crowd).map((l) => l.percent)).toEqual([100]);
+    // apart, every line keeps its label, in the input order
+    const apart = [60, 70, 80].map((percent, k) => ({ percent, x: 60 + 60 * k, y: 150 - 40 * k }));
+    expect(placeSpeedLabels(apart).map((l) => l.percent)).toEqual([60, 70, 80]);
+    const overlapping = (ls: ReturnType<typeof placeSpeedLabels>) =>
+      ls.some((a, i) =>
+        ls.slice(i + 1).some((b) => {
+          const p = labelBox(a);
+          const q = labelBox(b);
+          return p.x < q.x + q.w && q.x < p.x + p.w && p.y < q.y + q.h && q.y < p.y + p.h;
+        }),
+      );
+    // the real maps at a 300 x 170 plot: no two labels overlap, and 100 % is always labelled
+    for (const which of ['fan', 'hpc'] as const) {
+      const g = mapGeometry(frame(which));
+      const x0 = scaleOf(g.bounds.wc, 258, 0.04);
+      const y0 = scaleOf(g.bounds.pr, 136, 0.04);
+      const anchors = g.speedLines.map((l) => ({
+        percent: l.percent,
+        x: 34 + x0(l.points[0]?.[0] ?? 0),
+        y: 146 - y0(l.points[0]?.[1] ?? 0),
+      }));
+      const placed = placeSpeedLabels(anchors);
+      expect(overlapping(placed), which).toBe(false);
+      expect(
+        placed.map((l) => l.percent),
+        which,
+      ).toContain(100);
+    }
   });
 
   it('scales and ticks', () => {
