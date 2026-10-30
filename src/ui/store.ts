@@ -44,7 +44,8 @@ export interface AppStore {
   panels: Record<PanelId, boolean>;
   /** The transport to the worker (set by the client; a no-op before it exists). */
   post: (m: ToWorker) => void;
-  send: (c: SimCommand) => void;
+  /** Sends a command; its seq (the snapshot's lastCommandSeq reaches it once applied). */
+  send: (c: SimCommand) => number;
   orbit: (i: OrbitInput) => void;
   camera: (p: CameraPresetId) => void;
   setField: (f: FieldChoice) => void;
@@ -72,7 +73,9 @@ export const useApp = create<AppStore>((set, get) => ({
   panels: { maps: true, ts: true, stations: true, fidelity: false, diagnostics: false },
   post: () => undefined,
   send: (command) => {
-    get().post({ type: 'command', message: { seq: seq++, command } });
+    const s = seq++;
+    get().post({ type: 'command', message: { seq: s, command } });
+    return s;
   },
   orbit: (input) => {
     get().post({ type: 'orbit', input });
