@@ -7,6 +7,7 @@ import { createCycleModel } from '../../../src/cycle/model';
 import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 import type { FlowStatus } from '../../../src/contracts/sim';
 import { DEFAULT_UI_STATE, renderStateOf } from '../../../src/contracts/ui';
+import { APP_DEFAULT_VIEW } from '../../../src/shell/viewState';
 
 const NO_FLOW: FlowStatus = {
   status: 'unavailable',
@@ -19,12 +20,45 @@ const NO_FLOW: FlowStatus = {
 const mockCore = () => createSimCore({ cycle: createMockCycle(ENGINE_DEFINITION) });
 
 describe('createSimCore', () => {
-  it('starts at ground idle with the fuel lever at run and the view at its defaults', () => {
+  it("starts at ground idle with the fuel lever at run and the view at the app's defaults", () => {
     const core = mockCore();
     expect(core.inputs.fuelLever).toBe('run');
     expect(core.inputs.throttleLever).toBe(0);
-    expect(core.view).toEqual(renderStateOf(DEFAULT_UI_STATE));
+    // the contract's defaults, with D4-83's Realistic (no tracers) and the Data mode's Mach
+    expect(core.view).toEqual(APP_DEFAULT_VIEW);
+    expect({ ...core.view, overlays: { ...core.view.overlays, particles: true } }).toEqual({
+      ...renderStateOf(DEFAULT_UI_STATE),
+      cutPlaneField: 'mach',
+    });
     expect(core.state().n2Percent).toBeGreaterThan(55);
+  });
+
+  it('D4-83: a mode switch puts the tracers at that mode default, and the viewer can then toggle them', () => {
+    const core = mockCore();
+    const particles = (seq: number, on: boolean) =>
+      core.command({
+        seq,
+        command: { type: 'setRenderState', render: { overlays: { particles: on } } },
+      });
+    core.command({ seq: 0, command: { type: 'setViewMode', mode: 'data' } });
+    expect(core.view.overlays.particles).toBe(true);
+    particles(1, false);
+    expect(core.view.overlays.particles).toBe(false);
+    core.command({ seq: 2, command: { type: 'setViewMode', mode: 'realistic' } });
+    expect(core.view.overlays.particles).toBe(false);
+    particles(3, true);
+    expect(core.view.overlays.particles).toBe(true);
+    // a render-state patch that changes the mode does the same unless it sets the tracers itself
+    core.command({ seq: 4, command: { type: 'setRenderState', render: { viewMode: 'cutaway' } } });
+    expect(core.view.overlays.particles).toBe(true);
+    core.command({
+      seq: 5,
+      command: {
+        type: 'setRenderState',
+        render: { viewMode: 'realistic', overlays: { particles: true } },
+      },
+    });
+    expect(core.view).toMatchObject({ viewMode: 'realistic', overlays: { particles: true } });
   });
 
   it('applies valid commands in seq order and echoes the last applied seq', () => {
@@ -88,7 +122,7 @@ describe('createSimCore', () => {
       },
     });
     expect(core.view.overlays.tsDiagram).toBe(true);
-    expect(core.view.overlays.particles).toBe(DEFAULT_UI_STATE.overlays.particles);
+    expect(core.view.overlays.particles).toBe(APP_DEFAULT_VIEW.overlays.particles);
     expect(core.view.quality).toBe('low');
   });
 

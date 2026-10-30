@@ -9,6 +9,7 @@ import { ledgerKind, parseFidelityLedger, stripMarkdown } from '../../../src/hud
 import * as f from '../../../src/hud/format';
 import {
   flagAnnunciations,
+  fieldFallbackAnnunciation,
   flowAnnunciation,
   gasPathAnnunciation,
   provenanceBadges,
@@ -278,5 +279,45 @@ describe('annunciators', () => {
       'normal',
     ]);
     expect(provenanceBadges({ cycle: 'model', flow: 'none' })[1]?.text).toBe('FIELD: NONE');
+  });
+
+  it('D4-82: the field badge says the solver is uncoupled until W3, and a MOCK fallback says why', () => {
+    const uncoupled = { asked: 'solver', coupling: 'uncoupled', fallback: null } as const;
+    const solver = provenanceBadges({ cycle: 'model', flow: 'solver' }, uncoupled)[1];
+    expect(solver?.text).toBe('FIELD: solver (uncoupled until W3)');
+    expect(solver?.level).toBe('advisory');
+    expect(solver?.detail).toMatch(/no blade or combustor forces/);
+    const coupled = provenanceBadges(
+      { cycle: 'model', flow: 'solver' },
+      { asked: 'solver', coupling: 'coupled', fallback: null },
+    )[1];
+    expect(coupled?.text).toBe('FIELD: SOLVER (coupled)');
+    expect(coupled?.level).toBe('normal');
+    const fellBack = {
+      asked: 'solver',
+      coupling: 'mock',
+      fallback: 'solver lost: GPU device lost',
+    } as const;
+    const fb = provenanceBadges({ cycle: 'model', flow: 'mock' }, fellBack)[1];
+    expect(fb?.text).toBe('FIELD: MOCK fallback');
+    expect(fb?.level).toBe('caution');
+    expect(fb?.detail).toMatch(/^MOCK fallback .*solver lost: GPU device lost/);
+    // the asked-for MOCK is the plain MOCK badge, and no link state reads as before
+    expect(
+      provenanceBadges(
+        { cycle: 'model', flow: 'mock' },
+        { asked: 'mock', coupling: 'mock', fallback: null },
+      )[1]?.text,
+    ).toBe('FIELD: MOCK');
+    expect(provenanceBadges({ cycle: 'model', flow: 'solver' }, null)[1]?.text).toBe(
+      'FIELD: SOLVER',
+    );
+    // the fallback is also annunciated (visible, never silent), with the reason in the text
+    expect(fieldFallbackAnnunciation(uncoupled)).toBeNull();
+    expect(fieldFallbackAnnunciation(null)).toBeNull();
+    const a = fieldFallbackAnnunciation(fellBack);
+    expect(a?.level).toBe('caution');
+    expect(a?.text).toBe('MOCK FALLBACK: solver lost: GPU device lost');
+    expect(a?.detail).toMatch(/^MOCK fallback/);
   });
 });
