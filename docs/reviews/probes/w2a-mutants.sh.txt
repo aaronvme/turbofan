@@ -1,0 +1,47 @@
+#!/bin/bash
+# Critic pass 13 (w2/app-ui @f6ee8e2): hand mutants on the trial merge. Each mutant is one sed on
+# one file; the file's targeted suites run, and the file is restored from a copy. KILLED means a
+# suite failed. Run from the repo root of the trial merge: bash w2a-mutants.sh.txt <out.txt>
+set -u
+out=${1:-reports/critic13/mutants.txt}
+: > "$out"
+mutant() { # id file sed-expr tests...
+  local id=$1 file=$2 expr=$3
+  shift 3
+  cp "$file" "$file.orig"
+  sed -i "$expr" "$file"
+  if cmp -s "$file" "$file.orig"; then
+    echo "$id NOT APPLIED ($file)" | tee -a "$out"
+  elif npx vitest run "$@" > "reports/critic13/mutant-$id.log" 2>&1; then
+    echo "$id SURVIVED ($file)" | tee -a "$out"
+  else
+    echo "$id KILLED ($file): $(grep -cE '^ +(×|FAIL)' "reports/critic13/mutant-$id.log") failing lines" | tee -a "$out"
+  fi
+  mv "$file.orig" "$file"
+}
+SW=tests/unit/shell/fieldSwitch.test.ts
+UI="tests/unit/hud/hud.test.ts tests/unit/ui/overlay.test.tsx"
+CORE="tests/unit/shell/simCore.test.ts tests/unit/shell/viewState.test.ts tests/unit/ui/overlay.test.tsx"
+
+# the field switch (D4-82 in the shell)
+mutant M1 src/shell/fieldSwitch.ts '/if (dead !== null) throw new Error(dead);/d' $SW
+mutant M2 src/shell/fieldSwitch.ts 's/if (t === latest || t === live)/if (true)/' $SW
+mutant M3 src/shell/fieldSwitch.ts '/if (t !== latest) return;/d' $SW
+mutant M4 src/shell/fieldSwitch.ts 's/^      link.beforeFrame(budget);/      void budget;/' $SW
+# the fallback and the provenance on the overlay
+mutant M5 src/hud/annunciators.ts 's/if (link === null || link.fallback === null) return null;/return null;/' $UI
+mutant M6 src/ui/panels.tsx 's/\.\.\.(fallback === null ? \[\] : \[fallback\]),//' $UI
+mutant M7 src/hud/annunciators.ts "s/text: 'FIELD: solver (uncoupled until W3)'/text: 'FIELD: SOLVER'/" $UI
+mutant M8 src/ui/dock.tsx "s/'solver' ? 'uncoupled' : 'mock'/'solver' ? 'coupled' : 'mock'/" $UI
+mutant M9 src/ui/panels.tsx "s/a.id === 'gasPath' && a.level === 'warning'/false/" $UI
+# the sim core's command order
+mutant M10 src/shell/simCore.ts 's/if (m.seq <= lastSeq)/if (m.seq < lastSeq)/' $CORE
+mutant M11 src/shell/simCore.ts 's/if (refused.length === 0) lastSeq = m.seq;/lastSeq = m.seq;/' $CORE
+mutant M12 src/shell/viewState.ts 's/ && FLOW_VIZ_MODES\[f\].tracersByDefault;/;/' $CORE
+# the store and the fault screen (the worker's device-lost and fatal messages)
+mutant M13 src/ui/store.ts "s/set({ connection: { state: 'lost', message: m.message } });/return;/" $UI
+mutant M14 src/ui/App.tsx "s/if (c.state === 'running') return null;/return null;/" $UI
+# W2F-I1's cause (src/cycle/matchedSolve.ts attempt)
+mutant M15 src/cycle/matchedSolve.ts 's/why.cause = e instanceof Error ? `${e.name}: ${e.message}` : `threw ${String(e)}`;/why.cause = "threw";/' tests/unit/cycle/lostSolveCause.test.ts tests/unit/cycle/matchedSolve.test.ts
+mutant M16 src/cycle/matchedSolve.ts 's/if (!(bpr > 1)) {/if (!(bpr > 0)) {/' tests/unit/cycle/lostSolveCause.test.ts tests/unit/cycle/matchedSolve.test.ts
+mutant M17 src/cycle/model.ts 's/      this.holding = true;/      this.holding = false;/' tests/unit/cycle/lostSolveCause.test.ts
