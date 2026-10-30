@@ -1,4 +1,5 @@
-// D4-63 (SOLVER.md 10): the rest state on the engine mesh, the engine default from a 0.1 % wave.
+// D4-63 (SOLVER.md 10): the rest state on the engine mesh, the engine default from a 0.1 % wave,
+// with D4-81's global M_cut 0.02 (cases/d463.ts).
 import { describe, expect, it } from 'vitest';
 import { runCase, type CaseResult } from './spawn';
 
@@ -27,7 +28,7 @@ describe('D4-63: the rest state on the 130k engine mesh', () => {
     D463_TIMEOUT_MS,
   );
 
-  // KNOWN-FAIL (D4-63, round 9): the pulse does not decay. The upstream block focuses it on the axis
+  // D4-63's history (round 9): the pulse did not decay. The upstream block focuses it on the axis
   // (5.4x at 200, 20x at 270, then it falls) and the plume-core block's axis cells keep it: max |p'|
   // is 4-12x its first after iteration 500 and the residual rises from 12 at 100 to 1.3e2 at 1100.
   // It is not the inflow BC or the beta jump beside it (SOLVER.md 10 has the checks). Round 10
@@ -38,8 +39,11 @@ describe('D4-63: the rest state on the 130k engine mesh', () => {
   // D4-77 (round 11) the residual is volume-weighted too, and the pin still fails on it: 2.61x its
   // value at 100 over 1000-2000 (the far-field and plume blocks, not the axis). D4-79 (round 12)
   // judges decay in the limit instead: the weighted residual at 20000 against its values at 10000
-  // and at 100, with (a) also at 20000.
-  it.fails(
+  // and at 100, with (a) also at 20000. At M_cut 0.003 the case grows (round 12: L2 4.4x at 10000,
+  // the residual 2.5x its value at 100). D4-81 (round 13): the plain scheme decays, and with the
+  // global M_cut 0.02 the rule passes (L2 0.78 over 1000-2000 and 0.49 at 20000; the residual at
+  // 20000 0.52x its value at 10000 and 0.22x its value at 100), so the pin is lifted.
+  it(
     "rule (D4-72, D4-79): L2(p') <= 2x its first over 1000-2000 and at 20000; the volume-weighted residual at 20000 <= its values at 10000 and at 100",
     async () => {
       const gated = [await row(1), await row(2), await row(3), await row(4)];

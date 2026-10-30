@@ -1,4 +1,4 @@
-w2/reference-9 round 13: WIP (D4-81 in order). Run 1, the plain scheme, passes D4-79's (a) and (b): the preconditioning is the source of the growth. Run 2, the global M_cut 0.02, is running. (From c2d7c9f; HEAD = the commit of this handoff.)
+w2/reference-9 round 13: WIP (D4-81 in order). Run 1, the plain scheme, passes D4-79's (a) and (b): the preconditioning is the source of the growth. Run 2, the global M_cut 0.02, passes (a) and (b), so 0.05 is not run. The cut is on every preconditioned CPU ladder run, and the full ladder (rule 2) is running at the commit of this handoff. (From c2d7c9f; HEAD = the commit of this handoff.)
 
 DONE (round 13)
 - Step 0: round 12's scratch patch is reverted (`git checkout` of precondition.ts and solver.ts; the copy stays in `reports/scratch/r12/trial-step-limit.patch`).
@@ -10,11 +10,15 @@ DONE (round 13)
 
 D4-81 RESULTS (the contract case, 20000 iterations)
 - Plain scheme (CFL 1.5): (a) 0.366 over 1000-2000 and 0.0433 at 20000; (b) 0.641 against 10000 and 0.159 against 100. Weighted residual 3.89e-2 / 9.63e-3 / 6.17e-3 at 100 / 10000 / 20000. PASS. L2(p') falls from 0.365 at 1000 to 0.07 at 10000.
-- M_cut 0.02: running (`reports/scratch/r13/logs/mcut02.*`).
+- M_cut 0.02 (`d463mcut02`): (a) 0.778 over 1000-2000 and 0.488 at 20000; (b) 0.524 against 10000 and 0.223 against 100. Weighted residual 1.806 / 0.771 / 0.404 at 100 / 10000 / 20000. PASS.
+  - The late decay is slow. L2 is 0.48-0.51 over 13000-20000 and the residual 0.33-0.42 over 15000-20000 (SOLVER.md 10 says so).
+- The candidate is on trial in the CPU ladder. `tests/ladder/oracle.ts` has `GLOBAL_MACH_CUT = 0.02` and `ENGINE_PRECONDITIONING_CUT`. L7's preconditioned spheres, L8, f32's C-pre and S, and the d463 cases take it. The d463 pin is lifted (`it`). The GPU tests keep `ENGINE_PRECONDITIONING` (0.003) until the kernel round.
 
 NEXT
-1. Finish run 2 (M_cut 0.02). If it passes (a) and (b): run the full ladder with the cut on every preconditioned run, plus the linear part. If it fails: run 3 (0.05).
-2. The gates at the final commit.
+1. The full ladder at this commit (`reports/scratch/r13/logs/ladder.*`) is rule 2. If any row that passed at 0.003 fails, revert the trial commit (the ladder files and the pin) and hand back the data.
+2. The linear part at the cut: `runCase.ts d463lin` (it takes the contract's default, so the cut now), about 75 min.
+3. The gates (coverage, test:mesh).
+4. KERNEL MIRROR (w2/solver, not this branch): D4-40's adapter default becomes minMach = M_cut = 0.02 (`flowSolver.ts`), as a parameter. The kernel already takes minMach2 and machCut. Then the GPU tests' `ENGINE_PRECONDITIONING` takes the cut, and their tolerances (D4-62 / D4-71) are re-checked.
 
 GOTCHAS
 - Long runs: `reports/scratch/r13/runcase.ps1 -Case <name> -Tag <tag>` started via `Start-Process powershell.exe ... -WindowStyle Hidden`. It writes `logs/<tag>.{out,err,status}`. `runnpm.ps1 -Script <npm script> -Tag <tag>` does the same for npm scripts.

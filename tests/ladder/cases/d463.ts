@@ -1,7 +1,8 @@
 // D4-63 (SOLVER.md 10, "The rest state on the engine mesh"): the engine's default scheme on the
 // shipped 130k asset (f32 metrics), started at rest from tests/gpu/engine-stability.test.ts's 0.1 %
 // pressure wave. GpuFlowSolver's defaults: thermally perfect gas, ISA SLS at rest, preconditioned
-// tracking at minMach = M_cut = 0.003, the preconditioned CFL 0.8. Checkpoints every 100.
+// tracking at minMach = M_cut = 0.003, the preconditioned CFL 0.8, with D4-81's global M_cut 0.02
+// (tests/ladder/oracle.ts GLOBAL_MACH_CUT; at 0.003 alone the case grows). Checkpoints every 100.
 // D4-72: the rule's pressure bound is on the volume-weighted L2 of p' (the acoustic energy's norm: a
 // converging cylindrical wave grows pointwise towards the axis, about 1 / sqrt(r), while its energy
 // decays); max |p'| is reported. D4-77: the rule's residual is the density residual in the same
@@ -17,6 +18,7 @@ import { ReferenceSolver, type SolverOptions } from '../../../src/flow/reference
 import { solverMeshFromFile } from '../../../src/flow/reference/solverMesh';
 import { NP } from '../../../src/flow/reference/state';
 import { engineAsset } from '../engine';
+import { ENGINE_PRECONDITIONING_CUT } from '../oracle';
 
 /** The wave's relative amplitude (the soak's 0.1 %). */
 export const D463_AMPLITUDE = 1e-3;
@@ -44,15 +46,13 @@ export interface D463Case {
    */
   readonly start: 'isothermal' | 'isentropic';
   /**
-   * The tracking scheme (D4-81's trials): the engine's preconditioning (minMach = M_cut = 0.003,
-   * D4-40) when absent, another preconditioning, or null for the plain scheme (no preconditioning,
-   * the plain default CFL 1.5, round 9's plain run).
+   * The tracking scheme (D4-81's trials): when absent, the engine's preconditioning (D4-40's
+   * minMach = M_cut = 0.003) with D4-81's global M_cut 0.02, so minMach = M_cut = 0.02 in force;
+   * another preconditioning; or null for the plain scheme (no preconditioning, the plain default
+   * CFL 1.5, round 9's plain run).
    */
   readonly lowMachPreconditioning?: SolverOptions['lowMachPreconditioning'] | null;
 }
-
-/** The engine's low-Mach preconditioning (D4-40): minMach = M_cut = 0.003. */
-const ENGINE_PRECONDITIONING = { minMach: 0.003 } as const;
 
 export const D463_CONTRACT: D463Case = {
   id: 'D4-63-rest',
@@ -67,7 +67,7 @@ export async function runD463(k: D463Case) {
   const { file } = await engineAsset();
   const mesh = solverMeshFromFile(file);
   const pre =
-    k.lowMachPreconditioning === undefined ? ENGINE_PRECONDITIONING : k.lowMachPreconditioning;
+    k.lowMachPreconditioning === undefined ? ENGINE_PRECONDITIONING_CUT : k.lowMachPreconditioning;
   const s = new ReferenceSolver(mesh, {
     gas: THERMALLY_PERFECT,
     freeStream: { pressure: ISA_SLS.pressurePa, temperature: ISA_SLS.temperatureK, velocity: 0 },

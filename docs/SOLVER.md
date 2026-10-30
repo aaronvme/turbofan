@@ -457,21 +457,24 @@ Otherwise the engine setting stays 0.003 and J stays pinned. The rows that fail 
 
 *D4-81's results (round 13; each run alone and detached, about 72 min; logs in `reports/scratch/r13/logs`).* The contract case (1e-3, isothermal), 20000 iterations:
 
-| row | the contract, M_cut 0.003 (round 12, killed at 16000) | plain scheme (CFL 1.5) | global M_cut 0.02 |
+| row | M_cut 0.003, the contract until D4-81 (round 12, killed at 16000) | plain scheme (CFL 1.5) | global M_cut 0.02 (`d463mcut02`) |
 |---|---|---|---|
-| (a) L2(p′) / first, max over 1000-2000 (≤ 2) | 1.717: pass | 0.366: pass | running |
-| (a) L2(p′) / first at 20000 (≤ 2) | not reached (5.21 at 16000) | **0.0433: pass** | |
-| L2(p′) / first at 10000 (reported) | 4.36 | 0.0735 | |
-| (b) weighted residual at 20000 / at 10000 (≤ 1) | not reached | **0.641: pass** | |
-| (b) weighted residual at 20000 / at 100 (≤ 1) | not reached (2.48 at 16000) | **0.159: pass** | |
-| weighted residual at 100 / 10000 / 20000 | 3.548 / 8.73 / – | 3.89e-2 / 9.63e-3 / 6.17e-3 | |
-| reported: L2(p′) / first, max over 1000-20000 | ≥ 5.39 (15000) | 0.366 (1000) | |
-| reported: D4-77's window (weighted residual, max over 1000-2000 / at 100) | 2.614 | 1.147 | |
-| reported: max \|p′\| / first, max over 1000-2000; at 20000 | 8.39; – | 5.95; 1.51 | |
-| reported: cell-mean residual at 20000 / at 100 | – | 1.80 | |
-| signature: finite, peak max \|p′\| / first (< 100) | finite to 16000 | 6.59: pass | |
+| (a) L2(p′) / first, max over 1000-2000 (≤ 2) | 1.717: pass | 0.366: pass | 0.778: pass |
+| (a) L2(p′) / first at 20000 (≤ 2) | not reached (5.21 at 16000) | **0.0433: pass** | **0.488: pass** |
+| L2(p′) / first at 10000 (reported) | 4.36 | 0.0735 | 0.524 |
+| (b) weighted residual at 20000 / at 10000 (≤ 1) | not reached | **0.641: pass** | **0.524: pass** |
+| (b) weighted residual at 20000 / at 100 (≤ 1) | not reached (2.48 at 16000) | **0.159: pass** | **0.223: pass** |
+| weighted residual at 100 / 10000 / 20000 | 3.548 / 8.73 / – | 3.89e-2 / 9.63e-3 / 6.17e-3 | 1.806 / 0.771 / 0.404 |
+| reported: L2(p′) / first, max over 1000-20000 | ≥ 5.39 (15000) | 0.366 (1000) | 0.778 (1000) |
+| reported: D4-77's window (weighted residual, max over 1000-2000 / at 100) | 2.614 | 1.147 | 1.435 |
+| reported: max \|p′\| / first, max over 1000-2000; at 20000 | 8.39; – | 5.95; 1.51 | 4.21; 0.92 |
+| reported: cell-mean residual at 20000 / at 100 | – | 1.80 | 2.50 |
+| signature: finite, peak max \|p′\| / first (< 100) | finite to 16000 | 6.59: pass | 4.21: pass |
 
 - **The plain scheme decays (run 1): the preconditioning is the source of the growth.** From the same start, its L2(p′) falls every 1000 iterations from 0.365 at 1000 to 0.07 at 10000, then holds at 0.03-0.06 to 20000. Its weighted residual peaks at 4.47e-2 at 2000, falls to 9.6e-3 by 10000, and sits at 5-8e-3 from 13000 to 20000. Over the same 10000 iterations the contract's L2(p′) rose to 4.4× and its residual to 2.5× its value at 100. Max |p′| (the pointwise measure D4-72 replaced) reaches 3-6× its first before 5000, and it is 1.5× at 20000. The cell-mean residual ends at 1.8× its value at 100: that is round 10's small-cell weighting, which D4-77 removes.
+- **The global M_cut 0.02 passes D4-79's (a) and (b) (run 2), so 0.05 is not run.** `cases/d463mcut02.ts` reproduces round 11's 0.02 trial through 2000 (L2 0.778 at 1000; the weighted residual 1.806 at 100). After 2000 its weighted residual falls: 2.59 at 2000, 0.59-0.63 over 7000-9000, 0.77 at 10000 (a local high; 0.60 at 11000), 0.33-0.42 over 15000-20000, and 0.404 at 20000. That is 0.52× its value at 10000 and 0.22× its value at 100. L2(p′) never rises above its 1000 value: 0.52 at 10000 and 0.49 at 20000. Max |p′| is 0.92× its first at 20000.
+  - *What it does not show:* over the last 7000 iterations the decay is slow. L2(p′) holds at 0.48-0.51 from 13000 to 20000, and the weighted residual at 0.33-0.42 from 15000, ending 0.35 → 0.40 over the last 1000. The plain scheme falls to 0.04 over the same run. D4-79's rule compares only the values at 100, 10000 and 20000, and it passes on them, but those values do not show decay over 15000-20000.
+  - *Under the pre-stated rule it is the candidate,* pending rule 2: every row that passes now must still pass in the full ladder with the cut on every preconditioned CPU run (`tests/ladder/oracle.ts` `GLOBAL_MACH_CUT`), and the linear part must pass at the cut. The d463 pin (`d463.test.ts`) is lifted. In force, its configuration is minMach = M_cut = 0.02, D4-59's.
 
 
 **Low-Mach preconditioning (tracking mode only; decision D4-10).** Without it the pseudo-time step is set by the acoustic speed |u| + c while the flow converges at the convective speed |u|, so the iterations to converge grow like 1/M (ladder L7: the M 0.01 sphere did not converge in 20000 iterations, the M 0.3 sphere took 3096). The option `lowMachPreconditioning: { minMach }` multiplies the pseudo-time derivative of the pressure by 1/β² (Turkel's preconditioner with α = 0 in the variables (p, u, v, rw, s, Z), equivalent for this gas to Weiss & Smith 1995). Per cell, from the stage-1 primitives and frozen for the three stages like τ:
