@@ -13,7 +13,7 @@
 // (amplitude 1e-3, isothermal) and the linear part (cases/d463lin.ts: 1e-6, isentropic, round 10's).
 import { ISA_SLS } from '../../../src/contracts/ambient';
 import { THERMALLY_PERFECT } from '../../../src/flow/reference/gas';
-import { ReferenceSolver } from '../../../src/flow/reference/solver';
+import { ReferenceSolver, type SolverOptions } from '../../../src/flow/reference/solver';
 import { solverMeshFromFile } from '../../../src/flow/reference/solverMesh';
 import { NP } from '../../../src/flow/reference/state';
 import { engineAsset } from '../engine';
@@ -43,7 +43,16 @@ export interface D463Case {
    * start). 'isentropic': rho' = p' / c^2 (round 10's linear part; no entropy in the start).
    */
   readonly start: 'isothermal' | 'isentropic';
+  /**
+   * The tracking scheme (D4-81's trials): the engine's preconditioning (minMach = M_cut = 0.003,
+   * D4-40) when absent, another preconditioning, or null for the plain scheme (no preconditioning,
+   * the plain default CFL 1.5, round 9's plain run).
+   */
+  readonly lowMachPreconditioning?: SolverOptions['lowMachPreconditioning'] | null;
 }
+
+/** The engine's low-Mach preconditioning (D4-40): minMach = M_cut = 0.003. */
+const ENGINE_PRECONDITIONING = { minMach: 0.003 } as const;
 
 export const D463_CONTRACT: D463Case = {
   id: 'D4-63-rest',
@@ -57,10 +66,12 @@ const at = (series: readonly number[], it: number): number => series[it / EVERY 
 export async function runD463(k: D463Case) {
   const { file } = await engineAsset();
   const mesh = solverMeshFromFile(file);
+  const pre =
+    k.lowMachPreconditioning === undefined ? ENGINE_PRECONDITIONING : k.lowMachPreconditioning;
   const s = new ReferenceSolver(mesh, {
     gas: THERMALLY_PERFECT,
     freeStream: { pressure: ISA_SLS.pressurePa, temperature: ISA_SLS.temperatureK, velocity: 0 },
-    lowMachPreconditioning: { minMach: 0.003 },
+    ...(pre === null ? {} : { lowMachPreconditioning: pre }),
   });
   let x0 = Infinity;
   let x1 = -Infinity;
