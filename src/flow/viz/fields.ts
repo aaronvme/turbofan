@@ -103,11 +103,13 @@ export const FIELD_QUANTITIES: Readonly<Record<FieldQuantityId, FieldQuantitySpe
     colormap: 'viridis',
     contourStep: 0.1,
   },
+  // to 700 m/s: the take-off MOCK's expanded core jet reaches ~645 m/s, which sat flat at the
+  // top of a 600 m/s map (critic pass 12's visual note 4)
   speed: {
     label: 'Velocity magnitude',
     unit: 'm/s',
     min: 0,
-    max: 600,
+    max: 700,
     colormap: 'viridis',
     contourStep: 50,
   },

@@ -5,7 +5,7 @@
 // Query: ?flow=realistic|cutaway|schlieren|data&field=mock|solver&dilation=200&quantity=mach.
 // &domain=full (D4-76's option: the cut plane uncropped), &tracers=1|0 (D4-83: Realistic has
 // none by default). Keys: f the next flow mode, [ and ] slower / faster, m the next quantity,
-// n the near-field crop on / off, t tracers on / off.
+// n the near-field crop on / off, k tracers on / off.
 // D4-82, W2V-I6: the badge says how far the field is the engine's answer (MOCK, the solver
 // "uncoupled until W3", coupled), and a solver that cannot start, is lost or diverges is replaced
 // by the MOCK at once, with the reason on the badge (src/flow/viz/fieldLink.ts).
@@ -81,6 +81,10 @@ const CSS = `
 #legend .ticks span { position: absolute; top: 5px; transform: translateX(-50%); white-space: nowrap; }
 #legend .ticks span::before { content: ''; position: absolute; left: 50%; top: -5px; width: 1px;
   height: 4px; background: rgba(226,230,235,.45); }
+#legend .ticks span.lo { transform: none; }
+#legend .ticks span.lo::before { left: 0; }
+#legend .ticks span.hi { transform: translateX(-100%); }
+#legend .ticks span.hi::before { left: auto; right: 0; }
 #legend .badge { margin-top: 2px; font-size: 10.5px; color: rgba(226,230,235,.55);
   text-wrap: pretty; }
 #legend .badge.fallback { color: #f0c46e; }
@@ -184,7 +188,7 @@ export async function createFlowPanel(
     <div class="row" id="flow-q-row"><label for="flow-q">Cut plane</label>
       <select id="flow-q">${FIELD_QUANTITY_IDS.map((q) => `<option value="${q}">${FIELD_QUANTITIES[q].label}</option>`).join('')}</select></div>
     <div class="row" id="flow-t-row"><label for="flow-t">Tracers</label>
-      <button id="flow-t" class="sw" role="switch" aria-checked="false" aria-label="Tracers" title="Tracer streaks (t)"></button>
+      <button id="flow-t" class="sw" role="switch" aria-checked="false" aria-label="Tracers" title="Tracer streaks (k)"></button>
       <span class="hint" id="flow-t-h"></span></div>
     <div class="src" id="flow-src"><span class="dot"></span><span id="flow-src-t"></span></div>
     <div class="note" id="flow-note"></div>`;
@@ -215,7 +219,7 @@ export async function createFlowPanel(
       .join(',');
     legend.innerHTML = `<div class="t">${l.title}<span class="u">${l.unit}</span></div>
       <div class="bar" style="background:linear-gradient(90deg,${grad})"></div>
-      <div class="ticks">${l.ticks.map((t) => `<span style="left:${(100 * t.at).toFixed(2)}%">${t.label}</span>`).join('')}</div>
+      <div class="ticks">${l.ticks.map((t) => `<span class="${t.at < 0.03 ? 'lo' : t.at > 0.97 ? 'hi' : ''}" style="left:${(100 * t.at).toFixed(2)}%">${t.label}</span>`).join('')}</div>
       <div class="badge${b.st.fallback === null ? '' : ' fallback'}">${b.text}</div>`;
   };
   const showMs = () => {
@@ -278,7 +282,7 @@ export async function createFlowPanel(
         fullDomain = !fullDomain;
         view.setFlowFullDomain(fullDomain);
       }
-      if (key === 't' && mode !== null && FLOW_VIZ_MODES[mode].particleOpacity > 0)
+      if (key === 'k' && mode !== null && FLOW_VIZ_MODES[mode].particleOpacity > 0)
         api.setTracers(!tracersShown(FLOW_VIZ_MODES[mode], tracers));
       if (key === '[') api.setDilation(Math.max(1e-3, dilation / 2));
       if (key === ']') api.setDilation(Math.min(0.1, dilation * 2));
