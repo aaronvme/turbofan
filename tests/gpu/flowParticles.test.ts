@@ -147,9 +147,9 @@ describe('flow visual kernels on Dawn (MOCK takeoff field)', () => {
     return out;
   }
 
-  const params = (frame: number, n: number): ParticleParams => ({
+  const params = (frame: number, n: number, dtSimS = 4e-4): ParticleParams => ({
     extent: E,
-    dtSimS: 4e-4,
+    dtSimS,
     dtWallS: 1 / 60,
     lifeMinS: 2.5,
     lifeSpanS: 1.5,
@@ -158,10 +158,10 @@ describe('flow visual kernels on Dawn (MOCK takeoff field)', () => {
     zones,
   });
 
-  it('one GPU step is the TS step: advection, respawns and fades (f32 against f64)', async () => {
-    const n = 4096;
+  /** One GPU step of n particles against the TS step (the f64 oracle), at dtSimS. */
+  async function compareStep(n: number, dtSimS: number) {
     const start = startRecords(n);
-    const got = await runParticles(start, [params(17, n)]);
+    const got = await runParticles(start, [params(17, n, dtSimS)]);
     let advected = 0;
     let respawned = 0;
     let branch = 0;
@@ -169,10 +169,11 @@ describe('flow visual kernels on Dawn (MOCK takeoff field)', () => {
     let maxVel = 0;
     let maxAlpha = 0;
     let maxLife = 0;
+    let moved = 0;
     for (let i = 0; i < n; i++) {
       const before = readParticle(start, i);
       const g = readParticle(got, i);
-      const want = stepParticle(before, i, params(17, n), sampler);
+      const want = stepParticle(before, i, params(17, n, dtSimS), sampler);
       // the same branch: a respawn restarts the age at 0
       const wantRespawn = want.age === 0;
       if (wantRespawn !== (g.age === 0)) {
@@ -181,7 +182,10 @@ describe('flow visual kernels on Dawn (MOCK takeoff field)', () => {
       }
       if (before.age >= 0) {
         if (wantRespawn) respawned++;
-        else advected++;
+        else {
+          advected++;
+          moved = Math.max(moved, Math.abs(want.x - before.x));
+        }
       }
       maxPos = Math.max(maxPos, Math.abs(g.x - want.x), Math.abs(g.r - want.r));
       const dTh = Math.abs(
@@ -192,20 +196,45 @@ describe('flow visual kernels on Dawn (MOCK takeoff field)', () => {
       maxAlpha = Math.max(maxAlpha, Math.abs(g.alpha - want.alpha));
       maxLife = Math.max(maxLife, Math.abs(g.life - want.life));
     }
+    return { advected, respawned, branch, maxPos, maxVel, maxAlpha, maxLife, moved };
+  }
+
+  it('one GPU step is the TS step: advection, respawns and fades (f32 against f64)', async () => {
+    const n = 4096;
+    const r = await compareStep(n, 4e-4);
     // f32 against f64 can only disagree on a test that lands within rounding of its threshold
     // (fluid fraction 0.5, the field's end): at most 1 in 1000
-    expect(branch).toBeLessThanOrEqual(n / 1000);
-    expect(advected).toBeGreaterThan(n / 4);
-    expect(respawned).toBeGreaterThan(n / 20);
+    expect(r.branch).toBeLessThanOrEqual(n / 1000);
+    expect(r.advected).toBeGreaterThan(n / 4);
+    expect(r.respawned).toBeGreaterThan(n / 20);
     // f32 positions at x ~ 5 m are good to ~5e-7 m, and the f32 bilinear weights (texel
     // coordinates ~1000, so ~6e-5 texel) move a sample by up to ~0.2 m/s at the sharpest shear
     // (measured 1.7e-6 m and 0.027 m/s; a 10 % swirl-step mutant gives 7e-3 m)
-    expect(maxPos).toBeLessThan(1e-5);
-    expect(maxVel).toBeLessThan(0.25);
+    expect(r.maxPos).toBeLessThan(1e-5);
+    expect(r.maxVel).toBeLessThan(0.25);
     // the alpha follows the speed through the speed fade, whose slope is at most 1.5 / 35 per
     // m/s (smoothstep over SPEED_FADE): the velocity bound times that slope
-    expect(maxAlpha).toBeLessThan((0.25 * 1.5) / (SPEED_FADE[1] - SPEED_FADE[0]));
-    expect(maxLife).toBeLessThan(1e-6);
+    expect(r.maxAlpha).toBeLessThan((0.25 * 1.5) / (SPEED_FADE[1] - SPEED_FADE[0]));
+    expect(r.maxLife).toBeLessThan(1e-6);
+  });
+
+  // W2V-I4: at the panel's fastest x1/10 a core-jet tracer moves ~0.75 m (110 texels) in one
+  // 60 Hz frame; the kernel's substeps (one texel each) must be the TS mirror's, so they stop at
+  // the thin walls the TS steps stop at
+  it('a x1/10 step (up to ~110 one-texel substeps) is the TS step too', async ({ annotate }) => {
+    const n = 4096;
+    const dt = 1 / 60 / 10;
+    const r = await compareStep(n, dt);
+    await annotate(`[x1/10] ${JSON.stringify(r)}`);
+    // the substeps' extra fluid checks are more chances to land within rounding of 0.5
+    expect(r.branch).toBeLessThanOrEqual(n / 500);
+    expect(r.advected).toBeGreaterThan(n / 5);
+    // the step is long: some tracers moved tens of texels
+    expect(r.moved).toBeGreaterThan(0.3);
+    // a frame's displacement error is at most the per-sample velocity bound above (0.25 m/s)
+    // times dt, 4.2e-4 m, plus f32 rounding over at most MAX_SUBSTEPS substeps (128 x 5e-7 m)
+    expect(r.maxPos).toBeLessThan(0.25 * dt + 128 * 5e-7);
+    expect(r.maxVel).toBeLessThan(0.25);
   });
 
   it('keeps every particle finite and alive over 300 steps (5 s of frames)', async () => {
