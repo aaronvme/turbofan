@@ -165,11 +165,15 @@ describe('compressor map geometry', { timeout: 120_000 }, () => {
       );
     // the real maps at a 300 x 170 plot: no two labels overlap, and 100 % is always labelled
     for (const which of ['fan', 'hpc'] as const) {
-      const g = mapGeometry(frame(which));
+      // the lines the chart draws: from the map's own lowest line up (W2A-I2)
+      const g = mapGeometry(
+        frame(which),
+        chartSpeedPercents(frame(which), which === 'fan' ? FAN_LINES : HPC_LINES),
+      );
       const x0 = scaleOf(g.bounds.wc, 258, 0.04);
       const y0 = scaleOf(g.bounds.pr, 136, 0.04);
       const anchors = g.speedLines.map((l) => ({
-        percent: l.percent,
+        percent: Math.round(l.percent),
         x: 34 + x0(l.points[0]?.[0] ?? 0),
         y: 146 - y0(l.points[0]?.[1] ?? 0),
       }));

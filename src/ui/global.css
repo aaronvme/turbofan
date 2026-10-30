@@ -593,6 +593,26 @@ legend {
 .chart figcaption .value.caution {
   color: var(--caution);
 }
+.chart figcaption .value.warning {
+  color: var(--warning);
+}
+.chart figcaption .value-group {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+/* D4-87: a margin taken below the map is an extrapolation: dimmed, tagged, never amber */
+.chart figcaption .value[data-level='belowMap'] {
+  opacity: 0.6;
+}
+.chart figcaption .tag {
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  padding: 0 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+}
 svg text {
   font-size: 9.5px;
   fill: var(--muted);
@@ -623,6 +643,22 @@ svg text {
   fill: none;
   stroke: #fff;
   stroke-opacity: 0.6;
+}
+/* below the map's lowest speed line (D4-87): a hollow, dimmed point */
+.op[data-below-map='true'] {
+  fill: var(--bg);
+  stroke: #fff;
+  stroke-width: 1.2;
+}
+.op-ring[data-below-map='true'] {
+  stroke-dasharray: 2 2;
+}
+.op-off {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .axis {
   fill: var(--faint);
