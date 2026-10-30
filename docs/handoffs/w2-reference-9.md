@@ -1,4 +1,4 @@
-w2/reference-9 round 13: WIP (D4-81 in order). Run 1, the plain scheme, passes D4-79's (a) and (b): the preconditioning is the source of the growth. Run 2, the global M_cut 0.02, passes (a) and (b), so 0.05 is not run. The cut is on every preconditioned CPU ladder run, and the full ladder (rule 2) is running at the commit of this handoff. (From c2d7c9f; HEAD = the commit of this handoff.)
+w2/reference-9 round 13: WIP (D4-81 in order). Run 1, the plain scheme, passes D4-79's (a) and (b): the preconditioning is the source of the growth. Run 2, the global M_cut 0.02, passes (a) and (b), so 0.05 is not run. The cut is on every preconditioned CPU ladder run. In the full ladder at 8447e99 every row that passed at 0.003 still passes (rule 2), with D4-59's values. The ladder's own d463 run (the same configuration as run 2) was still running when this was written. (From c2d7c9f; HEAD = the commit of this handoff.)
 
 DONE (round 13)
 - Step 0: round 12's scratch patch is reverted (`git checkout` of precondition.ts and solver.ts; the copy stays in `reports/scratch/r12/trial-step-limit.patch`).
@@ -12,6 +12,7 @@ D4-81 RESULTS (the contract case, 20000 iterations)
 - Plain scheme (CFL 1.5): (a) 0.366 over 1000-2000 and 0.0433 at 20000; (b) 0.641 against 10000 and 0.159 against 100. Weighted residual 3.89e-2 / 9.63e-3 / 6.17e-3 at 100 / 10000 / 20000. PASS. L2(p') falls from 0.365 at 1000 to 0.07 at 10000.
 - M_cut 0.02 (`d463mcut02`): (a) 0.778 over 1000-2000 and 0.488 at 20000; (b) 0.524 against 10000 and 0.223 against 100. Weighted residual 1.806 / 0.771 / 0.404 at 100 / 10000 / 20000. PASS.
   - The late decay is slow. L2 is 0.48-0.51 over 13000-20000 and the residual 0.33-0.42 over 15000-20000 (SOLVER.md 10 says so).
+- Rule 2 (the ladder at 8447e99, `reports/scratch/r13/logs/ladder.log`, copies of its JSON in `logs/ladder-reports/`): L7 0.0109 falling (0.128 / 0.039 / 0.011), |Cd| 0.0013, ratio 1.779 <= 3. L8 0.754 %, steadiness 3.2e-5. f32 12/12 (C-pre 1.06e-6 and S 2.02e-6 after 100). floor 4/4. L1-L6 and L9 are as of record. The failures are the known ones only: L8 convergence, L9a (Euler work tied to its steadiness 1.062e-5 > 1e-5, D4-57; convergence) and L9b convergence.
 - The candidate is on trial in the CPU ladder. `tests/ladder/oracle.ts` has `GLOBAL_MACH_CUT = 0.02` and `ENGINE_PRECONDITIONING_CUT`. L7's preconditioned spheres, L8, f32's C-pre and S, and the d463 cases take it. The d463 pin is lifted (`it`). The GPU tests keep `ENGINE_PRECONDITIONING` (0.003) until the kernel round.
 
 NEXT

@@ -475,6 +475,21 @@ Otherwise the engine setting stays 0.003 and J stays pinned. The rows that fail 
 - **The global M_cut 0.02 passes D4-79's (a) and (b) (run 2), so 0.05 is not run.** `cases/d463mcut02.ts` reproduces round 11's 0.02 trial through 2000 (L2 0.778 at 1000; the weighted residual 1.806 at 100). After 2000 its weighted residual falls: 2.59 at 2000, 0.59-0.63 over 7000-9000, 0.77 at 10000 (a local high; 0.60 at 11000), 0.33-0.42 over 15000-20000, and 0.404 at 20000. That is 0.52× its value at 10000 and 0.22× its value at 100. L2(p′) never rises above its 1000 value: 0.52 at 10000 and 0.49 at 20000. Max |p′| is 0.92× its first at 20000.
   - *What it does not show:* over the last 7000 iterations the decay is slow. L2(p′) holds at 0.48-0.51 from 13000 to 20000, and the weighted residual at 0.33-0.42 from 15000, ending 0.35 → 0.40 over the last 1000. The plain scheme falls to 0.04 over the same run. D4-79's rule compares only the values at 100, 10000 and 20000, and it passes on them, but those values do not show decay over 15000-20000.
   - *Under the pre-stated rule it is the candidate,* pending rule 2: every row that passes now must still pass in the full ladder with the cut on every preconditioned CPU run (`tests/ladder/oracle.ts` `GLOBAL_MACH_CUT`), and the linear part must pass at the cut. The d463 pin (`d463.test.ts`) is lifted. In force, its configuration is minMach = M_cut = 0.02, D4-59's.
+- **Rule 2, the full ladder with the cut (round 13, `npm run test:ladder` at 8447e99).** Every row that passes at 0.003 still passes at 0.02, with D4-59's values to the digits shown:
+
+| row | 0.003 (round 11's ladder of record) | global M_cut 0.02 |
+|---|---|---|
+| L1-L6, L9a, L9b (no preconditioning) | pass (L9a's steadiness, and the L8/L9 convergence rows, fail as of record) | the same rows pass and fail |
+| L7 M 0.01 (96 × 96): asymmetry, sequence 24/48/96 | 0.0131, falling (0.135 / 0.044 / 0.013) | 0.0109, falling (0.128 / 0.039 / 0.011): pass |
+| L7: \|Cd\| | 0.0016 | 0.0013: pass |
+| L7: iterations M 0.01 / M 0.3 (≤ 3) | 1.048 | 1.779 (14734 at M 0.01): pass |
+| L8 velocity (< 1 %), steadiness (≤ 1e-3) | 0.449 %, 2.0e-5 | 0.754 %, 3.2e-5: pass |
+| L8 convergence (fails at 0.003) | not at 37500 | not at 37500 |
+| §12.2 C-pre after 1 / 10 / 100 | 1.43e-7 / 1.80e-7 / 2.26e-6 | 1.43e-7 / 1.79e-7 / 1.06e-6: pass |
+| §12.2 S after 1 / 10 / 100 | 7.3e-8 / 1.6e-7 / 4.7e-7 | 1.25e-7 / 1.11e-7 / 2.02e-6: pass |
+| §12.2 C tracking, C physical; floor | pass | the same values: pass |
+| D4-63 (d463, the ladder's run) | (b) fails, pinned | the same configuration as run 2 (results in the handoff) |
+
 
 
 **Low-Mach preconditioning (tracking mode only; decision D4-10).** Without it the pseudo-time step is set by the acoustic speed |u| + c while the flow converges at the convective speed |u|, so the iterations to converge grow like 1/M (ladder L7: the M 0.01 sphere did not converge in 20000 iterations, the M 0.3 sphere took 3096). The option `lowMachPreconditioning: { minMach }` multiplies the pseudo-time derivative of the pressure by 1/β² (Turkel's preconditioner with α = 0 in the variables (p, u, v, rw, s, Z), equivalent for this gas to Weiss & Smith 1995). Per cell, from the stage-1 primitives and frozen for the three stages like τ:
