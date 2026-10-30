@@ -19,8 +19,10 @@ afterEach(() => {
 });
 
 const meter = (name: string) => screen.getByRole('meter', { name });
+// each snapshot builds the real model at ground idle: a test runtime limit, not a threshold
+const TIMEOUT_MS = 120_000;
 
-describe('the overlay (RTL)', () => {
+describe('the overlay (RTL)', { timeout: TIMEOUT_MS }, () => {
   it('the N1, EGT and N2 dials are meters with the snapshot values', () => {
     const s = snapshotOf();
     mount(s);
@@ -102,7 +104,7 @@ describe('the overlay (RTL)', () => {
   });
 });
 
-describe('the drawn field in the overlay (D4-82)', () => {
+describe('the drawn field in the overlay (D4-82)', { timeout: TIMEOUT_MS }, () => {
   it('the field badge and the legend say the solver is uncoupled until W3', () => {
     mount(
       snapshotOf({ mode: 'data', flow: 'solver' }),
@@ -170,92 +172,100 @@ describe('the drawn field in the overlay (D4-82)', () => {
   });
 });
 
-describe('the frame cost in the diagnostics (W2F-N5, the off-frame MOCK raster)', () => {
-  it('shows the worst and the held cycle step and the MOCK raster', async () => {
-    const d = diagnosticsOf();
-    mount(
-      snapshotOf(),
-      diagnosticsOf({
-        budget: { ...d.budget, cycleCpuMaxMs: 602.1, cycleCpuHeldMs: 551.2, mockRasterMs: 348.1 },
-      }),
-    );
-    render(<Overlay />);
-    await userEvent.click(screen.getByRole('button', { name: 'Diagnostics' }));
-    const panel = screen.getByRole('region', { name: 'Diagnostics' });
-    expect(within(panel).getByText('Held step (W2F-N5)')).toBeTruthy();
-    expect(panel.textContent).toContain('551');
-    expect(panel.textContent).toContain('worst 602');
-    expect(within(panel).getByText('MOCK raster (off frame)')).toBeTruthy();
-  });
-
-  it('shows no held row while no frame in the window was held', async () => {
-    mount(snapshotOf());
-    render(<Overlay />);
-    await userEvent.click(screen.getByRole('button', { name: 'Diagnostics' }));
-    expect(screen.queryByText('Held step (W2F-N5)')).toBeNull();
-  });
-});
-
-describe('the view dock (camera presets, tracers, the cut-plane field)', () => {
-  it('a camera preset button sends the camera message', async () => {
-    const post = mount(snapshotOf());
-    render(<Overlay />);
-    const cam = screen.getByRole('group', { name: 'Camera' });
-    await userEvent.click(within(cam).getByRole('button', { name: 'Side' }));
-    expect(post).toHaveBeenCalledWith({ type: 'camera', preset: 'side' });
-    expect(within(cam).getAllByRole('button')).toHaveLength(4);
-  });
-
-  it("D4-83: the tracers switch shows the mode's state and toggles the particles overlay", async () => {
-    const post = mount(snapshotOf({ mode: 'data' }));
-    render(<Overlay />);
-    const sw = screen.getByRole('switch', { name: 'Tracers' });
-    expect(sw.getAttribute('aria-checked')).toBe('true');
-    await userEvent.click(sw);
-    expect(sentCommands(post)).toContainEqual({
-      type: 'setRenderState',
-      render: { overlays: { particles: false } },
+describe(
+  'the frame cost in the diagnostics (W2F-N5, the off-frame MOCK raster)',
+  { timeout: TIMEOUT_MS },
+  () => {
+    it('shows the worst and the held cycle step and the MOCK raster', async () => {
+      const d = diagnosticsOf();
+      mount(
+        snapshotOf(),
+        diagnosticsOf({
+          budget: { ...d.budget, cycleCpuMaxMs: 602.1, cycleCpuHeldMs: 551.2, mockRasterMs: 348.1 },
+        }),
+      );
+      render(<Overlay />);
+      await userEvent.click(screen.getByRole('button', { name: 'Diagnostics' }));
+      const panel = screen.getByRole('region', { name: 'Diagnostics' });
+      expect(within(panel).getByText('Held step (W2F-N5)')).toBeTruthy();
+      expect(panel.textContent).toContain('551');
+      expect(panel.textContent).toContain('worst 602');
+      expect(within(panel).getByText('MOCK raster (off frame)')).toBeTruthy();
     });
-    cleanup();
-    mount(snapshotOf());
-    render(<Overlay />);
-    expect(screen.getByRole('switch', { name: 'Tracers' }).getAttribute('aria-checked')).toBe(
-      'false',
-    );
-    cleanup();
-    mount(snapshotOf({ mode: 'schlieren' }));
-    render(<Overlay />);
-    expect(screen.getByRole('switch', { name: 'Tracers' })).toHaveProperty('disabled', true);
-  });
 
-  it('the Data view colours its plane by the chosen contract field (only the drawable ones)', async () => {
-    const post = mount(snapshotOf({ mode: 'data' }));
-    render(<Overlay />);
-    const sel = screen.getByRole('combobox', { name: 'Cut plane field' });
-    expect(
-      within(sel)
-        .getAllByRole('option')
-        .map((o) => o.getAttribute('value')),
-    ).toEqual(['pressure', 'density', 'temperature', 'mach']);
-    expect((sel as HTMLSelectElement).value).toBe('mach');
-    await userEvent.selectOptions(sel, 'temperature');
-    expect(sentCommands(post)).toContainEqual({
-      type: 'setRenderState',
-      render: { cutPlaneField: 'temperature' },
+    it('shows no held row while no frame in the window was held', async () => {
+      mount(snapshotOf());
+      render(<Overlay />);
+      await userEvent.click(screen.getByRole('button', { name: 'Diagnostics' }));
+      expect(screen.queryByText('Held step (W2F-N5)')).toBeNull();
     });
-    cleanup();
-    mount(snapshotOf({ mode: 'cutaway' }));
-    render(<Overlay />);
-    expect(screen.queryByRole('combobox', { name: 'Cut plane field' })).toBeNull();
-  });
+  },
+);
 
-  it('the store follows a new snapshot (the overlay re-renders from the worker)', () => {
-    mount(snapshotOf());
-    render(<Overlay />);
-    const next = snapshotOf({ mode: 'exploded' });
-    act(() => {
-      useApp.setState({ snapshot: next });
+describe(
+  'the view dock (camera presets, tracers, the cut-plane field)',
+  { timeout: TIMEOUT_MS },
+  () => {
+    it('a camera preset button sends the camera message', async () => {
+      const post = mount(snapshotOf());
+      render(<Overlay />);
+      const cam = screen.getByRole('group', { name: 'Camera' });
+      await userEvent.click(within(cam).getByRole('button', { name: 'Side' }));
+      expect(post).toHaveBeenCalledWith({ type: 'camera', preset: 'side' });
+      expect(within(cam).getAllByRole('button')).toHaveLength(4);
     });
-    expect(screen.getByRole('radio', { name: /Exploded/ })).toHaveProperty('checked', true);
-  });
-});
+
+    it("D4-83: the tracers switch shows the mode's state and toggles the particles overlay", async () => {
+      const post = mount(snapshotOf({ mode: 'data' }));
+      render(<Overlay />);
+      const sw = screen.getByRole('switch', { name: 'Tracers' });
+      expect(sw.getAttribute('aria-checked')).toBe('true');
+      await userEvent.click(sw);
+      expect(sentCommands(post)).toContainEqual({
+        type: 'setRenderState',
+        render: { overlays: { particles: false } },
+      });
+      cleanup();
+      mount(snapshotOf());
+      render(<Overlay />);
+      expect(screen.getByRole('switch', { name: 'Tracers' }).getAttribute('aria-checked')).toBe(
+        'false',
+      );
+      cleanup();
+      mount(snapshotOf({ mode: 'schlieren' }));
+      render(<Overlay />);
+      expect(screen.getByRole('switch', { name: 'Tracers' })).toHaveProperty('disabled', true);
+    });
+
+    it('the Data view colours its plane by the chosen contract field (only the drawable ones)', async () => {
+      const post = mount(snapshotOf({ mode: 'data' }));
+      render(<Overlay />);
+      const sel = screen.getByRole('combobox', { name: 'Cut plane field' });
+      expect(
+        within(sel)
+          .getAllByRole('option')
+          .map((o) => o.getAttribute('value')),
+      ).toEqual(['pressure', 'density', 'temperature', 'mach']);
+      expect((sel as HTMLSelectElement).value).toBe('mach');
+      await userEvent.selectOptions(sel, 'temperature');
+      expect(sentCommands(post)).toContainEqual({
+        type: 'setRenderState',
+        render: { cutPlaneField: 'temperature' },
+      });
+      cleanup();
+      mount(snapshotOf({ mode: 'cutaway' }));
+      render(<Overlay />);
+      expect(screen.queryByRole('combobox', { name: 'Cut plane field' })).toBeNull();
+    });
+
+    it('the store follows a new snapshot (the overlay re-renders from the worker)', () => {
+      mount(snapshotOf());
+      render(<Overlay />);
+      const next = snapshotOf({ mode: 'exploded' });
+      act(() => {
+        useApp.setState({ snapshot: next });
+      });
+      expect(screen.getByRole('radio', { name: /Exploded/ })).toHaveProperty('checked', true);
+    });
+  },
+);

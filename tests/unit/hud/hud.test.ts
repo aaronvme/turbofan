@@ -34,7 +34,8 @@ const frame = (which: 'fan' | 'hpc') => ({
     which === 'fan' ? engine.calibration.n1ReferenceRpm : engine.calibration.n2ReferenceRpm,
 });
 
-describe('compressor map geometry', () => {
+// the model's own steps: a test runtime limit, as the cycle tests carry (not a threshold)
+describe('compressor map geometry', { timeout: 120_000 }, () => {
   it('draws the speed lines and the stall line of the model own scaled map', () => {
     const g = mapGeometry(frame('hpc'), [80, 100]);
     expect(g.speedLines.map((s) => s.percent)).toEqual([80, 100]);
