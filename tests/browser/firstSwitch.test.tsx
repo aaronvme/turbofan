@@ -96,7 +96,7 @@ describe('the first switch into a flow mode (W2A-I4, D4-88)', () => {
         // D4-88's boot cost, per configuration (absent before the warm-up existed)
         warmUpMs: useApp.getState().diagnostics?.warmUpMs ?? null,
         warmUpSteps: (useApp.getState().diagnostics?.warmUpSteps ?? []).map(
-          (s) => `${s.name} ${s.ms.toFixed(0)} ms`,
+          (s) => `${s.name} ${s.ms.toFixed(0)} ms (frame CPU ${s.cpuMs.toFixed(0)} ms)`,
         ),
       };
       await commands.writeFile(

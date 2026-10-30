@@ -102,7 +102,11 @@ export interface AppDiagnostics {
   readonly backingStore: { readonly width: number; readonly height: number; readonly dpr: number };
   /** D4-88: what the boot's pipeline warm-up took, wall ms, and each configuration's share. */
   readonly warmUpMs: number;
-  readonly warmUpSteps: readonly { readonly name: string; readonly ms: number }[];
+  readonly warmUpSteps: readonly {
+    readonly name: string;
+    readonly ms: number;
+    readonly cpuMs: number;
+  }[];
   /** W2F-I1: why the last matched solve was lost (null: none lost since the reset). */
   readonly lostSolveCause: string | null;
   /** The worker's own errors so far (GPU errors, a throwing step), newest last, at most 8. */

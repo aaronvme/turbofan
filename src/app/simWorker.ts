@@ -114,7 +114,7 @@ interface App {
   settle: SettleTracker;
   settledFrames: number;
   warmUpMs: number;
-  warmUpSteps: readonly { readonly name: string; readonly ms: number }[];
+  warmUpSteps: readonly { readonly name: string; readonly ms: number; readonly cpuMs: number }[];
   appliedView: RenderState | null;
   errors: string[];
   refused: string[];

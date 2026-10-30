@@ -252,8 +252,15 @@ export interface EngineView {
 export interface WarmUpReport {
   /** Wall ms of the whole warm-up (the frames and the GPU waits). */
   readonly ms: number;
-  /** The configurations rendered, in order (e.g. "data:mach+tracers"), and each one's wall ms. */
-  readonly configurations: readonly { readonly name: string; readonly ms: number }[];
+  /**
+   * The configurations rendered, in order (e.g. "data:mach+tracers"): each one's wall ms, and of
+   * it the CPU ms of the frame call (three's node builds; the rest is the GPU's compile and run).
+   */
+  readonly configurations: readonly {
+    readonly name: string;
+    readonly ms: number;
+    readonly cpuMs: number;
+  }[];
 }
 
 /** Look-dev A/B switches for timing comparisons (never set by the app). */
@@ -609,7 +616,7 @@ async function assemble(
         // the app's first view last: TRAA's history is its own
         { flow: saved.flowMode, look: saved.mode },
       ];
-      const configurations: { name: string; ms: number }[] = [];
+      const configurations: { name: string; ms: number; cpuMs: number }[] = [];
       for (const s of steps) {
         const s0 = performance.now();
         flowMode = s.flow;
@@ -619,10 +626,12 @@ async function assemble(
         applyFlowMode();
         view.setMode(s.look, true);
         view.frame(0);
+        const cpuMs = performance.now() - s0;
         await device.device.queue.onSubmittedWorkDone();
         configurations.push({
           name: `${s.flow ?? s.look}${s.quantity === undefined ? '' : `:${s.quantity}`}${s.tracers === true ? '+tracers' : ''}`,
           ms: performance.now() - s0,
+          cpuMs,
         });
       }
       flowMode = saved.flowMode;
