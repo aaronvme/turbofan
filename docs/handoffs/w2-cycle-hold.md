@@ -46,31 +46,28 @@ MEASURED (Node, `tools/cycle/held-cost.ts --seconds=20`, the shared machine with
 - **The W1K-I2 slam (dt 0.02):** the same held stretch, 5.70-8.56 s, then a new one from 9.78 s (N2 87.7 %). Lost solves 281 → 306, peak thrust 94.3 → 88.3 kN (still no 95 %, so the pin holds). The worst step went from 1187 ms to 25 ms (the first step's warm-up).
 - **The entry from the sub-idle model at 60 Hz (not budgeted):** a start from shutdown costs 448 evaluations, 18.6 ms, at its entry (29.55 s); a flameout relight costs 654 evaluations, 58.5 ms (8.18 s). Both are matched frames, once per start or relight.
 
-NEEDS AN ORCHESTRATOR DECISION
-1. The bar's home. D4-84's "held frame ≤ 16.7 ms on the same ramp" has no PHYSICS.md row. Here it is gated in Node in the budget's unit (`heldFrame.test.ts`), and the browser row (`tests/browser/app.test.tsx` W2F-N5, app-ui's file) still only records. Should it become a §3.4 row (P5, mirrored in thresholds.ts: a flagged contract edit) and a gate in app-ui's browser suite? I did not touch `src/contracts` or the app.
-2. The sub-idle entry is over the frame budget once per start or relight: 448-654 evaluations, 19-59 ms in Node. It is a matched frame, so D4-84 does not cover it, and budgeting it would hold the start for a few frames, which every start test's zero-lost assertion forbids. Options:
-   - (i) accept it, a once-per-start hitch;
-   - (ii) slice the entry walk too, under a new non-held status (for example `entering`), which is a contract change;
-   - (iii) a better entry anchor than the last matched point (W2F-N2's area).
-3. Recovery comes later: a walk waits 0.5 s after the last one set out. On the fit ramp, episode 1 recovers after 3.37 s instead of 2.97 s. On the critic's hot-day relight, the state holds 0.62 s instead of 0.08 s. Accept it as (a)'s trade, or shorten WALK_INTERVAL_S: the budget bounds the frame either way. With the interval at 0 the walks run back to back, still inside the budget.
-4. Seen, not mine (D4-17): while held, the spools run on the held power balance without limit. The fit ramp's second episode never recovers, and N1 reaches 260-275 % by 23 s. The app would show that. Freeze the spools while held, or let the FADEC's N1/N2 limiters act on a held state?
+DECIDED (D4-90, main c2dc8da)
+1. The bar is P5: 2027bb1 adds it as a flagged contract addition to `src/contracts/thresholds.ts` and a PHYSICS.md §3.4 row. The gate is deterministic, in Node, on the fit ramp at 60 Hz: every step that starts held is ≤ 137 gas-path evaluations, and every step ≤ 217. The browser's held-frame wall time (≤ 16.7 ms) is recorded beside it and counts only in an official D0-1 run, like P1/P4. `heldFrame.test.ts` reads the bar from P5 (plus a check that the retry's own bounds, 120 + 17 and + 80, fit the row), and `thresholds.test.ts` counts P1-P5.
+2. The sub-idle entry's cost is accepted for W2 (GOTCHAS); W3's start scenario revisits it with a better entry anchor.
+3. The later recovery is accepted (GOTCHAS); the 0.5 s walk interval stays.
+4. The spool runaway while held is W2H-I1 (NEXT 1), for the part-power round.
 
 NEXT
-1. app-ui: re-measure the W2F-N5 browser row on this branch's model, and gate it at 16.7 ms if decision 1 says so. Show the cause text as it is, since the budget cause names itself.
-2. If decision 2 picks (ii): an `entering` status and the entry walk sliced like the held one, TDD.
-3. Read the coverage result, then run the targeted Stryker run (GATES). model.ts's retry wiring is reached fully only by the slow `heldFrame.test.ts`.
+1. **W2H-I1 (important, the part-power round, not here):** while held, the spools integrate the held power balance without limit (D4-17). On the fit ramp's second episode (from 13 s, N2 87.5 %) the solve never recovers and N1 reaches 260-275 % by 23 s. A held point must not integrate the spools past their limits on a stale balance. Fix it before the fit ships, together with that never-recovering episode. The default model does not hold on the ramp.
+2. app-ui: re-measure the W2F-N5 browser row on this branch's model and record the held-frame wall time beside P5 (official D0-1 run). The cause text can be shown as it is: the budget cause names itself.
+3. Read the targeted Stryker run (GATES), and kill its survivors if any are cheap. model.ts's retry wiring is reached fully only by the slow `heldFrame.test.ts`.
 
 GOTCHAS
 - The meter is a process-wide count (`gasPathEvaluations`); read it as a difference. A test double that does no gas-path evaluation spends nothing, so give it its own meter (`heldRetry.meter`), as `heldRetry.test.ts` does.
 - The budget is per `step()`, not per substep: a test at dt 0.1 (6 snapshots) gets the same retry work per step as the app's 60 Hz frame (2 snapshots), so a held episode lasts longer in sim time at large dt.
 - A 60 Hz step has two snapshots, so a held episode can start and end inside one step (lost, then matched). The step-level status undercounts episodes; the warnings count them exactly.
+- **Accepted (D4-90), the sub-idle entry is unbudgeted:** a start or relight runs D4-13's whole walk in one matched snapshot, 448-654 gas-path evaluations, 19-59 ms in Node: one hitch per start or relight, over the frame budget. Budgeting it would hold the start for a few frames, against every start test's zero-lost assertion.
+- **Accepted (D4-90), recovery comes later:** a walk waits 0.5 s after the last one set out. Fit ramp episode 1 recovers after 3.37 s instead of 2.97 s; the critic's hot-day relight holds 0.62 s instead of 0.08 s (the only fingerprint scenario that changes, and only on its held path).
 - `UNBOUNDED_RETRY` reproduces D4-13 call for call, which is the way to compare old and new behaviour (and what the bit-identity tests use).
 - `Start-Process` with `cmd /c` and a `.cmd` script worked for the detached runs; the reaper never hit them.
 
-GATES @c0ce953 (the code; this file adds only the handoff)
-- npm run typecheck: clean
-- npm run lint (ESLint + Prettier): clean
-- npm run test:mesh: 2 files, 29 passed
-- tests/unit/cycle + tests/unit/shell (detached, before the doc touch-ups): 25 files, 292 passed + 5 expected fail
-- npm run coverage (detached, --coverage.reportsDirectory=reports/cycle-hold/coverage, PID 40304, log reports/cycle-hold/gates.log): STILL RUNNING at handoff, result not read. Re-run or read the log before the merge
-- Stryker on the changed functions: NOT RUN (the script is ready: reports/cycle-hold/mutate.cmd, the fast suites heldRetry/matchedSolve/numerics/gasPathHold/lostSolveCause, concurrency 3)
+GATES
+- @c0ce953 (the code before P5): npm run coverage (detached, own reportsDirectory reports/cycle-hold/coverage): 120 files, 2154 passed + 11 expected fail, exit 0. Statements 98.36 %, branches 87.5 %, functions 99.35 %, lines 99.32 %. src/cycle: lines 99.46 %, branches 92.34 %; heldRetry.ts 100/100, matchedSolve.ts 100/97.56, newton.ts 100/100.
+- @c0ce953: npm run typecheck clean; npm run lint clean; npm run test:mesh 2 files, 29 passed; tests/unit/cycle + tests/unit/shell 25 files, 292 passed + 5 expected fail.
+- @2027bb1 (P5): typecheck clean; ESLint and Prettier clean on the changed files; tests/unit/contracts/thresholds.test.ts + heldFrame.test.ts + heldRetry.test.ts: 3 files, 118 passed. The full cycle suite was not re-run after P5: the only cycle change is heldFrame.test.ts reading its bounds from P5 (same numbers, the same 60 Hz ramp).
+- Stryker (targeted: heldRetry.ts, matchedSolve.ts, newton.ts:86-96, engine.ts:1066-1090 and 1118-1146, model.ts:393-406 and 833-904; tests heldRetry/matchedSolve/numerics/gasPathHold/lostSolveCause; concurrency 3): LAUNCHED DETACHED at handoff (usage 55 %, 2.75 GB free), result NOT READ. Status: reports/cycle-hold/mutate.status; log: reports/cycle-hold/mutate.log; report: reports/mutation/mutation.json.
