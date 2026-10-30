@@ -3913,3 +3913,149 @@ The chrome is close to the target. The fan map, the callouts and the true Schlie
 **Orchestrator questions:**
 - (tt) The fan's surge margin at ground idle reads 3.6 %, in amber: the cycle model's `surgeMarginFraction`, below the fan map's lowest (60 %) speed line, so off the drawn map. Is that number meaningful there? Should the UI show it as a caution, or mark it "below the map" until the part-power map backlog (D4-3) extends the fan map?
 - (uu) Who owns warming the flow modes' pipelines at boot (W2A-I4b): app-ui (calling each mode once behind the boot spinner) or the render/flowviz owner (a `warmUp()` on EngineView)?
+
+## Critic pass 14: w2/reference-9 @d05e16d and w2/cycle-hold @f2c0779 (PARTIAL: STOP-CLEAN)
+
+**Stopped on the coordinator's STOP-CLEAN at the usage brake (83 %).** Only coverage ran on the combined tree. The hand mutants (`pass14-mutants.sh.txt`) and the probe's default-model sweep (`w2h-held.probe.ts.txt` mode 1) are written but **not run**. No detached run is left going. The trial branch is deleted and `critic` is clean.
+
+Reviewed 2026-10-30 on a throwaway trial branch in the critic worktree: main c2dc8da, then `--no-ff` merges of w2/reference-9 @d05e16d and w2/cycle-hold @f2c0779, both clean (no conflicts; the branches touch disjoint files). The gates ran on that tree. The branch was deleted afterwards and `critic` restored. Probes: `docs/reviews/probes/w2h-held.probe.ts.txt` (the held retry on the default model and on the fit ramp) and `pass14-mutants.sh.txt` (hand mutants). The orchestrator's `d463lin.log`, round 13's `reports/scratch/r13/logs` (with `ladder-reports/`) and cycle-hold's `reports/cycle-hold/mutate.*` plus `reports/mutation/mutation.json` were read in place; nothing in a builder worktree was written.
+
+### A. w2/reference-9, rounds 10-13 (`bcacc0a..d05e16d`; round 13 = `c2d7c9f..d05e16d`)
+
+Pass 12 covered a5d86dd..c2d7c9f (the D4-77 monitor, D4-79 in `cases/d463.ts`). This pass reviews round 13 on top of that.
+
+- **The global M_cut is the Weiss-Smith/Turkel floor D4-81/D4-59 describe, and it is off by default.**
+  - `withGlobalCut` (`src/flow/reference/solver.ts:80-89`) returns the options unchanged when `globalMachCut` is absent. Otherwise it gives minMach' = max(minMach, cut) and M_cut' = max(M_cut ?? minMach, cut), and it throws RangeError on NaN, ±∞ or a negative cut.
+  - The constructor stores the floored pair once (`this.pre`, :163-165), and every consumer reads it:
+    - the far field's β², `min(1, max(M∞², minMach'²))` (:172);
+    - the flux scaling's `this.machCut` (:174), which `assembleResidual` gets at :304, :320 and :359;
+    - the preconditioned-CFL switch (:177);
+    - the per-cell β of `computeBeta` (:536), which also feeds the local dt.
+  - No other code reads `opts.lowMachPreconditioning` (grep), and physical time ignores it, as before.
+  - M_cut ≥ 1 stays ≥ 1, so the scaling stays off. minMach ≥ 1 stays ≥ 1, so the scheme stays plain. With no cut, D4-40's 0.003 contract is bitwise unchanged: the solver test files, `precondition.test.ts` and the GPU tests' `ENGINE_PRECONDITIONING` still run at 0.003.
+- **The cases and the oracle constants are right.**
+  - `GLOBAL_MACH_CUT = 0.02` and `ENGINE_PRECONDITIONING_CUT = {minMach 0.003, globalMachCut 0.02}` (`tests/ladder/oracle.ts:59-65`). In force this is minMach = M_cut = 0.02, D4-59's configuration.
+  - The cut is applied to every preconditioned CPU ladder run D4-81 lists: L7 (`l7.ts:58`; it binds at M 0.01 and is inert at M 0.3), L8 (`l8.ts:24`), §12.2's C-pre and S (`f32.ts:84,91`), and the d463 default (`d463.ts:69-75`).
+  - `d463plain.ts` passes `null`, which gives no preconditioning and CFL 1.5. `d463mcut02.ts` and `d463mcut05.ts` pass {0.003, cut}.
+  - The pin is lifted, `it.fails` → `it` (`d463.test.ts:46`), with the history kept in the comment.
+- **The run evidence matches the logs.** I recomputed every number from the JSON:
+  - `plain.json`: (a) 0.3663 / 0.04334; (b) 0.6408 / 0.1585; residual 3.89e-2 / 9.63e-3 / 6.17e-3 at 100 / 10k / 20k; peak 6.59.
+  - `mcut02.json`: (a) 0.7779 / 0.4876; (b) 0.5236 / 0.2234; residual 1.806 / 0.771 / 0.404; 0.601 at 11000; max over 10k-20k 0.852; peak 4.21. These match SOLVER.md §10's table and the handoff.
+  - `ladder.log` (8447e99, 76 min): 12 files passed and 3 failed, 14 tests passed and 3 failed. The 3 failures are the known ones (L8 convergence 37500; L9a Euler work, from its steadiness 1.062e-5; L9b convergence 20000). The rest pass:
+    - L7: 0.01093, |Cd| 0.001307, ratio 1.779, the sequence 0.128 / 0.039 / 0.011;
+    - L8: 0.7536 %, steadiness 3.24e-5;
+    - §12.2: C-pre 1.43e-7 / 1.79e-7 / 1.06e-6 and S 1.25e-7 / 1.11e-7 / 2.02e-6;
+    - floor 4/4;
+    - the ladder's own d463 run, identical to run 2.
+  - The orchestrator's linear part (`d463lin.log` `@@RESULT@@`) gives (a) 0.5056 / 0.05553, (b) 0.5959 / 0.3022 and peak 7.75, exactly D4-89's figures.
+  - The code at d05e16d equals 8447e99 in `src` and `tests` (`git diff 8447e99 d05e16d -- src tests` is empty), so I did not rerun the ladder.
+- **Would a test fail if the cut were ignored or misapplied?** By reading, yes:
+  - the test compares whole states after 3 iterations, plus dt, the residual and the CFL, against the run at minMach = M_cut = the cut;
+  - `not.toEqual` against the run without the cut catches an ignored cut;
+  - on this mesh the pulse reaches the far-field row at the top (g ≈ 0.12 there), so the test should see the far field's β.
+
+  This is UNCHECKED by mutation: hand mutants A1-A4 (the far field's β, M_cut, β and the CFL switch, each unfloored) are in `pass14-mutants.sh.txt`, not run. No Stryker run on `withGlobalCut`.
+
+#### Blocking
+None.
+
+#### Important
+None.
+
+#### Nits
+- **W2R-N28: SOLVER.md §10's "slow late decay" ranges are tighter than the data.** The text (also in the handoff and D4-89) says L2(p′) "holds at 0.48-0.51 from 13000 to 20000" and the residual "0.33-0.42 from 15000". `mcut02.json` gives 0.463-0.531 over 13000-20000 (0.464 at 14400, 0.531 at 13000) and 0.332-0.465 over 15000-20000 (0.465 at 15100). The conclusion holds (no decay over 15k-20k; recorded, not gating), but the ranges should be the measured ones, since D4-89's reopen trigger compares the GPU's trend against them. Fix: restate them in §10 in the kernel round.
+- **W2R-N29: SOLVER.md §10 has no linear-part row at the cut.** D4-79 requires it, and D4-89 quotes the orchestrator's run, but the only record is a job-tmp log outside the repo. This is W2R-N26's gap. Fix: add the row (0.5056 / 0.0555, 0.5959 / 0.3022, peak 7.75; the cell mean at 20000 over 100 is 5.06, reported) and the JSON to `reports/ladder/D4-63-linear.json` in the next reference or kernel round.
+- **W2R-N30: `L8_MACH_CUT` is now silently floored at 0.02** (`tests/ladder/cases/l8.ts:10-11,24`). A sweep with `L8_MACH_CUT=0.005` runs at 0.02 and prints rows labelled with its own value. The header comment "minMach = M_cut … the engine's value" (0.003) is stale too. Fix: drop the env override, or pass `globalMachCut` only when the env is unset, and say "in force 0.02" in the comment.
+
+#### Verdict A: **MERGE, provisional** (D4-89 already adopted it)
+It is pending the gates not yet run on the combined tree (typecheck, lint, test:mesh, test:gpu, test:browser) and hand mutants A1-A4. The cut does what D4-81 says, the default contract is untouched, and the evidence matches the logs. The nits go to the kernel round (W2R-N28/N29) or the next reference round.
+
+### B. w2/cycle-hold @f2c0779 (`42cf8e9..f2c0779`)
+
+- **A sliced walk is the unsliced walk.**
+  - Newton's only state between iterations is x. r = f(x) is recomputed on resume, deterministically. `stop` is asked only while the loop condition holds, so a stopped solve always has iterations left (`newton.ts:89-93`).
+  - `advanceWalk` keeps `done`, `step`, `x`, `solves` and the paused iterate with its used iterations. It resumes with `maxIterations = 25 − used` (`matchedSolve.ts:162-191`), and the target is fixed in `startWalk`. The bit-identity tests slice the start's walk at 5/23/60 evaluations.
+  - The iteration-limit arithmetic is not pinned by any test: Stryker 169 ×6, and hand mutant B1 below (W2H-I2).
+- **`UNBOUNDED_RETRY` is D4-13, and the matched path is unchanged where it matters.** I ran `w2f-fingerprint` (pass 7) three ways:
+  - 42cf8e9, as it was;
+  - the trial tree with `heldRetry: UNBOUNDED_RETRY`;
+  - the trial tree on its default.
+
+  42cf8e9 and the unbounded trial tree give the same 5 hashes, held path included: slam-chop 677bc456…, c12 c34d477c…, start dd082a71…, hot-surge-flameout 63915b7e…, part-lever 0b0723fc…. On its default the trial tree changes only hot-surge-flameout (c9b5371f…), the one scenario that holds, as the handoff says. The policy with `budget = ∞` and interval 0 is call for call `solveMatched`:
+  - the direct is never stopped;
+  - the walk always sets out (t − t_last ≥ 0);
+  - the walk is never paused, so `sameTarget` holds and the result is matched;
+  - `lostCause` always gets `why.cause`.
+- **The meter is deterministic.** `gasPathEvaluations` is a module counter that `evaluateGasPath` increments (`engine.ts:1065-1089`). `retryMatched` reads it only around its own solves, so nothing else runs inside a window, and a test double brings its own meter. The per-step reset is in `step()` (`model.ts:496`). The one host dependence is the documented per-`step()` budget: a held episode lasts longer in sim time at a larger frame dt.
+- **The held state stays visible (W2F-I1).**
+  - The status is 'held' on every lost snapshot, `lostSolves` counts each one, and the warning comes once per episode.
+  - W2A-N6 is fixed (the sub-idle path ends the episode, `model.ts:840-845`).
+  - A budget-cut direct names itself ("not converged within the held-retry budget (residual … after k iterations)"), and a snapshot with no attempt keeps the episode's cause (`model.ts:859`).
+  - The annunciator (app-ui) reads `gasPathSolve`, which is unchanged.
+- **P5.**
+  - The contract edit is one new `THRESHOLDS.P5` entry (`thresholds.ts:427-444`) and a matching PHYSICS.md §3.4 row; nothing else in the contract changed.
+  - `thresholds.test.ts` counts P1-P5 (4+12+13+5) and checks 137 / 217 / 16.7 / 60 Hz. The existing mirror tests (same IDs, same order, same text) cover the row.
+  - `heldFrame.test.ts` reads `stepRateHz`, `leverRampS`, `maxHeldStepEvaluations` and `maxStepEvaluations` from P5 (`:29-31, :62, :98-111`).
+- **W2H-I1 on the default model: only partly checked.**
+  - Of the 5 fingerprint scenarios, only hot-surge-flameout (ISA+30, surge, flameout and relight) holds on the default model, for 0.62 s. The default model held 0 times on the fit's ramp (D4-84).
+  - The wider sweep in `w2h-held.probe.ts.txt` mode 1 is NOT run: 6 ambients × 6 plans × 60 Hz and 0.02 s, each reporting lost solves, the longest hold and N1 while held.
+  - So "the default model can't reach the runaway" is not yet confirmed beyond those cases.
+
+#### Blocking
+None.
+
+#### Important
+- **W2H-I2: the "iterations left" of a resumed solve is untested** (`src/cycle/matchedSolve.ts:166-169`).
+  - Six Stryker mutants of `used > 0 ? { maxIterations: MAX_NEWTON_ITERATIONS - used } : {}` survive cycle-hold's targeted run: always, never, `≥`, `≤`, `{}`, and `25 + used`. That run's tests were heldRetry, matchedSolve, numerics, gasPathHold and lostSolveCause, not the slow heldFrame. Whether heldFrame kills them is UNCHECKED (hand mutant B1 is not run). The finding stands either way: no fast test pins it.
+  - The failure scenario is the fit ramp's common case: a walk solve that fails by running out of C7's 25 iterations. Sliced, under this mutant, it gets up to 25 + used. So it can converge where the unsliced walk failed, or fail later, and the branch's central claim, "a walk spread over several steps makes the same solves, to the bit", would silently break. The sliced-walk tests slice only converging solves, and the failing-everywhere test fails by refusal, not by exhausting iterations.
+  - Fix (test only): a Newton double whose residual needs more than 25 iterations, e.g. r ← 0.9 r. Slice its walk at k evaluations and assert the same refusal after exactly 25 iterations in total per solve, with the same points as unsliced. Then rerun Stryker on lines 162-191.
+
+#### Nits
+- **W2H-N1: "the budget never cuts the matched path" holds on the suite, not by construction** (`heldRetry.ts:121-132`, the header and the handoff).
+  - The direct solve's stop counts the step's *carried* spend even when the model is not holding. So after a snapshot that recovers in the same step, the next snapshot's matched-path direct gets only the remainder, and a non-holding direct that needs more than 120 evaluations (about 15 Newton iterations, below C7's 25) is cut too.
+  - On the fit ramp the probe traces two such cuts (8.85 s: recovered with 45 evaluations, then cut after 7 iterations at 4.29e-3; 11.40 s: 66, then cut after 6 iterations). Each started a new held episode and warning.
+  - A trial with the carried spend ignored when not holding leaves both still failing after 10 iterations (4.29e-3, 9.21e-3), so they are genuine losses, not artefacts.
+  - Fix: state the bound as observed (the fingerprints and heldFrame's three scenarios). Or start a non-holding direct's cap from its own work, then recheck P5's every-step row.
+- **W2H-N2: a stopped solve that already passes `ACCEPTED_RESIDUAL` is thrown away** (`matchedSolve.ts:74`: `stopped` is tested before acceptance).
+  - On the fit ramp, 5 solves stopped at residuals below 1e-6 (steps 632 and 680-683, e.g. 4.98e-10 after 9 iterations, against 1e-6). With a walk in flight the direct gets DIRECT_SHARE (60), restarts from the anchor every step, and stops one iteration short each time.
+  - Accepting them (trial) changed nothing measurable here: the same 798 held steps and 1594 lost. So it is a nit, but the module's own definition says such a solution is usable.
+  - Fix: accept a stopped direct solve that passes the residual and BPR checks; keep the walk as it is for bit-identity.
+- **W2H-N3: P5 does not say how long the ramp runs.** `heldFrame.test.ts` gates 10 s after the ramp starts (`ramp(10)`, to 13 s). The fit's second episode (13.05 s, the W2H-I1 runaway) and a 79-evaluation converged direct at 13.03 s (against `CONVERGED_DIRECT = 80`) fall just outside. Over 23 s the bars still hold (held-cost: held max 136, all steps ≤ 217). Fix: put the run length in P5's row (and the 3 s idle lead), or gate the handoff's 20 s.
+- **W2H-N4: Stryker survivors that are test gaps, not equivalents** (`heldRetry.ts`, `matchedSolve.ts`):
+  - `sameTarget` with the n1 or wf comparison forced true (116:3, 116:49): the `reached` tests change only n2;
+  - `walk === null` → true (143:7): a walk in flight is replaced once 0.5 s has passed. No fast test keeps a walk in flight past the interval. Hand mutant B2, against heldFrame, is not run;
+  - the solves-exhausted `lost` → `{}` (201): through `retryMatched` it would fall through to `matched` with an undefined solution. Only `solveMatched` tests reach it, and there null hides it;
+  - the walk's pre-solve `stop` check removed (158): the walk still pauses, through Newton's own check, one evaluation later.
+
+  Fix: three small double-based tests. The remaining survivors are equivalent (105, 108, 147, 217, `guess.slice`, `MAX_STEP.slice`, the jac init) or outside the branch and the targeted test set (`model.ts:837`, the sub-idle condition; the option checks and `entering` are reached only by heldFrame or the start tests; see the hand mutants).
+- **W2H-N5:** the `heldRetry.ts` header says "pure", but `retryMatched` mutates its `spend` argument (`:124-125`). Fix: say so in the doc, or return the spend.
+
+#### Mutation (cycle-hold's targeted Stryker run, read from `w2-cycle-hold/reports/mutation/mutation.json`, finished 18:58)
+| file | killed | timeout | survived | no coverage |
+|---|---|---|---|---|
+| matchedSolve.ts | 119 | 5 | 16 | 1 |
+| heldRetry.ts | 90 | 0 | 7 | 0 |
+| model.ts (393-406, 833-904) | 53 | 0 | 16 | 7 |
+| engine.ts (1066-1090, 1118-1146) | 12 | 0 | 2 | 0 |
+| newton.ts (86-96) | 21 | 0 | 2 | 0 |
+| **total (351; 3 ignored)** | **295** | **5** | **43** | **8** |
+
+The score is 300 / 351 = 85.5 % (87.5 % of covered). The survivors are classified in W2H-I2 and W2H-N4. model.ts's 16 survivors and 7 no-coverage mutants sit in lines that only heldFrame and the start tests reach, and that run excluded them (`model.ts:837`'s sub-idle condition is pre-existing).
+
+#### Verdict B: none yet (PARTIAL)
+B has no blocking finding so far, and one important finding (W2H-I2, test-only). Still unchecked:
+- hand mutants B1-B4 against heldFrame;
+- the default-model sweep (W2H-I1 reach);
+- the remaining gates.
+
+### Gates (the trial merge: main c2dc8da + w2/reference-9 @d05e16d + w2/cycle-hold @f2c0779)
+| gate | result |
+|---|---|
+| npm run coverage (own reportsDirectory) | 120 files passed; 2159 passed + 11 expected fail (2170); exit 0, so the per-directory thresholds hold; lines 99.32 %, statements 98.36 %, branches 87.52 %, functions 99.35 %; 876 s |
+| typecheck, lint | NOT RUN (STOP-CLEAN) |
+| test:mesh, test:gpu, test:browser | NOT RUN (STOP-CLEAN) |
+| test:ladder | not rerun, by instruction: src and tests at d05e16d equal 8447e99, whose ladder JSON is verified above |
+
+### Questions for the orchestrator (provisional)
+- (vv) W2H-N1: should a non-holding direct solve's budget count only its own work, not the step's carried spend? Then a step that recovers and then loses again could cost up to 274 evaluations. P5's every-step row (217) would need restating.
+- (ww) Next critic pass: finish B (run `pass14-mutants.sh.txt` and probe mode 1 on the trial merge), then typecheck, lint, test:mesh, test:gpu and test:browser.
