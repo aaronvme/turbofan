@@ -920,6 +920,21 @@ svg text {
   font-size: 11px;
   color: var(--fg);
 }
+/* W2A-I1: the fault counts are chips that open the Diagnostics drawer (the messages) */
+.annunciators button.badge {
+  pointer-events: auto;
+  min-height: 0;
+  padding: 3px 7px;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+  background: rgb(7 9 12 / 0.78);
+}
+.annunciators button.badge:hover {
+  background: rgb(255 255 255 / 0.1);
+}
+.clock .warning {
+  color: var(--warning);
+}
 
 /* the view dock: legend, camera presets, tracers, the Data view's field */
 .dock {

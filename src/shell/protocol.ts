@@ -76,6 +76,14 @@ export interface FrameBudget {
   readonly fps: number;
 }
 
+/** The MOCK raster's health (W2A-I1: a failure is annunciated, not only listed). */
+export interface RasterHealth {
+  /** Its worker failed, so the raster runs on the frame (slower frames, never a stale field). */
+  readonly onFrame: boolean;
+  /** Why the last raster (or its worker) failed; null: none failed. */
+  readonly lastError: string | null;
+}
+
 export interface AppDiagnostics {
   readonly budget: FrameBudget;
   /**
@@ -83,6 +91,7 @@ export interface AppDiagnostics {
    * the MOCK stands in for the solver asked for). null before the field is bound.
    */
   readonly field: FlowLinkState | null;
+  readonly raster: RasterHealth;
   /** W2F-I1: why the last matched solve was lost (null: none lost since the reset). */
   readonly lostSolveCause: string | null;
   /** The worker's own errors so far (GPU errors, a throwing step), newest last, at most 8. */
@@ -104,4 +113,10 @@ export type FromWorker =
     }
   | { readonly type: 'gpu-error'; readonly message: string }
   | { readonly type: 'device-lost'; readonly message: string }
+  /**
+   * W2A-I1: the cycle step threw (a bug), so the sim stopped: the clock and the gas path are
+   * frozen while the worker keeps rendering (the view can still be orbited and read).
+   */
+  | { readonly type: 'sim-stopped'; readonly message: string }
+  /** The app cannot go on (init failed, the snapshots cannot be posted). */
   | { readonly type: 'fatal'; readonly message: string };

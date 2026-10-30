@@ -57,6 +57,8 @@ const TIMINGS_EVERY = 15;
 /** The frame-cost window, frames (2 s at 60 fps: a held episode's frames stay in view). */
 const COST_WINDOW = 120;
 const MAX_ERRORS = 8;
+/** Snapshot posts that may fail in a row before the overlay is told the app cannot go on. */
+const MAX_FAILED_POSTS = 3;
 
 const anchors = componentAnchors(ENGINE_DEFINITION);
 
@@ -97,6 +99,8 @@ interface App {
   raster: Worker | null;
   rasterDue: RasterScheduler;
   rasterId: number;
+  /** Why the last raster (or the raster worker) failed (W2A-I1: annunciated). */
+  rasterError: string | null;
   mockRasterMs: number | null;
   mockRasters: number;
   orbit: OrbitState;
@@ -147,34 +151,44 @@ function rasterHere(a: App, state: CycleState) {
   return field;
 }
 
+/** The raster worker is gone: raster on the frame from now on, and say so (annunciated). */
+function rasterOnFrame(a: App, message: string) {
+  a.rasterError = message;
+  pushError(a, message);
+  console.warn(message);
+  a.raster = null;
+  a.rasterDue.settled();
+}
+
 /** The raster worker (src/shell/mockRaster.ts: the raster is ~10 frames of CPU). */
 function startRaster(a: App): Worker | null {
   try {
     const w = new Worker(new URL('./mockRasterWorker.ts', import.meta.url), { type: 'module' });
     w.onmessage = (e: MessageEvent<RasterReply>) => {
-      a.rasterDue.settled();
       const r = e.data;
+      // W2A-N7: only the reply to the request in flight settles it (a late one is dropped)
+      if (r.id !== a.rasterId) return;
+      a.rasterDue.settled();
       if ('error' in r) {
-        pushError(a, `MOCK raster: ${r.error}`);
+        a.rasterError = `MOCK raster: ${r.error}`;
+        pushError(a, a.rasterError);
         console.warn(`MOCK raster failed: ${r.error}`);
         return;
       }
+      a.rasterError = null;
       a.mockRasterMs = r.ms;
       a.mockRasters++;
       a.fields?.setMock(r.field);
     };
     w.onerror = (e) => {
       // say so, and raster on the frame from now on (slower frames, never a stale field)
-      const msg = `MOCK raster worker failed (${e.message}): rasterizing on the frame`;
-      pushError(a, msg);
-      console.warn(msg);
+      rasterOnFrame(a, `MOCK raster worker failed (${e.message}): rasterizing on the frame`);
       w.terminate();
-      a.raster = null;
-      a.rasterDue.settled();
     };
     return w;
   } catch (e) {
-    pushError(a, `MOCK raster worker: ${e instanceof Error ? e.message : String(e)}`);
+    a.rasterError = `MOCK raster worker: ${e instanceof Error ? e.message : String(e)}: rasterizing on the frame`;
+    pushError(a, a.rasterError);
     return null;
   }
 }
@@ -244,6 +258,7 @@ function loop(a: App) {
   const cycleMs = new Rolling(COST_WINDOW);
   const frameMs = new Rolling(COST_WINDOW);
   const stamps: number[] = [];
+  let failedPosts = 0;
   let stats = a.view.stats();
   const tick = (t: number) => {
     if (a.lost) return;
@@ -259,11 +274,12 @@ function loop(a: App) {
       try {
         a.core.advance(dt);
       } catch (e) {
-        // a throwing model is a bug: stop the sim, keep rendering, say so (never silent)
+        // a throwing model is a bug: stop the sim, keep rendering, say so (never silent): the
+        // overlay annunciates SIM STOPPED with this message (W2A-I1)
         a.simFailed = true;
-        const msg = `cycle step failed: ${e instanceof Error ? e.message : String(e)}`;
+        const msg = `cycle step failed: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`;
         pushError(a, msg);
-        post({ type: 'fatal', message: msg });
+        post({ type: 'sim-stopped', message: msg });
       }
       held = a.core.state().gasPathSolve.status === 'held';
       cycleMs.push(performance.now() - c0, held);
@@ -307,6 +323,7 @@ function loop(a: App) {
           fps: stamps.length,
         },
         field: a.fields?.state() ?? null,
+        raster: { onFrame: a.raster === null, lastError: a.rasterError },
         lostSolveCause: a.cycle.lostSolveCause(),
         errors: [...a.errors],
         adapter: `${a.view.device.info.vendor} ${a.view.device.info.architecture}`.trim(),
@@ -321,8 +338,14 @@ function loop(a: App) {
           anchors: projectAnchors(a),
           refused: a.refused.splice(0),
         });
+        failedPosts = 0;
       } catch (e) {
-        pushError(a, `snapshot: ${e instanceof Error ? e.message : String(e)}`);
+        // the errors travel in the snapshot, so a post that keeps failing (a DataCloneError)
+        // would freeze the overlay with no message: say so once it is not a one-off (W2A-N2)
+        const msg = `snapshot: ${e instanceof Error ? e.message : String(e)}`;
+        pushError(a, msg);
+        if (++failedPosts === MAX_FAILED_POSTS)
+          post({ type: 'fatal', message: `${msg} (${MAX_FAILED_POSTS} posts in a row failed)` });
       }
     }
     frame++;
@@ -356,8 +379,13 @@ function handle(a: App, m: ToWorker) {
       return;
     }
     case 'field':
-      // drawn once bound; a fallback and its reason are in the switch's state (D4-82)
-      void a.fields?.choose(m.source);
+      // drawn once bound; a fallback and its reason are in the switch's state (D4-82). A choice
+      // that throws (the fallback's own bind) is an error, never an unhandled rejection (W2A-N1)
+      a.fields?.choose(m.source).catch((e: unknown) => {
+        const msg = `field ${m.source}: ${e instanceof Error ? e.message : String(e)}`;
+        pushError(a, msg);
+        console.warn(msg);
+      });
       return;
   }
 }
@@ -407,6 +435,7 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     raster: null,
     rasterDue: createRasterScheduler(),
     rasterId: 0,
+    rasterError: null,
     mockRasterMs: null,
     mockRasters: 0,
     orbit: orbitFromPose(preset.camera, preset.target),

@@ -40,6 +40,12 @@ export function startClient(canvas: HTMLCanvasElement, options: ClientOptions = 
   worker.onerror = (e) => {
     useApp.getState().setConnection({ state: 'failed', message: `worker: ${e.message}` });
   };
+  // a message that cannot be deserialized never reaches onmessage: say so (W2A-N2)
+  worker.onmessageerror = () => {
+    useApp
+      .getState()
+      .setConnection({ state: 'failed', message: 'worker: a message could not be read' });
+  };
 
   const size = () => {
     const r = canvas.getBoundingClientRect();

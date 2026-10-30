@@ -8,6 +8,7 @@ import { parseFidelityLedger, type LedgerKind } from '../hud/ledger';
 import { layoutCallouts, leaderEnd, type Rect } from '../hud/callouts';
 import { componentAnchors } from '../hud/anchors';
 import {
+  faultAnnunciations,
   fieldFallbackAnnunciation,
   flagAnnunciations,
   flowAnnunciation,
@@ -99,6 +100,8 @@ export function TopBar({ snapshot }: { readonly snapshot: SimSnapshot }) {
   const units = useApp((s) => s.units);
   const setUnits = useApp((s) => s.setUnits);
   const link = useApp((s) => s.diagnostics?.field ?? null);
+  // W2A-I1: a stopped sim's clock is frozen, so it offers no pause and says so
+  const stopped = useApp((s) => s.simStopped !== null);
   const { clock, view } = snapshot;
   return (
     <header className="topbar" data-reserve>
@@ -111,14 +114,16 @@ export function TopBar({ snapshot }: { readonly snapshot: SimSnapshot }) {
         <button
           type="button"
           aria-pressed={clock.paused}
+          disabled={stopped}
           onClick={() => {
             send({ type: 'pause', paused: !clock.paused });
           }}
         >
           {clock.paused ? 'Resume' : 'Pause'}
         </button>
-        <span className="mono" aria-label="Simulated time">
+        <span className={stopped ? 'mono warning' : 'mono'} aria-label="Simulated time">
           t {fmt.simTime(clock.simTimeS)}
+          {stopped ? ' · stopped' : ''}
         </span>
         <label className="compact">
           <span className="sr-only">Time scale</span>
@@ -179,6 +184,9 @@ export function TopBar({ snapshot }: { readonly snapshot: SimSnapshot }) {
   );
 }
 
+/** The fault chips that open the Diagnostics drawer, which lists their messages. */
+const OPENS_DIAGNOSTICS = new Set(['gpuErrors', 'raster', 'refused']);
+
 export function Annunciators({
   snapshot,
   diagnostics,
@@ -186,22 +194,55 @@ export function Annunciators({
   readonly snapshot: SimSnapshot;
   readonly diagnostics: AppDiagnostics | null;
 }) {
+  const simStopped = useApp((s) => s.simStopped);
+  const gpuErrors = useApp((s) => s.gpuErrorCount);
+  const refused = useApp((s) => s.refused.length);
+  const openPanel = useApp((s) => s.openPanel);
   const gas = gasPathAnnunciation(snapshot.cycle, diagnostics?.lostSolveCause ?? null);
   const fallback = fieldFallbackAnnunciation(diagnostics?.field ?? null);
+  // W2A-I1: the worker's faults outside the field switch, on screen
+  const faults = faultAnnunciations({
+    simStopped,
+    gpuErrors,
+    raster: diagnostics?.raster ?? null,
+    refused,
+  });
   const list = [
+    ...faults.filter((a) => a.id === 'simStopped'),
     ...flagAnnunciations(snapshot.cycle),
     ...(gas.level === 'normal' ? [] : [gas]),
     ...(fallback === null ? [] : [fallback]),
+    ...faults.filter((a) => a.id !== 'simStopped'),
   ];
   return (
-    <div className="annunciators" role="status" aria-live="polite" aria-label="Annunciators">
+    <div
+      className="annunciators"
+      role="status"
+      aria-live="polite"
+      aria-label="Annunciators"
+      data-reserve
+    >
       {list.map((a) =>
-        // a held gas path states its cause beside it (D4-17, W2F-I1), not only in a tooltip
-        a.id === 'gasPath' && a.level === 'warning' ? (
+        // a held gas path and a stopped sim state their cause beside them (D4-17, W2F-I1,
+        // W2A-I1), not only in a tooltip
+        (a.id === 'gasPath' || a.id === 'simStopped') && a.level === 'warning' ? (
           <div key={a.id} className="annunciation">
             <Badge a={a} />
             <span className="annunciation-detail">{a.detail}</span>
           </div>
+        ) : OPENS_DIAGNOSTICS.has(a.id) ? (
+          <button
+            key={a.id}
+            type="button"
+            className="badge"
+            data-level={a.level}
+            title={a.detail}
+            onClick={() => {
+              openPanel('diagnostics');
+            }}
+          >
+            {a.text}
+          </button>
         ) : (
           <Badge key={a.id} a={a} />
         ),
