@@ -3404,6 +3404,16 @@ None.
   - This closes W2V-I1 and W2V-I6.
 - **D4-83 (question ss): Realistic mode has no tracers by default,** because the cinematic product view read them as hair. Its subtle haze and schlieren stay, and tracers remain available as an option and on by default in the Cutaway/Data modes.
   - The near-field crop gets a crisp edge with a thin outline instead of a fade. This also removes the purple fog the fade made around the engine in the cut modes.
+- **D4-84 (w2/app-ui round 2 @f6ee8e2, decision 1): a held gas path must stay inside the frame budget; the fix bounds the retry, and the D2-4 worker layout stays.**
+  - Measured in the worker (Chrome at 1.5x, shared machine, indicative): a held step on the part-power fit's 1 s lever ramp costs 411-602 ms (median of three runs), against 1.7-3.6 ms for a matched step. Held frames run at 414-605 ms, 8-31 fps. The default reference model had 0 lost solves on the same ramp, so this bites on the part-power fit or a hard transient.
+  - **Adopted:** (b) the held retry gets a CPU budget per step and resumes on the next step, so the frame always holds 16.7 ms; and (a) the full halving walk runs at most once per 0.5 s of sim time, with the direct solve tried each step. The held state stays visible (W2F-I1's cause, the annunciator), never silent.
+  - **Not adopted now:** (c) the cycle in its own worker. It changes D2-4's single sim-plus-render worker and isn't needed once (a) and (b) bound the cost. It comes back only with data that (a) and (b) can't hold the budget.
+  - It doesn't block the app-ui merge (the default model doesn't hold on the ramp). It is a cycle follow-up round in W2, TDD, with the held-frame cost re-measured as a browser-suite row: held frame ≤ 16.7 ms on the same ramp.
+- **D4-85 (decision 2): the canvas is capped at 1080p-equivalent pixels for quality up to high; ultra keeps the full DPR.**
+  - At Chrome's 1.5x scaling, 1920×1001 rendered 4.3 MP, 2.1 times P4's 1080p, and the engine render measured 27.9 ms on the shared machine, leaving D4-2's solver at its 2-iteration floor.
+  - P4's budget (render ≤ 8 ms) is pre-registered at 1080p, so the app renders the pixels P4 measures: the backing store's pixel count is capped at 1920×1080 (2.07 MP) and the canvas is upscaled. Sharpness trades for frame rate, and ultra is the explicit opt-in.
+  - It goes into app-ui's next round, with a unit test on the cap and the measured render time recorded beside P4.
+- **D4-86 (decision 3): W2V-N21 is raised to important (W2V-I7).** At ground idle almost the whole Data plane is the colormap's darkest end (Mach ≈ 0 outside the nacelle), so the Data view reads as a purple board. The ambient region must read as quiet, not as a colour field: a neutral or transparent floor below a small threshold of the field's own range, or a range from the near field rather than the whole plane. It's flowviz's code; it goes to a small flowviz round with a screenshot before and after, and it doesn't block the app-ui merge.
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
