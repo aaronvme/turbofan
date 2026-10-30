@@ -3536,6 +3536,101 @@ None found.
 
 The glow reads as faint pink metal, which is honest for its physics. Provisional view: the UI chrome is at the target level; the flow layer needs a polish round before the app shows it.
 
+### Completion @4ad355e (2026-10-30)
+
+**Scope.**
+- I read `2cfd469..4ad355e` (round 3, 12 commits) against the PARTIAL above, with D4-82 and D4-83 from main bb7c83c.
+- I synced the critic branch with main bb7c83c (6b2c0fa). LOG.md conflicted; I kept both sides.
+- I trial-merged w2/flowviz @4ad355e with `--no-ff --no-commit`. It merged clean. `git diff --stat 4ad355e` shows only this LOG and my probe, so the gates below ran on the branch's own code.
+- Suites ran one at a time, in the foreground. Afterwards I aborted the merge; the critic branch is back at 6b2c0fa. The flowviz worktree was not touched.
+
+**Gates (on the trial merge).**
+- typecheck: clean.
+- lint (ESLint + Prettier): clean, 63 s.
+- `npm run coverage`: 109 files, 2049 passed + 11 expected fail. Statements 98.5 %, lines 99.5 %. Thresholds met, exit 0, 774 s.
+- `test:mesh`: 29 passed.
+- `test:gpu`: 12 files, 68 passed.
+- `test:browser`, run 1, with about 0.4-0.6 GB free:
+  - 1 failed, 29 passed, 1 error, and some files never reported.
+  - The error: `flowSolver.test.ts`'s iframe "did not become ready within 60000ms".
+  - The failure: the indicative `[timing]` test, with the tracers on at 3.17 ms against ≤ 2. The whole GPU was about 2.7× slow in that run: the P4 render total was 17.7 ms against about 6.5 elsewhere, so this was memory pressure and contention.
+- `test:browser`, run 2, once free memory had recovered to 2.3 GB, run verbose once: **11 files, 34 passed**, 0 WebGPU errors. I reran because the first run's failure was the environment, and I record both runs here.
+  - Timing (indicative): Realistic default 0.70 ms (render 0.61, compute 0.09). Tracers on 1.12 ms (compute 0.16). P4 paired change +0.04 ms.
+  - D4-76: 86.6 % of sampled plane pixels are on the LUT. The glow red-lifts 15732 px, and the haze changes 2942 px.
+  - The run left `docs/` clean (N8).
+
+**The W2V findings re-verified.** I read each fix in the diff and checked each test.
+- **W2V-I1 FIXED.**
+  - `FlowCoupling = 'mock' | 'uncoupled' | 'coupled'` is required on `FlowField` and `CpuFlowField` (`src/contracts/flow.ts`).
+  - `flowCouplingProblems` refuses a coupling that contradicts the source, and `GpuFlowSolver.fields()` says 'uncoupled'.
+  - `provenanceLabel(coupling, fallback)` reads "Flow solver (uncoupled until W3) … no blade or combustor forces", with a blue dot.
+  - Tested in the unit, gpu (`flow-solver.test.ts`) and browser (`flowPanel.test.ts`) suites.
+- **W2V-I2 FIXED.**
+  - The test sets a uniform state through `kernel.setUniform`: 110 m/s, which sits off every contour. It resamples with 0 iterations.
+  - Data (M 0.323): 53344 of 56041 plane pixels are on that value's LUT colour, and 0 on the zero colour. Cutaway: 53092 of 55891, and 0.
+  - The bounds are > 80 % and < 5 %, so a zero, misbound or misscaled texture fails.
+- **W2V-I3 FIXED, and the new test found a real bug.**
+  - The test reads back the schlieren and haze targets and compares them ray for ray with `rayDeflection`, using the shader's own offset (`marchOffset`) and the gradient kernel's TS mirror.
+  - The tolerance is 1 % of the column's peak plus the 96-step against 768-step quadrature error.
+  - Schlieren: worst 0.13 % of 1.23e-3 rad. Haze: worst 0.09 %. Nothing is outside the tolerance in either.
+  - The bug: the haze shift was twice the physical value, because `screenSize` inside the half-resolution `rtt()` is the RTT's own size (GPU_FACTS M55).
+  - The fix divides by 2 tan(fovY/2), and by the aspect for x. I re-derived it: the small-angle uv shift is angle / (2 tan(fovY/2)), over the aspect for x. Correct.
+- **W2V-I4 FIXED.**
+  - `advectSubstepped` and its WGSL mirror take midpoint substeps of at most one texel, at most 128 per frame.
+  - The step criterion uses the meridional speed, which is right: swirl cannot cross an axisymmetric wall.
+  - Past the cap a tracer lags behind instead of tunnelling.
+  - The Dawn test at ×1/10: 0 branch mismatches and 8.4e-5 m. A no-substep mutant gives 213 mismatches and 0.87 m.
+- **W2V-I5 FIXED.**
+  - The flow pass and the march use `flowCamera`, copied from the camera at render start, before TRAA sets its view offset inside the pipeline (GPU_FACTS M54).
+  - The test: 0 of 278643 overlay pixels change between two still frames. The jittered control (`jitterFlow`) changes 222681.
+  - A residual remains: W2V-N20 below.
+- **W2V-I6 FIXED** for the look-dev page. The app shell picks this up under D4-82 (handoff NEXT 2).
+  - `src/flow/viz/fieldLink.ts` binds the MOCK before it disposes the solver.
+  - It falls back to the MOCK, with the reason shown and a warning, on:
+    - a failed start;
+    - a solver that is unavailable, lost or diverged (`sanitizeFlowStatus`);
+    - a step that throws;
+    - a field the visuals refuse.
+  - Re-created solver textures are rebound, and the cut plane discards non-finite values.
+  - Tests: 10 unit cases, plus 2 browser cases (a failed start, and a solver lost mid-run).
+- **The nits:**
+  - N7 FIXED (02c374e).
+  - N8 FIXED: output goes to `reports/flow/` unless `VITE_FLOW_LOOKDEV=1`, and my run left `docs/` clean.
+  - N9 FIXED: `ui-realistic.jpg` shows "GPU 0.66 ms".
+  - N10 FIXED: a/f is 1e-3, pinned by a test, and `schlieren.png` is now graded, not saturated.
+  - N11 FIXED: `GAMMA_R_TABLE`/`airGammaR` is shared by `deriveQuantities` and the shader.
+  - N12 FIXED: u_r is negated past the axis. The θ rate is even and needs no sign, which is correct.
+  - N13 FIXED: a frame without a flow time is NaN and skipped.
+  - N14 FIXED: `createGlowRadianceCache` in the view.
+  - N15 FIXED: the ledger says about 9 % (HPT vane) and about 15 % (LPT vane), and that the absolute T41 makes it an upper bound.
+  - N16 FIXED: M53 has both round 2's numbers and round 3's.
+  - N17 FIXED: Realistic's note says "mean flow, no shimmer", and the notes end "The visuals add nothing synthesized."
+  - N18 FIXED: the 45 cm cap and its reason are in the ledger and the note.
+  - N19 parts 1-2 FIXED: all six extent fields are compared, and re-created textures are rebound. **N19 part 3, the intake seed zone, STILL OPEN:** it is deferred to W3's coupled field, with the reason, which I accept.
+
+**New nits (not blocking).**
+- **W2V-N20:** the overlay's occlusion edges still follow the jittered depth.
+  - `behindEngine` (`flowViz.ts`) reads `sceneDepth` and `rotorDepth`, which TRAA renders jittered. Where the fan or the lip crosses the plane, the plane's cut edge moves by up to half a pixel per frame.
+  - I5's test hides everything else, so it cannot see this.
+  - Polish: compare against unjittered depth, or accept it.
+- **W2V-N21 (visual):** with the crisp crop, the ambient part of the plane is a large flat purple board in `ui-cutaway.jpg` and `ui-data.jpg`. It is clean and reads as intended, but it is heavy. Consider a lower opacity outside the nacelle (stated on the legend), or a smaller rMax.
+- P4 is the orchestrator's (handoff NEXT 1). The builder's indicative paired change is +0.18 ms; my run 2 gives +0.04. Only the official D0-1 capture with the flow on counts, against the 1.04 ms margin (D4-75).
+
+**Visual review (the new screenshots, all viewed: the four `ui-*.jpg`, `solver-link.png`, `schlieren.png`).**
+- Realistic now reads as premium: the engine is clean, there are no hair streaks, and the panel shows the tracer switch and the ms.
+- The crop's edge is crisp and outlined, so the fog is gone.
+- The overlay no longer crawls (I5).
+- The speed map runs to 700 m/s, so the MOCK's 645 m/s core jet is no longer flat at the top.
+- The uncoupled solver's near-rest frames are gone. `solver-link.png` is labelled as a link check.
+- The schlieren is graded.
+- What remains: N21's heavy board and N20. The glow stays faint, which is honest for its physics.
+
+**Verdict w2/flowviz @4ad355e: MERGE.**
+- B 0. I1-I6 FIXED. N7-N18 FIXED. N19 part 3 is open as a W3 item.
+- New: N20 and N21.
+- The gates are green on the trial merge, with browser run 2 at recovered memory.
+- Before the flow is shown in the app, the orchestrator runs P4 official with the flow on (NEXT 1).
+
 ## Critic pass 12: w2/reference-9 a5d86dd..c2d7c9f (no merge; light review, PARTIAL: STOP-CLEAN)
 
 Reviewed with `git show` and `git diff` only; the worktree's uncommitted scratch patch was ignored. The monitor itself landed in round 11, before a5d86dd (2d3a592 TDD, 8ed4497), so I read `bcacc0a..c2d7c9f -- src tests`. The only src change is the monitor; there is no scheme change.
