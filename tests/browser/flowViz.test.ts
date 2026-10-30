@@ -600,18 +600,30 @@ describe('flow visuals', () => {
         overlay: on.flow.renderMs,
       });
     }
+    // D4-83: Realistic draws no tracers by default; with the option on (32768 streaks, the
+    // substeps of W2V-I4) the visuals must still fit D4-2's budget
+    v.setFlowTracers(true);
+    const traced = await sample(true);
+    v.setFlowTracers(null);
     await q.onSubmittedWorkDone();
     expect(v.stats().errors).toEqual([]);
+    expect(traced.flow.tracers).toBe(true);
+    const tracers = {
+      flow: traced.flow.visualsMs,
+      compute: traced.flow.computeMs,
+      overlay: traced.flow.renderMs,
+    };
     const med = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? NaN;
     const flowMs = med(pairs.map((p) => p.flow));
     const deltaRender = med(pairs.map((p) => p.on - p.off));
     await annotate(
-      `[timing] flow visuals (realistic, default preset, 1080p, back to back, indicative): ${flowMs.toFixed(3)} ms (render passes ${med(pairs.map((p) => p.overlay)).toFixed(3)}, compute ${med(pairs.map((p) => p.compute ?? NaN)).toFixed(3)}); P4 render total off ${med(pairs.map((p) => p.off)).toFixed(2)} / on ${med(pairs.map((p) => p.on)).toFixed(2)} ms (paired change ${deltaRender.toFixed(3)} ms) ${JSON.stringify(pairs)}`,
+      `[timing] flow visuals (realistic, default preset, 1080p, back to back, indicative): ${flowMs.toFixed(3)} ms (render passes ${med(pairs.map((p) => p.overlay)).toFixed(3)}, compute ${med(pairs.map((p) => p.compute ?? NaN)).toFixed(3)}); P4 render total off ${med(pairs.map((p) => p.off)).toFixed(2)} / on ${med(pairs.map((p) => p.on)).toFixed(2)} ms (paired change ${deltaRender.toFixed(3)} ms); with the tracers on ${tracers.flow.toFixed(3)} ms (compute ${(tracers.compute ?? NaN).toFixed(3)}) ${JSON.stringify(pairs)}`,
     );
     await commands.writeFile(
       `${OUT}/timing.json`,
-      `${JSON.stringify({ note: 'indicative, back to back, 1080p, threeQuarterFront, realistic flow mode; not D0-1', pairs }, null, 2)}\n`,
+      `${JSON.stringify({ note: 'indicative, back to back, 1080p, threeQuarterFront, realistic flow mode (D4-83: no tracers by default; tracers: the option on); not D0-1', pairs, tracers }, null, 2)}\n`,
     );
     expect(flowMs).toBeLessThanOrEqual(FLOW_VISUALS_BUDGET_MS);
+    expect(tracers.flow).toBeLessThanOrEqual(FLOW_VISUALS_BUDGET_MS);
   });
 });
