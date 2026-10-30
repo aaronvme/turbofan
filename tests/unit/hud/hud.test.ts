@@ -3,12 +3,19 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  chartSpeedPercents,
+  FAN_LINES,
+  HPC_LINES,
   labelBox,
+  lowestMapPercent,
   mapGeometry,
   niceTicks,
   placeSpeedLabels,
+  plotPoint,
   pushTrail,
   scaleOf,
+  SM_CAUTION_FRACTION,
+  surgeMarginView,
 } from '../../../src/hud/compressorMap';
 import { tsDiagram } from '../../../src/hud/tsDiagram';
 import { layoutCallouts, leaderEnd, overlaps } from '../../../src/hud/callouts';
@@ -65,6 +72,72 @@ describe('compressor map geometry', { timeout: 120_000 }, () => {
     for (let k = 0; k < 10; k++)
       s = model.step(1, { ...DEFAULT_CYCLE_INPUTS, fuelLever: 'run', throttleLever: 1 });
     check();
+  });
+
+  it("D4-87: the map's lowest speed line is the map's own (the fan's 30.6 %, the HPC's 44 %)", () => {
+    for (const which of ['fan', 'hpc'] as const) {
+      const f = frame(which);
+      const expected =
+        (100 * (f.map.map.nc[0] ?? NaN) * f.designCorrectedRpm) /
+        (f.map.map.design.nc * f.referenceRpm);
+      expect(lowestMapPercent(f), which).toBeCloseTo(expected, 9);
+      expect(mapGeometry(f).lowestPercent, which).toBeCloseTo(expected, 9);
+      // the chart draws the map down to its lowest line, then the round lines above it
+      const lines = chartSpeedPercents(f, [40, 50, 60, 100]);
+      expect(lines[0], which).toBeCloseTo(expected, 9);
+      expect(lines.slice(1).every((p) => p >= expected + 5)).toBe(true);
+    }
+    expect(lowestMapPercent(frame('fan'))).toBeCloseTo(30.6, 1);
+    expect(lowestMapPercent(frame('hpc'))).toBeCloseTo(44.0, 1);
+  });
+
+  it('D4-87: a surge margin below the map is dimmed and tagged "below map", never amber or red; on the map amber and red apply', () => {
+    const fan = mapGeometry(frame('fan'), chartSpeedPercents(frame('fan'), FAN_LINES));
+    const hpc = mapGeometry(frame('hpc'), chartSpeedPercents(frame('hpc'), HPC_LINES));
+    const idle = createCycleModel().reset('groundIdle');
+    // ground idle: the fan's corrected speed (about 20 %) is below its map's lowest line, and its
+    // 3.6 % margin is extrapolated there (amber before D4-87)
+    expect(100 * idle.fan.correctedSpeedFraction).toBeLessThan(fan.lowestPercent);
+    expect(idle.fan.surgeMarginFraction).toBeLessThan(SM_CAUTION_FRACTION);
+    expect(surgeMarginView(fan, idle.fan)).toEqual({ level: 'belowMap', tag: 'below map' });
+    // the HPC at idle is on its map, with a normal margin
+    expect(surgeMarginView(hpc, idle.hpc)).toEqual({ level: 'normal', tag: null });
+    const on = { ...idle.fan, correctedSpeedFraction: 0.8 };
+    expect(surgeMarginView(fan, { ...on, surgeMarginFraction: 0.2 }).level).toBe('normal');
+    expect(surgeMarginView(fan, { ...on, surgeMarginFraction: 0.03 }).level).toBe('caution');
+    expect(surgeMarginView(fan, { ...on, surgeMarginFraction: 0 }).level).toBe('warning');
+    expect(surgeMarginView(fan, { ...on, surgeMarginFraction: -0.02 }).level).toBe('warning');
+    // below the map neither applies, whatever the extrapolated number says
+    const below = { ...idle.fan, correctedSpeedFraction: 0.2 };
+    expect(surgeMarginView(fan, { ...below, surgeMarginFraction: -0.02 })).toEqual({
+      level: 'belowMap',
+      tag: 'below map',
+    });
+  });
+
+  it('W2A-I2: the idle and take-off operating points lie inside both charts, and a point off the chart is clamped to its edge', () => {
+    const fan = mapGeometry(frame('fan'), chartSpeedPercents(frame('fan'), FAN_LINES));
+    const hpc = mapGeometry(frame('hpc'), chartSpeedPercents(frame('hpc'), HPC_LINES));
+    const model = createCycleModel();
+    let s = model.reset('groundIdle');
+    const inside = (g: typeof fan, p: typeof s.fan, what: string) => {
+      expect(p.correctedFlowKgPerS, what).toBeGreaterThan(g.bounds.wc[0]);
+      expect(p.correctedFlowKgPerS, what).toBeLessThan(g.bounds.wc[1]);
+      expect(p.pressureRatio, what).toBeGreaterThanOrEqual(g.bounds.pr[0]);
+      expect(p.pressureRatio, what).toBeLessThan(g.bounds.pr[1]);
+    };
+    inside(fan, s.fan, 'fan at idle');
+    inside(hpc, s.hpc, 'hpc at idle');
+    for (let k = 0; k < 10; k++)
+      s = model.step(1, { ...DEFAULT_CYCLE_INPUTS, fuelLever: 'run', throttleLever: 1 });
+    inside(fan, s.fan, 'fan at take-off');
+    inside(hpc, s.hpc, 'hpc at take-off');
+    // the plot's rectangle, px: inside it a point is drawn where it is, outside on its edge
+    const plot = { x: 40, y: 10, w: 252, h: 128 };
+    expect(plotPoint(100, 50, plot, 3)).toEqual({ x: 100, y: 50, off: null });
+    expect(plotPoint(-20, 50, plot, 3)).toEqual({ x: 43, y: 50, off: { dx: -1, dy: 0 } });
+    expect(plotPoint(400, 200, plot, 3)).toEqual({ x: 289, y: 135, off: { dx: 1, dy: 1 } });
+    expect(plotPoint(100, Number.NaN, plot, 3).off).not.toBeNull();
   });
 
   it('keeps a bounded trail without repeating a still point', () => {

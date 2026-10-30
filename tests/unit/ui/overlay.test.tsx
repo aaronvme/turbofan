@@ -104,6 +104,34 @@ describe('the overlay (RTL)', { timeout: TIMEOUT_MS }, () => {
   });
 });
 
+describe('the compressor maps at ground idle (W2A-I2, D4-87)', { timeout: TIMEOUT_MS }, () => {
+  // the charts' plot rectangle in their 300 x 168 viewBox (charts.tsx's margins)
+  const inPlot = (c: Element | undefined) => {
+    const x = Number(c?.getAttribute('cx'));
+    const y = Number(c?.getAttribute('cy'));
+    return x >= 40 && x <= 300 - 8 && y >= 10 && y <= 168 - 30;
+  };
+
+  it("draws both operating points inside the plots; the fan's margin below its map is dimmed and tagged, not amber", () => {
+    mount(snapshotOf());
+    render(<Overlay />);
+    const maps = screen.getByRole('region', { name: 'Compressor maps' });
+    const [fan, hpc] = within(maps).getAllByRole('figure');
+    if (fan === undefined || hpc === undefined) throw new Error('no map figures');
+    expect(fan.textContent).toMatch(/^Fan/);
+    expect(inPlot(fan.querySelector('circle.op') ?? undefined)).toBe(true);
+    expect(inPlot(hpc.querySelector('circle.op') ?? undefined)).toBe(true);
+    // D4-87: the fan's idle margin is an extrapolation below the map, not a caution
+    const sm = within(fan).getByText(/^SM/);
+    expect(sm.getAttribute('data-level')).toBe('belowMap');
+    expect(sm.className).not.toMatch(/caution|warning/);
+    expect(within(fan).getByText('below map')).toBeTruthy();
+    expect(fan.querySelector('circle.op')?.getAttribute('data-below-map')).toBe('true');
+    expect(within(hpc).getByText(/^SM/).getAttribute('data-level')).toBe('normal');
+    expect(within(hpc).queryByText('below map')).toBeNull();
+  });
+});
+
 describe('the drawn field in the overlay (D4-82)', { timeout: TIMEOUT_MS }, () => {
   it('the field badge and the legend say the solver is uncoupled until W3', () => {
     mount(
