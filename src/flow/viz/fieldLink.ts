@@ -93,8 +93,10 @@ export async function createFlowFieldLink(o: {
     }
   };
   const fallBack = (reason: string) => {
-    drop();
+    // the MOCK is bound before the solver's textures are destroyed
+    bound = null;
     o.sink.setFlowField(mock);
+    drop();
     state = { asked: state.asked, coupling: 'mock', fallback: reason };
     warn(`flow field: drawing the MOCK instead of the solver (${reason})`);
   };

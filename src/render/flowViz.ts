@@ -143,6 +143,14 @@ type DepthNode = Node<'vec4'> & {
   sample(uv: Node<'vec2'>): Node<'vec4'>;
 };
 
+/** The camera's view geometry the haze needs (resolution-free). */
+export interface FlowViewGeometry {
+  /** 2 tan(fovY / 2): the frame height's angular size at unit distance. */
+  readonly tanFovY2: number;
+  /** Width over height. */
+  readonly aspect: number;
+}
+
 /** What the visuals need from the render pipeline (src/render/post.ts). */
 export interface FlowPostDeps {
   /** The scene and rotor passes' depth textures (WebGPU depth in [0, 1]). */
@@ -173,7 +181,7 @@ export interface FlowViz {
   /** D4-76: the cut plane over the full near-field raster instead of the mode's crop. */
   setFullDomain(full: boolean): void;
   /** Follows the cutaway wedge (the planes lie on its faces) and the camera's pixel angle. */
-  update(cutCenter: number, cutHalf: number, open: boolean, radPerPx: number): void;
+  update(cutCenter: number, cutHalf: number, open: boolean, view: FlowViewGeometry): void;
   /** The haze's background shift in uv (xy), built on the pipeline's depth (post.ts). */
   hazeNode(deps: FlowPostDeps): Node<'vec4'>;
   /** The schlieren's eps (up, right) per pixel, rad (post.ts composites the grey). */
@@ -233,7 +241,8 @@ export function createFlowViz(o: {
   const opacity = uniform(0);
   /** 1: display-encoded white streaks (D4-76 modes); 0: scene-linear radiance (Realistic). */
   const display = uniform(0);
-  const radPerPxU = uniform(5e-4);
+  const tanFovY2 = uniform(0.5);
+  const aspect = uniform(16 / 9);
   /** The mode's haze strength (1 = the physical Gladstone-Dale deflection; 0 = none). */
   const hazeGain = uniform(0);
   let hazeOff = false;
@@ -600,7 +609,7 @@ export function createFlowViz(o: {
     setDilation(d) {
       dilation.value = d;
     },
-    update(center, halfW, open, radPerPx) {
+    update(center, halfW, open, view) {
       planes.visible = open && quantity !== null && mode?.cutPlane === true;
       // the face at center - half shows its front; the plane's +y is the radius
       faces[0].rotation.x = center - halfW;
@@ -608,15 +617,17 @@ export function createFlowViz(o: {
       // the plane's +y at rotation a is the radius at theta = a (rotation about +x)
       sheet.faceA.value = center - halfW;
       sheet.faceB.value = center + halfW;
-      radPerPxU.value = radPerPx;
+      tanFovY2.value = view.tanFovY2;
+      aspect.value = view.aspect;
     },
     hazeNode(dp) {
       return Fn(() => {
         const m = march(dp, HAZE_STEPS);
-        // hazeShiftPx: eps (t_bg - t_gas) / t_bg over the pixel's angle, then px to uv (y down)
-        const k = max(m.w.sub(m.z), 0).div(max(m.w, 1e-3)).div(radPerPxU);
-        const px = m.xy.mul(k).mul(hazeGain);
-        return vec4(px.x.div(screenSize.x), px.y.negate().div(screenSize.y), 0, 1);
+        // hazeShiftPx, in the full frame's uv (y down): eps (t_bg - t_gas) / t_bg over the
+        // frame's angular size. W2V-I3: not px over screenSize, which in this half-resolution
+        // target is half the frame's, so round 2's shift was twice the physical one
+        const k = max(m.w.sub(m.z), 0).div(max(m.w, 1e-3)).div(tanFovY2).mul(hazeGain);
+        return vec4(m.x.mul(k).div(aspect), m.y.mul(k).negate(), 0, 1);
       })();
     },
     schlierenNode(dp) {

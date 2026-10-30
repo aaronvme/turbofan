@@ -714,8 +714,10 @@ async function assemble(
             : glowRadiance(part, metal[part], GLOW_EMISSIVITY[part]);
         uniforms.glow[part].value.set(r, g, b);
       }
-      const radPerPx = (2 * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(1, heightPx);
-      flowViz.update(wedge.center, wedge.halfWidth, wedge.halfWidth > 1e-3, radPerPx);
+      flowViz.update(wedge.center, wedge.halfWidth, wedge.halfWidth > 1e-3, {
+        tanFovY2: 2 * Math.tan((camera.fov * Math.PI) / 360),
+        aspect: camera.aspect,
+      });
       if (flowMode !== null && flowCompute.binding !== null) {
         const m = FLOW_VIZ_MODES[flowMode];
         flowCompute.run({
