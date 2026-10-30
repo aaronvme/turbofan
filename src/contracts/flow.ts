@@ -327,6 +327,34 @@ export function texelIndexAt(
 export type FlowFieldSource = 'mock' | 'solver';
 export const FLOW_FIELD_SOURCES = ['mock', 'solver'] as const satisfies readonly FlowFieldSource[];
 
+/**
+ * D4-82 (critic pass 12; a minimal, flagged contract addition): how far a field is the engine's
+ * answer. mock: the labelled stand-in (src/mocks). uncoupled: the solver, run without the
+ * coupling's body forces and combustor sources (W2: from a start state, so not this engine's
+ * flow; the badge and the legend say "solver (uncoupled until W3)"). coupled: the solver driven
+ * toward the cycle model by W3's coupling. It travels with the data, as `source` does.
+ */
+export type FlowCoupling = 'mock' | 'uncoupled' | 'coupled';
+export const FLOW_COUPLINGS = [
+  'mock',
+  'uncoupled',
+  'coupled',
+] as const satisfies readonly FlowCoupling[];
+
+/** Problems if the coupling contradicts the source (empty when they agree). */
+export function flowCouplingProblems(f: {
+  readonly source: FlowFieldSource;
+  readonly coupling: FlowCoupling;
+}): string[] {
+  const mock = f.source === 'mock';
+  if (mock === (f.coupling === 'mock')) return [];
+  return [
+    mock
+      ? `a MOCK field cannot be '${f.coupling}' (only the solver is coupled or uncoupled)`
+      : "a solver field cannot be 'mock' (it is 'uncoupled' or 'coupled')",
+  ];
+}
+
 /** CPU copy of one extent's two textures: raw f16 bits, exactly what writeTexture uploads. */
 export interface CpuFieldTextures {
   readonly extent: FieldExtent;
@@ -336,6 +364,8 @@ export interface CpuFieldTextures {
 
 export interface CpuFlowField {
   readonly source: FlowFieldSource;
+  /** D4-82. */
+  readonly coupling: FlowCoupling;
   readonly reference: FieldReference;
   readonly near: CpuFieldTextures;
   readonly far: CpuFieldTextures;
@@ -349,6 +379,8 @@ export interface FieldTexturePair {
 
 export interface FlowField {
   readonly source: FlowFieldSource;
+  /** D4-82: the solver's field is 'uncoupled' until W3's coupling drives it. */
+  readonly coupling: FlowCoupling;
   readonly reference: FieldReference;
   readonly extents: Readonly<Record<FieldExtentId, FieldExtent>>;
   readonly near: FieldTexturePair;

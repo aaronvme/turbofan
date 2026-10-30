@@ -54,11 +54,19 @@ export function isFlowPass(label: string): boolean {
 
 const validMs = (ms: number): boolean => ms >= 0 && ms <= MAX_PASS_MS;
 
-/** One frame's flow-visual passes, ms (invalid durations dropped, as in sumByGroup). */
+/**
+ * One frame's flow-visual passes, ms (invalid durations dropped, as in sumByGroup); NaN when the
+ * frame has no valid flow duration (W2V-N13: no flow time, which is not a 0 ms flow time).
+ */
 export function sumFlowMs(entries: Iterable<{ label: string; ms: number }>): number {
   let t = 0;
-  for (const e of entries) if (isFlowPass(e.label) && validMs(e.ms)) t += e.ms;
-  return t;
+  let any = false;
+  for (const e of entries)
+    if (isFlowPass(e.label) && validMs(e.ms)) {
+      t += e.ms;
+      any = true;
+    }
+  return any ? t : Number.NaN;
 }
 
 const zero = (): Record<PassGroup, number> =>
@@ -90,7 +98,10 @@ export interface PassMedians {
   readonly gpuTotal: number;
   /** Median CPU ms per frame (JS time to encode and submit it). */
   readonly cpu: number;
-  /** Median GPU ms per frame of the flow-visual render passes (not in `gpu` or `gpuTotal`). */
+  /**
+   * Median GPU ms of the flow-visual render passes (not in `gpu` or `gpuTotal`), over the frames
+   * that drew them; 0 when none did (W2V-N13).
+   */
   readonly flow: number;
 }
 
@@ -148,7 +159,7 @@ export function summarizeRun(frames: readonly FrameSample[]): RunSummary {
 
 /** The last `window` frames' pass timings (the overlay), plus every frame of a timing run. */
 export class RollingPassStats {
-  private readonly frames: { gpu: PassMs; total: number; cpu: number; flow: number }[] = [];
+  private readonly frames: { gpu: PassMs; total: number; cpu: number; flow: number | null }[] = [];
   private run: FrameSample[] | null = null;
   private readonly window: number;
   // no parameter property: Node's type stripping (tools/lookdev/capture.ts imports this) rejects it
@@ -161,9 +172,12 @@ export class RollingPassStats {
   push(gpu: PassMs, cpuMs: number, flowMs?: number): void {
     let total = 0;
     for (const g of PASS_GROUPS) total += gpu[g];
-    this.frames.push({ gpu, total, cpu: cpuMs, flow: flowMs ?? 0 });
+    // W2V-N13: a frame without a flow time (none drawn, or every flow query dropped) is skipped
+    // by the flow median, not counted as 0
+    const flow = flowMs !== undefined && Number.isFinite(flowMs) ? flowMs : null;
+    this.frames.push({ gpu, total, cpu: cpuMs, flow });
     if (this.frames.length > this.window) this.frames.shift();
-    this.run?.push(flowMs === undefined ? { gpu, cpu: cpuMs } : { gpu, cpu: cpuMs, flow: flowMs });
+    this.run?.push(flow === null ? { gpu, cpu: cpuMs } : { gpu, cpu: cpuMs, flow });
   }
 
   /** Starts recording every frame pushed from now on (a timing run). */
@@ -178,6 +192,13 @@ export class RollingPassStats {
     return r;
   }
 
+  /** The flow passes' median over the frames that drew them; 0 when none did. */
+  private flowMedian(): number {
+    const xs: number[] = [];
+    for (const f of this.frames) if (f.flow !== null) xs.push(f.flow);
+    return xs.length === 0 ? 0 : median(xs);
+  }
+
   medians(): PassMedians {
     const gpu = zero();
     for (const g of PASS_GROUPS) gpu[g] = median(this.frames.map((f) => f.gpu[g]));
@@ -186,7 +207,7 @@ export class RollingPassStats {
       gpu,
       gpuTotal: median(this.frames.map((f) => f.total)),
       cpu: median(this.frames.map((f) => f.cpu)),
-      flow: median(this.frames.map((f) => f.flow)),
+      flow: this.flowMedian(),
     };
   }
 }

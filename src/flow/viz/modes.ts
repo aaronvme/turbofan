@@ -18,20 +18,31 @@ import type { FieldQuantityId } from './fields';
  */
 export type FlowComposite = 'scene' | 'display';
 
-/** D4-76: the cut plane's near-field crop: x in [xMin, xMax], r <= rMax, faded over fadeM. */
+/**
+ * D4-76: the cut plane's near-field crop, x in [xMin, xMax], r <= rMax. D4-83: its edge is crisp,
+ * with a thin outline (CROP_OUTLINE), not a fade: the fade left viridis' darkest end as a soft
+ * purple fog round the engine.
+ */
 export interface CutPlaneCrop {
   readonly xMin: number;
   readonly xMax: number;
   readonly rMax: number;
-  readonly fadeM: number;
 }
+
+/** D4-83: the crop's outline, drawn just inside the edge: about a pixel, light, translucent. */
+export const CROP_OUTLINE = { widthPx: 1.25, alpha: 0.55, rgb: [0.88, 0.9, 0.93] } as const;
 
 export type FlowVizModeId = 'realistic' | 'cutaway' | 'schlieren' | 'data';
 
 export interface FlowVizMode {
   readonly label: string;
-  /** Peak particle opacity, 0 = no particles. */
+  /** Peak particle opacity when the tracers are shown, 0 = the mode has none to show. */
   readonly particleOpacity: number;
+  /**
+   * D4-83: whether the tracers show unless the viewer says otherwise. Realistic has none by
+   * default (the cinematic view read them as hair); the cut modes show them.
+   */
+  readonly tracersByDefault: boolean;
   /** The meridional cut plane through the axis, coloured by `quantity`. */
   readonly cutPlane: boolean;
   readonly quantity: FieldQuantityId;
@@ -62,34 +73,41 @@ export function nearFieldCrop(def: EngineDefinition | null): CutPlaneCrop | null
   const tip = c.plug.points.at(-1);
   if (hl === undefined || tip === undefined) throw new Error('nearFieldCrop: no flowpath');
   const rNacelle = Math.max(...c.nacelleOuter.points.map((p) => p.r));
-  return { xMin: hl.x - 0.6, xMax: tip.x + 0.9, rMax: 1.15 * rNacelle, fadeM: 0.25 };
+  return { xMin: hl.x - 0.6, xMax: tip.x + 0.9, rMax: 1.15 * rNacelle };
 }
 
-const smooth = (e0: number, e1: number, v: number): number => {
-  const t = Math.min(1, Math.max(0, (v - e0) / (e1 - e0)));
-  return t * t * (3 - 2 * t);
-};
-
-/** The crop's opacity at (x, r): 1 inside, fading to 0 over fadeM at each edge. */
+/** The crop's opacity at (x, r): 1 inside, 0 outside (D4-83: a crisp edge; the shader anti-aliases it). */
 export function cropAlpha(c: CutPlaneCrop, x: number, r: number): number {
-  return (
-    smooth(0, c.fadeM, c.rMax - r) * smooth(0, c.fadeM, x - c.xMin) * smooth(0, c.fadeM, c.xMax - x)
-  );
+  return r <= c.rMax && x >= c.xMin && x <= c.xMax ? 1 : 0;
 }
 
 const CROP = nearFieldCrop(ENGINE_DEFINITION);
 
 /**
- * The schlieren's default sensitivity: a/f = 500 microradians. A hot core jet deflects light by
- * about K rho_inf (delta g / shear width) x path ~ 2.3e-4 x 1.2 x (0.6 / 0.05 m) x 0.3 m ~ 1e-3
- * rad, so this keeps its shear layers inside the grey scale (a tenth of it saturated them).
+ * The schlieren's default sensitivity: a/f = 1 milliradian (W2V-N10). A hot core jet deflects
+ * light by about K rho_inf (delta g / shear width) x path ~ 2.3e-4 x 1.2 x (0.6 / 0.05 m) x
+ * 0.3 m ~ 1e-3 rad (the critic's probe: 9.9e-4), so a/f at that estimate keeps the shear layers
+ * just inside the grey scale; 500 microradians saturated them.
  */
-const SCHLIEREN_RANGE_RAD = 5e-4;
+const SCHLIEREN_RANGE_RAD = 1e-3;
+
+/**
+ * A streak is the tracer's path over this much wall time, s (a long film exposure of smoke
+ * tracers: at 1/200 the intake's 150 m/s draws 19 cm, so the streaks read as flow lines).
+ */
+export const STREAK_EXPOSURE_S = 0.25;
+/**
+ * The longest streak drawn, m (W2V-N18: stated in the note and the ledger). At 1/200 it caps every
+ * stream above 360 m/s, so the core and bypass jets draw equal streaks: a long line would hide
+ * the field it is on, and the cut plane's colour says how fast each jet is.
+ */
+export const STREAK_MAX_M = 0.45;
 
 export const FLOW_VIZ_MODES: Readonly<Record<FlowVizModeId, FlowVizMode>> = {
   realistic: {
     label: 'Realistic',
     particleOpacity: 0.18,
+    tracersByDefault: false,
     cutPlane: false,
     quantity: 'speed',
     haze: 1,
@@ -103,6 +121,7 @@ export const FLOW_VIZ_MODES: Readonly<Record<FlowVizModeId, FlowVizMode>> = {
   cutaway: {
     label: 'Cutaway',
     particleOpacity: 0.7,
+    tracersByDefault: true,
     cutPlane: true,
     quantity: 'speed',
     haze: 0,
@@ -116,6 +135,7 @@ export const FLOW_VIZ_MODES: Readonly<Record<FlowVizModeId, FlowVizMode>> = {
   schlieren: {
     label: 'Schlieren',
     particleOpacity: 0,
+    tracersByDefault: false,
     cutPlane: false,
     quantity: 'rho',
     haze: 0,
@@ -129,6 +149,7 @@ export const FLOW_VIZ_MODES: Readonly<Record<FlowVizModeId, FlowVizMode>> = {
   data: {
     label: 'Data',
     particleOpacity: 0.35,
+    tracersByDefault: true,
     cutPlane: true,
     quantity: 'mach',
     haze: 0,
@@ -142,6 +163,11 @@ export const FLOW_VIZ_MODES: Readonly<Record<FlowVizModeId, FlowVizMode>> = {
 };
 
 export const FLOW_VIZ_MODE_IDS = Object.keys(FLOW_VIZ_MODES) as readonly FlowVizModeId[];
+
+/** D4-83: whether a mode draws its tracers, given the viewer's choice (null: the mode's default). */
+export function tracersShown(mode: FlowVizMode, choice: boolean | null): boolean {
+  return mode.particleOpacity > 0 && (choice ?? mode.tracersByDefault);
+}
 
 /** The engine view mode a flow mode needs: the cut plane needs the cutaway wedge open. */
 export function lookModeFor(id: FlowVizModeId): LookMode {

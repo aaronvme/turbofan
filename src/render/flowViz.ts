@@ -9,7 +9,7 @@
 //   display-encoded sRGB bytes and the plane composites after the tone map, so its pixels are
 //   the legend's colours exactly (D4-76).
 // - The particles: the GPU particle records (flowCompute.ts) drawn as camera-facing streaks along
-//   their 3D velocity, length |u| x dilation x STREAK_S, a capsule profile a few pixels wide,
+//   their 3D velocity, length |u| x dilation x STREAK_EXPOSURE_S (at most STREAK_MAX_M), a capsule profile a few pixels wide,
 //   fading toward the tail. Both layers are in the "Flow Overlay" scene (src/render/post.ts
 //   renders it as its own pass, timed outside P4) and are depth-tested by hand against the
 //   engine's scene and rotor depths.
@@ -87,26 +87,25 @@ import {
 } from 'three/tsl';
 import type { FieldExtent } from '../contracts/flow';
 import { bakeLut, COLORMAPS, type ColormapId } from '../flow/viz/colormaps';
-import { FIELD_QUANTITIES, type FieldQuantityId } from '../flow/viz/fields';
-import type { CutPlaneCrop, FlowVizMode } from '../flow/viz/modes';
+import { FIELD_QUANTITIES, GAMMA_R_TABLE, type FieldQuantityId } from '../flow/viz/fields';
+import {
+  CROP_OUTLINE,
+  STREAK_EXPOSURE_S,
+  STREAK_MAX_M,
+  tracersShown,
+  type CutPlaneCrop,
+  type FlowVizMode,
+} from '../flow/viz/modes';
 import { gladstoneDaleK } from '../flow/viz/optics';
 import { PARTICLE_FLOATS } from '../flow/viz/particleKernel';
-import { gamma, gasConstant } from '../thermo/gas';
 import type { FlowCompute, FlowFieldBinding } from './flowCompute';
 import { injectGpuBuffer } from './rendererOnDevice';
 
-/** gamma R of air over [A_T0, A_T1] K: the cut plane's speed of sound a = sqrt(gamma R T). */
-const A_T0 = 200;
-const A_T1 = 2400;
-const A_N = 64;
+/** The cut plane's speed of sound: air's gamma R table (fields.ts, W2V-N11: the tested one). */
+const A_T0 = GAMMA_R_TABLE.t0;
+const A_T1 = GAMMA_R_TABLE.t1;
+const A_N = GAMMA_R_TABLE.n;
 
-/**
- * A streak is the particle's path over this much wall time, s (a long film exposure of smoke
- * tracers: at 1/200 the intake's 150 m/s draws 19 cm, so the streaks read as flow lines).
- */
-export const STREAK_S = 0.25;
-/** The longest streak drawn, m (a fast jet at a fast dilation stays a streak, not a line). */
-const MAX_STREAK_M = 0.45;
 /** Half the streak's width, px (of the flow pass's target). */
 const HALF_WIDTH_PX = 1;
 /**
@@ -167,6 +166,8 @@ export interface FlowViz {
   setDilation(d: number): void;
   /** Hides the particles whatever the mode (a debug A/B). */
   setParticlesHidden(hidden: boolean): void;
+  /** D4-83: the viewer's tracer choice (null: the mode's default; Realistic has none). */
+  setTracers(on: boolean | null): void;
   /** No haze whatever the mode (a debug A/B). */
   setHazeOff(off: boolean): void;
   /** D4-76: the cut plane over the full near-field raster instead of the mode's crop. */
@@ -242,7 +243,6 @@ export function createFlowViz(o: {
     xMin: uniform(-1e3),
     xMax: uniform(1e3),
     rMax: uniform(1e3),
-    fade: uniform(0.25),
   };
 
   const luts = new Map<ColormapId, DataTexture>();
@@ -255,12 +255,7 @@ export function createFlowViz(o: {
     t.needsUpdate = true;
     luts.set(id, t);
   }
-  const aData = new Float32Array(A_N);
-  for (let i = 0; i < A_N; i++) {
-    const tK = A_T0 + ((A_T1 - A_T0) * i) / (A_N - 1);
-    aData[i] = gamma(tK, 0) * gasConstant(0);
-  }
-  const gammaR = new DataTexture(aData, A_N, 1, RedFormat, FloatType);
+  const gammaR = new DataTexture(GAMMA_R_TABLE.values.slice(), A_N, 1, RedFormat, FloatType);
   gammaR.magFilter = gammaR.minFilter = NearestFilter;
   gammaR.needsUpdate = true;
 
@@ -312,6 +307,10 @@ export function createFlowViz(o: {
   let built: FieldQuantityId | null = null;
   let mode: FlowVizMode | null = null;
   let particlesHidden = false;
+  let tracers: boolean | null = null;
+  const showStreaks = () => {
+    streaks.visible = mode !== null && tracersShown(mode, tracers) && !particlesHidden;
+  };
   let fullDomain = false;
   const applyCrop = () => {
     const c: CutPlaneCrop | null = fullDomain ? null : (mode?.crop ?? null);
@@ -320,7 +319,6 @@ export function createFlowViz(o: {
       crop.xMin.value = c.xMin;
       crop.xMax.value = c.xMax;
       crop.rMax.value = c.rMax;
-      crop.fade.value = c.fadeM;
     }
   };
   const buildPlane = (id: FieldQuantityId) => {
@@ -335,6 +333,11 @@ export function createFlowViz(o: {
       const s = stateNode.sample(uv());
       const v = velocityNode.sample(uv());
       const q = value(id, s, v);
+      // a non-finite field (a diverging solver before the fallback, W2V-I6) never reaches the
+      // blend: comparisons with NaN are false
+      If(abs(q).lessThan(1e30).and(abs(v.w).lessThan(1e30)).not(), () => {
+        Discard();
+      });
       const t = q
         .sub(spec.min)
         .div(spec.max - spec.min)
@@ -348,21 +351,27 @@ export function createFlowViz(o: {
       const fl = v.w;
       const aa = max(fwidth(fl), 1e-3);
       const fluid = smoothstep(float(0.5).sub(aa), float(0.5).add(aa), fl);
-      // D4-76: the near-field crop
+      // D4-76's near-field crop, D4-83: a crisp, anti-aliased edge with a thin outline just
+      // inside it (a fade left viridis' darkest end as a purple fog round the engine)
       const x = uv()
         .x.mul(e.xMax - e.xMin)
         .add(e.xMin);
       const r = uv()
         .y.mul(e.rMax - e.rMin)
         .add(e.rMin);
-      const cropA = smoothstep(0, crop.fade, crop.rMax.sub(r))
-        .mul(smoothstep(0, crop.fade, x.sub(crop.xMin)))
-        .mul(smoothstep(0, crop.fade, crop.xMax.sub(x)));
-      const a = fluid.mul(mix(float(1), cropA, crop.on));
+      const edgeM = min(min(crop.rMax.sub(r), x.sub(crop.xMin)), crop.xMax.sub(x));
+      const edgePx = edgeM.div(max(fwidth(edgeM), 1e-6));
+      const inside = mix(float(1), edgePx.add(0.5).clamp(0, 1), crop.on);
+      const outline = float(1)
+        .sub(smoothstep(CROP_OUTLINE.widthPx - 0.5, CROP_OUTLINE.widthPx + 0.5, edgePx))
+        .mul(crop.on)
+        .mul(CROP_OUTLINE.alpha);
+      const framed = mix(rgb, vec3(...CROP_OUTLINE.rgb), outline);
+      const a = fluid.mul(inside);
       If(a.lessThan(0.002), () => {
         Discard();
       });
-      return vec4(rgb.mul(a), a);
+      return vec4(framed.mul(a), a);
     })();
     planeMaterial.needsUpdate = true;
   };
@@ -412,7 +421,7 @@ export function createFlowViz(o: {
     const vel = parts.element(k.add(2));
     const corner = attribute<'vec3'>('position', 'vec3');
     const head = vec3(pos.x, pos.y.mul(cos(pos.z)), pos.y.mul(sin(pos.z)));
-    const len = min(vel.w.mul(dilation).mul(STREAK_S), MAX_STREAK_M);
+    const len = min(vel.w.mul(dilation).mul(STREAK_EXPOSURE_S), STREAK_MAX_M);
     const tail = head.sub(vel.xyz.div(max(vel.w, 1e-3)).mul(len));
     const viewH = cameraViewMatrix.mul(vec4(head, 1));
     const viewT = cameraViewMatrix.mul(vec4(tail, 1));
@@ -570,7 +579,7 @@ export function createFlowViz(o: {
       hazeGain.value = hazeOff ? 0 : (m?.haze ?? 0);
       sheet.on.value = m?.cutPlane === true ? 1 : 0;
       applyCrop();
-      streaks.visible = (m?.particleOpacity ?? 0) > 0 && !particlesHidden;
+      showStreaks();
     },
     setFullDomain(full) {
       fullDomain = full;
@@ -582,7 +591,11 @@ export function createFlowViz(o: {
     },
     setParticlesHidden(h) {
       particlesHidden = h;
-      streaks.visible = (mode?.particleOpacity ?? 0) > 0 && !h;
+      showStreaks();
+    },
+    setTracers(on) {
+      tracers = on;
+      showStreaks();
     },
     setDilation(d) {
       dilation.value = d;

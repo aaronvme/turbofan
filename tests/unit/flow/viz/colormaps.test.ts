@@ -24,6 +24,7 @@ import {
   FLOW_VIZ_MODE_IDS,
   lookModeFor,
   nearFieldCrop,
+  tracersShown,
 } from '../../../../src/flow/viz/modes';
 
 const close = (a: readonly number[], b: readonly number[], tol: number) =>
@@ -114,10 +115,19 @@ describe('cut-plane quantities', () => {
     expect(GAMMA_R_TABLE.values.length).toBe(GAMMA_R_TABLE.n);
     for (const tK of [250, 288.15, 900, 1700]) {
       expect(airGammaR(tK) / (gamma(tK, 0) * gasConstant(0))).toBeCloseTo(1, 2);
-      const i = Math.round(((tK - GAMMA_R_TABLE.t0) / (GAMMA_R_TABLE.t1 - GAMMA_R_TABLE.t0)) * (GAMMA_R_TABLE.n - 1));
+      const i = Math.round(
+        ((tK - GAMMA_R_TABLE.t0) / (GAMMA_R_TABLE.t1 - GAMMA_R_TABLE.t0)) * (GAMMA_R_TABLE.n - 1),
+      );
       expect(airGammaR(tK)).toBe(GAMMA_R_TABLE.values[i]);
     }
-    const hot = { ...ambient, tK: 1500, uxMPerS: 400, urMPerS: 0, uthetaMPerS: 0, fluidFraction: 1 };
+    const hot = {
+      ...ambient,
+      tK: 1500,
+      uxMPerS: 400,
+      urMPerS: 0,
+      uthetaMPerS: 0,
+      fluidFraction: 1,
+    };
     const burnt = deriveQuantities({ ...hot, fuelAirRatio: 0.03 });
     expect(burnt.mach).toBe(deriveQuantities(hot).mach);
     expect(burnt.mach).toBeCloseTo(400 / Math.sqrt(airGammaR(1500) * 1500), 12);
@@ -168,8 +178,13 @@ describe('modes', () => {
     expect(FLOW_VIZ_MODES.realistic.tracersByDefault).toBe(false);
     expect(FLOW_VIZ_MODES.cutaway.tracersByDefault).toBe(true);
     expect(FLOW_VIZ_MODES.data.tracersByDefault).toBe(true);
+    expect(tracersShown(FLOW_VIZ_MODES.realistic, null)).toBe(false);
+    expect(tracersShown(FLOW_VIZ_MODES.realistic, true)).toBe(true);
+    expect(tracersShown(FLOW_VIZ_MODES.data, null)).toBe(true);
+    expect(tracersShown(FLOW_VIZ_MODES.data, false)).toBe(false);
     // the schlieren has none to offer
     expect(FLOW_VIZ_MODES.schlieren.particleOpacity).toBe(0);
+    expect(tracersShown(FLOW_VIZ_MODES.schlieren, true)).toBe(false);
     expect(FLOW_VIZ_MODES.realistic.particleOpacity).toBeGreaterThan(0);
   });
 

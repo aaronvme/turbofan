@@ -3,18 +3,28 @@
 // solver) and what the flow visuals cost; and the legend of whatever is drawn as colour (the
 // LUT's own stops, src/flow/viz/legend.ts, so the bar matches the pixels: D4-76).
 // Query: ?flow=realistic|cutaway|schlieren|data&field=mock|solver&dilation=200&quantity=mach.
-// &domain=full (D4-76's option: the cut plane uncropped). Keys: f the next flow mode, [ and ]
-// slower / faster, m the next quantity, n the near-field crop on / off.
+// &domain=full (D4-76's option: the cut plane uncropped), &tracers=1|0 (D4-83: Realistic has
+// none by default). Keys: f the next flow mode, [ and ] slower / faster, m the next quantity,
+// n the near-field crop on / off, t tracers on / off.
+// D4-82, W2V-I6: the badge says how far the field is the engine's answer (MOCK, the solver
+// "uncoupled until W3", coupled), and a solver that cannot start, is lost or diverges is replaced
+// by the MOCK at once, with the reason on the badge (src/flow/viz/fieldLink.ts).
 
 import { ISA_SLS } from '../contracts/ambient';
 import { ENGINE_DEFINITION } from '../engine/definition';
 import { GpuFlowSolver } from '../flow/gpu/device/flowSolver';
 import { solverBudgetMs } from '../flow/gpu/scheduler';
+import { createFlowFieldLink, type FlowLinkState, type LinkedSolver } from '../flow/viz/fieldLink';
 import { loadMeshAsset, parseMeshManifest } from '../flow/mesh/loader';
 import { solverMeshFromFile } from '../flow/reference/solverMesh';
 import { FIELD_QUANTITIES, FIELD_QUANTITY_IDS, type FieldQuantityId } from '../flow/viz/fields';
 import { dilationLabel, flowModeNote, legendFor, provenanceLabel } from '../flow/viz/legend';
-import { FLOW_VIZ_MODES, FLOW_VIZ_MODE_IDS, type FlowVizModeId } from '../flow/viz/modes';
+import {
+  FLOW_VIZ_MODES,
+  FLOW_VIZ_MODE_IDS,
+  tracersShown,
+  type FlowVizModeId,
+} from '../flow/viz/modes';
 import { mockSteadyState } from '../mocks/mockCycle';
 import { createMockFlowField } from '../mocks/mockFlowField';
 import type { EngineView } from '../render/engineView';
@@ -47,7 +57,17 @@ const CSS = `
 #flow .src { display: flex; align-items: center; gap: 7px; margin-top: 10px; font-size: 11.5px; }
 #flow .dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
 #flow .src.mock .dot { background: #e8b04a; }
-#flow .src.solver .dot { background: #5fd0b0; }
+#flow .src.uncoupled .dot { background: #86a9d6; }
+#flow .src.coupled .dot { background: #5fd0b0; }
+#flow .src.fallback { color: #f0c46e; }
+#flow .row .sw { all: unset; cursor: pointer; position: relative; flex: 0 0 auto; width: 30px;
+  height: 17px; border-radius: 9px; background: rgba(255,255,255,.14); transition: background .15s; }
+#flow .row .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 13px;
+  height: 13px; border-radius: 50%; background: rgba(236,240,244,.92); transition: transform .15s; }
+#flow .row .sw[aria-checked="true"] { background: rgba(95,208,176,.6); }
+#flow .row .sw[aria-checked="true"]::after { transform: translateX(13px); }
+#flow .row .sw:focus-visible { outline: 2px solid rgba(140,190,255,.9); outline-offset: 2px; }
+#flow .row .hint { flex: 1; text-align: right; color: rgba(226,230,235,.45); font-size: 11px; }
 #flow .note { margin-top: 8px; color: rgba(226,230,235,.56); font-size: 11px; line-height: 1.45;
   text-wrap: pretty; }
 #legend { right: 16px; bottom: 16px; width: 280px; padding: 11px 14px 9px; }
@@ -61,7 +81,9 @@ const CSS = `
 #legend .ticks span { position: absolute; top: 5px; transform: translateX(-50%); white-space: nowrap; }
 #legend .ticks span::before { content: ''; position: absolute; left: 50%; top: -5px; width: 1px;
   height: 4px; background: rgba(226,230,235,.45); }
-#legend .badge { margin-top: 2px; font-size: 10.5px; color: rgba(226,230,235,.55); }
+#legend .badge { margin-top: 2px; font-size: 10.5px; color: rgba(226,230,235,.55);
+  text-wrap: pretty; }
+#legend .badge.fallback { color: #f0c46e; }
 body.clean #flow { display: none; }
 `;
 
@@ -81,6 +103,10 @@ export interface FlowPanel {
   setMode(id: FlowVizModeId | null): void;
   setDilation(d: number): void;
   setQuantity(id: FieldQuantityId | null): void;
+  /** D4-83: tracers on or off (null: the mode's default). */
+  setTracers(on: boolean | null): void;
+  /** Which field is drawn and why (D4-82; W2V-I6: a fallback's reason). */
+  linkState(): FlowLinkState;
   /** The MOCK field follows the throttle (a rasterised steady state). */
   setThrottle(lever: number): void;
 }
@@ -89,9 +115,31 @@ export interface FlowPanel {
 const sliderToDilation = (v: number) => 10 ** (-3 + (2 * v) / 100);
 const dilationToSlider = (d: number) => ((Math.log10(d) + 3) * 100) / 2;
 
+/** The live solver on the view's device, from its timing start state (W3 couples it). */
+async function startSolver(view: EngineView): Promise<GpuFlowSolver> {
+  const manifest = parseMeshManifest(await (await fetch('/mesh/manifest.json')).json());
+  const entry = manifest.specs['130k'];
+  if (entry === undefined) throw new Error('no 130k mesh in /mesh/manifest.json');
+  const bytes = await (await fetch(`/mesh/${entry.file}`)).arrayBuffer();
+  const { asset, file } = await loadMeshAsset(bytes, entry);
+  const solver = new GpuFlowSolver();
+  try {
+    await solver.init({ device: view.device.device, mesh: asset, definition: ENGINE_DEFINITION });
+    const kernel = solver.kernel;
+    // the solver's timing start state: structure to show until the coupling (W3) drives it
+    if (kernel !== null) kernel.setConserved(perfState(solverMeshFromFile(file), kernel.ref));
+    return solver;
+  } catch (e) {
+    solver.dispose();
+    throw e;
+  }
+}
+
 export async function createFlowPanel(
   view: EngineView,
   params: URLSearchParams,
+  /** Starts the solver for ?field=solver (a test can inject one that fails: W2V-I6). */
+  solverFactory: (view: EngineView) => Promise<LinkedSolver> = startSolver,
 ): Promise<FlowPanel> {
   const style = document.createElement('style');
   style.textContent = CSS;
@@ -107,29 +155,21 @@ export async function createFlowPanel(
   let quantity: FieldQuantityId | null = null;
   let dilation = 1 / Number(params.get('dilation') ?? 200);
   if (!(dilation > 0 && dilation <= 1)) dilation = 1 / 200;
-  let solver: GpuFlowSolver | null = null;
+  let tracers: boolean | null =
+    params.get('tracers') === '1' ? true : params.get('tracers') === '0' ? false : null;
   let lever = 0;
   let mockTimer = 0;
   let fullDomain = params.get('domain') === 'full';
   view.setFlowFullDomain(fullDomain);
 
-  if (params.get('field') === 'solver') {
-    const manifest = parseMeshManifest(await (await fetch('/mesh/manifest.json')).json());
-    const entry = manifest.specs['130k'];
-    if (entry === undefined) throw new Error('flow panel: no 130k mesh');
-    const bytes = await (await fetch(`/mesh/${entry.file}`)).arrayBuffer();
-    const { asset, file } = await loadMeshAsset(bytes, entry);
-    solver = new GpuFlowSolver();
-    await solver.init({ device: view.device.device, mesh: asset, definition: ENGINE_DEFINITION });
-    const kernel = solver.kernel;
-    // the solver's timing start state: structure to show until the coupling (W3) drives it
-    if (kernel !== null) kernel.setConserved(perfState(solverMeshFromFile(file), kernel.ref));
-    view.setFlowSolverField(solver.fields());
-  } else {
-    view.setFlowField(
-      createMockFlowField(ENGINE_DEFINITION, mockSteadyState(ENGINE_DEFINITION, 0), ISA_SLS),
-    );
-  }
+  const mockAt = (l: number) =>
+    createMockFlowField(ENGINE_DEFINITION, mockSteadyState(ENGINE_DEFINITION, l), ISA_SLS);
+  const link = await createFlowFieldLink({
+    sink: view,
+    mock: mockAt(0),
+    ...(params.get('field') === 'solver' ? { solver: () => solverFactory(view) } : {}),
+  });
+  let shown = link.state();
   view.setFlowTimeScale(dilation);
 
   panel.innerHTML = `
@@ -143,6 +183,9 @@ export async function createFlowPanel(
       <output id="flow-dil-o"></output></div>
     <div class="row" id="flow-q-row"><label for="flow-q">Cut plane</label>
       <select id="flow-q">${FIELD_QUANTITY_IDS.map((q) => `<option value="${q}">${FIELD_QUANTITIES[q].label}</option>`).join('')}</select></div>
+    <div class="row" id="flow-t-row"><label for="flow-t">Tracers</label>
+      <button id="flow-t" class="sw" role="switch" aria-checked="false" aria-label="Tracers" title="Tracer streaks (t)"></button>
+      <span class="hint" id="flow-t-h"></span></div>
     <div class="src" id="flow-src"><span class="dot"></span><span id="flow-src-t"></span></div>
     <div class="note" id="flow-note"></div>`;
   const $ = (id: string): HTMLElement => {
@@ -155,10 +198,16 @@ export async function createFlowPanel(
   const dilOut = $('flow-dil-o') as HTMLOutputElement;
   const qSel = $('flow-q') as HTMLSelectElement;
   const qRow = $('flow-q-row') as HTMLDivElement;
+  const tSw = $('flow-t') as HTMLButtonElement;
+  const tRow = $('flow-t-row') as HTMLDivElement;
+  const badge = () => {
+    const st = link.state();
+    return { st, text: provenanceLabel(st.coupling, st.fallback) };
+  };
 
   const drawLegend = () => {
-    const source = view.stats().flow.source ?? 'mock';
-    const l = mode === null ? null : legendFor(mode, source, quantity ?? undefined);
+    const b = badge();
+    const l = mode === null ? null : legendFor(mode, b.st.coupling, quantity ?? undefined);
     legend.hidden = l === null;
     if (l === null) return;
     const grad = l.stops
@@ -167,7 +216,7 @@ export async function createFlowPanel(
     legend.innerHTML = `<div class="t">${l.title}<span class="u">${l.unit}</span></div>
       <div class="bar" style="background:linear-gradient(90deg,${grad})"></div>
       <div class="ticks">${l.ticks.map((t) => `<span style="left:${(100 * t.at).toFixed(2)}%">${t.label}</span>`).join('')}</div>
-      <div class="badge">${provenanceLabel(l.source)}</div>`;
+      <div class="badge${b.st.fallback === null ? '' : ' fallback'}">${b.text}</div>`;
   };
   const showMs = () => {
     const f = view.stats().flow;
@@ -180,27 +229,42 @@ export async function createFlowPanel(
     const m = mode === null ? null : FLOW_VIZ_MODES[mode];
     qRow.style.display = m?.cutPlane === true ? '' : 'none';
     qSel.value = quantity ?? m?.quantity ?? 'mach';
-    const src = view.stats().flow.source;
+    const b = badge();
     const s = $('flow-src') as HTMLDivElement;
-    s.className = `src ${src ?? 'mock'}`;
-    $('flow-src-t').textContent = provenanceLabel(src ?? 'mock');
+    s.className = `src ${b.st.coupling}${b.st.fallback === null ? '' : ' fallback'}`;
+    $('flow-src-t').textContent = b.text;
+    tRow.style.display = m !== null && m.particleOpacity > 0 ? '' : 'none';
+    tSw.setAttribute('aria-checked', String(m !== null && tracersShown(m, tracers)));
+    $('flow-t-h').textContent = tracers === null ? 'mode default' : '';
     ($('flow-note') as HTMLDivElement).textContent =
       mode === null
         ? 'Pick a mode to see the air.'
-        : flowModeNote(mode, dilation, quantity ?? undefined);
+        : flowModeNote(mode, dilation, quantity ?? undefined, tracers ?? undefined);
     drawLegend();
     showMs();
   };
 
   const api: FlowPanel = {
     beforeFrame() {
-      if (solver === null || mode === null) return;
+      // the health check runs every frame (a lost or diverged solver falls back at once); the
+      // solver steps only while a flow mode draws it, at D4-2's budget
       const st = view.stats();
-      const budget = solverBudgetMs({
-        renderMs: st.timings.frames > 0 ? st.timings.gpuTotal : null,
-        flowVisualsMs: st.flow.visualsMs,
-      });
-      solver.step({ gpuTimeBudgetMs: budget, maxIterations: 1000 });
+      link.beforeFrame(
+        mode === null
+          ? null
+          : {
+              gpuTimeBudgetMs: solverBudgetMs({
+                renderMs: st.timings.frames > 0 ? st.timings.gpuTotal : null,
+                flowVisualsMs: st.flow.visualsMs,
+              }),
+              maxIterations: 1000,
+            },
+      );
+      const now = link.state();
+      if (now !== shown) {
+        shown = now;
+        sync();
+      }
     },
     refresh() {
       showMs();
@@ -214,6 +278,8 @@ export async function createFlowPanel(
         fullDomain = !fullDomain;
         view.setFlowFullDomain(fullDomain);
       }
+      if (key === 't' && mode !== null && FLOW_VIZ_MODES[mode].particleOpacity > 0)
+        api.setTracers(!tracersShown(FLOW_VIZ_MODES[mode], tracers));
       if (key === '[') api.setDilation(Math.max(1e-3, dilation / 2));
       if (key === ']') api.setDilation(Math.min(0.1, dilation * 2));
       if (key === 'm' && mode !== null && FLOW_VIZ_MODES[mode].cutPlane) {
@@ -228,6 +294,7 @@ export async function createFlowPanel(
       mode = id;
       quantity = null;
       view.setFlowQuantity(null);
+      view.setFlowTracers(tracers);
       view.setFlowMode(id);
       if (id === null) view.setMode('realistic');
       sync();
@@ -243,19 +310,19 @@ export async function createFlowPanel(
       view.setFlowQuantity(id);
       sync();
     },
+    setTracers(on) {
+      tracers = on;
+      view.setFlowTracers(on);
+      sync();
+    },
+    linkState: () => link.state(),
     setThrottle(l) {
       lever = l;
-      if (solver !== null) return;
-      // rasterising the MOCK takes a moment: once the lever rests
+      // rasterising the MOCK takes a moment: once the lever rests. It is kept up to date while
+      // the solver is drawn, so a fallback shows the MOCK at this throttle
       clearTimeout(mockTimer);
       mockTimer = window.setTimeout(() => {
-        view.setFlowField(
-          createMockFlowField(
-            ENGINE_DEFINITION,
-            mockSteadyState(ENGINE_DEFINITION, lever),
-            ISA_SLS,
-          ),
-        );
+        link.setMock(mockAt(lever));
       }, 250);
     },
   };
@@ -269,6 +336,9 @@ export async function createFlowPanel(
   });
   qSel.addEventListener('change', () => {
     api.setQuantity(qSel.value as FieldQuantityId);
+  });
+  tSw.addEventListener('click', () => {
+    if (mode !== null) api.setTracers(!tracersShown(FLOW_VIZ_MODES[mode], tracers));
   });
   const start = params.get('flow');
   const q = params.get('quantity');

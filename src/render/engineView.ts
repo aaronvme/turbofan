@@ -61,19 +61,26 @@ import { createFlowCompute, type FlowCompute } from './flowCompute';
 import {
   FIELD_EXTENTS,
   type CpuFlowField,
+  type FlowCoupling,
   type FlowField,
   type FlowFieldSource,
 } from '../contracts/flow';
-import { FLOW_VIZ_MODES, lookModeFor, type FlowVizModeId } from '../flow/viz/modes';
+import { FLOW_VIZ_MODES, lookModeFor, tracersShown, type FlowVizModeId } from '../flow/viz/modes';
 import type { FieldQuantityId } from '../flow/viz/fields';
 import { flowSeedZones, visualDtS } from '../flow/viz/seeding';
 import {
+  createGlowRadianceCache,
   GLOW_EMISSIVITY,
   GLOW_PARTS,
-  glowSceneRadiance,
   hotPartTemperatures,
 } from '../flow/viz/glow';
-import { createPipeline, type LookPipeline, type PostDebug } from './post';
+import {
+  createPipeline,
+  type FlowTargetId,
+  type FlowTargetPixels,
+  type LookPipeline,
+  type PostDebug,
+} from './post';
 import { LOOK_PRESETS, SHUTTER_1000, type LookMode, type LookPresetId } from './presets';
 import { createRendererOnDevice } from './rendererOnDevice';
 import { createStandMesh, createStudio, FLOOR_Y, type Studio } from './studio';
@@ -141,6 +148,10 @@ export interface FlowStats {
   readonly mode: FlowVizModeId | null;
   /** Where the drawn field comes from (null: none bound). */
   readonly source: FlowFieldSource | null;
+  /** D4-82: how far the drawn field is the engine's answer (null: none bound). */
+  readonly coupling: FlowCoupling | null;
+  /** D4-83: whether the mode draws its tracers now (the viewer's choice or its default). */
+  readonly tracers: boolean;
   readonly quantity: FieldQuantityId | null;
   readonly dilation: number;
   readonly particles: number;
@@ -183,6 +194,10 @@ export interface EngineView {
   setFlowMode(id: FlowVizModeId | null): void;
   /** The cut plane's quantity (null: the mode's own). */
   setFlowQuantity(id: FieldQuantityId | null): void;
+  /** D4-83: tracers on or off (null: the mode's default; Realistic has none by default). */
+  setFlowTracers(on: boolean | null): void;
+  /** The last frame's flow target (the overlay, the haze shift, the schlieren eps): tests. */
+  readFlowTarget(id: FlowTargetId): Promise<FlowTargetPixels>;
   /** Time dilation of the particles: simulated seconds per wall second (default 1/200). */
   setFlowTimeScale(dilation: number): void;
   /** D4-76: the cut plane over the whole near-field raster (true) or the near-field crop. */
@@ -246,6 +261,8 @@ export interface DebugFlags {
   readonly noFlowParticles?: boolean;
   /** The flow modes without the heat haze (its A/B). */
   readonly noHaze?: boolean;
+  /** The flow layers with TRAA's per-frame jitter (W2V-I5's negative control). */
+  readonly jitterFlow?: boolean;
 }
 
 const FPS = 60;
@@ -402,7 +419,10 @@ async function assemble(
   });
   let flowMode: FlowVizModeId | null = null;
   let flowQuantity: FieldQuantityId | null = null;
+  let flowTracers: boolean | null = null;
   let dilation = DEFAULT_DILATION;
+  // W2V-N14: a part's radiance (two blackbody integrals) only when its temperature changes
+  const glowRadiance = createGlowRadianceCache();
   const applyFlowMode = () => {
     const m = flowMode === null || flowCompute.binding === null ? null : FLOW_VIZ_MODES[flowMode];
     flowViz.setMode(m, flowQuantity);
@@ -471,6 +491,8 @@ async function assemble(
     return {
       mode: flowMode,
       source: flowCompute.binding?.source ?? null,
+      coupling: flowCompute.binding?.coupling ?? null,
+      tracers: m !== null && tracersShown(m, flowTracers),
       quantity: m?.cutPlane === true ? (flowQuantity ?? m.quantity) : null,
       dilation,
       particles: flowCompute.count,
@@ -554,6 +576,11 @@ async function assemble(
       flowQuantity = id;
       applyFlowMode();
     },
+    setFlowTracers(on) {
+      flowTracers = on;
+      flowViz.setTracers(on);
+    },
+    readFlowTarget: (id) => post.readFlowTarget(id),
     readFlowParticles: () => flowCompute.readParticles(),
     setFlowFullDomain(full) {
       flowViz.setFullDomain(full);
@@ -567,6 +594,7 @@ async function assemble(
       flags = { ...f };
       flowViz.setParticlesHidden(f.noFlowParticles === true);
       flowViz.setHazeOff(f.noHaze === true);
+      post.setFlowJitter(f.jitterFlow === true);
       hidden = [];
       if (f.hide !== undefined && f.hide !== '') {
         // matched against "main:<name>" / "rotors:<name>", so a pattern can pick one pass
@@ -681,7 +709,9 @@ async function assemble(
       const metal = hotPartTemperatures(cycleSpeeds.stations);
       for (const part of GLOW_PARTS) {
         const [r, g, b] =
-          flags.noGlow === true ? [0, 0, 0] : glowSceneRadiance(metal[part], GLOW_EMISSIVITY[part]);
+          flags.noGlow === true
+            ? [0, 0, 0]
+            : glowRadiance(part, metal[part], GLOW_EMISSIVITY[part]);
         uniforms.glow[part].value.set(r, g, b);
       }
       const radPerPx = (2 * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(1, heightPx);
@@ -691,7 +721,7 @@ async function assemble(
         flowCompute.run({
           dtSimS: visualDtS(dtS, dilation),
           dtWallS: Math.min(dtS, 0.1),
-          particles: m.particleOpacity > 0 && flags.noFlowParticles !== true,
+          particles: tracersShown(m, flowTracers) && flags.noFlowParticles !== true,
           gradient: m.haze > 0 || m.schlieren,
         });
       }

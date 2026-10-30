@@ -61,7 +61,15 @@ class FakeSolver implements LinkedSolver {
   }
   step() {
     this.steps++;
-    return this.status().stats ?? { iterationsThisStep: 0, totalIterations: 0, gpuTimeMs: null, residualDensityL2: null, physicalTimeS: 0 };
+    return (
+      this.status().stats ?? {
+        iterationsThisStep: 0,
+        totalIterations: 0,
+        gpuTimeMs: null,
+        residualDensityL2: null,
+        physicalTimeS: 0,
+      }
+    );
   }
   dispose(): void {
     this.disposed = true;
@@ -98,7 +106,11 @@ describe('createFlowFieldLink', () => {
   it("draws the solver's textures, labelled with the field's coupling (uncoupled until W3)", async () => {
     const s = sink();
     const solver = new FakeSolver();
-    const link = await createFlowFieldLink({ sink: s, mock: cpuField(0), solver: () => Promise.resolve(solver) });
+    const link = await createFlowFieldLink({
+      sink: s,
+      mock: cpuField(0),
+      solver: () => Promise.resolve(solver),
+    });
     expect(link.state()).toEqual({ asked: 'solver', coupling: 'uncoupled', fallback: null });
     expect(s.calls.map((c) => c.kind)).toEqual(['solver']);
     link.beforeFrame(budget);
@@ -195,7 +207,11 @@ describe('createFlowFieldLink', () => {
   it('rebinds when the solver hands out new textures', async () => {
     const s = sink();
     const solver = new FakeSolver();
-    const link = await createFlowFieldLink({ sink: s, mock: cpuField(0), solver: () => Promise.resolve(solver) });
+    const link = await createFlowFieldLink({
+      sink: s,
+      mock: cpuField(0),
+      solver: () => Promise.resolve(solver),
+    });
     link.beforeFrame(budget);
     expect(s.calls).toHaveLength(1);
     solver.field = solverField(1);
@@ -225,7 +241,11 @@ describe('createFlowFieldLink', () => {
 
   it('disposes the solver with the link', async () => {
     const solver = new FakeSolver();
-    const link = await createFlowFieldLink({ sink: sink(), mock: cpuField(0), solver: () => Promise.resolve(solver) });
+    const link = await createFlowFieldLink({
+      sink: sink(),
+      mock: cpuField(0),
+      solver: () => Promise.resolve(solver),
+    });
     link.dispose();
     expect(solver.disposed).toBe(true);
   });

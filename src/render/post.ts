@@ -85,9 +85,20 @@ import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { installTraaResolve } from './traaResolve';
 import type { FlowPostDeps } from './flowViz';
+import { fromHalfBits } from '../contracts/half';
 
 /** How the flow visuals join the frame (D4-76): none, scene-linear, display space, schlieren. */
 export type FlowCompositeMode = 'off' | 'scene' | 'display' | 'schlieren';
+
+/** A flow pipeline target read back (tests): rgba per pixel, row 0 at the top. */
+export interface FlowTargetPixels {
+  readonly width: number;
+  readonly height: number;
+  readonly rgba: Float32Array;
+}
+
+/** The flow targets a test can read: the overlay pass, the haze shift and the schlieren eps. */
+export type FlowTargetId = 'overlay' | 'haze' | 'schlieren';
 
 export interface FlowHooks {
   /** The "Flow Overlay" scene (premultiplied colour, its own depth). */
@@ -145,6 +156,13 @@ export interface LookPipeline {
   attachFlow(hooks: FlowHooks): void;
   /** Which flow pipeline renders (D4-76); 'off' is the plain pipeline. */
   setFlowComposite(mode: FlowCompositeMode): void;
+  /**
+   * W2V-I5's negative control: true draws the flow layers with TRAA's per-frame jitter (as
+   * round 2 did), false (the default) with the unjittered camera.
+   */
+  setFlowJitter(on: boolean): void;
+  /** The last frame's flow target, decoded (tests: W2V-I3 and W2V-I5). */
+  readFlowTarget(id: FlowTargetId): Promise<FlowTargetPixels>;
   /**
    * The resolution of the 3D passes, the composite and TRAA relative to the drawing buffer
    * (D3-7, the performance profile); the output pass upsamples TRAA's result.
@@ -500,13 +518,20 @@ export function createPipeline(
   let cinematic = false;
   let renderScale = 1;
 
+  // W2V-I5: TRAA does not accumulate the flow layers (D4-76: the data colours composite after
+  // it), so they must not carry its jitter either, or the contours, edges and streaks crawl by up
+  // to half a pixel against the resolved engine. They render with their own camera: a copy of
+  // the scene camera taken before the pipeline jitters it. (The depth test against the jittered
+  // scene depth moves only the occlusion edges, by that half pixel.)
+  const flowCamera = camera.clone();
+  let flowJitter = false;
   const flowDeps: FlowPostDeps = {
     sceneDepth: sceneDepth,
     rotorDepth: rotorDepth,
     viewZOf,
-    camProjInv: camProjInv,
-    camWorld: camWorld,
-    cameraPosition: cameraPosition,
+    camProjInv: uniform(flowCamera.projectionMatrixInverse),
+    camWorld: uniform(flowCamera.matrixWorld),
+    cameraPosition: uniform(flowCamera.position),
   };
   let flowComposite: FlowCompositeMode = 'off';
   let flow: {
@@ -517,7 +542,7 @@ export function createPipeline(
   } | null = null;
   const attachFlow = (h: FlowHooks) => {
     if (flow !== null) throw new Error('post: attachFlow twice');
-    const flowPass = pass(h.scene, camera);
+    const flowPass = pass(h.scene, flowCamera);
     flowPass.name = 'Flow Overlay';
     const ov = flowPass.getTextureNode('output');
     const hazeTex = rtt(h.haze, null, null, { type: HalfFloatType });
@@ -587,6 +612,29 @@ export function createPipeline(
     setFlowComposite: (m) => {
       flowComposite = m;
     },
+    setFlowJitter: (on) => {
+      flowJitter = on;
+    },
+    readFlowTarget: async (id) => {
+      if (flow === null) throw new Error('post: readFlowTarget before attachFlow');
+      const rt = (id === 'overlay' ? flow.pass : id === 'haze' ? flow.haze : flow.schlieren)
+        .renderTarget;
+      if (rt === null) throw new Error(`post: the flow ${id} target is not rendered yet`);
+      const { width, height } = rt;
+      const raw = (await renderer.readRenderTargetPixelsAsync(rt, 0, 0, width, height)) as
+        Uint16Array | Float32Array;
+      // WebGPU copies rows padded to 256 bytes
+      const half = raw instanceof Uint16Array;
+      const bpt = half ? 8 : 16;
+      const stride = (Math.ceil((width * bpt) / 256) * 256) / (bpt / 4);
+      const rgba = new Float32Array(4 * width * height);
+      for (let y = 0; y < height; y++)
+        for (let k = 0; k < 4 * width; k++) {
+          const v = raw[y * stride + k] ?? Number.NaN;
+          rgba[4 * width * y + k] = half ? fromHalfBits(v) : v;
+        }
+      return { width, height, rgba };
+    },
     setRenderScale: (scale) => {
       if (scale === renderScale) return;
       renderScale = scale;
@@ -619,6 +667,11 @@ export function createPipeline(
       }
       const flowPipe =
         flow !== null && flowComposite !== 'off' ? flow.pipelines[flowComposite] : null;
+      if (flow !== null) {
+        // the camera is unjittered here: TRAA jitters it only inside the pipeline's render
+        flowCamera.copy(camera, false);
+        flow.pass.camera = flowJitter ? camera : flowCamera;
+      }
       (cinematic ? cinePipeline : (flowPipe ?? pipeline)).render();
     },
     dispose: () => {

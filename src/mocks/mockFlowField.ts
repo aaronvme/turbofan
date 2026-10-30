@@ -554,6 +554,7 @@ export function createMockFlowField(
   return {
     label: MOCK_LABEL,
     source: 'mock',
+    coupling: 'mock',
     reference,
     extents: FIELD_EXTENTS,
     near: raster(FIELD_EXTENTS.near),
