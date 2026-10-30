@@ -3398,3 +3398,9 @@ None.
     2. a **global M_cut tied to the domain's peak velocity** (the standard Weiss-Smith/Turkel floor; D4-59's rationale), tried at 0.02 then 0.05. D4-59 found 0.02 kept every other row passing (L7 ratio 1.78 ≤ 3, L8 0.754%). It was rejected there only on R's convergence, which D4-55/D4-58 later traced to the limiter, so that criterion was wrong for R;
     3. only if both fail, come back with data for a deeper change.
   - The kernel mirrors the adopted M_cut, as a parameter: D4-40's adapter default.
+- **D4-82 (critic pass 12 question rr, PARTIAL pass): a flow field carries an explicit coupling state,** `'mock' | 'uncoupled' | 'coupled'`. This is a minimal, flagged contract addition.
+  - The badge and legend say "solver (uncoupled until W3)" while the solver runs without body forces or combustor sources.
+  - A runtime MOCK fallback, used when the solver is unavailable, lost or diverged, is part of the app shell's contract: visible, never silent.
+  - This closes W2V-I1 and W2V-I6.
+- **D4-83 (question ss): Realistic mode has no tracers by default,** because the cinematic product view read them as hair. Its subtle haze and schlieren stay, and tracers remain available as an option and on by default in the Cutaway/Data modes.
+  - The near-field crop gets a crisp edge with a thin outline instead of a fade. This also removes the purple fog the fade made around the engine in the cut modes.
