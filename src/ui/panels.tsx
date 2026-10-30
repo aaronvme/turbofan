@@ -71,12 +71,33 @@ const PANELS: readonly [PanelId, string][] = [
   ['diagnostics', 'Diagnostics'],
 ];
 
+/** The panel switches, at the head of the right column (the panels they open are its, the
+ * station strip's and the drawer's). */
+export function PanelToggles() {
+  const panels = useApp((s) => s.panels);
+  const toggle = useApp((s) => s.togglePanel);
+  return (
+    <nav className="panel-toggles" aria-label="Panels" data-reserve>
+      {PANELS.map(([id, label]) => (
+        <button
+          key={id}
+          type="button"
+          aria-pressed={panels[id]}
+          onClick={() => {
+            toggle(id);
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 export function TopBar({ snapshot }: { readonly snapshot: SimSnapshot }) {
   const send = useApp((s) => s.send);
   const units = useApp((s) => s.units);
   const setUnits = useApp((s) => s.setUnits);
-  const panels = useApp((s) => s.panels);
-  const toggle = useApp((s) => s.togglePanel);
   const link = useApp((s) => s.diagnostics?.field ?? null);
   const { clock, view } = snapshot;
   return (
@@ -149,20 +170,6 @@ export function TopBar({ snapshot }: { readonly snapshot: SimSnapshot }) {
           ))}
         </div>
       </div>
-      <nav className="panel-toggles" aria-label="Panels">
-        {PANELS.map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            aria-pressed={panels[id]}
-            onClick={() => {
-              toggle(id);
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
       <div className="provenance" role="group" aria-label="Data provenance">
         {provenanceBadges(snapshot.sources, link).map((b) => (
           <Badge key={b.id} a={b} />
@@ -299,11 +306,27 @@ function BudgetBar({ d }: { readonly d: AppDiagnostics }) {
         </div>
         <div>
           <dt>Cycle step (CPU)</dt>
-          <dd>{fmt.ms(b.cycleCpuMs)} ms</dd>
+          <dd>
+            {fmt.ms(b.cycleCpuMs)} ms · worst {fmt.ms(b.cycleCpuMaxMs)}
+          </dd>
         </div>
+        {b.cycleCpuHeldMs !== null && (
+          <div>
+            <dt>Held step (W2F-N5)</dt>
+            <dd className="caution">{fmt.ms(b.cycleCpuHeldMs)} ms</dd>
+          </div>
+        )}
         <div>
           <dt>Worker frame (CPU)</dt>
-          <dd>{fmt.ms(b.frameCpuMs)} ms</dd>
+          <dd>
+            {fmt.ms(b.frameCpuMs)} ms · worst {fmt.ms(b.frameCpuMaxMs)}
+          </dd>
+        </div>
+        <div>
+          <dt>MOCK raster (off frame)</dt>
+          <dd>
+            {fmt.ms(b.mockRasterMs)} ms · {b.mockRasters}
+          </dd>
         </div>
         <div>
           <dt>Frame rate</dt>

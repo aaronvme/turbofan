@@ -1,6 +1,8 @@
-// The engine display (N1, EGT, N2 dials and the fuel flow, the CFM56-7B's upper-display layout)
-// and the throttle quadrant (thrust lever, fuel lever, start switch, ignition), on the real cycle
-// model's snapshot. Limits are the definition's (EASA TCDS figures in src/engine/facts.ts).
+// The engine display (N1 and EGT dials above, the N2 dial beside the fuel flow, thrust and TSFC
+// readouts, as the CFM56-7B's upper and lower displays split them) and the throttle quadrant
+// (the thrust lever beside the fuel lever, start switch and ignition; reset and fault rows under
+// them), on the real cycle model's snapshot. Limits are the definition's (EASA TCDS figures in
+// src/engine/facts.ts).
 
 import { useId } from 'react';
 import { ENGINE_DEFINITION } from '../engine/definition';
@@ -16,9 +18,10 @@ const N2_RED = (100 * DEF.limits.n2MaxRpm) / DEF.designPoint.n2Rpm;
 const EGT_RED_C = kelvinToCelsius(DEF.limits.egtTakeoffRedlineK);
 const EGT_AMBER_C = kelvinToCelsius(DEF.limits.egtMaxContinuousK);
 
-/** The dial sweeps 210 degrees, from the lower left. */
+/** The dial sweeps 210 degrees clockwise from the lower left; its gap is at the bottom, where the
+ * readout sits (SVG angles: 0 is +x, 90 is down). */
 const SWEEP = 210;
-const START = 180 + (180 - SWEEP) / 2 + 90;
+const START = 90 + (360 - SWEEP) / 2;
 
 function polar(cx: number, cy: number, r: number, deg: number): [number, number] {
   const a = (deg * Math.PI) / 180;
@@ -41,34 +44,29 @@ interface DialProps {
   readonly amber?: number;
   /** The commanded value (N1 target), drawn as a bug on the scale. */
   readonly target?: number | null;
-  readonly size?: number;
+  /** The secondary dial (N2): drawn smaller, beside the readouts. */
+  readonly small?: boolean;
 }
 
-export function Dial({
-  label,
-  value,
-  digits,
-  unit,
-  max,
-  red,
-  amber,
-  target,
-  size = 132,
-}: DialProps) {
-  const cx = size / 2;
-  const cy = size / 2 + 4;
-  const r = size / 2 - 12;
+/** The dial's drawing units (the SVG scales to its column). */
+const SIZE = 132;
+/** The drawn rows: the target bug's top (cy - r - 7 - 2.8 = 6.2) to the readout under the hub. */
+const VIEW_TOP = 2;
+const VIEW_H = 98;
+
+export function Dial({ label, value, digits, unit, max, red, amber, target, small }: DialProps) {
+  const cx = SIZE / 2;
+  const cy = SIZE / 2 + 4;
+  const r = SIZE / 2 - 12;
   const angle = (v: number) => START + (SWEEP * Math.max(0, Math.min(max, v))) / max;
   const level =
     value >= red ? 'warning' : amber !== undefined && value >= amber ? 'caution' : 'normal';
   const shown = fmt.fixed(value, digits);
   const [nx, ny] = polar(cx, cy, r - 6, angle(value));
   return (
-    <figure className="dial" data-level={level}>
+    <figure className={small === true ? 'dial small' : 'dial'} data-level={level}>
       <svg
-        width={size}
-        height={size * 0.86}
-        viewBox={`0 0 ${size} ${size * 0.86}`}
+        viewBox={`0 ${VIEW_TOP} ${SIZE} ${VIEW_H}`}
         role="meter"
         aria-label={label}
         aria-valuemin={0}
@@ -88,9 +86,9 @@ export function Dial({
         {target !== undefined && target !== null && (
           <circle
             className="dial-bug"
-            cx={polar(cx, cy, r + 6, angle(target))[0]}
-            cy={polar(cx, cy, r + 6, angle(target))[1]}
-            r={2.6}
+            cx={polar(cx, cy, r + 7, angle(target))[0]}
+            cy={polar(cx, cy, r + 7, angle(target))[1]}
+            r={2.8}
           />
         )}
         <line className="dial-needle" x1={cx} y1={cy} x2={nx} y2={ny} />
@@ -141,45 +139,39 @@ export function EngineDisplay({ snapshot }: { readonly snapshot: SimSnapshot }) 
           red={EGT_RED_C}
           amber={EGT_AMBER_C}
         />
-        <Dial
-          label="N2"
-          value={c.n2Percent}
-          digits={1}
-          unit="%"
-          max={110}
-          red={N2_RED}
-          size={112}
-        />
       </div>
-      <dl className="readouts">
-        <div>
-          <dt>FF</dt>
-          <dd>
-            {ff.value}
-            <small>{ff.unit}</small>
-          </dd>
-        </div>
-        <div>
-          <dt>Net thrust</dt>
-          <dd>
-            {fn.value}
-            <small>{fn.unit}</small>
-          </dd>
-        </div>
-        <div>
-          <dt>TSFC</dt>
-          <dd>
-            {sfc.value}
-            <small>{sfc.unit}</small>
-          </dd>
-        </div>
-        <div>
-          <dt>Start</dt>
-          <dd className="word">
-            {c.startPhase === 'none' ? (c.combustorLit ? 'lit' : 'off') : c.startPhase}
-          </dd>
-        </div>
-      </dl>
+      <div className="engine-lower">
+        <Dial label="N2" value={c.n2Percent} digits={1} unit="%" max={110} red={N2_RED} small />
+        <dl className="readouts">
+          <div>
+            <dt>FF</dt>
+            <dd>
+              {ff.value}
+              <small>{ff.unit}</small>
+            </dd>
+          </div>
+          <div>
+            <dt>Net thrust</dt>
+            <dd>
+              {fn.value}
+              <small>{fn.unit}</small>
+            </dd>
+          </div>
+          <div>
+            <dt>TSFC</dt>
+            <dd>
+              {sfc.value}
+              <small>{sfc.unit}</small>
+            </dd>
+          </div>
+          <div>
+            <dt>Start</dt>
+            <dd className="word">
+              {c.startPhase === 'none' ? (c.combustorLit ? 'lit' : 'off') : c.startPhase}
+            </dd>
+          </div>
+        </dl>
+      </div>
     </section>
   );
 }
@@ -199,36 +191,39 @@ export function ThrottleQuadrant({ snapshot }: { readonly snapshot: SimSnapshot 
     <section className="panel quadrant" aria-label="Throttle quadrant" data-reserve>
       <header className="panel-head">
         <h2>Controls</h2>
+        <span className="tag">lever {Math.round(inp.throttleLever * 100)} %</span>
       </header>
-      <div className="quadrant-body">
+      <div className="quadrant-top">
         <div className="lever">
           <label htmlFor={`${id}-lever`}>Thrust lever</label>
-          <input
-            id={`${id}-lever`}
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={inp.throttleLever}
-            aria-valuetext={`${Math.round(inp.throttleLever * 100)} % of travel`}
-            onChange={(e) => {
-              send({ type: 'setThrottle', lever: Number(e.currentTarget.value) });
-            }}
-          />
-          <div className="detents" aria-hidden="true">
-            {DETENTS.map((d) => (
-              <button
-                key={d.label}
-                type="button"
-                tabIndex={-1}
-                style={{ bottom: `${d.at * 100}%` }}
-                onClick={() => {
-                  send({ type: 'setThrottle', lever: d.at });
-                }}
-              >
-                {d.label}
-              </button>
-            ))}
+          <div className="lever-track">
+            <input
+              id={`${id}-lever`}
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={inp.throttleLever}
+              aria-valuetext={`${Math.round(inp.throttleLever * 100)} % of travel`}
+              onChange={(e) => {
+                send({ type: 'setThrottle', lever: Number(e.currentTarget.value) });
+              }}
+            />
+            <div className="detents" aria-hidden="true">
+              {DETENTS.map((d) => (
+                <button
+                  key={d.label}
+                  type="button"
+                  tabIndex={-1}
+                  style={{ bottom: `${d.at * 100}%` }}
+                  onClick={() => {
+                    send({ type: 'setThrottle', lever: d.at });
+                  }}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         <div className="switches">
@@ -259,7 +254,7 @@ export function ThrottleQuadrant({ snapshot }: { readonly snapshot: SimSnapshot 
                 send({ type: 'start', engage: !inp.starter });
               }}
             >
-              {inp.starter ? 'GRD (starter on)' : 'OFF'}
+              {inp.starter ? 'GRD' : 'OFF'}
             </button>
             <span className={`lamp${c.starterEngaged ? ' on' : ''}`}>START VALVE</span>
           </fieldset>
@@ -282,48 +277,54 @@ export function ThrottleQuadrant({ snapshot }: { readonly snapshot: SimSnapshot 
             </select>
             <span className={`lamp${c.ignitersOn ? ' on' : ''}`}>IGN</span>
           </fieldset>
-          <fieldset>
-            <legend>Reset</legend>
-            <div className="seg">
-              <button
-                type="button"
-                onClick={() => {
-                  send({ type: 'reset', initial: 'shutdown' });
-                }}
-              >
-                Shutdown
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  send({ type: 'reset', initial: 'groundIdle' });
-                }}
-              >
-                Ground idle
-              </button>
-            </div>
-          </fieldset>
-          <fieldset>
-            <legend>Inject fault</legend>
-            <div className="seg">
-              <button
-                type="button"
-                onClick={() => {
-                  send({ type: 'injectFault', fault: 'surge' });
-                }}
-              >
-                Surge
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  send({ type: 'injectFault', fault: 'flameout' });
-                }}
-              >
-                Flameout
-              </button>
-            </div>
-          </fieldset>
+        </div>
+      </div>
+      <div className="quadrant-rows">
+        <div className="row">
+          <span className="row-label" id={`${id}-reset`}>
+            Reset
+          </span>
+          <div className="seg" role="group" aria-labelledby={`${id}-reset`}>
+            <button
+              type="button"
+              onClick={() => {
+                send({ type: 'reset', initial: 'shutdown' });
+              }}
+            >
+              Shutdown
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                send({ type: 'reset', initial: 'groundIdle' });
+              }}
+            >
+              Ground idle
+            </button>
+          </div>
+        </div>
+        <div className="row">
+          <span className="row-label" id={`${id}-fault`}>
+            Fault
+          </span>
+          <div className="seg" role="group" aria-labelledby={`${id}-fault`}>
+            <button
+              type="button"
+              onClick={() => {
+                send({ type: 'injectFault', fault: 'surge' });
+              }}
+            >
+              Surge
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                send({ type: 'injectFault', fault: 'flameout' });
+              }}
+            >
+              Flameout
+            </button>
+          </div>
         </div>
       </div>
     </section>

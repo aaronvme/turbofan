@@ -117,6 +117,22 @@ const visible = (el: Element): boolean => {
 const overlap = (a: DOMRect, b: DOMRect): number =>
   Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
   Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+/** The part of an element its scroll containers show (the drawer and the columns scroll). */
+function shown(el: Element): DOMRect {
+  const r = el.getBoundingClientRect();
+  let [l, t, rt, b] = [r.left, r.top, r.right, r.bottom];
+  for (let p = el.parentElement; p !== null; p = p.parentElement) {
+    if (!p.matches('.drawer, .col')) continue;
+    const c = p.getBoundingClientRect();
+    [l, t, rt, b] = [
+      Math.max(l, c.left),
+      Math.max(t, c.top),
+      Math.min(rt, c.right),
+      Math.min(b, c.bottom),
+    ];
+  }
+  return new DOMRect(l, t, Math.max(0, rt - l), Math.max(0, b - t));
+}
 const nameOf = (el: Element): string =>
   el.getAttribute('aria-label') ??
   el.closest('[aria-label]')?.getAttribute('aria-label') ??
@@ -135,11 +151,11 @@ function layoutProblems(): string[] {
   const H = window.innerHeight;
   const blocks = [
     ...document.querySelectorAll(
-      '.overlay .topbar, .overlay .panel, .overlay .panel-toggles, .overlay .dock-row, .overlay .legend, .overlay .annunciators > *',
+      '.overlay .topbar, .overlay .panel, .overlay .panel-toggles, .overlay .drawer, .overlay .dock-row, .overlay .legend, .overlay .annunciators > *',
     ),
-  ].filter(visible);
+  ].filter((el) => visible(el) && shown(el).height > 0);
   for (const b of blocks) {
-    const r = b.getBoundingClientRect();
+    const r = shown(b);
     if (r.left < -0.5 || r.top < -0.5 || r.right > W + 0.5 || r.bottom > H + 0.5)
       out.push(
         `${nameOf(b)} is off screen: ${r.left.toFixed(0)},${r.top.toFixed(0)}-${r.right.toFixed(0)},${r.bottom.toFixed(0)} of ${String(W)}x${String(H)}`,
@@ -148,8 +164,7 @@ function layoutProblems(): string[] {
   blocks.forEach((a, i) => {
     for (const b of blocks.slice(i + 1)) {
       if (a.contains(b) || b.contains(a)) continue;
-      if (overlap(a.getBoundingClientRect(), b.getBoundingClientRect()) > 1)
-        out.push(`${nameOf(a)} overlaps ${nameOf(b)}`);
+      if (overlap(shown(a), shown(b)) > 1) out.push(`${nameOf(a)} overlaps ${nameOf(b)}`);
     }
   });
   for (const el of document.querySelectorAll('.overlay .col, .overlay .panel, .overlay .topbar')) {

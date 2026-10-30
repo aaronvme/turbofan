@@ -7,10 +7,12 @@ import { referenceEngine } from '../cycle/engine';
 import {
   mapGeometry,
   niceTicks,
+  placeSpeedLabels,
   scaleOf,
   type MapGeometry,
   type MapPoint,
 } from '../hud/compressorMap';
+import { placePointLabels } from '../hud/labels';
 import { tsDiagram, type TsPoint } from '../hud/tsDiagram';
 import * as fmt from '../hud/format';
 import type { SimSnapshot } from '../contracts/sim';
@@ -42,9 +44,29 @@ export function mapGeometries(): { fan: MapGeometry; hpc: MapGeometry } {
   return maps;
 }
 
+// the plot: the y title runs up the left edge, the x ticks sit above the x title, so no axis text
+// shares a line with another (the browser suite checks every chart label for overlap)
 const W = 300;
-const H = 196;
-const M = { l: 34, r: 8, t: 10, b: 24 };
+const H = 168;
+const M = { l: 40, r: 8, t: 10, b: 30 };
+const X_TICK_Y = H - M.b + 12;
+
+function AxisTitles({ x, y }: { readonly x: string; readonly y: string }) {
+  return (
+    <>
+      <text className="axis" x={W - M.r} y={H - 3} textAnchor="end">
+        {x}
+      </text>
+      <text
+        className="axis"
+        transform={`translate(9 ${String((M.t + H - M.b) / 2)}) rotate(-90)`}
+        textAnchor="middle"
+      >
+        {y}
+      </text>
+    </>
+  );
+}
 
 const path = (pts: readonly MapPoint[], x: (v: number) => number, y: (v: number) => number) =>
   pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p[0]).toFixed(1)} ${y(p[1]).toFixed(1)}`).join('');
@@ -68,6 +90,14 @@ export function CompressorMapChart({
   const xt = niceTicks(g.bounds.wc[0], g.bounds.wc[1], 4);
   const yt = niceTicks(g.bounds.pr[0], g.bounds.pr[1], 4);
   const margin = point.surgeMarginFraction;
+  // the speed lines' stall ends crowd near design speed: only the labels that fit are drawn
+  const labels = placeSpeedLabels(
+    g.speedLines.map((s) => ({
+      percent: s.percent,
+      x: x(s.points[0]?.[0] ?? 0),
+      y: y(s.points[0]?.[1] ?? 0),
+    })),
+  );
   const label = `${title} map: corrected flow ${fmt.fixed(point.correctedFlowKgPerS, 1)} kg/s, pressure ratio ${fmt.fixed(point.pressureRatio, 2)}, surge margin ${fmt.fixed(100 * margin, 1)} %`;
   return (
     <figure className="chart">
@@ -83,7 +113,7 @@ export function CompressorMapChart({
         {xt.map((t) => (
           <g key={`x${t}`} className="tick">
             <line x1={x(t)} x2={x(t)} y1={M.t} y2={H - M.b} />
-            <text x={x(t)} y={H - M.b + 14} textAnchor="middle">
+            <text x={x(t)} y={X_TICK_Y} textAnchor="middle">
               {t}
             </text>
           </g>
@@ -99,15 +129,15 @@ export function CompressorMapChart({
         {g.speedLines.map((s) => (
           <g key={s.percent} className="speed-line">
             <path d={path(s.points, x, y)} />
-            <text
-              x={x(s.points[0]?.[0] ?? 0) - 2}
-              y={y(s.points[0]?.[1] ?? 0) - 3}
-              textAnchor="end"
-            >
-              {s.percent}
-            </text>
           </g>
         ))}
+        <g className="speed-labels">
+          {labels.map((l) => (
+            <text key={l.percent} x={l.x - 2} y={l.y - 3} textAnchor="end">
+              {l.percent}
+            </text>
+          ))}
+        </g>
         <path className="surge-line" d={path(g.surgeLine, x, y)} />
         {trail.slice(1).map((p, i) => {
           const a = trail[i];
@@ -136,12 +166,7 @@ export function CompressorMapChart({
           cy={y(point.pressureRatio)}
           r={2.6}
         />
-        <text className="axis" x={W - M.r} y={H - 2} textAnchor="end">
-          W√θ/δ kg/s
-        </text>
-        <text className="axis" x={4} y={M.t + 2} textAnchor="start" dominantBaseline="hanging">
-          PR
-        </text>
+        <AxisTitles x="W√θ/δ kg/s" y="PR" />
       </svg>
     </figure>
   );
@@ -186,6 +211,12 @@ export function TsPanel({ snapshot }: { readonly snapshot: SimSnapshot }) {
     pts
       .map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.sJPerKgK).toFixed(1)} ${y(p.ttK).toFixed(1)}`)
       .join('');
+  const stationLabels = placePointLabels(
+    d.core
+      .filter((p) => ['2', '3', '4', '45', '5'].includes(p.id))
+      .map((p) => ({ id: p.id, text: p.id, x: x(p.sJPerKgK), y: y(p.ttK) })),
+    { bounds: { x: M.l, y: 0, w: W - M.l, h: H - M.b } },
+  );
   const label = `T-s diagram: T3 ${fmt.fixed(snapshot.cycle.stations['3'].ttK, 0)} K, T4 ${fmt.fixed(snapshot.cycle.stations['4'].ttK, 0)} K`;
   return (
     <section className="panel ts" aria-label="T-s diagram" data-reserve>
@@ -205,7 +236,7 @@ export function TsPanel({ snapshot }: { readonly snapshot: SimSnapshot }) {
         {niceTicks(s0, s1, 4).map((t) => (
           <g key={`s${t}`} className="tick">
             <line x1={x(t)} x2={x(t)} y1={M.t} y2={H - M.b} />
-            <text x={x(t)} y={H - M.b + 14} textAnchor="middle">
+            <text x={x(t)} y={X_TICK_Y} textAnchor="middle">
               {t}
             </text>
           </g>
@@ -218,21 +249,16 @@ export function TsPanel({ snapshot }: { readonly snapshot: SimSnapshot }) {
         <path className="ts-bypass" d={line(d.bypass)} />
         <path className="ts-core" d={line(d.core)} />
         {d.core.map((p) => (
-          <g key={p.id} className="ts-station">
-            <circle cx={x(p.sJPerKgK)} cy={y(p.ttK)} r={2.2} />
-            {['2', '3', '4', '45', '5'].includes(p.id) && (
-              <text x={x(p.sJPerKgK) + 4} y={y(p.ttK) - 4}>
-                {p.id}
-              </text>
-            )}
-          </g>
+          <circle key={p.id} className="ts-station" cx={x(p.sJPerKgK)} cy={y(p.ttK)} r={2.2} />
         ))}
-        <text className="axis" x={W - M.r} y={H - 2} textAnchor="end">
-          s − s₀ J/(kg·K)
-        </text>
-        <text className="axis" x={4} y={M.t + 2} dominantBaseline="hanging">
-          Tt K
-        </text>
+        <g className="ts-labels">
+          {stationLabels.map((l) => (
+            <text key={l.id} x={l.x} y={l.y} textAnchor={l.anchor}>
+              {l.text}
+            </text>
+          ))}
+        </g>
+        <AxisTitles x="s − s₀ J/(kg·K)" y="Tt K" />
       </svg>
     </section>
   );

@@ -1,0 +1,5 @@
+realistic: 2049x1152 centre std 0.239 lit 0.774
+cutaway: 2049x1152 centre std 0.284 lit 0.492
+exploded: 2049x1152 centre std 0.223 lit 0.635
+schlieren: 2049x1152 centre std 0.161 lit 0.134
+data: 2049x1152 centre std 0.146 lit 0.199

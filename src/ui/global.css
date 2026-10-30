@@ -74,16 +74,22 @@ body,
 .overlay {
   pointer-events: none;
   display: grid;
-  grid-template-columns: 300px 1fr 320px;
-  grid-template-rows: auto 1fr auto;
-  gap: 10px;
-  padding: 10px;
+  grid-template-columns: clamp(272px, 16.5vw, 316px) minmax(0, 1fr) clamp(296px, 18vw, 340px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 8px;
 }
 .overlay > * {
   pointer-events: auto;
 }
 .overlay > .callouts,
-.overlay > .annunciators {
+.overlay > .center {
+  pointer-events: none;
+}
+.center > * {
+  pointer-events: auto;
+}
+.center > .annunciators {
   pointer-events: none;
 }
 
@@ -131,7 +137,7 @@ button:disabled {
   backdrop-filter: blur(14px) saturate(1.2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 9px 12px 10px;
   box-shadow: 0 8px 30px rgb(0 0 0 / 0.35);
 }
 .panel-head {
@@ -139,7 +145,7 @@ button:disabled {
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .panel h2 {
   margin: 0;
@@ -179,10 +185,11 @@ small {
 .topbar {
   grid-column: 1 / -1;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 10px 16px;
-  padding: 8px 12px;
+  gap: 14px;
+  min-width: 0;
+  padding: 6px 10px;
   background: var(--panel);
   backdrop-filter: blur(14px);
   border: 1px solid var(--line);
@@ -191,8 +198,9 @@ small {
 .brand {
   display: flex;
   flex-direction: column;
+  flex: none;
   line-height: 1.15;
-  margin-right: 6px;
+  margin-right: 2px;
 }
 .brand strong {
   font-size: 14px;
@@ -215,10 +223,11 @@ small {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
+  padding: 4px 10px;
   border-radius: 6px;
   cursor: pointer;
   color: var(--muted);
+  white-space: nowrap;
 }
 .modes label.on {
   background: rgb(124 196 255 / 0.16);
@@ -246,6 +255,7 @@ kbd {
 .clock,
 .settings {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 8px;
 }
@@ -265,15 +275,26 @@ kbd {
 }
 .panel-toggles {
   display: flex;
-  gap: 4px;
-  margin-left: auto;
+  flex: none;
+  gap: 3px;
+  padding: 3px;
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
 }
 .panel-toggles button {
-  font-size: 12px;
+  flex: 1 1 auto;
+  padding: 3px 4px;
+  min-height: 24px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 .provenance {
   display: flex;
+  flex: none;
   gap: 6px;
+  margin-left: auto;
 }
 .badge {
   display: inline-block;
@@ -301,19 +322,20 @@ kbd {
 }
 
 .annunciators {
-  position: absolute;
-  top: 72px;
-  left: 50%;
-  translate: -50% 0;
+  grid-row: 1;
+  justify-self: center;
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 6px;
+  max-width: 100%;
 }
 
 /* columns */
 .col {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
@@ -330,24 +352,50 @@ kbd {
   pointer-events: none;
 }
 
+/* the view's column: annunciators on top, the drawer at its right edge, the dock at the bottom */
+.center {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.drawer {
+  grid-row: 2;
+  justify-self: end;
+  align-self: start;
+  width: min(360px, 100%);
+  max-height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 /* engine display */
 .dials {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  gap: 8px;
   justify-items: center;
 }
 .dial {
   margin: 0;
+  min-width: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
-.dial:last-child {
-  grid-column: 1 / -1;
-  margin-top: -6px;
-}
 .dial svg {
-  overflow: visible;
+  display: block;
+  width: 100%;
+  max-width: 132px;
+  height: auto;
 }
 .dial-track {
   fill: none;
@@ -390,10 +438,11 @@ kbd {
   fill: var(--advisory);
 }
 .dial figcaption {
+  position: relative;
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  margin-top: -14px;
+  gap: 6px;
+  margin-top: -20px;
 }
 .dial-label {
   font-size: 11px;
@@ -402,12 +451,13 @@ kbd {
   letter-spacing: 0.06em;
 }
 .dial-readout {
-  font-size: 19px;
+  font-size: 17px;
   font-weight: 600;
   padding: 1px 6px;
+  background: var(--panel-solid);
   border: 1px solid var(--line-strong);
   border-radius: 4px;
-  min-width: 58px;
+  min-width: 54px;
   text-align: right;
 }
 .dial[data-level='caution'] .dial-readout {
@@ -417,17 +467,19 @@ kbd {
   color: var(--warning);
 }
 .readouts {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px 12px;
-  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  min-width: 0;
 }
 .readouts div {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  gap: 8px;
   border-top: 1px solid var(--line);
-  padding-top: 4px;
+  padding-top: 3px;
 }
 .readouts dt {
   color: var(--muted);
@@ -435,8 +487,9 @@ kbd {
 }
 .readouts dd {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
 }
 .readouts dd.word {
   font-size: 12px;
@@ -445,17 +498,11 @@ kbd {
 }
 
 /* quadrant */
-.quadrant-body {
-  display: grid;
-  grid-template-columns: 70px 1fr;
-  gap: 12px;
-}
 .lever {
-  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 .lever label {
   font-size: 11px;
@@ -465,25 +512,27 @@ kbd {
 .lever input[type='range'] {
   writing-mode: vertical-lr;
   direction: rtl;
-  height: 200px;
-  width: 28px;
+  height: 100%;
+  width: 26px;
+  margin: 0;
   accent-color: var(--accent);
   cursor: ns-resize;
 }
 .detents {
   position: absolute;
-  top: 34px;
-  height: 196px;
-  right: -6px;
-  width: 26px;
+  top: 8px;
+  bottom: 8px;
+  left: 30px;
+  width: 30px;
 }
 .detents button {
   position: absolute;
-  right: 0;
+  left: 0;
   translate: 0 50%;
-  padding: 0 3px;
+  padding: 0 2px;
   min-height: 0;
   font-size: 9px;
+  letter-spacing: 0.04em;
   border: none;
   background: none;
   color: var(--faint);
@@ -491,7 +540,8 @@ kbd {
 .switches {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
+  min-width: 0;
 }
 fieldset {
   border: none;
@@ -527,14 +577,14 @@ legend {
 
 /* charts */
 .chart {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
 }
 .chart figcaption {
   display: flex;
   justify-content: space-between;
   font-size: 12px;
   font-weight: 600;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 .chart figcaption .value {
   font-weight: 500;
@@ -555,10 +605,6 @@ svg text {
   fill: none;
   stroke: rgb(230 233 238 / 0.32);
   stroke-width: 1;
-}
-.speed-line text {
-  fill: var(--faint);
-  font-size: 8.5px;
 }
 .surge-line {
   fill: none;
@@ -592,34 +638,40 @@ svg text {
   stroke: #fcffa4;
   stroke-width: 1.8;
 }
+.ts-labels text {
+  fill: var(--fg);
+}
 .ts-bypass {
   fill: none;
   stroke: var(--accent);
   stroke-width: 1.4;
 }
-.ts-station circle {
+.ts-station {
   fill: #fff;
 }
-.ts-station text {
-  fill: var(--fg);
+.speed-labels text {
+  fill: var(--faint);
+  font-size: 8.5px;
 }
 
 /* station strip */
 .strip {
   grid-column: 1 / 3;
   grid-row: 3;
-  overflow-x: auto;
-  padding: 6px 10px;
+  padding: 5px 10px 6px;
 }
 .strip table {
   border-collapse: collapse;
   width: 100%;
+  table-layout: fixed;
 }
 .strip th,
 .strip td {
-  padding: 2px 8px;
+  padding: 1px 6px;
   text-align: right;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .strip thead th {
   font-weight: 600;
@@ -631,6 +683,8 @@ svg text {
   font-size: 9px;
   color: var(--faint);
   font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .strip tbody th {
   text-align: left;
@@ -850,14 +904,6 @@ svg text {
     animation: none;
   }
 }
-@media (max-width: 1100px) {
-  .overlay {
-    grid-template-columns: 260px 1fr 280px;
-  }
-  .panel-toggles {
-    margin-left: 0;
-  }
-}
 
 /* the annunciated cause beside a held gas path (D4-17, W2F-I1) */
 .annunciation {
@@ -877,20 +923,20 @@ svg text {
 
 /* the view dock: legend, camera presets, tracers, the Data view's field */
 .dock {
-  grid-column: 2;
-  grid-row: 2;
-  align-self: end;
+  grid-row: 3;
   justify-self: center;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 .dock-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 5px 6px;
+  max-width: 100%;
+  padding: 4px 6px;
   background: var(--panel);
   backdrop-filter: blur(14px);
   border: 1px solid var(--line);
@@ -932,8 +978,8 @@ svg text {
   background: #fff;
 }
 .legend {
-  width: 360px;
-  padding: 8px 12px 6px;
+  width: min(380px, 100%);
+  padding: 7px 12px 6px;
   background: var(--panel);
   backdrop-filter: blur(14px);
   border: 1px solid var(--line);
@@ -995,4 +1041,73 @@ svg text {
 }
 .legend-badge[data-fallback='true'] {
   color: var(--caution);
+}
+
+/* the quadrant's parts */
+.quadrant-top {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+}
+.lever label {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.2;
+}
+.lever-track {
+  position: relative;
+  height: 128px;
+  width: 64px;
+  display: flex;
+  justify-content: flex-start;
+  padding-left: 4px;
+  box-sizing: border-box;
+}
+.quadrant-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+.quadrant-rows .row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.row-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* the N2 dial beside the readouts */
+.engine-lower {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  margin-top: 4px;
+}
+.dial.small svg {
+  max-width: 96px;
+}
+.dial.small figcaption {
+  margin-top: -16px;
+}
+.dial.small .dial-readout {
+  font-size: 13px;
+  min-width: 42px;
+}
+
+/* the mode keys are a hint: dropped where the bar is tight */
+@media (max-width: 1500px) {
+  .modes kbd {
+    display: none;
+  }
+  .modes label {
+    padding: 4px 9px;
+  }
 }

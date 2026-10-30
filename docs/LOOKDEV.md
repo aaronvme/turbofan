@@ -37,6 +37,24 @@ The browser test writes these frames to `reports/flow/` (ignored) on every run; 
 
 Not done or not right yet: the MOCK field's inflow ahead of the lip converges about ten times faster than continuity allows, which piled tracers on the axis, so the intake tracers are born inside the lip (revisit the intake seed zone on W3's coupled solver field); the haze is a mean-field refraction (2942 of 518400 pixels change side on: physically about a pixel), so there is no shimmer; particles live in the near field only (they fade out at x = 5 m); the cinematic (depth-of-field) presets draw no flow layer.
 
+## The app shell (w2/app-ui round 2: the overlay on the real cycle model)
+
+`npm run dev` (this branch uses `--port 5194`) opens the app: the D2-4 worker renders the engine on the real cycle model, the React overlay reads its snapshots. The layout is one top bar (brand, the five modes with keys 1-5, the clock, quality and units, the provenance badges), the engine display and the controls on the left, the panel switches, the compressor maps and T-s on the right, the station strip along the bottom, and the view dock under the engine (the flow legend with its provenance line, the camera presets, the tracers switch, the Data view's cut-plane field). Diagnostics and What's simulated open as a drawer at the right edge of the view, which scrolls on its own. Every number is tabular; text is the cockpit's white, cyan, amber and red on a dark glass panel.
+
+The browser suite (`tests/browser/app.test.tsx`) checks the bar at 1920 x 1001 and 1366 x 768 CSS px in every mode and with the drawer open: no block off screen, none cut off (a panel or column whose content overflows it), no two blocks overlapping, no two labels in a chart overlapping, no two dials overlapping. The callouts have their own layout module (`src/hud/callouts.ts`).
+
+| File (`docs/look-dev/ui/`) | What it shows |
+|---|---|
+| `1920-1-realistic.jpg` ... `1920-5-data.jpg` | The five modes at 1920 x 1001, ground idle on the real model, the MOCK field (labelled) |
+| `1366-1-realistic.jpg` ... `1366-5-data.jpg` | The same at 1366 x 768 (the mode keys hide; nothing else changes) |
+| `1920-6-drawer.jpg`, `1366-6-drawer.jpg` | Data with Diagnostics and What's simulated open in the drawer |
+| `1920-data-solver.jpg` | Data on the live solver's field: the badge says "FIELD: solver (uncoupled until W3)", the legend "Flow solver (uncoupled until W3)" (D4-82) |
+| `01-realistic-idle.jpg` | Round 1's shot (the MCP at 1.5x, the old layout), kept for comparison |
+
+The suite writes these to `reports/ui/` (ignored) on every run; `VITE_UI_LOOKDEV=1` writes them here. The shared Chrome runs at the OS's 1.5x scale; the JPEGs are scaled to the CSS size.
+
+Not right yet: at ground idle the Data plane is mostly the darkest viridis purple (the ambient part of the near field at Mach about 0, W2V-N21); the callouts are hidden in Exploded (they do not follow the explode offsets); the colormaps of the contract (`colormaps`) are not the flow visuals' (fixed per quantity), so they are not offered.
+
 ## Look-dev round 5 (w2/lookdev-5: W2L-I1..I5, P4's last 0.5 ms, the pass-8 visual notes)
 
 All eight shots (00-07) were regenerated at the end; the round-4 set is in `docs/look-dev/before/`. Every timing below is **indicative**: back to back (D4-42's measure), paired and interleaved, a reference builder's CPU tests on the machine, never the official D0-1 run.

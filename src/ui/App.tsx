@@ -8,7 +8,14 @@ import type { CycleChoice } from '../shell/protocol';
 import { VIEW_MODES } from '../contracts/ui';
 import { EngineDisplay, ThrottleQuadrant } from './instruments';
 import { MapsPanel, StationStrip, TsPanel } from './charts';
-import { Annunciators, Callouts, DiagnosticsPanel, FidelityPanel, TopBar } from './panels';
+import {
+  Annunciators,
+  Callouts,
+  DiagnosticsPanel,
+  FidelityPanel,
+  PanelToggles,
+  TopBar,
+} from './panels';
 import { ViewDock } from './dock';
 import { useApp } from './store';
 
@@ -88,21 +95,32 @@ export function Overlay() {
     };
   }, [send]);
   if (snapshot === null) return null;
+  const drawer = panels.diagnostics || panels.fidelity;
   return (
     <div className="overlay">
       <TopBar snapshot={snapshot} />
       {snapshot.view.overlays.callouts && <Callouts snapshot={snapshot} />}
-      <Annunciators snapshot={snapshot} diagnostics={diagnostics} />
-      <ViewDock snapshot={snapshot} diagnostics={diagnostics} />
       <aside className="col left">
         <EngineDisplay snapshot={snapshot} />
         <ThrottleQuadrant snapshot={snapshot} />
       </aside>
+      {/* the view: the annunciators over it, the drawer at its right edge, the dock under it */}
+      <div className="center">
+        <Annunciators snapshot={snapshot} diagnostics={diagnostics} />
+        {drawer && (
+          <div className="drawer">
+            {panels.diagnostics && (
+              <DiagnosticsPanel snapshot={snapshot} diagnostics={diagnostics} />
+            )}
+            {panels.fidelity && <FidelityPanel />}
+          </div>
+        )}
+        <ViewDock snapshot={snapshot} diagnostics={diagnostics} />
+      </div>
       <aside className="col right">
+        <PanelToggles />
         {panels.maps && <MapsPanel snapshot={snapshot} />}
         {panels.ts && <TsPanel snapshot={snapshot} />}
-        {panels.diagnostics && <DiagnosticsPanel snapshot={snapshot} diagnostics={diagnostics} />}
-        {panels.fidelity && <FidelityPanel />}
       </aside>
       {panels.stations && <StationStrip snapshot={snapshot} />}
     </div>
