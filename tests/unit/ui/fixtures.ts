@@ -58,6 +58,7 @@ export function diagnosticsOf(o: Partial<AppDiagnostics> = {}): AppDiagnostics {
       fps: 60,
     },
     field: MOCK_LINK,
+    raster: { onFrame: false, lastError: null },
     lostSolveCause: null,
     errors: [],
     adapter: 'intel arc',

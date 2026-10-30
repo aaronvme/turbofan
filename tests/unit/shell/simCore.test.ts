@@ -83,6 +83,30 @@ describe('createSimCore', () => {
     expect(core.snapshot({ flow: NO_FLOW, flowSource: 'none' }).lastCommandSeq).toBe(4);
   });
 
+  it('W2A-N5 (M10): a seq equal to the last applied one is refused, not applied again', () => {
+    const core = mockCore();
+    expect(core.command({ seq: 2, command: { type: 'setThrottle', lever: 0.25 } })).toEqual([]);
+    const again = core.command({ seq: 2, command: { type: 'setThrottle', lever: 0.75 } });
+    expect(again.join()).toMatch(/seq 2 is not after the last applied seq 2/);
+    expect(core.inputs.throttleLever).toBe(0.25);
+    expect(core.snapshot({ flow: NO_FLOW, flowSource: 'none' }).lastCommandSeq).toBe(2);
+  });
+
+  it('W2A-N5 (M11): a refused command leaves the echoed seq at the last applied one', () => {
+    const core = mockCore();
+    expect(core.command({ seq: 4, command: { type: 'setThrottle', lever: 0.25 } })).toEqual([]);
+    const refused = core.command({ seq: 5, command: { type: 'runScenario', scenarioId: 'c12' } });
+    expect(refused.length).toBeGreaterThan(0);
+    expect(core.snapshot({ flow: NO_FLOW, flowSource: 'none' }).lastCommandSeq).toBe(4);
+    // an invalid command does not advance it either, and the next valid seq still applies
+    expect(
+      core.command({ seq: 6, command: { type: 'setThrottle', lever: 7 } }).length,
+    ).toBeGreaterThan(0);
+    expect(core.snapshot({ flow: NO_FLOW, flowSource: 'none' }).lastCommandSeq).toBe(4);
+    expect(core.command({ seq: 5, command: { type: 'setThrottle', lever: 0.5 } })).toEqual([]);
+    expect(core.snapshot({ flow: NO_FLOW, flowSource: 'none' }).lastCommandSeq).toBe(5);
+  });
+
   it('says scenarios are not available instead of pretending to run one', () => {
     const core = mockCore();
     const p = core.command({ seq: 0, command: { type: 'runScenario', scenarioId: 'c12' } });

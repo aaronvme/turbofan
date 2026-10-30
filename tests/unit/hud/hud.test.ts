@@ -15,6 +15,7 @@ import { layoutCallouts, leaderEnd, overlaps } from '../../../src/hud/callouts';
 import { ledgerKind, parseFidelityLedger, stripMarkdown } from '../../../src/hud/ledger';
 import * as f from '../../../src/hud/format';
 import {
+  faultAnnunciations,
   flagAnnunciations,
   fieldFallbackAnnunciation,
   flowAnnunciation,
@@ -361,5 +362,34 @@ describe('annunciators', () => {
     expect(a?.level).toBe('caution');
     expect(a?.text).toBe('MOCK FALLBACK: solver lost: GPU device lost');
     expect(a?.detail).toMatch(/^MOCK fallback/);
+  });
+
+  it('W2A-I1: the worker faults are annunciated: a stopped sim, GPU errors, the MOCK raster, refused commands', () => {
+    const none = { simStopped: null, gpuErrors: 0, raster: null, refused: 0 };
+    expect(faultAnnunciations(none)).toEqual([]);
+    expect(faultAnnunciations({ ...none, raster: { onFrame: false, lastError: null } })).toEqual(
+      [],
+    );
+    const all = faultAnnunciations({
+      simStopped: 'cycle step failed: TypeError: boom',
+      gpuErrors: 3,
+      raster: { onFrame: true, lastError: 'MOCK raster worker failed: rasterizing on the frame' },
+      refused: 2,
+    });
+    expect(all.map((f) => [f.id, f.level, f.text])).toEqual([
+      ['simStopped', 'warning', 'SIM STOPPED'],
+      ['gpuErrors', 'caution', 'GPU ERRORS (3)'],
+      ['raster', 'caution', 'MOCK RASTER ON FRAME'],
+      ['refused', 'advisory', 'REFUSED (2)'],
+    ]);
+    expect(all[0]?.detail).toMatch(/^cycle step failed: TypeError: boom/);
+    expect(all[2]?.detail).toBe('MOCK raster worker failed: rasterizing on the frame');
+    const failed = faultAnnunciations({
+      ...none,
+      raster: { onFrame: false, lastError: 'MOCK raster: NaN' },
+    });
+    expect(failed.map((f) => [f.text, f.detail])).toEqual([
+      ['MOCK RASTER FAILED', 'MOCK raster: NaN'],
+    ]);
   });
 });
