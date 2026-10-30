@@ -130,7 +130,9 @@ describe('seeding', () => {
     { id: 'bypass', weight: 1, x0: 0.3, x1: 0.35, r0: 0.62, r1: 0.9 },
   ];
 
-  it('fills each zone uniformly by area and splits by weight', () => {
+  // 40000 seeds: a test runtime limit (the coverage run on the loaded machine took 5.1 s, past
+  // vitest's 5 s default), not a threshold
+  it('fills each zone uniformly by area and splits by weight', { timeout: 60_000 }, () => {
     const rng = createRng(1);
     const n = 40000;
     const byZone = new Map<string, number[]>();
