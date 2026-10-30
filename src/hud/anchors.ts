@@ -3,6 +3,7 @@
 // the cutaway wedge opens), and projected to CSS pixels with the camera's view-projection matrix.
 
 import { radiusAt, type ComponentId, type EngineDefinition } from '../contracts/engine';
+import type { ViewMode } from '../contracts/ui';
 
 export interface WorldAnchor {
   readonly id: ComponentId;
@@ -36,6 +37,19 @@ export function componentAnchors(def: EngineDefinition): WorldAnchor[] {
     out.push({ id: c.id, name: c.name, x, r: 0.5 * (hub + casing), priority: p });
   }
   return out;
+}
+
+/**
+ * The parts the closed engine shows: the fan through the intake and the exhaust's nozzle. In
+ * Realistic the nacelle is opaque, so a callout on a core part would point at nothing seen
+ * (critic pass 13's visual note; W2A-I3: fewer labels on the core, fewer crossings).
+ */
+const SEEN_CLOSED: ReadonlySet<ComponentId> = new Set(['fan', 'exhaust']);
+
+/** Whether a mode calls a component out: the open modes all, Realistic what it shows, Exploded none. */
+export function calloutShownIn(mode: ViewMode, id: ComponentId): boolean {
+  if (mode === 'exploded') return false;
+  return mode !== 'realistic' || SEEN_CLOSED.has(id);
 }
 
 /**

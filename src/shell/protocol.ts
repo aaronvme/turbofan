@@ -100,8 +100,9 @@ export interface AppDiagnostics {
   readonly view: { readonly mode: ViewMode; readonly settledFrames: number };
   /** D4-85: the canvas's backing store, px, and the pixel ratio it renders at. */
   readonly backingStore: { readonly width: number; readonly height: number; readonly dpr: number };
-  /** D4-88: what the boot's pipeline warm-up took, wall ms. */
+  /** D4-88: what the boot's pipeline warm-up took, wall ms, and each configuration's share. */
   readonly warmUpMs: number;
+  readonly warmUpSteps: readonly { readonly name: string; readonly ms: number }[];
   /** W2F-I1: why the last matched solve was lost (null: none lost since the reset). */
   readonly lostSolveCause: string | null;
   /** The worker's own errors so far (GPU errors, a throwing step), newest last, at most 8. */

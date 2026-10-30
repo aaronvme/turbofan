@@ -252,8 +252,8 @@ export interface EngineView {
 export interface WarmUpReport {
   /** Wall ms of the whole warm-up (the frames and the GPU waits). */
   readonly ms: number;
-  /** The configurations rendered, in order (e.g. "data:mach+tracers"). */
-  readonly configurations: readonly string[];
+  /** The configurations rendered, in order (e.g. "data:mach+tracers"), and each one's wall ms. */
+  readonly configurations: readonly { readonly name: string; readonly ms: number }[];
 }
 
 /** Look-dev A/B switches for timing comparisons (never set by the app). */
@@ -609,8 +609,9 @@ async function assemble(
         // the app's first view last: TRAA's history is its own
         { flow: saved.flowMode, look: saved.mode },
       ];
-      const configurations: string[] = [];
+      const configurations: { name: string; ms: number }[] = [];
       for (const s of steps) {
+        const s0 = performance.now();
         flowMode = s.flow;
         flowQuantity = s.quantity ?? null;
         flowTracers = s.tracers ?? null;
@@ -619,9 +620,10 @@ async function assemble(
         view.setMode(s.look, true);
         view.frame(0);
         await device.device.queue.onSubmittedWorkDone();
-        configurations.push(
-          `${s.flow ?? s.look}${s.quantity === undefined ? '' : `:${s.quantity}`}${s.tracers === true ? '+tracers' : ''}`,
-        );
+        configurations.push({
+          name: `${s.flow ?? s.look}${s.quantity === undefined ? '' : `:${s.quantity}`}${s.tracers === true ? '+tracers' : ''}`,
+          ms: performance.now() - s0,
+        });
       }
       flowMode = saved.flowMode;
       flowQuantity = saved.flowQuantity;

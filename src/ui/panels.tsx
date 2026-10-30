@@ -508,49 +508,112 @@ export function DiagnosticsPanel({
 }
 
 const NAMES = new Map(componentAnchors(ENGINE_DEFINITION).map((a) => [a.id, a.name]));
+/** A label's box before it has been measured (the layout then uses its rendered size). */
 const LABEL = { w: 132, h: 34 };
 
-/** The 3D-anchored callouts: the worker's projected anchors, laid out so that none collide. */
+type Size = { readonly w: number; readonly h: number };
+
+/**
+ * The 3D-anchored callouts: the worker's projected anchors, laid out so that none collide and
+ * their leaders cross nothing where they can (W2A-I3). The layout reserves each label's rendered
+ * box: the labels are measured as drawn (border-box, one line each), and a label with no place
+ * yet is drawn hidden so that it is measured too. The reserved panels are measured when one
+ * resizes or a panel opens (W2A-N10), not on every snapshot.
+ */
 export function Callouts({ snapshot }: { readonly snapshot: SimSnapshot }) {
   const anchors = useApp((s) => s.anchors);
   const units = useApp((s) => s.units);
+  const panels = useApp((s) => s.panels);
   const ref = useRef<HTMLDivElement>(null);
   const [reserved, setReserved] = useState<Rect[]>([]);
   const [vp, setVp] = useState({ w: 1, h: 1 });
+  const [sizes, setSizes] = useState<Readonly<Record<string, Size>>>({});
   useLayoutEffect(() => {
     const host = ref.current;
     if (host === null) return;
-    const r = host.getBoundingClientRect();
-    setVp({ w: r.width, h: r.height });
-    setReserved(
-      [...document.querySelectorAll('[data-reserve]')].map((el) => {
-        const b = el.getBoundingClientRect();
-        return { x: b.left - r.left, y: b.top - r.top, w: b.width, h: b.height };
-      }),
-    );
-  }, [snapshot.version]);
-  const placed = layoutCallouts(anchors, () => LABEL, vp, reserved);
+    const measure = () => {
+      const r = host.getBoundingClientRect();
+      setVp({ w: r.width, h: r.height });
+      setReserved(
+        [...document.querySelectorAll('[data-reserve]')].map((el) => {
+          const b = el.getBoundingClientRect();
+          return { x: b.left - r.left, y: b.top - r.top, w: b.width, h: b.height };
+        }),
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(host);
+    for (const el of document.querySelectorAll('[data-reserve]')) ro.observe(el);
+    return () => {
+      ro.disconnect();
+    };
+  }, [panels, snapshot.view.viewMode]);
+  // laid out again only when an anchor, a size or the room changes (not on every snapshot)
+  const key = anchors
+    .map((a) => `${a.id}:${a.visible ? `${a.x.toFixed(1)},${a.y.toFixed(1)}` : '-'}`)
+    .join('|');
+  const placed = useMemo(
+    () => layoutCallouts(anchors, (id) => sizes[id] ?? LABEL, vp, reserved),
+    // `key` stands for the anchors' values: a new array of the same anchors is no change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key, sizes, vp, reserved],
+  );
+  const placedIds = new Set(placed.map((p) => p.id));
+  // the labels as drawn (their values change with the snapshot): a change of a px or more is
+  // laid out again
+  useLayoutEffect(() => {
+    const host = ref.current;
+    if (host === null) return;
+    let next: Record<string, Size> | null = null;
+    for (const el of host.querySelectorAll<HTMLElement>('.callout[data-id]')) {
+      const b = el.getBoundingClientRect();
+      const id = el.dataset.id ?? '';
+      // not laid out (a DOM without layout): keep the default
+      if (b.width === 0 || b.height === 0 || id === '') continue;
+      const size = { w: Math.ceil(b.width), h: Math.ceil(b.height) };
+      const was = sizes[id];
+      if (was?.w === size.w && was.h === size.h) continue;
+      next ??= { ...sizes };
+      next[id] = size;
+    }
+    if (next !== null) setSizes(next);
+  }, [sizes, placed, snapshot.version, units]);
   const st = snapshot.cycle.stations;
   const value = (id: string): string => {
+    // every value with its unit (W2A-N8)
+    const t = (k: keyof typeof st) => {
+      const v = fmt.temperature(st[k].ttK, units);
+      return `${v.value} ${v.unit}`;
+    };
     switch (id) {
       case 'fan':
         return `N1 ${fmt.fixed(snapshot.cycle.n1Percent, 1)} %`;
       case 'hpc':
-        return `PR ${fmt.fixed(snapshot.cycle.hpc.pressureRatio, 1)} · T3 ${fmt.temperature(st['3'].ttK, units).value}`;
+        return `PR ${fmt.fixed(snapshot.cycle.hpc.pressureRatio, 1)} · T3 ${t('3')}`;
       case 'combustor':
-        return `T4 ${fmt.temperature(st['4'].ttK, units).value} ${fmt.temperature(1, units).unit}`;
+        return `T4 ${t('4')}`;
       case 'hpt':
-        return `T45 ${fmt.temperature(st['45'].ttK, units).value}`;
+        return `T45 ${t('45')}`;
       case 'lpt':
-        return `T5 ${fmt.temperature(st['5'].ttK, units).value}`;
+        return `T5 ${t('5')}`;
       case 'booster':
         return `P25 ${fmt.pressure(st['25'].ptPa, units).value} ${fmt.pressure(1, units).unit}`;
-      case 'bypassDuct':
-        return `W13 ${fmt.massFlow(st['13'].wKgPerS, units).value}`;
+      case 'bypassDuct': {
+        const w = fmt.massFlow(st['13'].wKgPerS, units);
+        return `W13 ${w.value} ${w.unit}`;
+      }
       default:
-        return `T8 ${fmt.temperature(st['8'].ttK, units).value}`;
+        return `T8 ${t('8')}`;
     }
   };
+  const label = (id: string) => (
+    <>
+      <span>{NAMES.get(id as never) ?? id}</span>
+      <b>{value(id)}</b>
+    </>
+  );
   return (
     <div className="callouts" ref={ref} aria-hidden="true">
       <svg className="leaders">
@@ -558,22 +621,30 @@ export function Callouts({ snapshot }: { readonly snapshot: SimSnapshot }) {
           const e = leaderEnd(p.anchor, p.box);
           return (
             <g key={p.id}>
-              <line x1={p.anchor.x} y1={p.anchor.y} x2={e.x} y2={e.y} />
+              <line data-id={p.id} x1={p.anchor.x} y1={p.anchor.y} x2={e.x} y2={e.y} />
               <circle cx={p.anchor.x} cy={p.anchor.y} r={2.5} />
             </g>
           );
         })}
       </svg>
       {placed.map((p) => (
+        // keyed apart from the measuring copy: a label that gets a place is drawn there at once
         <div
-          key={p.id}
+          key={`${p.id}:placed`}
           className="callout"
-          style={{ transform: `translate(${p.box.x}px, ${p.box.y}px)`, width: p.box.w }}
+          data-id={p.id}
+          style={{ transform: `translate(${p.box.x}px, ${p.box.y}px)` }}
         >
-          <span>{NAMES.get(p.id as never) ?? p.id}</span>
-          <b>{value(p.id)}</b>
+          {label(p.id)}
         </div>
       ))}
+      {anchors
+        .filter((a) => a.visible && !placedIds.has(a.id))
+        .map((a) => (
+          <div key={`${a.id}:measure`} className="callout measure" data-id={a.id}>
+            {label(a.id)}
+          </div>
+        ))}
     </div>
   );
 }

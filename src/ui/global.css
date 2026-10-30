@@ -867,10 +867,13 @@ svg text {
 .leaders circle {
   fill: #fff;
 }
+/* W2A-I3: the layout reserves the box as drawn (measured), border and padding included */
 .callout {
   position: absolute;
   top: 0;
   left: 0;
+  box-sizing: border-box;
+  white-space: nowrap;
   display: flex;
   flex-direction: column;
   padding: 3px 7px;
@@ -879,6 +882,11 @@ svg text {
   border-radius: 5px;
   backdrop-filter: blur(6px);
   transition: transform 160ms ease-out;
+}
+/* a label with no place yet, drawn only to be measured */
+.callout.measure {
+  visibility: hidden;
+  transition: none;
 }
 .callout span {
   font-size: 10px;

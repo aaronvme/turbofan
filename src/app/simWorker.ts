@@ -24,7 +24,7 @@ import { GpuFlowSolver } from '../flow/gpu/device/flowSolver';
 import { solverBudgetMs } from '../flow/gpu/scheduler';
 import { loadMeshAsset, parseMeshManifest } from '../flow/mesh/loader';
 import { FLOW_SOLVER_LIMITS, type GpuErrorReport } from '../gpu/device';
-import { anchorWorld, componentAnchors, projectPoint } from '../hud/anchors';
+import { anchorWorld, calloutShownIn, componentAnchors, projectPoint } from '../hud/anchors';
 import { createMockFlowField } from '../mocks/mockFlowField';
 import { createEngineView, type EngineView } from '../render/engineView';
 import { LOOK_PRESETS } from '../render/presets';
@@ -114,6 +114,7 @@ interface App {
   settle: SettleTracker;
   settledFrames: number;
   warmUpMs: number;
+  warmUpSteps: readonly { readonly name: string; readonly ms: number }[];
   appliedView: RenderState | null;
   errors: string[];
   refused: string[];
@@ -242,11 +243,12 @@ function projectAnchors(a: App): Anchor[] {
   const vp = cam.projectionMatrix.clone().multiply(cam.matrixWorldInverse).elements;
   const theta = Math.atan2(cam.position.z, cam.position.y);
   // W2A-N10: only on a settled view (during a transition the parts are not at the anchors)
-  const shown =
-    a.core.view.viewMode !== 'exploded' && a.core.view.overlays.callouts && a.settledFrames > 0;
+  const mode = a.core.view.viewMode;
+  const shown = a.core.view.overlays.callouts && a.settledFrames > 0;
   return anchors.map((w) => {
     const p = projectPoint(vp, anchorWorld(w, theta), a.size.width, a.size.height);
-    return { id: w.id, x: p.x, y: p.y, visible: shown && p.visible, priority: w.priority };
+    const visible = shown && calloutShownIn(mode, w.id) && p.visible;
+    return { id: w.id, x: p.x, y: p.y, visible, priority: w.priority };
   });
 }
 
@@ -350,6 +352,7 @@ function loop(a: App) {
           dpr: a.renderDpr,
         },
         warmUpMs: a.warmUpMs,
+        warmUpSteps: a.warmUpSteps,
         lostSolveCause: a.cycle.lostSolveCause(),
         errors: [...a.errors],
         adapter: `${a.view.device.info.vendor} ${a.view.device.info.architecture}`.trim(),
@@ -474,6 +477,7 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     settle: createSettleTracker(),
     settledFrames: 0,
     warmUpMs: 0,
+    warmUpSteps: [],
     appliedView: null,
     errors: [],
     refused: [],
@@ -505,6 +509,7 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
   // flow layers draw), so the viewer's first switch into a mode does not stall the worker
   const warm = await view.warmUp();
   a.warmUpMs = warm.ms;
+  a.warmUpSteps = warm.configurations;
   // messages wait in `pending` until the field is bound (a 'field' choice needs the switch)
   app = a;
   for (const p of pending.splice(0)) handle(a, p);
