@@ -1,9 +1,10 @@
-// D4-84 on the whole model. The pre-registered bar is "held frame <= 16.7 ms on the same ramp" (the
-// W1K-I2 part-power fit's 1 s lever ramp from ground idle, the case tests/browser/app.test.tsx's
-// W2F-N5 row runs, stepped at the app's 60 Hz). Node cannot gate a frame time on a shared machine,
-// so the gate is the step's work in the budget's own deterministic unit, gas-path evaluations:
-// a step that starts held spends at most the budget plus one Newton iteration, and any step at most
-// that plus one converged direct solve. tools/cycle/held-cost.ts reports the wall time (indicative).
+// D4-84 on the whole model, gated by PHYSICS.md P5 (D4-90). The bar is "held frame <= 16.7 ms on
+// the same ramp" (the W1K-I2 part-power fit's 1 s lever ramp from ground idle, the case
+// tests/browser/app.test.tsx's W2F-N5 row runs, stepped at the app's 60 Hz). Node cannot gate a
+// frame time on a shared machine, so P5 gates the step's work in the budget's own deterministic
+// unit, gas-path evaluations: a step that starts held spends at most the budget plus one Newton
+// iteration, and any step at most that plus one converged direct solve. The wall time is a record
+// (tools/cycle/held-cost.ts here, the browser row there).
 import { describe, expect, it, vi } from 'vitest';
 import { ISA_SLS } from '../../../src/contracts/ambient';
 import {
@@ -11,6 +12,7 @@ import {
   type CycleInputs,
   type CycleState,
 } from '../../../src/contracts/cycle';
+import { THRESHOLDS } from '../../../src/contracts/thresholds';
 import {
   PART_POWER_FIT_CALIBRATION,
   gasPathEvaluations,
@@ -25,7 +27,8 @@ import { withCalibration } from '../../../src/cycle/partPower';
 import { lazy } from './fixtures';
 
 const TIMEOUT_MS = 240_000;
-const DT = 1 / 60;
+const P5 = THRESHOLDS.P5.values;
+const DT = 1 / P5.stepRateHz.value;
 /** The browser row boots at idle and waits 3 s before the ramp. */
 const RAMP_FROM_S = 3;
 /**
@@ -58,7 +61,8 @@ function ramp(seconds: number, opts: CycleModelOptions = {}) {
   const n = Math.round((RAMP_FROM_S + seconds) / DT);
   for (let i = 0; i < n; i++) {
     const t = i * DT;
-    const lever = t < RAMP_FROM_S ? 0 : Math.max(0.01, Math.min(1, t - RAMP_FROM_S));
+    const ramped = (t - RAMP_FROM_S) / P5.leverRampS.value;
+    const lever = t < RAMP_FROM_S ? 0 : Math.max(0.01, Math.min(1, ramped));
     const e0 = gasPathEvaluations();
     const s = m.step(DT, inputs({ throttleLever: lever }));
     steps.push({ s, evals: gasPathEvaluations() - e0, cause: m.lostSolveCause() });
@@ -79,23 +83,32 @@ describe('D4-84: the held frame on the part-power fit ramp', { timeout: TIMEOUT_
     expect(steps[steps.length - 1]?.s.gasPathSolve.lostSolves ?? 0).toBeGreaterThan(0);
   });
 
-  it('the bar: a step that starts held spends at most the budget plus one Newton iteration', () => {
+  it("the retry's own bounds fit the P5 row", () => {
+    expect(HELD_RETRY_BUDGET + RETRY_OVERSHOOT).toBeLessThanOrEqual(
+      P5.maxHeldStepEvaluations.value,
+    );
+    expect(HELD_RETRY_BUDGET + RETRY_OVERSHOOT + CONVERGED_DIRECT).toBeLessThanOrEqual(
+      P5.maxStepEvaluations.value,
+    );
+  });
+
+  it('P5: a step that starts held spends at most the budget plus one Newton iteration', () => {
     const { steps } = run();
     let checked = 0;
     steps.forEach((k, i) => {
       if (!held(steps[i - 1])) return;
       checked++;
       expect(k.evals, `step at ${k.s.timeS.toFixed(3)} s`).toBeLessThanOrEqual(
-        HELD_RETRY_BUDGET + RETRY_OVERSHOOT,
+        P5.maxHeldStepEvaluations.value,
       );
     });
     expect(checked).toBeGreaterThan(10);
   });
 
-  it('and every step of the ramp, held or matched, at most one converged direct solve more', () => {
+  it('P5: every step of the ramp, held or matched, at most one converged direct solve more', () => {
     const { steps } = run();
     const worst = Math.max(...steps.map((k) => k.evals));
-    expect(worst).toBeLessThanOrEqual(HELD_RETRY_BUDGET + RETRY_OVERSHOOT + CONVERGED_DIRECT);
+    expect(worst).toBeLessThanOrEqual(P5.maxStepEvaluations.value);
   });
 
   it('the hold stays visible: status, count, cause, one warning per held episode (W2F-I1)', () => {

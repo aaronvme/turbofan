@@ -50,8 +50,8 @@ const physics = readPhysicsThresholds();
 
 describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
   it('finds the full pre-registered set in PHYSICS.md', () => {
-    // T1-T4, C1-C12 (C10 by D3-3, C11 by D3-11, C12 by D3-17), L1-L13, P1-P4 (P4 by D4-2)
-    expect(physics.length).toBe(4 + 12 + 13 + 4);
+    // T1-T4, C1-C12 (C10 by D3-3, C11 by D3-11, C12 by D3-17), L1-L13, P1-P5 (P4 by D4-2, P5 by D4-90)
+    expect(physics.length).toBe(4 + 12 + 13 + 5);
   });
 
   it('has exactly the same IDs, in the same order', () => {
@@ -103,6 +103,10 @@ describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
     expect(THRESHOLDS.P4.values.maxRenderGpuMs.value).toBe(8);
     expect(THRESHOLDS.P4.values.resolutionLines.value).toBe(1080);
     expect(THRESHOLDS.P4.values.reportedTargetMs.value).toBe(10);
+    expect(THRESHOLDS.P5.values.maxHeldStepEvaluations.value).toBe(137);
+    expect(THRESHOLDS.P5.values.maxStepEvaluations.value).toBe(217);
+    expect(THRESHOLDS.P5.values.heldFrameMs.value).toBe(16.7);
+    expect(THRESHOLDS.P5.values.stepRateHz.value).toBe(60);
   });
 
   it('marks the thresholds whose numbers live in ENGINE_FACTS.md instead', () => {
