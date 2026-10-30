@@ -116,7 +116,9 @@ describe('kernel buffers', () => {
     expect([...f.slice(20, 24)]).toEqual([-1, -0.5, Math.fround(0.1), 0.5]);
     expect(f[36]).toBe(1);
     // W2V-I4: the substep length (the texel, m) and the substep cap
-    expect(f[7]).toBe(Math.fround(Math.min((E.xMax - E.xMin) / E.width, (E.rMax - E.rMin) / E.height)));
+    expect(f[7]).toBe(
+      Math.fround(Math.min((E.xMax - E.xMin) / E.width, (E.rMax - E.rMin) / E.height)),
+    );
     expect(f[14]).toBe(MAX_SUBSTEPS);
     expect(() => packParticleParams({ ...params, zones: [] })).toThrow();
     expect(() =>

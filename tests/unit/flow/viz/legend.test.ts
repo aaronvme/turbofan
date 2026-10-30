@@ -98,7 +98,9 @@ describe('flowModeNote and dilationLabel', () => {
     expect(dilationLabel(1)).toBe('x1 (real time)');
     // D4-83: Realistic has no tracers by default; W2V-N17: its haze is the mean flow's
     const r = flowModeNote('realistic', 1 / 200);
-    expect(r).toMatch(/^Heat haze from its density gradient \(Gladstone-Dale; mean flow, no shimmer\)/);
+    expect(r).toMatch(
+      /^Heat haze from its density gradient \(Gladstone-Dale; mean flow, no shimmer\)/,
+    );
     expect(r).not.toMatch(/tracer/i);
     expect(r).toMatch(/The visuals add nothing synthesized\.$/);
     expect(r).not.toMatch(/Derived from the field; nothing synthesized/);
