@@ -113,3 +113,56 @@ export function niceTicks(lo: number, hi: number, count = 5): number[] {
     ticks.push(Number(t.toPrecision(12)));
   return ticks;
 }
+
+/** A speed line's label: its percent, drawn at the line's low-flow (stall) end, x and y in px. */
+export interface SpeedLabel {
+  readonly percent: number;
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * Where the chart draws a label relative to its line end, and the text's size, px: right-aligned
+ * 2 px to the left, baseline 3 px above, 8.5 px tabular digits (at most 5.2 px wide each).
+ */
+export const SPEED_LABEL = { dx: -2, dy: -3, digitW: 5.2, h: 8.5 } as const;
+
+/** The box a label's text occupies, px. */
+export function labelBox(l: SpeedLabel): { x: number; y: number; w: number; h: number } {
+  const w = String(l.percent).length * SPEED_LABEL.digitW;
+  return {
+    x: l.x + SPEED_LABEL.dx - w,
+    y: l.y + SPEED_LABEL.dy - SPEED_LABEL.h,
+    w,
+    h: SPEED_LABEL.h,
+  };
+}
+
+/**
+ * The speed-line labels that fit without overlapping, in the input order. Near design speed the
+ * lines' stall ends crowd together (the HPC map's 95, 100 and 105 sit a few px apart), so the
+ * round tens are placed first, high to low (100 before 90), then the others; a label whose box
+ * comes within `gapPx` of a placed one is left out (its line is still drawn).
+ */
+export function placeSpeedLabels(anchors: readonly SpeedLabel[], gapPx = 2): SpeedLabel[] {
+  const rank = (p: number) => (p % 10 === 0 ? 0 : 1);
+  const order = [...anchors].sort(
+    (a, b) => rank(a.percent) - rank(b.percent) || b.percent - a.percent,
+  );
+  const boxes: ReturnType<typeof labelBox>[] = [];
+  const kept = new Set<SpeedLabel>();
+  for (const a of order) {
+    const p = labelBox(a);
+    const clear = boxes.every(
+      (q) =>
+        p.x >= q.x + q.w + gapPx ||
+        q.x >= p.x + p.w + gapPx ||
+        p.y >= q.y + q.h + gapPx ||
+        q.y >= p.y + p.h + gapPx,
+    );
+    if (!clear) continue;
+    boxes.push(p);
+    kept.add(a);
+  }
+  return anchors.filter((a) => kept.has(a));
+}

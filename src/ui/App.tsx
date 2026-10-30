@@ -4,6 +4,7 @@
 
 import { useEffect, useRef } from 'react';
 import { startClient } from '../app/client';
+import type { CycleChoice } from '../shell/protocol';
 import { VIEW_MODES } from '../contracts/ui';
 import { EngineDisplay, ThrottleQuadrant } from './instruments';
 import { MapsPanel, StationStrip, TsPanel } from './charts';
@@ -11,7 +12,7 @@ import { Annunciators, Callouts, DiagnosticsPanel, FidelityPanel, TopBar } from 
 import { ViewDock } from './dock';
 import { useApp } from './store';
 
-function Viewport() {
+function Viewport({ cycle }: { readonly cycle: CycleChoice | undefined }) {
   const host = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = host.current;
@@ -27,12 +28,12 @@ function Viewport() {
       'Engine view. Drag or use the arrow keys to orbit, plus and minus to zoom, brackets to pan.',
     );
     el.appendChild(canvas);
-    const client = startClient(canvas);
+    const client = startClient(canvas, cycle === undefined ? {} : { cycle });
     return () => {
       client.dispose();
       canvas.remove();
     };
-  }, []);
+  }, [cycle]);
   return <div className="viewport" ref={host} />;
 }
 
@@ -108,11 +109,16 @@ export function Overlay() {
   );
 }
 
-export function App() {
+export function App({
+  cycle,
+}: {
+  /** The worker's cycle model (default the reference calibration; tests pick the held case). */
+  readonly cycle?: CycleChoice;
+} = {}) {
   return (
     <main className="app">
       <h1 className="sr-only">Turbofan: a CFM56-7B27-class engine, simulated</h1>
-      <Viewport />
+      <Viewport cycle={cycle} />
       <Overlay />
       <Status />
     </main>

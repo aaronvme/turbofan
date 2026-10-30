@@ -34,6 +34,8 @@ import type { CycleState } from '../contracts/cycle';
 import { createSimCore, type SimCore } from '../shell/simCore';
 import { createFieldSwitch, type FieldSwitch } from '../shell/fieldSwitch';
 import { cutPlaneQuantity, flowModeFor } from '../shell/viewState';
+import { createRasterScheduler, type RasterScheduler } from '../shell/mockRaster';
+import type { RasterReply, RasterRequest } from './mockRasterWorker';
 import { applyOrbit, orbitFromPose, orbitPose, type OrbitState } from '../shell/orbit';
 import type { AppDiagnostics, CycleChoice, FromWorker, ToWorker } from '../shell/protocol';
 import type { Anchor } from '../hud/callouts';
@@ -52,9 +54,6 @@ const post = (m: FromWorker) => {
 const PUBLISH_EVERY = 3;
 /** stats() walks the scene to count draws: read the timings this often (as P1 does). */
 const TIMINGS_EVERY = 15;
-/** The MOCK field is re-rasterized from the cycle state when N1 moved this far, %, or after 2 s. */
-const MOCK_FIELD_N1_STEP = 1.5;
-const MOCK_FIELD_MAX_AGE_MS = 2000;
 /** The frame-cost window, frames (2 s at 60 fps: a held episode's frames stay in view). */
 const COST_WINDOW = 120;
 const MAX_ERRORS = 8;
@@ -94,7 +93,10 @@ interface App {
   flowInitError: string | null;
   /** What is drawn (D4-82); null until the first MOCK raster is bound. */
   fields: FieldSwitch | null;
-  mockAt: { n1: number; t: number } | null;
+  /** The MOCK raster's own worker (null: it failed, so the raster runs here, on the frame). */
+  raster: Worker | null;
+  rasterDue: RasterScheduler;
+  rasterId: number;
   mockRasterMs: number | null;
   mockRasters: number;
   orbit: OrbitState;
@@ -136,23 +138,58 @@ function applyView(a: App) {
     a.view.setFlowTimeScale(Math.min(1, 1 / v.particleTimeDilation));
 }
 
-/** The MOCK raster of the cycle's own state (labelled 'mock'), timed (W2 app-ui NEXT 4). */
-function rasterMock(a: App, state: CycleState, nowMs: number) {
+/** The MOCK raster of the cycle's own state, here on the frame (the boot raster, a fallback). */
+function rasterHere(a: App, state: CycleState) {
   const r0 = performance.now();
   const field = createMockFlowField(ENGINE_DEFINITION, state, a.core.inputs.ambient);
   a.mockRasterMs = performance.now() - r0;
   a.mockRasters++;
-  a.mockAt = { n1: state.n1Percent, t: nowMs };
   return field;
 }
 
-/** Re-rasterizes the MOCK when N1 moved MOCK_FIELD_N1_STEP or it is MOCK_FIELD_MAX_AGE_MS old. */
+/** The raster worker (src/shell/mockRaster.ts: the raster is ~10 frames of CPU). */
+function startRaster(a: App): Worker | null {
+  try {
+    const w = new Worker(new URL('./mockRasterWorker.ts', import.meta.url), { type: 'module' });
+    w.onmessage = (e: MessageEvent<RasterReply>) => {
+      a.rasterDue.settled();
+      const r = e.data;
+      if ('error' in r) {
+        pushError(a, `MOCK raster: ${r.error}`);
+        console.warn(`MOCK raster failed: ${r.error}`);
+        return;
+      }
+      a.mockRasterMs = r.ms;
+      a.mockRasters++;
+      a.fields?.setMock(r.field);
+    };
+    w.onerror = (e) => {
+      // say so, and raster on the frame from now on (slower frames, never a stale field)
+      const msg = `MOCK raster worker failed (${e.message}): rasterizing on the frame`;
+      pushError(a, msg);
+      console.warn(msg);
+      w.terminate();
+      a.raster = null;
+      a.rasterDue.settled();
+    };
+    return w;
+  } catch (e) {
+    pushError(a, `MOCK raster worker: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}
+
+/** Asks for a new MOCK raster when N1 moved or the last is old (one in flight at a time). */
 function refreshMock(a: App, state: CycleState, nowMs: number) {
-  if (a.fields === null || a.mockAt === null) return;
-  const stale =
-    Math.abs(state.n1Percent - a.mockAt.n1) > MOCK_FIELD_N1_STEP ||
-    nowMs - a.mockAt.t > MOCK_FIELD_MAX_AGE_MS;
-  if (stale) a.fields.setMock(rasterMock(a, state, nowMs));
+  if (a.fields === null || !a.rasterDue.due(state.n1Percent, nowMs)) return;
+  a.rasterDue.requested(state.n1Percent, nowMs);
+  if (a.raster === null) {
+    a.fields.setMock(rasterHere(a, state));
+    a.rasterDue.settled();
+    return;
+  }
+  const req: RasterRequest = { id: ++a.rasterId, state, ambient: a.core.inputs.ambient };
+  a.raster.postMessage(req);
 }
 
 function flowStatus(a: App): FlowStatus {
@@ -367,7 +404,9 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     flow: new GpuFlowSolver(),
     flowInitError: null,
     fields: null,
-    mockAt: null,
+    raster: null,
+    rasterDue: createRasterScheduler(),
+    rasterId: 0,
     mockRasterMs: null,
     mockRasters: 0,
     orbit: orbitFromPose(preset.camera, preset.target),
@@ -384,9 +423,15 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
   // a failed start is already reported (the errors, the flow status), and the switch's fallback
   // says so again if the solver is chosen: no unhandled rejection
   solver.catch(() => undefined);
+  // the boot raster here (the field must be bound before the first frame), the rest off the frame
+  const now = performance.now();
+  a.rasterDue.requested(core.state().n1Percent, now);
+  const boot = rasterHere(a, core.state());
+  a.rasterDue.settled();
+  a.raster = startRaster(a);
   a.fields = await createFieldSwitch({
     sink: view,
-    mock: rasterMock(a, core.state(), performance.now()),
+    mock: boot,
     solver: () => solver,
     warn: (message) => {
       console.warn(message);

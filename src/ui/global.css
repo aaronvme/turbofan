@@ -858,3 +858,141 @@ svg text {
     margin-left: 0;
   }
 }
+
+/* the annunciated cause beside a held gas path (D4-17, W2F-I1) */
+.annunciation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px 2px 2px;
+  background: rgb(7 9 12 / 0.78);
+  border: 1px solid rgb(255 107 107 / 0.45);
+  border-radius: 6px;
+}
+.annunciation-detail {
+  max-width: 520px;
+  font-size: 11px;
+  color: var(--fg);
+}
+
+/* the view dock: legend, camera presets, tracers, the Data view's field */
+.dock {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: end;
+  justify-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.dock-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 6px;
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.dock-row .seg button {
+  font-size: 12px;
+}
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.switch .knob {
+  position: relative;
+  width: 26px;
+  height: 14px;
+  border-radius: 7px;
+  background: rgb(255 255 255 / 0.12);
+  transition: background 120ms;
+}
+.switch .knob::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: translate 120ms;
+}
+.switch[aria-checked='true'] .knob {
+  background: rgb(124 196 255 / 0.5);
+}
+.switch[aria-checked='true'] .knob::after {
+  translate: 12px 0;
+  background: #fff;
+}
+.legend {
+  width: 360px;
+  padding: 8px 12px 6px;
+  background: var(--panel);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.legend-title {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.legend-unit {
+  font-weight: 400;
+  color: var(--muted);
+}
+.legend-bar {
+  height: 8px;
+  margin: 5px 0 2px;
+  border-radius: 2px;
+}
+.legend-ticks {
+  position: relative;
+  height: 14px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.legend-ticks span {
+  position: absolute;
+  translate: -50% 0;
+}
+.legend-ticks span.lo {
+  translate: 0 0;
+}
+.legend-ticks span.hi {
+  translate: -100% 0;
+}
+.legend-badge {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 4px 0 0;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.legend-badge .dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--caution);
+}
+.legend-badge[data-coupling='uncoupled'] .dot {
+  background: var(--accent);
+}
+.legend-badge[data-coupling='coupled'] .dot {
+  background: var(--ok);
+}
+.legend-badge[data-fallback='true'] {
+  color: var(--caution);
+}

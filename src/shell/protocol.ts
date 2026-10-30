@@ -66,7 +66,10 @@ export interface FrameBudget {
   readonly frameCpuMaxMs: number;
   /** CPU ms of the worker frame on held frames, median; null: none in the window. */
   readonly frameCpuHeldMs: number | null;
-  /** CPU ms of the latest MOCK re-raster (null: none yet), and how many there have been. */
+  /**
+   * CPU ms of the latest MOCK raster (null: none yet), and how many there have been. Measured on
+   * the raster's own worker, off the frame (only the boot raster, or a fallback, is on it).
+   */
   readonly mockRasterMs: number | null;
   readonly mockRasters: number;
   /** Frames per second over the last second, from rAF timestamps. */

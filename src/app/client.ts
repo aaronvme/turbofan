@@ -3,14 +3,19 @@
 // (pointer drag, wheel, keys become OrbitInput messages). Snapshots go into the store.
 
 import { DRAG_RAD_PER_PX, orbitInputForKey } from '../shell/orbit';
-import type { FromWorker, ToWorker } from '../shell/protocol';
+import type { CycleChoice, FromWorker, ToWorker } from '../shell/protocol';
 import { useApp } from '../ui/store';
 
 export interface Client {
   dispose(): void;
 }
 
-export function startClient(canvas: HTMLCanvasElement): Client {
+export interface ClientOptions {
+  /** The worker's cycle model (default 'reference'; the browser suite's held-step case). */
+  readonly cycle?: CycleChoice;
+}
+
+export function startClient(canvas: HTMLCanvasElement, options: ClientOptions = {}): Client {
   const app = useApp.getState();
   if (!('gpu' in navigator)) {
     app.setConnection({ state: 'unsupported', message: 'This browser has no WebGPU.' });
@@ -45,7 +50,15 @@ export function startClient(canvas: HTMLCanvasElement): Client {
     };
   };
   const offscreen = canvas.transferControlToOffscreen();
-  post({ type: 'init', canvas: offscreen, ...size() }, [offscreen]);
+  post(
+    {
+      type: 'init',
+      canvas: offscreen,
+      ...size(),
+      ...(options.cycle === undefined ? {} : { cycle: options.cycle }),
+    },
+    [offscreen],
+  );
   // the slow-motion default the look-dev uses (1/200 s per s), as a render-state command
   useApp.getState().send({ type: 'setRenderState', render: { particleTimeDilation: 200 } });
 
