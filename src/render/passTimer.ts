@@ -13,9 +13,11 @@
 
 import { InspectorBase, type Object3D, type WebGPURenderer } from 'three/webgpu';
 import {
+  isFlowPass,
   passGroupOf,
   RollingPassStats,
   sumByGroup,
+  sumFlowMs,
   type FrameSample,
   type PassMedians,
 } from '../gpu/passTimings';
@@ -75,13 +77,15 @@ export function createPassTimer(
       let list = byFrame.get(l.frame);
       if (list === undefined) byFrame.set(l.frame, (list = []));
       list.push({ label: l.label, ms });
-      if (passGroupOf(l.label) === 'other' && !unclassified.has(l.label)) {
+      if (passGroupOf(l.label) === 'other' && !isFlowPass(l.label) && !unclassified.has(l.label)) {
         unclassified.add(l.label);
         console.warn(`pass timer: unclassified pass "${l.label}" (${ms.toFixed(3)} ms)`);
       }
     }
     for (const [f, list] of [...byFrame].sort((a, b) => a[0] - b[0])) {
-      stats.push(sumByGroup(list), cpuByFrame.get(f) ?? Number.NaN);
+      // the flow visuals' passes are timed apart from the render (P4 excludes them, D4-2)
+      const flow = list.some((e) => isFlowPass(e.label)) ? sumFlowMs(list) : undefined;
+      stats.push(sumByGroup(list), cpuByFrame.get(f) ?? Number.NaN, flow);
       cpuByFrame.delete(f);
     }
     // labels of frames whose queries were dropped (pool overflow) must not pile up

@@ -1,0 +1,31 @@
+{
+  "note": "indicative, back to back, 1080p, threeQuarterFront, realistic flow mode (D4-83: no tracers by default; tracers: the option on); not D0-1",
+  "pairs": [
+    {
+      "off": 6.418476500000001,
+      "on": 6.614124499999999,
+      "flow": 0.5666635,
+      "compute": 0.07864550000000001,
+      "overlay": 0.488018
+    },
+    {
+      "off": 6.4673025,
+      "on": 6.571286499999999,
+      "flow": 0.5613765000000001,
+      "compute": 0.07992099999999999,
+      "overlay": 0.48145550000000004
+    },
+    {
+      "off": 6.4566775000000005,
+      "on": 6.63751,
+      "flow": 0.553303,
+      "compute": 0.077864,
+      "overlay": 0.475439
+    }
+  ],
+  "tracers": {
+    "flow": 0.916271,
+    "compute": 0.1424735,
+    "overlay": 0.7737974999999999
+  }
+}

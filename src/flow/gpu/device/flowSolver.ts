@@ -204,6 +204,8 @@ export class GpuFlowSolver implements FlowSolver {
     if (near === undefined || far === undefined) throw new Error('resample textures missing');
     this.field = {
       source: 'solver',
+      // D4-82: no body forces or combustor sources until W3's coupling drives the solver
+      coupling: 'uncoupled',
       reference: { pInfPa: solver.ref.p, rhoInfKgPerM3: solver.ref.rho, tInfK: solver.ref.t },
       extents: FIELD_EXTENTS,
       near,

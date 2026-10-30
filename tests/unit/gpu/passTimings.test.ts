@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isFlowPass,
   median,
   PASS_GROUPS,
   passGroupOf,
   RollingPassStats,
   sumByGroup,
+  sumFlowMs,
 } from '../../../src/gpu/passTimings';
 
 describe('passGroupOf (three render-context names -> render passes, W1G-I2)', () => {
@@ -120,5 +122,72 @@ describe('RollingPassStats', () => {
 
   it('needs a positive window', () => {
     expect(() => new RollingPassStats(0)).toThrow();
+  });
+});
+
+// w2/flowviz: the flow visuals' passes ("Flow ...") are timed apart from the render, because
+// P4 is the render GPU time excluding the solver and the flow visuals (D4-2, PHYSICS.md 3.4)
+describe('flow-visual passes (D4-2: outside P4, inside the flow-visuals budget)', () => {
+  it('are recognised by name and left out of every render group', () => {
+    expect(isFlowPass('Flow Overlay')).toBe(true);
+    expect(isFlowPass('Flow Particles [ RTT ]')).toBe(true);
+    expect(isFlowPass('Opaque')).toBe(false);
+    expect(isFlowPass('Flowing')).toBe(false);
+    const s = sumByGroup([
+      { label: 'Opaque', ms: 2 },
+      { label: 'Flow Overlay', ms: 0.5 },
+    ]);
+    expect(s.opaque).toBe(2);
+    expect(s.other).toBe(0);
+    expect(PASS_GROUPS.reduce((t, g) => t + s[g], 0)).toBe(2);
+  });
+
+  it('sum into one flow total (valid durations only)', () => {
+    expect(
+      sumFlowMs([
+        { label: 'Opaque', ms: 2 },
+        { label: 'Flow Overlay', ms: 0.5 },
+        { label: 'Flow Haze [ RTT ]', ms: 0.25 },
+        { label: 'Flow Overlay', ms: Number.NaN },
+      ]),
+    ).toBe(0.75);
+  });
+
+  it('get their own rolling median, which the render total does not include', () => {
+    const r = new RollingPassStats(3);
+    r.push(sumByGroup([{ label: 'Opaque', ms: 4 }]), 1, 1);
+    r.push(sumByGroup([{ label: 'Opaque', ms: 4 }]), 1, 3);
+    r.push(sumByGroup([{ label: 'Opaque', ms: 4 }]), 1, 2);
+    const m = r.medians();
+    expect(m.flow).toBe(2);
+    expect(m.gpuTotal).toBe(4);
+    r.beginRun();
+    r.push(sumByGroup([{ label: 'Opaque', ms: 4 }]), 1, 0.5);
+    expect(r.endRun()).toEqual([
+      { gpu: sumByGroup([{ label: 'Opaque', ms: 4 }]), cpu: 1, flow: 0.5 },
+    ]);
+  });
+
+  it('count 0 when no frame in the window drew any', () => {
+    const r = new RollingPassStats(2);
+    r.push(sumByGroup([{ label: 'Opaque', ms: 1 }]), 1);
+    expect(r.medians().flow).toBe(0);
+  });
+
+  // W2V-N13: a frame from before the flow was switched on, or one whose flow queries were all
+  // dropped, has no flow time: counting it as 0 showed D4-2's scheduler the visuals low
+  it('skip the frames without a flow time instead of counting them as 0', () => {
+    const r = new RollingPassStats(6);
+    for (let k = 0; k < 3; k++) r.push(sumByGroup([{ label: 'Opaque', ms: 4 }]), 1);
+    r.push(sumByGroup([{ label: 'Opaque', ms: 4 }]), 1, 1.2);
+    r.push(sumByGroup([{ label: 'Opaque', ms: 4 }]), 1, Number.NaN);
+    r.push(sumByGroup([{ label: 'Opaque', ms: 4 }]), 1, 1.4);
+    expect(r.medians().flow).toBeCloseTo(1.3, 12);
+    expect(r.medians().gpuTotal).toBe(4);
+  });
+
+  it('a frame whose flow durations are all invalid has no flow time (NaN), not 0', () => {
+    expect(sumFlowMs([{ label: 'Flow Overlay', ms: Number.NaN }])).toBeNaN();
+    expect(sumFlowMs([{ label: 'Opaque', ms: 1 }])).toBeNaN();
   });
 });

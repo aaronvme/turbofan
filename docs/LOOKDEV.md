@@ -17,6 +17,26 @@ Regenerate with `node tools/lookdev/capture.ts --no-timing` (own headed Chrome t
 | `06-fan-takeoff.jpg` | `fanTakeoff`, 1/1000 s | 30 degrees per exposure, 8 time copies: the fan reads as a smooth disc, no blade-edge teeth at the hub |
 | `07-hot-section.jpg` | `hotSection` (cutaway close-up) | Combustor liner and dome, HPT and LPT disks and blades (10 span sections), heat tint graded along x, TRF struts, plug |
 
+## Flow visuals (w2/flowviz rounds 2 and 3: the air made visible)
+
+Run the look-dev page with `?flow=realistic|cutaway|schlieren|data` (`&field=solver` draws the live GPU solver, `&dilation=200` the slow motion, `&domain=full` the uncropped plane, `&tracers=1|0` the tracers); keys `f` (mode), `[` `]` (slow motion), `m` (cut-plane quantity), `n` (crop), `k` (tracers). The flow panel (top left) shows the mode, the slow-motion factor, the cut-plane quantity, the tracers switch ("mode default" until touched), where the field comes from and how far it is the engine's answer (D4-82: an amber MOCK badge, a blue "Flow solver (uncoupled until W3)" one while the solver runs without blade or combustor forces, a green one only for W3's coupled field) and the flow visuals' GPU ms. A solver that cannot start, is lost or diverges is replaced by the MOCK at once, and the badge and the legend say "MOCK fallback" with the reason (W2V-I6, `src/flow/viz/fieldLink.ts`). The legend (bottom right) is drawn from the cut plane's own LUT stops. Every layer is derived from the bound field (PHYSICS.md 1); the visuals add nothing synthesized.
+
+Round 3 (critic pass 12, D4-82, D4-83): Realistic has no tracers by default (they read as hair on the cinematic view; the option remains); the near-field crop is a crisp edge with a 1.25 px outline instead of a 25 cm fade (no more purple fog round the engine); the speed map runs to 700 m/s (the take-off MOCK's core jet, ~645 m/s, sat flat at the top of 600); the schlieren's a/f is 1000 µrad (the core jet's shear layers inside the grey scale); the flow layers are drawn unjittered (no crawl against TRAA's resolved engine); the haze's shift is the physical one (round 2's was twice it, GPU_FACTS M55).
+
+| File (`docs/look-dev/flow/`) | What it shows |
+|---|---|
+| `ui-realistic.jpg` | Realistic at the default view, take-off MOCK field: the haze only, no tracers (D4-83), the panel with the tracers switch off |
+| `ui-cutaway.jpg` | Cutaway: velocity magnitude (viridis, 0-700 m/s) on the wedge faces, the crisp outlined crop, laser-sheet tracers |
+| `ui-data.jpg` | Data (Mach on viridis) on the cutaway faces, laser-sheet tracers, the legend |
+| `ui-schlieren.jpg` | Knife-edge schlieren (a/f 1000 µrad), side on: the hot core jet's shear layers (light above, dark below) inside the grey scale, the bypass layer, the intake; the engine a silhouette; the legend's end ticks inside the bar |
+| `realistic.png`, `cutaway.png`, `schlieren.png`, `data.png` | The browser test's frames of each mode (960 × 540, MOCK) |
+| `solver-link.png` | The W2V-I2 link check, not a look: the live solver's textures set to a uniform 110 m/s, Data mode (one flat Mach 0.32 colour; the solver is uncoupled until W3, so its own field is not showcased) |
+| `glow-hotsection.png` | The hot section at take-off: the HPT/LPT airfoils' blackbody glow (a faint warm lift, physically dim) |
+
+The browser test writes these frames to `reports/flow/` (ignored) on every run; `VITE_FLOW_LOOKDEV=1` writes them here (W2V-N8). The `ui-*.jpg` are the look-dev page in Chrome via the MCP (1920 × 889).
+
+Not done or not right yet: the MOCK field's inflow ahead of the lip converges about ten times faster than continuity allows, which piled tracers on the axis, so the intake tracers are born inside the lip (revisit the intake seed zone on W3's coupled solver field); the haze is a mean-field refraction (2942 of 518400 pixels change side on: physically about a pixel), so there is no shimmer; particles live in the near field only (they fade out at x = 5 m); the cinematic (depth-of-field) presets draw no flow layer.
+
 ## Look-dev round 5 (w2/lookdev-5: W2L-I1..I5, P4's last 0.5 ms, the pass-8 visual notes)
 
 All eight shots (00-07) were regenerated at the end; the round-4 set is in `docs/look-dev/before/`. Every timing below is **indicative**: back to back (D4-42's measure), paired and interleaved, a reference builder's CPU tests on the machine, never the official D0-1 run.

@@ -27,6 +27,7 @@ import {
   type Node,
   type NodeMaterial,
   type UniformNode,
+  Vector3,
 } from 'three/webgpu';
 import {
   abs,
@@ -71,6 +72,7 @@ import {
   vertexStage,
 } from 'three/tsl';
 import type { BladeCutRule } from '../geometry/cutaway';
+import { GLOW_PARTS, type GlowPart } from '../flow/viz/glow';
 import type { PartMaterial } from '../geometry/parts';
 import type { RowMaterial } from '../geometry/engineGeometry';
 
@@ -91,6 +93,11 @@ export interface LookUniforms {
    */
   readonly lpStep: UniformNode<'float', number>;
   readonly hpStep: UniformNode<'float', number>;
+  /**
+   * The hot parts' thermal emission, linear sRGB in scene units (w2/flowviz: blackbody at the
+   * metal temperature the cycle gives, src/flow/viz/glow.ts; the view sets it every frame).
+   */
+  readonly glow: Readonly<Record<GlowPart, UniformNode<'vec3', Vector3>>>;
 }
 
 /** Time-offset copies of the fan drawn per frame (stochastic blur, src/render/post.ts). */
@@ -109,6 +116,10 @@ export function createLookUniforms(): LookUniforms {
     fanSeed: uniform(0),
     lpStep: uniform(0),
     hpStep: uniform(0),
+    glow: Object.fromEntries(GLOW_PARTS.map((p) => [p, uniform(new Vector3())])) as Record<
+      GlowPart,
+      UniformNode<'vec3', Vector3>
+    >,
   };
 }
 
@@ -534,6 +545,7 @@ function partMaterial(kind: PartMaterial, u: LookUniforms): NodeMaterial {
         float(1).sub(soot.mul(0.16)).sub(streak.mul(0.08)).sub(aft.mul(0.25)),
       );
       m.roughnessNode = mix(float(0.58), float(0.78), soot).add(streak.mul(0.05));
+      m.emissiveNode = u.glow[plug ? 'plug' : 'exhaust'];
       break;
     }
     case 'spinner': {
@@ -749,6 +761,7 @@ function rowSurface(kind: RowMaterial, u: LookUniforms): MeshPhysicalNodeMateria
       const scorched = vec3(0.34, 0.27, 0.21);
       m.colorNode = mix(tbc, scorched, burn.clamp(0, 1).mul(0.8)).mul(float(1).add(jit.mul(0.04)));
       m.roughnessNode = float(0.62).add(jit.mul(0.05));
+      m.emissiveNode = u.glow[vane ? 'hptVane' : 'hptBlade'];
       return m;
     }
     case 'lptBlade':
@@ -758,6 +771,7 @@ function rowSurface(kind: RowMaterial, u: LookUniforms): MeshPhysicalNodeMateria
         float(1).add(jit.mul(0.04)),
       );
       m.roughnessNode = float(0.48).add(jit.mul(0.07));
+      m.emissiveNode = u.glow[kind === 'lptVane' ? 'lptVane' : 'lptBlade'];
       return m;
     }
   }

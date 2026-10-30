@@ -2,8 +2,9 @@
 // app's own 1080p engine scene, src/render/engineView.ts at 1920 x 1080 and DPR 1 with its
 // defaults (the 'high' geometry, the 'quality' profile, the three-quarter front preset: P4's
 // view), on the view's device, at D4-2's budget (spikes/scene/productionRun.ts). The device asks
-// for FLOW_SOLVER_LIMITS (D4-50), as the app must to host the solver. The view draws no flow
-// visuals yet, so D4-2's flow-visual time is 0. No page wiring here (spikes/p1/main.ts does it),
+// for FLOW_SOLVER_LIMITS (D4-50), as the app must to host the solver. D4-2's flow-visual time
+// is the view's measured one (stats().flow.visualsMs; none while no flow mode is set, as in
+// P1's record). No page wiring here (spikes/p1/main.ts does it),
 // so tests/browser/p1Bench.test.ts can run it.
 
 import { ENGINE_DEFINITION } from '../../src/engine/definition';
@@ -72,6 +73,7 @@ const frameTotal = (f: FrameSample) => PASS_GROUPS.reduce((t, g) => t + f.gpu[g]
  */
 function appScene(v: EngineView, isRun: () => boolean): ProductionScene {
   let lastRender: number | null = null;
+  let lastFlow: number | null = null;
   let frames = 0;
   let recording = false;
   let run: number[] | null = null;
@@ -83,12 +85,14 @@ function appScene(v: EngineView, isRun: () => boolean): ProductionScene {
       }
       v.frame(dtS);
       if (frames++ % TIMINGS_EVERY === 0) {
-        const m = v.stats().timings;
+        const st = v.stats();
+        const m = st.timings;
         lastRender = m.frames > 0 && Number.isFinite(m.gpuTotal) ? m.gpuTotal : null;
+        lastFlow = st.flow.mode === null ? null : st.flow.visualsMs;
       }
     },
     renderMs: () => lastRender,
-    flowVisualsMs: () => null,
+    flowVisualsMs: () => lastFlow,
     triangles: v.stats().triangles,
     // read once, after the run (productionRun waits for the queue and the last read-backs)
     get runRenderMs() {

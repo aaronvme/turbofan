@@ -2,9 +2,15 @@
 // worker, src/render/worker.ts). Query: ?preset=<id>&clean=1&shutter=<deg>&quality=test
 // &profile=performance. Keys: 1-8 presets, c cutaway, e exploded, r realistic, t/g throttle
 // up/down, p the GPU pass overlay, q the render profile (quality / performance, D3-7). window.lookdev drives it from Playwright (tools/lookdev/capture.ts).
+// The flow visuals (src/lookdev/flowPanel.ts): ?flow=<mode>&field=mock|solver&dilation=200;
+// keys f (mode), [ ] (slow motion), m (cut-plane quantity).
 
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { ENGINE_DEFINITION } from '../engine/definition';
+import type { FieldQuantityId } from '../flow/viz/fields';
+import type { FlowVizModeId } from '../flow/viz/modes';
+import { FLOW_SOLVER_LIMITS } from '../gpu/device';
+import { createFlowPanel } from './flowPanel';
 import { PASS_GROUPS, type FrameSample, type PassMedians } from '../gpu/passTimings';
 import type { RenderProfileId } from '../gpu/renderScale';
 import { createEngineView, type DebugFlags, type EngineView } from '../render/engineView';
@@ -25,6 +31,12 @@ interface LookdevApi {
   setShutter(deg: number): void;
   setDebugFlags(flags: DebugFlags): void;
   setProfile(id: RenderProfileId): void;
+  /** The flow visuals (w2/flowviz): mode, slow motion (simulated s per wall s), quantity. */
+  setFlowMode(id: FlowVizModeId | null): void;
+  setFlowTimeScale(dilation: number): void;
+  setFlowQuantity(id: FieldQuantityId | null): void;
+  /** The GPU particle records (12 floats each, src/flow/viz/particleKernel.ts). */
+  readFlowParticles(): Promise<number[]>;
   /** Renders n frames at a fixed 1/60 s step, one per animation frame, then waits for the GPU. */
   renderFrames(n: number): Promise<void>;
   /** Renders n frames and returns the per-pass GPU and CPU medians over them. */
@@ -44,6 +56,8 @@ interface LookdevApi {
   conditions(): Promise<Record<string, unknown>>;
   pause(paused: boolean): void;
   stats(): ReturnType<EngineView['stats']>;
+  /** The camera's (unjittered) view-projection, column-major: inspection of the particles. */
+  viewProjection(): number[];
 }
 
 export interface TimingRun {
@@ -125,7 +139,10 @@ async function main(): Promise<void> {
     debug: (params.get('debug') as PostDebug) ?? null,
     // look-dev A/B of round 5's P4 cut (tools/lookdev/variantAb.ts)
     legacyGbuffer: params.get('gbuffer') === 'legacy',
+    // the live flow solver shares the view's device (D4-64)
+    ...(params.get('field') === 'solver' ? { preferredLimits: FLOW_SOLVER_LIMITS } : {}),
   });
+  const flow = await createFlowPanel(view, params);
   const controls = new OrbitControls(view.camera, canvas);
   controls.enableDamping = true;
   const applyPreset = (id: LookPresetId) => {
@@ -155,12 +172,14 @@ async function main(): Promise<void> {
     last = now;
     if (!paused) {
       controls.update();
+      flow.beforeFrame();
       view.frame(dt);
       acc += dt;
       if (acc > 0.5) {
         const s = view.stats();
         hud.textContent = `${s.cycleLabel} cycle · N1 ${s.n1Rpm.toFixed(0)} rpm · N2 ${s.n2Rpm.toFixed(0)} rpm · blur ${s.lpBlurDeg.toFixed(1)}° · ${(s.drawnTriangles / 1e6).toFixed(2)} of ${(s.triangles / 1e6).toFixed(2)} M tris · ${s.profile} ${s.renderScale.toFixed(2)}× · GPU errors ${s.errors.length}`;
         passes.innerHTML = renderPasses(s.timings, s.timestamps);
+        flow.refresh();
         acc = 0;
       }
     }
@@ -177,6 +196,8 @@ async function main(): Promise<void> {
     if (e.key === 'r') view.setMode('realistic');
     if (e.key === 't') view.setThrottle((lever = Math.min(1, lever + 0.25)));
     if (e.key === 'g') view.setThrottle((lever = Math.max(0, lever - 0.25)));
+    if (e.key === 't' || e.key === 'g') flow.setThrottle(lever);
+    flow.onKey(e.key);
     if (e.key === 'p') document.body.classList.toggle('nopasses');
     if (e.key === 'q')
       view.setProfile(view.stats().profile === 'quality' ? 'performance' : 'quality');
@@ -190,7 +211,18 @@ async function main(): Promise<void> {
     },
     setThrottle: (l, s) => {
       view.setThrottle(l, s);
+      flow.setThrottle(l);
     },
+    setFlowMode: (id) => {
+      flow.setMode(id);
+    },
+    setFlowTimeScale: (d) => {
+      flow.setDilation(d);
+    },
+    setFlowQuantity: (id) => {
+      flow.setQuantity(id);
+    },
+    readFlowParticles: async () => Array.from(await view.readFlowParticles()),
     setShutter: (d) => {
       view.setShutter(d);
     },
@@ -322,6 +354,11 @@ async function main(): Promise<void> {
       paused = p;
     },
     stats: () => view.stats(),
+    viewProjection: () => {
+      view.camera.updateMatrixWorld();
+      const m = view.camera.projectionMatrix.clone().multiply(view.camera.matrixWorldInverse);
+      return [...m.elements];
+    },
   };
 }
 

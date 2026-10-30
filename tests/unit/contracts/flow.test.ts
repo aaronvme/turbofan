@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { HALF_MAX, toHalfBits } from '../../../src/contracts/half';
 import {
   FIELD_EXTENTS,
+  FLOW_COUPLINGS,
   SOLVER_DOMAIN_MIN_D,
+  flowCouplingProblems,
   fieldExtentDomainProblems,
   minimumSolverDomain,
   type SolverDomain,
@@ -283,5 +285,22 @@ describe('flowTargetsFromCycleState', () => {
       fuelAirRatio: state.stations['4'].fuelAirRatio,
     });
     expect(t.ambient).toEqual(ISA_SLS);
+  });
+});
+
+// D4-82 (flagged contract addition): a field carries its coupling state, so the badge and the
+// legend can say "solver (uncoupled until W3)" and W3's coupled field gets a badge of its own
+describe('D4-82: the flow field coupling state', () => {
+  it("is 'mock' | 'uncoupled' | 'coupled'", () => {
+    expect([...FLOW_COUPLINGS]).toEqual(['mock', 'uncoupled', 'coupled']);
+  });
+
+  it('agrees with the source: a MOCK field is mock, a solver field uncoupled or coupled', () => {
+    expect(flowCouplingProblems({ source: 'mock', coupling: 'mock' })).toEqual([]);
+    expect(flowCouplingProblems({ source: 'solver', coupling: 'uncoupled' })).toEqual([]);
+    expect(flowCouplingProblems({ source: 'solver', coupling: 'coupled' })).toEqual([]);
+    expect(flowCouplingProblems({ source: 'mock', coupling: 'coupled' })).toHaveLength(1);
+    expect(flowCouplingProblems({ source: 'mock', coupling: 'uncoupled' })).toHaveLength(1);
+    expect(flowCouplingProblems({ source: 'solver', coupling: 'mock' })).toHaveLength(1);
   });
 });
