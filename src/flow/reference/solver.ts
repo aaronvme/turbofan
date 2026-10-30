@@ -54,6 +54,15 @@ export interface SolverOptions {
   readonly lowMachPreconditioning?: {
     readonly minMach: number;
     readonly machCut?: number;
+    /**
+     * D4-81's trial, not the contract: the global cutoff of the standard preconditioners (Weiss &
+     * Smith 1995; Turkel's beta^2 >= K M_ref^2), one floor the same in every cell, which the caller
+     * ties to the domain's peak velocity (the engine's inlet Mach is about 0.5, so 0.02 is about
+     * 4 % of it, D4-59). It raises minMach and M_cut to it: beta >= globalMachCut everywhere, the
+     * far field included, and the flux's M_cut >= globalMachCut. An M_cut >= 1 (the scaling off)
+     * and a minMach >= 1 (the plain scheme) stay as they are. Absent: minMach and M_cut as given.
+     */
+    readonly globalMachCut?: number;
   };
   /**
    * The limiter (section 6): 'sharp' van Albada (default) or the 'smooth' eps form, the D4-25
@@ -63,6 +72,20 @@ export interface SolverOptions {
   readonly limiter?: 'sharp' | 'smooth';
   /** 'f32': round the state to f32 after every stage (the f32-storage tolerance experiment). */
   readonly storage?: 'f64' | 'f32';
+}
+
+/** The preconditioning's minMach and M_cut in force (section 10): D4-81's global cut applied. */
+type Preconditioning = { readonly minMach: number; readonly machCut?: number };
+
+function withGlobalCut(pre: NonNullable<SolverOptions['lowMachPreconditioning']>): Preconditioning {
+  const cut = pre.globalMachCut;
+  if (cut === undefined) return pre;
+  if (!(Number.isFinite(cut) && cut >= 0))
+    throw new RangeError(`globalMachCut must be finite and >= 0, not ${cut}`);
+  return {
+    minMach: Math.max(pre.minMach, cut),
+    machCut: Math.max(pre.machCut ?? pre.minMach, cut),
+  };
 }
 
 export interface IterationStats {
@@ -90,6 +113,8 @@ export class ReferenceSolver {
   stats: IterationStats = { residualDensityL2: 0, residualDensityL2Volume: 0 };
 
   private readonly opts: SolverOptions;
+  /** The tracking mode's preconditioning in force (undefined: none), D4-81's global cut applied. */
+  private readonly pre: Preconditioning | undefined;
   private readonly cfl: number;
   private readonly cflPhysical: number;
   /** M_cut of the tracking mode's dissipation scaling (1: off); physical time always uses 1. */
@@ -135,7 +160,9 @@ export class ReferenceSolver {
       ...(opts.outflowPressure === undefined ? {} : { outflowPressure: opts.outflowPressure }),
     };
     this.bcPhysical = boundaryParams(this.ref, bcOpts);
-    const pre = opts.lowMachPreconditioning;
+    const given = opts.lowMachPreconditioning;
+    const pre = given === undefined ? undefined : withGlobalCut(given);
+    this.pre = pre;
     const mInf2 = (this.ref.u * this.ref.u) / (this.ref.c * this.ref.c);
     this.bc =
       pre === undefined
@@ -506,7 +533,7 @@ export class ReferenceSolver {
     const m = this.mesh;
     const n = m.nCells;
     const { P, cellNbr, beta2, betaExt } = this;
-    const pre = tracking ? this.opts.lowMachPreconditioning : undefined;
+    const pre = tracking ? this.pre : undefined;
     for (let c = 0; c < n; c++) {
       let b2 = 1;
       if (pre !== undefined) {
