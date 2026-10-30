@@ -455,6 +455,24 @@ Otherwise the engine setting stays 0.003 and J stays pinned. The rows that fail 
 3. *If a candidate passes (a) and (b)* on the contract case, the full ladder (`npm run test:ladder`) is run with the cut on every preconditioned run, as D4-59 applied it: L7's M 0.01 sphere, L8, §12.2's C-pre and S, and the d463 case. Every row that passes now must still pass. D4-79's rule also takes the linear part (`d463lin`) at the candidate. The WGSL kernel is not changed in this round: its mirror is D4-40's adapter default, as a parameter.
 4. *If both cuts fail*, no new scheme is tried this round: the data go back to the orchestrator.
 
+*D4-81's results (round 13; each run alone and detached, about 72 min; logs in `reports/scratch/r13/logs`).* The contract case (1e-3, isothermal), 20000 iterations:
+
+| row | the contract, M_cut 0.003 (round 12, killed at 16000) | plain scheme (CFL 1.5) | global M_cut 0.02 |
+|---|---|---|---|
+| (a) L2(p′) / first, max over 1000-2000 (≤ 2) | 1.717: pass | 0.366: pass | running |
+| (a) L2(p′) / first at 20000 (≤ 2) | not reached (5.21 at 16000) | **0.0433: pass** | |
+| L2(p′) / first at 10000 (reported) | 4.36 | 0.0735 | |
+| (b) weighted residual at 20000 / at 10000 (≤ 1) | not reached | **0.641: pass** | |
+| (b) weighted residual at 20000 / at 100 (≤ 1) | not reached (2.48 at 16000) | **0.159: pass** | |
+| weighted residual at 100 / 10000 / 20000 | 3.548 / 8.73 / – | 3.89e-2 / 9.63e-3 / 6.17e-3 | |
+| reported: L2(p′) / first, max over 1000-20000 | ≥ 5.39 (15000) | 0.366 (1000) | |
+| reported: D4-77's window (weighted residual, max over 1000-2000 / at 100) | 2.614 | 1.147 | |
+| reported: max \|p′\| / first, max over 1000-2000; at 20000 | 8.39; – | 5.95; 1.51 | |
+| reported: cell-mean residual at 20000 / at 100 | – | 1.80 | |
+| signature: finite, peak max \|p′\| / first (< 100) | finite to 16000 | 6.59: pass | |
+
+- **The plain scheme decays (run 1): the preconditioning is the source of the growth.** From the same start, its L2(p′) falls every 1000 iterations from 0.365 at 1000 to 0.07 at 10000, then holds at 0.03-0.06 to 20000. Its weighted residual peaks at 4.47e-2 at 2000, falls to 9.6e-3 by 10000, and sits at 5-8e-3 from 13000 to 20000. Over the same 10000 iterations the contract's L2(p′) rose to 4.4× and its residual to 2.5× its value at 100. Max |p′| (the pointwise measure D4-72 replaced) reaches 3-6× its first before 5000, and it is 1.5× at 20000. The cell-mean residual ends at 1.8× its value at 100: that is round 10's small-cell weighting, which D4-77 removes.
+
 
 **Low-Mach preconditioning (tracking mode only; decision D4-10).** Without it the pseudo-time step is set by the acoustic speed |u| + c while the flow converges at the convective speed |u|, so the iterations to converge grow like 1/M (ladder L7: the M 0.01 sphere did not converge in 20000 iterations, the M 0.3 sphere took 3096). The option `lowMachPreconditioning: { minMach }` multiplies the pseudo-time derivative of the pressure by 1/β² (Turkel's preconditioner with α = 0 in the variables (p, u, v, rw, s, Z), equivalent for this gas to Weiss & Smith 1995). Per cell, from the stage-1 primitives and frozen for the three stages like τ:
 
