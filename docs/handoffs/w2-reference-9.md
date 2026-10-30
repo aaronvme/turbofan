@@ -1,4 +1,4 @@
-w2/reference-9 round 13: D4-81 done through step 2. The plain scheme decays (the preconditioning is the source of D4-63's growth). The global M_cut 0.02 passes D4-79's (a) and (b) on the contract case and keeps every passing ladder row (rule 2), so 0.05 was not run. The cut is adopted in the CPU reference ladder (the D4-63 pin lifted). The WGSL kernel and the GPU tests are unchanged (NEXT). (From c2d7c9f; HEAD = the commit of this handoff.)
+w2/reference-9 round 13: STOP-CLEAN at the usage brake (86 %), after D4-81's steps 1-2 and the ladder. D4-81 is done through step 2. The plain scheme decays (the preconditioning is the source of D4-63's growth). The global M_cut 0.02 passes D4-79's (a) and (b) on the contract case and keeps every passing ladder row (rule 2), so 0.05 was not run. The cut is adopted in the CPU reference ladder (the D4-63 pin lifted). The WGSL kernel and the GPU tests are unchanged (NEXT). (From c2d7c9f; HEAD = the commit of this handoff.)
 
 DONE (round 13)
 - Step 0: round 12's scratch patch is reverted (`git checkout` of precondition.ts and solver.ts; the copy stays in `reports/scratch/r12/trial-step-limit.patch`).
@@ -29,7 +29,7 @@ FOR THE ORCHESTRATOR
 
 NEXT
 1. The linear part at the cut: `node --import ./tools/mesh/ts-resolve.mjs tests/ladder/runCase.ts d463lin`, detached and alone (it takes the d463 default, now the cut), about 75 min. If it fails D4-79's (a) or (b), the cut does not meet the rule: revert 8447e99's ladder changes and the pin.
-2. The gates that are not done yet (see GATES).
+2. `npm run test:mesh` (the one gate not run).
 3. KERNEL MIRROR (w2/solver, not this branch): D4-40's adapter default becomes minMach = M_cut = 0.02 (`src/flow/gpu/device/flowSolver.ts`), as a parameter. The kernel already takes minMach2 and machCut. Then the GPU tests' `ENGINE_PRECONDITIONING` takes the cut, and their D4-62 / D4-71 tolerances are re-checked. The reference's `globalMachCut` is max(minMach, cut) and max(M_cut, cut), so the GPU side needs no new code, only the two parameters.
 4. R and J (precondition.test.ts) stay pinned at 0.003 as written. R is excluded (the limiter's floor). At 0.02, D4-59 found J meets its rule at 9441 and then rebounds.
 
@@ -42,7 +42,8 @@ GOTCHAS
 GATES @8447e99 (later commits are docs only)
 - npm run typecheck: clean. npm run lint: clean (ESLint --max-warnings 0, Prettier).
 - npm run test:ladder (detached, 76 min): 12 files passed, 3 failed (15). Tests: 14 passed, 3 failed (17). The 3 are the known failures of record (L8 convergence; L9a's Euler work / steadiness 1.062e-5 / convergence; L9b convergence). The D4-63 file passes both its tests: signature 4.212, (a) 0.7779 / 0.4876, (b) 0.5236 / 0.2234, the same as run 2. Round 11's ladder had 13 passed, 3 failed and 1 expected fail; the expected fail was this pin.
-- npm run coverage, npm run test:mesh: not run yet.
+- npm run coverage (detached, 812 s, @60d95c2, docs-only after 8447e99): 99 files passed, 1919 tests passed / 11 expected fail. Lines 99.6 %, statements 98.71 %, branches 87.79 %, functions 99.65 %. It exits 0, so the per-directory thresholds hold (the per-directory split was not extracted).
+- npm run test:mesh: NOT run (STOP-CLEAN at the usage brake, 86 %). src/flow/mesh and tools/mesh are untouched this round.
 - `precondition.test.ts` alone: 18 passed, 3 expected fail.
 
 ---
