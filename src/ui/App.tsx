@@ -8,6 +8,7 @@ import { VIEW_MODES } from '../contracts/ui';
 import { EngineDisplay, ThrottleQuadrant } from './instruments';
 import { MapsPanel, StationStrip, TsPanel } from './charts';
 import { Annunciators, Callouts, DiagnosticsPanel, FidelityPanel, TopBar } from './panels';
+import { ViewDock } from './dock';
 import { useApp } from './store';
 
 function Viewport() {
@@ -91,6 +92,7 @@ export function Overlay() {
       <TopBar snapshot={snapshot} />
       {snapshot.view.overlays.callouts && <Callouts snapshot={snapshot} />}
       <Annunciators snapshot={snapshot} diagnostics={diagnostics} />
+      <ViewDock snapshot={snapshot} diagnostics={diagnostics} />
       <aside className="col left">
         <EngineDisplay snapshot={snapshot} />
         <ThrottleQuadrant snapshot={snapshot} />

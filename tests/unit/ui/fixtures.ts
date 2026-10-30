@@ -32,9 +32,8 @@ export function snapshotOf(
   o: { mode?: ViewMode; flow?: FlowFieldSource; status?: FlowStatus } = {},
 ): SimSnapshot {
   const core = createSimCore({ cycle: createCycleModel() });
-  let seq = 0;
   if (o.mode !== undefined)
-    core.command({ seq: seq++, command: { type: 'setViewMode', mode: o.mode } });
+    core.command({ seq: 0, command: { type: 'setViewMode', mode: o.mode } });
   core.advance(1 / 60);
   return core.snapshot({ flow: o.status ?? RUNNING, flowSource: o.flow ?? 'mock' });
 }

@@ -8,12 +8,14 @@ import { parseFidelityLedger, type LedgerKind } from '../hud/ledger';
 import { layoutCallouts, leaderEnd, type Rect } from '../hud/callouts';
 import { componentAnchors } from '../hud/anchors';
 import {
+  fieldFallbackAnnunciation,
   flagAnnunciations,
   flowAnnunciation,
   gasPathAnnunciation,
   provenanceBadges,
   type Annunciation,
 } from '../hud/annunciators';
+import { provenanceLabel } from '../flow/viz/legend';
 import * as fmt from '../hud/format';
 import { ENGINE_DEFINITION } from '../engine/definition';
 import { QUALITY_PRESETS, VIEW_MODES, type QualityPreset, type ViewMode } from '../contracts/ui';
@@ -75,6 +77,7 @@ export function TopBar({ snapshot }: { readonly snapshot: SimSnapshot }) {
   const setUnits = useApp((s) => s.setUnits);
   const panels = useApp((s) => s.panels);
   const toggle = useApp((s) => s.togglePanel);
+  const link = useApp((s) => s.diagnostics?.field ?? null);
   const { clock, view } = snapshot;
   return (
     <header className="topbar" data-reserve>
@@ -160,8 +163,8 @@ export function TopBar({ snapshot }: { readonly snapshot: SimSnapshot }) {
           </button>
         ))}
       </nav>
-      <div className="provenance" aria-label="Data provenance">
-        {provenanceBadges(snapshot.sources).map((b) => (
+      <div className="provenance" role="group" aria-label="Data provenance">
+        {provenanceBadges(snapshot.sources, link).map((b) => (
           <Badge key={b.id} a={b} />
         ))}
       </div>
@@ -177,12 +180,25 @@ export function Annunciators({
   readonly diagnostics: AppDiagnostics | null;
 }) {
   const gas = gasPathAnnunciation(snapshot.cycle, diagnostics?.lostSolveCause ?? null);
-  const list = [...flagAnnunciations(snapshot.cycle), ...(gas.level === 'normal' ? [] : [gas])];
+  const fallback = fieldFallbackAnnunciation(diagnostics?.field ?? null);
+  const list = [
+    ...flagAnnunciations(snapshot.cycle),
+    ...(gas.level === 'normal' ? [] : [gas]),
+    ...(fallback === null ? [] : [fallback]),
+  ];
   return (
     <div className="annunciators" role="status" aria-live="polite" aria-label="Annunciators">
-      {list.map((a) => (
-        <Badge key={a.id} a={a} />
-      ))}
+      {list.map((a) =>
+        // a held gas path states its cause beside it (D4-17, W2F-I1), not only in a tooltip
+        a.id === 'gasPath' && a.level === 'warning' ? (
+          <div key={a.id} className="annunciation">
+            <Badge a={a} />
+            <span className="annunciation-detail">{a.detail}</span>
+          </div>
+        ) : (
+          <Badge key={a.id} a={a} />
+        ),
+      )}
     </div>
   );
 }
@@ -309,6 +325,7 @@ export function DiagnosticsPanel({
   const refused = useApp((s) => s.refused);
   const field = useApp((s) => s.field);
   const setField = useApp((s) => s.setField);
+  const link = diagnostics?.field ?? null;
   const gas = gasPathAnnunciation(snapshot.cycle, diagnostics?.lostSolveCause ?? null);
   const flow = flowAnnunciation(snapshot.flow);
   const st = snapshot.flow.stats;
@@ -370,7 +387,6 @@ export function DiagnosticsPanel({
                   key={f}
                   type="button"
                   aria-pressed={field === f}
-                  disabled={f === 'solver' && snapshot.flow.status !== 'running'}
                   onClick={() => {
                     setField(f);
                   }}
@@ -381,10 +397,17 @@ export function DiagnosticsPanel({
             </div>
           </dd>
         </div>
+        <div>
+          <dt>Drawn</dt>
+          <dd className="wrap">
+            {link === null ? 'no field bound yet' : provenanceLabel(link.coupling, link.fallback)}
+          </dd>
+        </div>
       </dl>
       <p className="note">
-        The solver runs uncoupled until W3 (no body forces from the cycle), so its field is the
-        ambient at rest; the MOCK field is scaled by the cycle state and labelled.
+        The solver runs uncoupled until W3 (no blade or combustor forces from the cycle), so its
+        field is not this engine&rsquo;s flow; the MOCK is scaled by the cycle state and labelled. A
+        solver that cannot start, is lost or diverges is replaced by the MOCK, with the reason.
       </p>
       <h3>Frame budget</h3>
       {diagnostics === null ? (
