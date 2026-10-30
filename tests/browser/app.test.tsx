@@ -7,9 +7,11 @@
 // recorded while the gas path is held (the W1K-I2 part-power fit's slam), to reports/ui/.
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { commands, page } from 'vitest/browser';
+import { commands, page, userEvent } from 'vitest/browser';
 import { VIEW_MODES, type ViewMode } from '../../src/contracts/ui';
 import type { FrameBudget } from '../../src/shell/protocol';
+import { BACKING_STORE_MAX_PX } from '../../src/shell/pixelCap';
+import { SETTLED_FRAMES } from '../../src/shell/settle';
 import { App } from '../../src/ui/App';
 import { useApp } from '../../src/ui/store';
 import '../../src/ui/global.css';
@@ -139,11 +141,80 @@ const nameOf = (el: Element): string =>
   el.getAttribute('class') ??
   el.tagName;
 
+type Seg = readonly [number, number, number, number];
+/** Whether two segments cross properly (touching ends do not count). */
+function segmentsCross(p: Seg, q: Seg): boolean {
+  const o = (ax: number, ay: number, bx: number, by: number, cx: number, cy: number) =>
+    Math.sign((bx - ax) * (cy - ay) - (by - ay) * (cx - ax));
+  return (
+    o(p[0], p[1], p[2], p[3], q[0], q[1]) * o(p[0], p[1], p[2], p[3], q[2], q[3]) < 0 &&
+    o(q[0], q[1], q[2], q[3], p[0], p[1]) * o(q[0], q[1], q[2], q[3], p[2], p[3]) < 0
+  );
+}
+const edges = (r: DOMRect): Seg[] => [
+  [r.left, r.top, r.right, r.top],
+  [r.right, r.top, r.right, r.bottom],
+  [r.right, r.bottom, r.left, r.bottom],
+  [r.left, r.bottom, r.left, r.top],
+];
+
+/**
+ * W2A-I3: the callouts as drawn: each rendered label against the others and against the blocks
+ * the layout reserves, its text not cut, and no leader line crossing another leader or running
+ * through another label (the layout's unit test checks the boxes it reserves; this checks what
+ * the CSS renders, 147 x 37 px against 132 x 34 before the fix).
+ */
+function calloutProblems(): string[] {
+  const out: string[] = [];
+  const host = document.querySelector('.overlay .callouts');
+  if (host === null) return out;
+  const hostRect = host.getBoundingClientRect();
+  const labels = [...host.querySelectorAll<HTMLElement>('.callout')].filter(visible);
+  const reserved = [...document.querySelectorAll('.overlay [data-reserve]')].filter(
+    (el) => visible(el) && shown(el).height > 0,
+  );
+  const id = (el: HTMLElement) => el.dataset.id ?? el.textContent;
+  labels.forEach((a, i) => {
+    const ra = a.getBoundingClientRect();
+    for (const b of labels.slice(i + 1))
+      if (overlap(ra, b.getBoundingClientRect()) > 0.5)
+        out.push(`callout ${id(a)} overlaps callout ${id(b)}`);
+    for (const r of reserved)
+      if (overlap(ra, shown(r)) > 0.5) out.push(`callout ${id(a)} overlaps ${nameOf(r)}`);
+    if (a.scrollWidth > a.clientWidth + 1 || a.scrollHeight > a.clientHeight + 1)
+      out.push(`callout ${id(a)} is cut off`);
+  });
+  // the leaders, in page px (the SVG fills the callouts' host)
+  const leaders = [...host.querySelectorAll('.leaders line')].map((l) => {
+    const n = (k: string) => Number(l.getAttribute(k));
+    return {
+      id: l.getAttribute('data-id') ?? '',
+      seg: [
+        hostRect.left + n('x1'),
+        hostRect.top + n('y1'),
+        hostRect.left + n('x2'),
+        hostRect.top + n('y2'),
+      ] as Seg,
+    };
+  });
+  leaders.forEach((a, i) => {
+    for (const b of leaders.slice(i + 1))
+      if (segmentsCross(a.seg, b.seg)) out.push(`leader ${a.id} crosses leader ${b.id}`);
+    for (const l of labels)
+      if (
+        l.dataset.id !== a.id &&
+        edges(l.getBoundingClientRect()).some((e) => segmentsCross(a.seg, e))
+      )
+        out.push(`leader ${a.id} runs through callout ${id(l)}`);
+  });
+  return out;
+}
+
 /**
  * The layout bar (Aaron's "ultra high level ui"; W2 app-ui NEXT 3): at the shot sizes nothing in
  * the overlay is off screen, cut off (a panel or column whose content overflows it) or overlapping
- * (two blocks, two labels in a chart, two dials). The callouts are laid out by their own tested
- * module and the drawer scrolls by design, so neither is checked here.
+ * (two blocks, two labels in a chart, two dials), and the callouts as drawn (W2A-I3) collide with
+ * nothing and their leaders cross nothing. The drawer scrolls by design.
  */
 function layoutProblems(): string[] {
   const out: string[] = [];
@@ -188,14 +259,27 @@ function layoutProblems(): string[] {
       if (overlap(a.getBoundingClientRect(), b.getBoundingClientRect()) > 1)
         out.push(`engine display: ${nameOf(a)} overlaps ${nameOf(b)}`);
   });
+  out.push(...calloutProblems());
   return out;
+}
+
+/** D4-88: the worker says the view has settled in `mode` (its transition done, TRAA converged). */
+function settledIn(mode: ViewMode): boolean {
+  const s = useApp.getState();
+  return (
+    s.snapshot?.view.viewMode === mode &&
+    s.diagnostics?.view.mode === mode &&
+    s.diagnostics.view.settledFrames >= SETTLED_FRAMES
+  );
 }
 
 async function toMode(mode: ViewMode) {
   await page.getByRole('radio', { name: new RegExp(`^${mode}`, 'i') }).click();
-  await until(`view mode ${mode}`, () => useApp.getState().snapshot?.view.viewMode === mode);
-  // let the temporal AA, the tracers and the callouts settle
-  await sleep(1500);
+  // W2A-I4: shoot on the worker's settled-view signal, not after a fixed wait
+  await until(`view mode ${mode} settled`, () => settledIn(mode));
+  // the callouts' CSS move (160 ms) and the next snapshot's layout
+  const v = useApp.getState().snapshot?.version ?? 0;
+  await until('two more snapshots', () => (useApp.getState().snapshot?.version ?? 0) >= v + 2);
 }
 
 describe('the app in Chrome', () => {
@@ -219,8 +303,14 @@ describe('the app in Chrome', () => {
           shot.jpeg,
           'base64',
         );
+        const d = useApp.getState().diagnostics;
+        const bs = d?.backingStore;
         rows.push(
-          `${mode}: ${String(shot.w)}x${String(shot.h)} centre std ${shot.centreStd.toFixed(3)} lit ${shot.centreLit.toFixed(3)}`,
+          `${mode}: ${String(shot.w)}x${String(shot.h)} centre std ${shot.centreStd.toFixed(3)} lit ${shot.centreLit.toFixed(3)} · backing ${String(bs?.width)}x${String(bs?.height)} · render ${d?.budget.renderGpuMs?.toFixed(1) ?? '-'} ms · flow ${d?.budget.flowVisualsGpuMs.toFixed(1) ?? '-'} ms · ${String(d?.budget.fps)} fps`,
+        );
+        // D4-85: up to high the backing store is capped at 1920 x 1080 pixels
+        expect((bs?.width ?? Infinity) * (bs?.height ?? Infinity), mode).toBeLessThanOrEqual(
+          BACKING_STORE_MAX_PX,
         );
         // the engine is drawn: the centre of the view is not one flat colour
         expect(shot.centreStd, `${mode}: centre luminance spread`).toBeGreaterThan(0.03);
@@ -234,9 +324,17 @@ describe('the app in Chrome', () => {
       layout.push(...layoutProblems().map((p) => `drawer open: ${p}`));
       const drawer = await shoot();
       await commands.writeFile(`${OUT}/${size.id}-6-drawer.jpg`, drawer.jpeg, 'base64');
+      // D4-85: ultra is the explicit opt-in to the full device pixel ratio
+      const dpr = useApp.getState().diagnostics?.backingStore.dpr ?? 0;
+      await page.getByRole('combobox', { name: 'Quality' }).selectOptions('ultra');
+      await until('the ultra backing store', () => {
+        const b = useApp.getState().diagnostics?.backingStore;
+        return b?.width === Math.floor(window.innerWidth * Math.min(2, window.devicePixelRatio));
+      });
+      const ultra = useApp.getState().diagnostics?.backingStore;
       await commands.writeFile(
         `${OUT}/${size.id}-shots.txt`,
-        `${[...rows, ...layout.map((l) => `LAYOUT ${l}`)].join('\n')}\n`,
+        `${[...rows, `ultra: backing ${String(ultra?.width)}x${String(ultra?.height)} at dpr ${String(ultra?.dpr)} (high: ${String(dpr)})`, ...layout.map((l) => `LAYOUT ${l}`)].join('\n')}\n`,
       );
       expect(useApp.getState().connection.state).toBe('running');
       expect(problems()).toEqual([]);
@@ -280,6 +378,23 @@ describe('the app in Chrome', () => {
   it('W2F-N5: records the worker frame cost while the gas path is held (the part-power fit slam)', async () => {
     await page.viewport(1366, 768);
     await boot('partPowerFit');
+    // W2A-I5: five quick ArrowUp presses on the focused lever land at 0.05 (the lever shows what
+    // it sent until the snapshot's seq echo catches up; before, each press restarted from the
+    // last echo and the worker ended at 0.01)
+    const lever = document.querySelector<HTMLInputElement>('input[type="range"]');
+    if (lever === null) throw new Error('no thrust lever');
+    lever.focus();
+    await userEvent.keyboard('{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}');
+    expect(lever.value).toBe('0.05');
+    await until(
+      'the lever echoed',
+      () => {
+        const s = useApp.getState().snapshot;
+        return s !== null && Math.abs(s.inputs.throttleLever - 0.05) < 1e-9;
+      },
+      5000,
+    );
+    expect(lever.value).toBe('0.05');
     await sleep(3000);
     const before = useApp.getState().diagnostics?.budget;
     // the w2f-c12 probe's case: the lever ramped from idle to take-off over 1 s of sim time

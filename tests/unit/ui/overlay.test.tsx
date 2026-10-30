@@ -49,6 +49,46 @@ describe('the overlay (RTL)', { timeout: TIMEOUT_MS }, () => {
     expect(sentCommands(post)).toContainEqual({ type: 'setThrottle', lever: 0.6 });
   });
 
+  it('W2A-I5: the lever shows what it sent until the snapshot echoes its seq: quick presses add up', () => {
+    const s = snapshotOf();
+    const post = mount(s);
+    render(<Overlay />);
+    const lever = screen.getByRole('slider', { name: 'Thrust lever' }) as HTMLInputElement;
+    // an ArrowUp: one step from the value the lever shows now
+    const press = () => {
+      fireEvent.change(lever, {
+        target: { value: String((Math.round(Number(lever.value) * 100) + 1) / 100) },
+      });
+    };
+    press();
+    press();
+    const levers = () =>
+      sentCommands(post).flatMap((c) => (c.type === 'setThrottle' ? [c.lever] : []));
+    expect(levers()).toEqual([0.01, 0.02]);
+    press();
+    press();
+    press();
+    expect(levers()).toEqual([0.01, 0.02, 0.03, 0.04, 0.05]);
+    expect(lever.value).toBe('0.05');
+    const seqs = post.mock.calls.flatMap(([m]) => (m.type === 'command' ? [m.message.seq] : []));
+    const at = (seq: number, value: number) => {
+      act(() => {
+        useApp.setState({
+          snapshot: { ...s, lastCommandSeq: seq, inputs: { ...s.inputs, throttleLever: value } },
+        });
+      });
+    };
+    // a snapshot that has applied only the second press does not pull the lever back
+    at(seqs[1] ?? -1, 0.02);
+    expect(lever.value).toBe('0.05');
+    expect(screen.getByText('lever 5 %')).toBeTruthy();
+    // once the echo reaches the last press, the lever shows the sim's own value again
+    at(seqs[4] ?? -1, 0.05);
+    expect(lever.value).toBe('0.05');
+    at((seqs[4] ?? -1) + 1, 0);
+    expect(lever.value).toBe('0');
+  });
+
   it('a mode radio and the 1-5 keys send setViewMode', async () => {
     const post = mount(snapshotOf());
     render(<Overlay />);

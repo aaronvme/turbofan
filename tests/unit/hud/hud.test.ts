@@ -18,7 +18,7 @@ import {
   surgeMarginView,
 } from '../../../src/hud/compressorMap';
 import { tsDiagram } from '../../../src/hud/tsDiagram';
-import { layoutCallouts, leaderEnd, overlaps } from '../../../src/hud/callouts';
+import { layoutCallouts, leaderCrossings, leaderEnd, overlaps } from '../../../src/hud/callouts';
 import { ledgerKind, parseFidelityLedger, stripMarkdown } from '../../../src/hud/ledger';
 import * as f from '../../../src/hud/format';
 import {
@@ -276,6 +276,47 @@ describe('callout layout', () => {
       [{ x: 0, y: 0, w: 800, h: 600 }],
     );
     expect(none).toEqual([]);
+  });
+
+  it('W2A-I3: counts a leader crossing another leader or running through another label', () => {
+    const box = (x: number, y: number) => ({ x, y, w: 40, h: 10 });
+    // two leaders that cross: (0,0)->(100,100)'s box corner and (100,0)->(0,100)'s
+    const crossing = [
+      { id: 'a', anchor: { x: 0, y: 0 }, box: box(100, 100) },
+      { id: 'b', anchor: { x: 100, y: 0 }, box: box(-40, 100) },
+    ];
+    expect(leaderCrossings(crossing)).toBe(1);
+    // a leader through another label's box
+    const through = [
+      { id: 'a', anchor: { x: 0, y: 50 }, box: box(200, 45) },
+      { id: 'b', anchor: { x: 120, y: 0 }, box: box(80, 45) },
+    ];
+    expect(leaderCrossings(through)).toBe(1);
+    const apart = [
+      { id: 'a', anchor: { x: 0, y: 0 }, box: box(10, -20) },
+      { id: 'b', anchor: { x: 300, y: 0 }, box: box(310, -20) },
+    ];
+    expect(leaderCrossings(apart)).toBe(0);
+  });
+
+  it('W2A-I3: places every label with no leader crossing where a crossing-free place exists', () => {
+    // the components' anchors along the engine's axis, a few tens of px apart (as projected):
+    // the first free offset of each made 1-3 crossings in these rows before W2A-I3
+    const big = () => ({ w: 140, h: 36 });
+    for (const dy of [-25, -20, -10, 0]) {
+      const anchors = [9, 4, 7, 8, 6, 5].map((priority, k) => ({
+        id: `c${String(k)}`,
+        x: 300 + 20 * k,
+        y: 350 + dy * k + (k % 2) * 8,
+        visible: true,
+        priority,
+      }));
+      const placed = layoutCallouts(anchors, big, { w: 1000, h: 700 });
+      expect(placed, `dy ${String(dy)}`).toHaveLength(6);
+      expect(leaderCrossings(placed), `dy ${String(dy)}`).toBe(0);
+      for (const p of placed)
+        for (const q of placed) if (p !== q) expect(overlaps(p.box, q.box)).toBe(false);
+    }
   });
 
   it('is deterministic and ends leaders on the box edge', () => {
