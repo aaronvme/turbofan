@@ -1,29 +1,49 @@
-w2/reference-9 round 13: WIP (D4-81 in order). Run 1, the plain scheme, passes D4-79's (a) and (b): the preconditioning is the source of the growth. Run 2, the global M_cut 0.02, passes (a) and (b), so 0.05 is not run. The cut is on every preconditioned CPU ladder run. In the full ladder at 8447e99 every row that passed at 0.003 still passes (rule 2), with D4-59's values. The ladder's own d463 run (the same configuration as run 2) was still running when this was written. (From c2d7c9f; HEAD = the commit of this handoff.)
+w2/reference-9 round 13: D4-81 done through step 2. The plain scheme decays (the preconditioning is the source of D4-63's growth). The global M_cut 0.02 passes D4-79's (a) and (b) on the contract case and keeps every passing ladder row (rule 2), so 0.05 was not run. The cut is adopted in the CPU reference ladder (the D4-63 pin lifted). The WGSL kernel and the GPU tests are unchanged (NEXT). (From c2d7c9f; HEAD = the commit of this handoff.)
 
 DONE (round 13)
 - Step 0: round 12's scratch patch is reverted (`git checkout` of precondition.ts and solver.ts; the copy stays in `reports/scratch/r12/trial-step-limit.patch`).
-- 87c5210: the d463 case takes a scheme (`D463Case.lowMachPreconditioning`: absent = the engine's 0.003, null = plain). `cases/d463plain.ts` is the plain run.
-- c03c87c (TDD), 1413b3d: `lowMachPreconditioning.globalMachCut`, off by default. It raises minMach and M_cut to the cut (beta, the far field's beta and the flux scaling). M_cut >= 1 stays off, minMach >= 1 stays plain, and an invalid cut throws. The test is `precondition.test.ts` "takes a global M_cut ...".
-- 3313910: `cases/d463mcut02.ts` and `d463mcut05.ts`.
+- 87c5210: the d463 case takes a scheme (`D463Case.lowMachPreconditioning`: absent = the engine default, null = plain). `cases/d463plain.ts` is the plain run.
+- c03c87c (TDD), 1413b3d: `lowMachPreconditioning.globalMachCut` in `src/flow/reference/solver.ts`, off by default. It raises minMach and M_cut to the cut (beta, the far field's beta and the flux scaling). M_cut >= 1 stays off, minMach >= 1 stays plain, and an invalid cut throws RangeError. Test: `precondition.test.ts` "takes a global M_cut ... (D4-81)".
+- 3313910 (+ 9814094, 8f60370 header fixes): `cases/d463mcut02.ts` and `d463mcut05.ts`.
 - f504d9c: SOLVER.md 10, D4-81's plan, written before the runs.
-- dc38608: run 1's results, in SOLVER.md 10's D4-81 table.
+- dc38608: run 1's results. 8447e99: run 2's results, and the cut on trial in the CPU ladder:
+  - `tests/ladder/oracle.ts` has `GLOBAL_MACH_CUT = 0.02` and `ENGINE_PRECONDITIONING_CUT`;
+  - L7's preconditioned spheres, L8, f32's C-pre and S, and the d463 cases take it;
+  - `d463.test.ts`'s rule test is `it`, no longer `it.fails`.
+- 3709be3: rule 2's ladder table in SOLVER.md 10.
 
-D4-81 RESULTS (the contract case, 20000 iterations)
-- Plain scheme (CFL 1.5): (a) 0.366 over 1000-2000 and 0.0433 at 20000; (b) 0.641 against 10000 and 0.159 against 100. Weighted residual 3.89e-2 / 9.63e-3 / 6.17e-3 at 100 / 10000 / 20000. PASS. L2(p') falls from 0.365 at 1000 to 0.07 at 10000.
-- M_cut 0.02 (`d463mcut02`): (a) 0.778 over 1000-2000 and 0.488 at 20000; (b) 0.524 against 10000 and 0.223 against 100. Weighted residual 1.806 / 0.771 / 0.404 at 100 / 10000 / 20000. PASS.
-  - The late decay is slow. L2 is 0.48-0.51 over 13000-20000 and the residual 0.33-0.42 over 15000-20000 (SOLVER.md 10 says so).
-- Rule 2 (the ladder at 8447e99, `reports/scratch/r13/logs/ladder.log`, copies of its JSON in `logs/ladder-reports/`): L7 0.0109 falling (0.128 / 0.039 / 0.011), |Cd| 0.0013, ratio 1.779 <= 3. L8 0.754 %, steadiness 3.2e-5. f32 12/12 (C-pre 1.06e-6 and S 2.02e-6 after 100). floor 4/4. L1-L6 and L9 are as of record. The failures are the known ones only: L8 convergence, L9a (Euler work tied to its steadiness 1.062e-5 > 1e-5, D4-57; convergence) and L9b convergence.
-- The candidate is on trial in the CPU ladder. `tests/ladder/oracle.ts` has `GLOBAL_MACH_CUT = 0.02` and `ENGINE_PRECONDITIONING_CUT`. L7's preconditioned spheres, L8, f32's C-pre and S, and the d463 cases take it. The d463 pin is lifted (`it`). The GPU tests keep `ENGINE_PRECONDITIONING` (0.003) until the kernel round.
+D4-81 RESULTS (the contract case, 1e-3 isothermal, 20000 iterations; SOLVER.md 10's D4-81 table)
+| run | L2(p')/first: max 1000-2000 / at 10000 / at 20000 | weighted residual: at 100 / 10000 / 20000 | (a) | (b) |
+|---|---|---|---|---|
+| M_cut 0.003, the old contract (round 12, killed at 16000) | 1.717 / 4.36 / (5.21 at 16000) | 3.548 / 8.73 / (8.79 at 16000) | fails late | fails (2.48x its value at 100 at 16000) |
+| plain scheme, CFL 1.5 | 0.366 / 0.0735 / 0.0433 | 3.89e-2 / 9.63e-3 / 6.17e-3 | pass | pass (0.641, 0.159) |
+| global M_cut 0.02 | 0.778 / 0.524 / 0.488 | 1.806 / 0.771 / 0.404 | pass | pass (0.524, 0.223) |
+| global M_cut 0.05 | not run (0.02 passed) | | | |
+- Rule 2 (`npm run test:ladder` at 8447e99): every row that passed at 0.003 still passes at 0.02, with D4-59's values. L7 0.0109 falling (0.128 / 0.039 / 0.011), |Cd| 0.0013, ratio 1.779 <= 3. L8 0.754 %, steadiness 3.2e-5. f32 12/12 (C-pre 1.06e-6, S 2.02e-6 after 100). floor 4/4. L1-L6 and L9 are as of record. The failures are the known ones only: L8 convergence, L9a (Euler work tied to its steadiness 1.062e-5 > 1e-5, D4-57; convergence) and L9b convergence. Log: `reports/scratch/r13/logs/ladder.log`, with JSON copies in `logs/ladder-reports/`. See GATES for the ladder's own d463 row.
+
+FOR THE ORCHESTRATOR
+- With the cut, the late decay is slow. L2(p') holds at 0.48-0.51 over 13000-20000, and the weighted residual at 0.33-0.42 over 15000-20000 (0.35 to 0.40 over the last 1000). D4-79 compares only the values at 100, 10000 and 20000, and it passes on them, but those values do not show decay over 15000-20000. The plain scheme falls to 0.04 over the same run.
+- The 10000 value (0.771) is a local high: it is 0.60 at 11000. Rule (b)'s comparison against 10000 rests on one checkpoint. It passes either way: the max over 10000-20000 is 0.852 and the value at 20000 is 0.404.
+- Whether the cut is adopted for good is a decision. It meets the pre-stated rule. I made no change to any threshold or rule.
+- D4-79 also requires the linear part at the candidate. It is not run yet (NEXT 1).
 
 NEXT
-1. The full ladder at this commit (`reports/scratch/r13/logs/ladder.*`) is rule 2. If any row that passed at 0.003 fails, revert the trial commit (the ladder files and the pin) and hand back the data.
-2. The linear part at the cut: `runCase.ts d463lin` (it takes the contract's default, so the cut now), about 75 min.
-3. The gates (coverage, test:mesh).
-4. KERNEL MIRROR (w2/solver, not this branch): D4-40's adapter default becomes minMach = M_cut = 0.02 (`flowSolver.ts`), as a parameter. The kernel already takes minMach2 and machCut. Then the GPU tests' `ENGINE_PRECONDITIONING` takes the cut, and their tolerances (D4-62 / D4-71) are re-checked.
+1. The linear part at the cut: `node --import ./tools/mesh/ts-resolve.mjs tests/ladder/runCase.ts d463lin`, detached and alone (it takes the d463 default, now the cut), about 75 min. If it fails D4-79's (a) or (b), the cut does not meet the rule: revert 8447e99's ladder changes and the pin.
+2. The gates that are not done yet (see GATES).
+3. KERNEL MIRROR (w2/solver, not this branch): D4-40's adapter default becomes minMach = M_cut = 0.02 (`src/flow/gpu/device/flowSolver.ts`), as a parameter. The kernel already takes minMach2 and machCut. Then the GPU tests' `ENGINE_PRECONDITIONING` takes the cut, and their D4-62 / D4-71 tolerances are re-checked. The reference's `globalMachCut` is max(minMach, cut) and max(M_cut, cut), so the GPU side needs no new code, only the two parameters.
+4. R and J (precondition.test.ts) stay pinned at 0.003 as written. R is excluded (the limiter's floor). At 0.02, D4-59 found J meets its rule at 9441 and then rebounds.
 
 GOTCHAS
-- Long runs: `reports/scratch/r13/runcase.ps1 -Case <name> -Tag <tag>` started via `Start-Process powershell.exe ... -WindowStyle Hidden`. It writes `logs/<tag>.{out,err,status}`. `runnpm.ps1 -Script <npm script> -Tag <tag>` does the same for npm scripts.
+- Long runs: `reports/scratch/r13/runcase.ps1 -Case <name> -Tag <tag>`, started via `Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',<script>,... -WindowStyle Hidden`. It writes `logs/<tag>.{out,err,status}`. `runnpm.ps1 -Script <npm script> -Tag <tag>` does the same for npm scripts. `watch.sh` / `summary.mjs` are the watch and ladder-summary helpers.
 - `npm run test:ladder`'s globalSetup clears `reports/ladder`. The run logs' `@@RESULT@@` lines keep each case's result.
+- The ladder's d463 child is started with a relative path, so `r12/boost.ps1` does not match it. Boost it by command line (`runCase.ts d463`).
+- Wall times: 72 min per 20k d463 run alone (about 3.6 min per 1000). The full ladder is about 30 min loaded, then d463 alone.
+
+GATES @8447e99 (later commits are docs only)
+- npm run typecheck: clean. npm run lint: clean (ESLint --max-warnings 0, Prettier).
+- npm run test:ladder: every non-d463 file finished as listed above; the d463 file was still running at the time of writing.
+- npm run coverage, npm run test:mesh: not run yet.
+- `precondition.test.ts` alone: 18 passed, 3 expected fail.
 
 ---
 
