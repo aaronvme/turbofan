@@ -35,6 +35,8 @@ import { createSimCore, type SimCore } from '../shell/simCore';
 import { createFieldSwitch, type FieldSwitch } from '../shell/fieldSwitch';
 import { cutPlaneQuantity, flowModeFor } from '../shell/viewState';
 import { createRasterScheduler, type RasterScheduler } from '../shell/mockRaster';
+import { backingDpr, backingSize } from '../shell/pixelCap';
+import { createSettleTracker, type SettleTracker } from '../shell/settle';
 import type { RasterReply, RasterRequest } from './mockRasterWorker';
 import { applyOrbit, orbitFromPose, orbitPose, type OrbitState } from '../shell/orbit';
 import type { AppDiagnostics, CycleChoice, FromWorker, ToWorker } from '../shell/protocol';
@@ -105,6 +107,13 @@ interface App {
   mockRasters: number;
   orbit: OrbitState;
   size: { width: number; height: number };
+  /** The device pixel ratio from the main thread, and the one rendered at (D4-85's cap). */
+  dpr: number;
+  renderDpr: number;
+  /** D4-88: the frames the view has been settled in the asked mode. */
+  settle: SettleTracker;
+  settledFrames: number;
+  warmUpMs: number;
   appliedView: RenderState | null;
   errors: string[];
   refused: string[];
@@ -120,12 +129,20 @@ function pushError(a: App, message: string) {
   if (a.errors.length > MAX_ERRORS) a.errors.shift();
 }
 
+/** D4-85: the canvas at the CSS size, its backing store capped up to quality high. */
+function applySize(a: App) {
+  const { width, height } = a.size;
+  a.renderDpr = backingDpr(width, height, a.dpr, a.core.view.quality);
+  a.view.setSize(width, height, a.renderDpr);
+}
+
 /** Applies the render state the core holds to the view (only what changed). */
 function applyView(a: App) {
   const v = a.core.view;
   const was = a.appliedView;
   if (was === v) return;
   a.appliedView = v;
+  if (was !== null && was.quality !== v.quality) applySize(a);
   if (was?.viewMode !== v.viewMode) {
     // D4-83: Realistic draws its haze and schlieren always, its tracers only when asked
     const fm = flowModeFor(v.viewMode);
@@ -224,7 +241,9 @@ function projectAnchors(a: App): Anchor[] {
   cam.updateMatrixWorld();
   const vp = cam.projectionMatrix.clone().multiply(cam.matrixWorldInverse).elements;
   const theta = Math.atan2(cam.position.z, cam.position.y);
-  const shown = a.core.view.viewMode !== 'exploded' && a.core.view.overlays.callouts;
+  // W2A-N10: only on a settled view (during a transition the parts are not at the anchors)
+  const shown =
+    a.core.view.viewMode !== 'exploded' && a.core.view.overlays.callouts && a.settledFrames > 0;
   return anchors.map((w) => {
     const p = projectPoint(vp, anchorWorld(w, theta), a.size.width, a.size.height);
     return { id: w.id, x: p.x, y: p.y, visible: shown && p.visible, priority: w.priority };
@@ -294,6 +313,7 @@ function loop(a: App) {
     const pose = orbitPose(a.orbit);
     a.view.setCameraPose(pose.position, pose.target);
     a.view.frame(Math.min(dt, 0.1));
+    a.settledFrames = a.settle.frame(a.core.view.viewMode, a.view.viewSettled());
     if (frame % TIMINGS_EVERY === 0) {
       stats = a.view.stats();
       const m = stats.timings;
@@ -324,6 +344,12 @@ function loop(a: App) {
         },
         field: a.fields?.state() ?? null,
         raster: { onFrame: a.raster === null, lastError: a.rasterError },
+        view: { mode: a.core.view.viewMode, settledFrames: a.settledFrames },
+        backingStore: {
+          ...backingSize(a.size.width, a.size.height, a.renderDpr),
+          dpr: a.renderDpr,
+        },
+        warmUpMs: a.warmUpMs,
         lostSolveCause: a.cycle.lostSolveCause(),
         errors: [...a.errors],
         adapter: `${a.view.device.info.vendor} ${a.view.device.info.architecture}`.trim(),
@@ -360,7 +386,8 @@ function handle(a: App, m: ToWorker) {
       return;
     case 'resize':
       a.size = { width: m.width, height: m.height };
-      a.view.setSize(m.width, m.height, m.dpr);
+      a.dpr = m.dpr;
+      applySize(a);
       return;
     case 'command': {
       const problems = a.core.command(m.message);
@@ -412,18 +439,20 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
       });
     } else post({ type: 'gpu-error', message });
   };
+  const cycle = createCycleModel(cycleOptions(m.cycle ?? 'reference'));
+  const core = createSimCore({ cycle });
+  // D4-85: the backing store capped from the first frame
+  const renderDpr = backingDpr(m.width, m.height, m.dpr, core.view.quality);
   const view = await createEngineView({
     gpu: navigator.gpu,
     canvas: m.canvas,
     definition: ENGINE_DEFINITION,
     width: m.width,
     height: m.height,
-    dpr: m.dpr,
+    dpr: renderDpr,
     preferredLimits: FLOW_SOLVER_LIMITS,
     onError,
   });
-  const cycle = createCycleModel(cycleOptions(m.cycle ?? 'reference'));
-  const core = createSimCore({ cycle });
   const preset = LOOK_PRESETS.threeQuarterFront;
   const a: App = {
     view,
@@ -440,6 +469,11 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     mockRasters: 0,
     orbit: orbitFromPose(preset.camera, preset.target),
     size: { width: m.width, height: m.height },
+    dpr: m.dpr,
+    renderDpr,
+    settle: createSettleTracker(),
+    settledFrames: 0,
+    warmUpMs: 0,
     appliedView: null,
     errors: [],
     refused: [],
@@ -467,12 +501,17 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
       pushError(a, message);
     },
   });
+  // D4-88: every mode's pipelines compiled behind the boot spinner (the MOCK is bound, so the
+  // flow layers draw), so the viewer's first switch into a mode does not stall the worker
+  const warm = await view.warmUp();
+  a.warmUpMs = warm.ms;
   // messages wait in `pending` until the field is bound (a 'field' choice needs the switch)
   app = a;
   for (const p of pending.splice(0)) handle(a, p);
   post({
     type: 'ready',
     adapter: `${view.device.info.vendor} ${view.device.info.description}`.trim(),
+    warmUpMs: warm.ms,
   });
   loop(a);
 }

@@ -64,6 +64,10 @@ body,
   touch-action: none;
   cursor: grab;
 }
+/* D4-88: the boot's warm-up frames (every mode once) stay behind the spinner */
+.viewport.booting canvas.view {
+  visibility: hidden;
+}
 .viewport canvas.view:active {
   cursor: grabbing;
 }

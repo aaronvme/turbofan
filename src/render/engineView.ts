@@ -190,10 +190,26 @@ export interface EngineView {
   setThrottle(lever: number, settle?: boolean): void;
   /**
    * w2/app-ui (flagged edit): the cycle state that drives the spools and the hot-part glow, set
-   * by the app every frame from the transient model; null returns to the view's own MOCK cycle
-   * (the look-dev pages and the benches never set it).
+   * by the app every frame from the transient model, with its source as the model states it
+   * (W1F-N1: derived, never defaulted; W2A-N3); null returns to the view's own MOCK cycle (the
+   * look-dev pages and the benches never set it).
    */
-  setCycleState(state: CycleState | null, source?: CycleSource): void;
+  setCycleState(state: CycleState | null, source: CycleSource): void;
+  /**
+   * w2/app-ui round 3 (flagged edit, D4-88): compiles every mode's pipelines before first use,
+   * the flow layers included: one frame of each look mode and flow mode (Cutaway and Data with
+   * their tracers and every cut-plane quantity, Schlieren, Exploded, Realistic with and without
+   * tracers), each waited on until the GPU has run it, so the GPU process's pipeline compiles
+   * are done too. The first switch into a mode stalled the worker for 0.4-2.8 s before (W2A-I4).
+   * The view's state is put back afterwards (the last frames are Realistic, the app's first
+   * view, so TRAA's history is that view's). The app calls it behind the boot spinner.
+   */
+  warmUp(): Promise<WarmUpReport>;
+  /**
+   * D4-88: whether the view shows its mode: the cutaway wedge and the explode offsets at the
+   * mode's end, the spools at speed (or stopped in Exploded). False during a transition.
+   */
+  viewSettled(): boolean;
   setShutter(angleDeg: number): void;
   setCinematic(on: boolean): void;
   /** The render profile (D3-7): `performance` follows the GPU time with the render scale. */
@@ -230,6 +246,14 @@ export interface EngineView {
   /** The frames since beginTimingRun; stops recording. */
   endTimingRun(): FrameSample[];
   dispose(): Promise<void>;
+}
+
+/** What EngineView.warmUp() did. */
+export interface WarmUpReport {
+  /** Wall ms of the whole warm-up (the frames and the GPU waits). */
+  readonly ms: number;
+  /** The configurations rendered, in order (e.g. "data:mach+tracers"). */
+  readonly configurations: readonly string[];
 }
 
 /** Look-dev A/B switches for timing comparisons (never set by the app). */
@@ -282,6 +306,11 @@ export interface DebugFlags {
 }
 
 const FPS = 60;
+/**
+ * The cut-plane quantities warmUp() compiles (each rebuilds the plane's material): the Data
+ * view's contract fields as the app maps them (src/shell/viewState.ts: p, rho, T, Mach).
+ */
+const WARM_PLANE_QUANTITIES: readonly FieldQuantityId[] = ['p', 'rho', 't', 'mach'];
 const CUT_WIDTH = (100 * Math.PI) / 180;
 const EXPLODE_GAP = 0.22;
 const TRANSITION_S = 1.4;
@@ -555,8 +584,62 @@ async function assemble(
       settle = s;
       if (s) settled = mockSteadyState(def, lever);
     },
-    setCycleState(state, source = 'model') {
+    setCycleState(state, source) {
       external = state === null ? null : { state, source };
+    },
+    async warmUp() {
+      const t0 = performance.now();
+      const saved = { mode, cut, explode, spoolFactor, flowMode, flowQuantity, flowTracers };
+      const steps: readonly {
+        flow: FlowVizModeId | null;
+        look: LookMode;
+        quantity?: FieldQuantityId;
+        tracers?: boolean;
+      }[] = [
+        { flow: 'cutaway', look: 'cutaway', tracers: true },
+        ...WARM_PLANE_QUANTITIES.map((q) => ({
+          flow: 'data' as const,
+          look: 'cutaway' as const,
+          quantity: q,
+          tracers: true,
+        })),
+        { flow: 'schlieren', look: 'realistic' },
+        { flow: null, look: 'exploded' },
+        { flow: 'realistic', look: 'realistic', tracers: true },
+        // the app's first view last: TRAA's history is its own
+        { flow: saved.flowMode, look: saved.mode },
+      ];
+      const configurations: string[] = [];
+      for (const s of steps) {
+        flowMode = s.flow;
+        flowQuantity = s.quantity ?? null;
+        flowTracers = s.tracers ?? null;
+        flowViz.setTracers(flowTracers);
+        applyFlowMode();
+        view.setMode(s.look, true);
+        view.frame(0);
+        await device.device.queue.onSubmittedWorkDone();
+        configurations.push(
+          `${s.flow ?? s.look}${s.quantity === undefined ? '' : `:${s.quantity}`}${s.tracers === true ? '+tracers' : ''}`,
+        );
+      }
+      flowMode = saved.flowMode;
+      flowQuantity = saved.flowQuantity;
+      flowTracers = saved.flowTracers;
+      flowViz.setTracers(flowTracers);
+      applyFlowMode();
+      mode = saved.mode;
+      cut = saved.cut;
+      explode = saved.explode;
+      spoolFactor = saved.spoolFactor;
+      return { ms: performance.now() - t0, configurations };
+    },
+    viewSettled() {
+      return (
+        cut === (mode === 'cutaway' ? 1 : 0) &&
+        explode === (mode === 'exploded' ? 1 : 0) &&
+        spoolFactor === (mode === 'exploded' ? 0 : 1)
+      );
     },
     setShutter(a) {
       shutterDeg = a;

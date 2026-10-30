@@ -373,6 +373,16 @@ function BudgetBar({ d }: { readonly d: AppDiagnostics }) {
           <dt>Frame rate</dt>
           <dd>{b.fps} fps</dd>
         </div>
+        <div>
+          <dt>Backing store (D4-85)</dt>
+          <dd>
+            {d.backingStore.width} × {d.backingStore.height} @ {fmt.fixed(d.backingStore.dpr, 2)}
+          </dd>
+        </div>
+        <div>
+          <dt>Pipeline warm-up (D4-88)</dt>
+          <dd>{fmt.ms(d.warmUpMs)} ms at boot</dd>
+        </div>
       </dl>
     </div>
   );

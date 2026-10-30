@@ -21,6 +21,9 @@ import { useApp } from './store';
 
 function Viewport({ cycle }: { readonly cycle: CycleChoice | undefined }) {
   const host = useRef<HTMLDivElement>(null);
+  // D4-88: the worker warms every mode's pipelines before `ready`; its frames stay hidden
+  // behind the boot spinner
+  const booting = useApp((s) => s.connection.state === 'booting');
   useEffect(() => {
     const el = host.current;
     if (el === null) return;
@@ -41,7 +44,7 @@ function Viewport({ cycle }: { readonly cycle: CycleChoice | undefined }) {
       canvas.remove();
     };
   }, [cycle]);
-  return <div className="viewport" ref={host} />;
+  return <div className={booting ? 'viewport booting' : 'viewport'} ref={host} />;
 }
 
 export function Status() {

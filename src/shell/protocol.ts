@@ -8,6 +8,7 @@ import type { SimCommandMessage, SimSnapshot } from '../contracts/sim';
 import type { FlowFieldSource } from '../contracts/flow';
 import type { FlowLinkState } from '../flow/viz/fieldLink';
 import type { Anchor } from '../hud/callouts';
+import type { ViewMode } from '../contracts/ui';
 import type { OrbitInput } from './orbit';
 
 export type FieldChoice = FlowFieldSource;
@@ -92,6 +93,15 @@ export interface AppDiagnostics {
    */
   readonly field: FlowLinkState | null;
   readonly raster: RasterHealth;
+  /**
+   * D4-88's settled-view signal: the mode the view was asked for and how many frames it has
+   * shown it settled (src/shell/settle.ts; the shots wait for SETTLED_FRAMES).
+   */
+  readonly view: { readonly mode: ViewMode; readonly settledFrames: number };
+  /** D4-85: the canvas's backing store, px, and the pixel ratio it renders at. */
+  readonly backingStore: { readonly width: number; readonly height: number; readonly dpr: number };
+  /** D4-88: what the boot's pipeline warm-up took, wall ms. */
+  readonly warmUpMs: number;
   /** W2F-I1: why the last matched solve was lost (null: none lost since the reset). */
   readonly lostSolveCause: string | null;
   /** The worker's own errors so far (GPU errors, a throwing step), newest last, at most 8. */
@@ -102,7 +112,8 @@ export interface AppDiagnostics {
 }
 
 export type FromWorker =
-  | { readonly type: 'ready'; readonly adapter: string }
+  /** Posted after the boot's pipeline warm-up (D4-88), so the spinner covers it. */
+  | { readonly type: 'ready'; readonly adapter: string; readonly warmUpMs?: number }
   | {
       readonly type: 'snapshot';
       readonly snapshot: SimSnapshot;
