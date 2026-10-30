@@ -100,21 +100,31 @@ describe('D4-84: the held frame on the part-power fit ramp', { timeout: TIMEOUT_
 
   it('the hold stays visible: status, count, cause, one warning per held episode (W2F-I1)', () => {
     const { steps, warnings } = run();
-    let episodes = 0;
+    // An episode is a run of lost snapshots; a 60 Hz step has two, so one that loses a solve after
+    // a matched step starts exactly one episode, and one after a held step at most one (its first
+    // snapshot matched, its second lost).
+    let surely = 0;
+    let atMost = 0;
     let lost = 0;
     steps.forEach((k, i) => {
       const n = k.s.gasPathSolve.lostSolves;
       if (held(k)) {
         expect(n).toBeGreaterThan(lost);
         expect(k.cause).not.toBeNull();
-        if (!held(steps[i - 1])) episodes++;
       } else {
         expect(k.s.gasPathSolve.status).toBe('matched');
       }
+      if (n > lost) {
+        atMost++;
+        if (!held(steps[i - 1])) surely++;
+      }
       lost = n;
     });
-    expect(episodes).toBeGreaterThan(0);
-    expect(warnings).toBe(episodes);
+    expect(surely).toBeGreaterThan(0);
+    expect(warnings).toBeGreaterThanOrEqual(surely);
+    expect(warnings).toBeLessThanOrEqual(atMost);
+    // once per episode, not once per lost solve
+    expect(warnings).toBeLessThan(lost / 10);
   });
 
   it('the solve recovers, on the root an unbudgeted solve finds from its warm start', () => {
@@ -148,7 +158,9 @@ describe('D4-84: the held frame on the part-power fit ramp', { timeout: TIMEOUT_
       at.out.x.map((v) => v * (1 + 1e-3)),
     );
     expect(other.maxResidual).toBeLessThan(ACCEPTED_RESIDUAL);
-    other.x.forEach((v, i) => expect(v).toBeCloseTo(at.out.x[i] ?? NaN, 6));
+    other.x.forEach((v, i) => {
+      expect(v).toBeCloseTo(at.out.x[i] ?? NaN, 6);
+    });
   });
 });
 

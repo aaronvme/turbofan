@@ -70,7 +70,8 @@ describe('W1K-I2: why the D3-14 part-power fit was rejected', { timeout: TIMEOUT
     // back to the sub-idle similarity model there without a word, fuel and P3 chattered between the
     // two models, and the engine "hung" at N1 about 35 %, 10-11 kN. Now the state holds the last
     // converged gas path and says so (status held, the lost solves counted); the spools run on its
-    // held power balance (not physics), and the slam makes about 94 kN by 10 s. The reference makes
+    // held power balance (not physics), and the slam makes about 94 kN by 10 s (88 kN since D4-84's
+    // bounded retry, which holds again from 9.8 s). The reference makes
     // 95 % thrust at about 5.8 s without a surge or a lost solve (model.test.ts).
     const states = slam(
       createCycleModel({ engine: withCalibration(referenceEngine(), PART_POWER_FIT_CALIBRATION) }),

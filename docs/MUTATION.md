@@ -1,6 +1,6 @@
 # Mutation scores (D3-13)
 
-Stryker 10.1.1, vitest runner, `coverageAnalysis: perTest`, `ignoreStatic: true`, concurrency 6, the runner's default `related` test selection. The base test set is `vitest.mutation.config.ts`: the fast core suites without the slow whole-engine transient files (`model.test.ts`, `modelPaths.test.ts`, `surgeRecovery.test.ts`). A targeted run narrows it with `MUTATION_TESTS` (comma-separated globs; the config reads it), and each row below names its set. A score measured on a narrow set is a lower bound for the full fast set. Every run was in the foreground and under 10 min.
+Stryker 10.1.1, vitest runner, `coverageAnalysis: perTest`, `ignoreStatic: true`, concurrency 6, the runner's default `related` test selection. The base test set is `vitest.mutation.config.ts`: the fast core suites without the slow whole-engine transient files (`model.test.ts`, `modelPaths.test.ts`, `surgeRecovery.test.ts`, and since D4-84 `heldFrame.test.ts`). A targeted run narrows it with `MUTATION_TESTS` (comma-separated globs; the config reads it), and each row below names its set. A score measured on a narrow set is a lower bound for the full fast set. Every run was in the foreground and under 10 min.
 
 Columns:
 - **killed**: a test failed.

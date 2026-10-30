@@ -12,6 +12,8 @@ export const SLOW_TRANSIENT_TESTS = [
   'tests/unit/cycle/model.test.ts',
   'tests/unit/cycle/modelPaths.test.ts',
   'tests/unit/cycle/surgeRecovery.test.ts',
+  // D4-84: the part-power fit ramp at 60 Hz and three bit-identity scenarios, run twice each
+  'tests/unit/cycle/heldFrame.test.ts',
 ];
 
 /**
