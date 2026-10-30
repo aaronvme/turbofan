@@ -110,6 +110,72 @@ async function shoot(): Promise<Shot> {
   };
 }
 
+const visible = (el: Element): boolean => {
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+};
+const overlap = (a: DOMRect, b: DOMRect): number =>
+  Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
+  Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+const nameOf = (el: Element): string =>
+  el.getAttribute('aria-label') ??
+  el.closest('[aria-label]')?.getAttribute('aria-label') ??
+  el.getAttribute('class') ??
+  el.tagName;
+
+/**
+ * The layout bar (Aaron's "ultra high level ui"; W2 app-ui NEXT 3): at the shot sizes nothing in
+ * the overlay is off screen, cut off (a panel or column whose content overflows it) or overlapping
+ * (two blocks, two labels in a chart, two dials). The callouts are laid out by their own tested
+ * module and the drawer scrolls by design, so neither is checked here.
+ */
+function layoutProblems(): string[] {
+  const out: string[] = [];
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  const blocks = [
+    ...document.querySelectorAll(
+      '.overlay .topbar, .overlay .panel, .overlay .panel-toggles, .overlay .dock-row, .overlay .legend, .overlay .annunciators > *',
+    ),
+  ].filter(visible);
+  for (const b of blocks) {
+    const r = b.getBoundingClientRect();
+    if (r.left < -0.5 || r.top < -0.5 || r.right > W + 0.5 || r.bottom > H + 0.5)
+      out.push(
+        `${nameOf(b)} is off screen: ${r.left.toFixed(0)},${r.top.toFixed(0)}-${r.right.toFixed(0)},${r.bottom.toFixed(0)} of ${String(W)}x${String(H)}`,
+      );
+  }
+  blocks.forEach((a, i) => {
+    for (const b of blocks.slice(i + 1)) {
+      if (a.contains(b) || b.contains(a)) continue;
+      if (overlap(a.getBoundingClientRect(), b.getBoundingClientRect()) > 1)
+        out.push(`${nameOf(a)} overlaps ${nameOf(b)}`);
+    }
+  });
+  for (const el of document.querySelectorAll('.overlay .col, .overlay .panel, .overlay .topbar')) {
+    if (!visible(el) || el.closest('.drawer') !== null) continue;
+    if (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1)
+      out.push(
+        `${nameOf(el)} is cut off: content ${String(el.scrollWidth)}x${String(el.scrollHeight)} in ${String(el.clientWidth)}x${String(el.clientHeight)}`,
+      );
+  }
+  for (const svg of document.querySelectorAll('.overlay svg')) {
+    const texts = [...svg.querySelectorAll('text')].filter(visible);
+    texts.forEach((a, i) => {
+      for (const b of texts.slice(i + 1))
+        if (overlap(a.getBoundingClientRect(), b.getBoundingClientRect()) > 0.5)
+          out.push(`${nameOf(svg)}: "${a.textContent}" overlaps "${b.textContent}"`);
+    });
+  }
+  const dials = [...document.querySelectorAll('.engine-display .dial, .engine-display .readouts')];
+  dials.forEach((a, i) => {
+    for (const b of dials.slice(i + 1))
+      if (overlap(a.getBoundingClientRect(), b.getBoundingClientRect()) > 1)
+        out.push(`engine display: ${nameOf(a)} overlaps ${nameOf(b)}`);
+  });
+  return out;
+}
+
 async function toMode(mode: ViewMode) {
   await page.getByRole('radio', { name: new RegExp(`^${mode}`, 'i') }).click();
   await until(`view mode ${mode}`, () => useApp.getState().snapshot?.view.viewMode === mode);
@@ -128,8 +194,10 @@ describe('the app in Chrome', () => {
       await boot();
       expect(problems()).toEqual([]);
       const rows: string[] = [];
+      const layout: string[] = [];
       for (const [i, mode] of VIEW_MODES.entries()) {
         await toMode(mode);
+        layout.push(...layoutProblems().map((p) => `${mode}: ${p}`));
         const shot = await shoot();
         await commands.writeFile(
           `${OUT}/${size.id}-${String(i + 1)}-${mode}.jpg`,
@@ -144,9 +212,20 @@ describe('the app in Chrome', () => {
         expect(shot.centreLit, `${mode}: lit fraction of the centre`).toBeGreaterThan(0.02);
         expect(problems(), mode).toEqual([]);
       }
-      await commands.writeFile(`${OUT}/${size.id}-shots.txt`, `${rows.join('\n')}\n`);
+      // the drawer (Diagnostics and What's simulated) opens without covering the other panels
+      await page.getByRole('button', { name: 'Diagnostics' }).click();
+      await page.getByRole('button', { name: "What's simulated" }).click();
+      await sleep(300);
+      layout.push(...layoutProblems().map((p) => `drawer open: ${p}`));
+      const drawer = await shoot();
+      await commands.writeFile(`${OUT}/${size.id}-6-drawer.jpg`, drawer.jpeg, 'base64');
+      await commands.writeFile(
+        `${OUT}/${size.id}-shots.txt`,
+        `${[...rows, ...layout.map((l) => `LAYOUT ${l}`)].join('\n')}\n`,
+      );
       expect(useApp.getState().connection.state).toBe('running');
       expect(problems()).toEqual([]);
+      expect(layout).toEqual([]);
     });
 
   it('D4-82: the solver field is labelled uncoupled until W3 on the badge and the legend', async () => {
@@ -251,7 +330,6 @@ describe('the app in Chrome', () => {
       n1End: s.snapshot?.cycle.n1Percent ?? null,
     };
     await commands.writeFile('reports/ui/frame-cost.json', `${JSON.stringify(record, null, 2)}\n`);
-    console.log(`[frame-cost] ${JSON.stringify(record)}`);
     // the case exercises a held gas path, or its numbers would not answer W2F-N5
     expect(record.lostSolves).toBeGreaterThan(0);
     expect(problems()).toEqual([]);
