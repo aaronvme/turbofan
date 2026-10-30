@@ -41,7 +41,9 @@ Not done or not right yet: the MOCK field's inflow ahead of the lip converges ab
 
 `npm run dev` (this branch uses `--port 5194`) opens the app: the D2-4 worker renders the engine on the real cycle model, the React overlay reads its snapshots. The layout is one top bar (brand, the five modes with keys 1-5, the clock, quality and units, the provenance badges), the engine display and the controls on the left, the panel switches, the compressor maps and T-s on the right, the station strip along the bottom, and the view dock under the engine (the flow legend with its provenance line, the camera presets, the tracers switch, the Data view's cut-plane field). Diagnostics and What's simulated open as a drawer at the right edge of the view, which scrolls on its own. Every number is tabular; text is the cockpit's white, cyan, amber and red on a dark glass panel.
 
-The browser suite (`tests/browser/app.test.tsx`) checks the bar at 1920 x 1001 and 1366 x 768 CSS px in every mode and with the drawer open: no block off screen, none cut off (a panel or column whose content overflows it), no two blocks overlapping, no two labels in a chart overlapping, no two dials overlapping. The callouts have their own layout module (`src/hud/callouts.ts`).
+The browser suite (`tests/browser/app.test.tsx`) checks the bar at 1920 x 1001 and 1366 x 768 CSS px in every mode and with the drawer open: no block off screen, none cut off (a panel or column whose content overflows it), no two blocks overlapping, no two labels in a chart overlapping, no two dials overlapping, and (round 3, W2A-I3) the callouts as drawn: no label over another or over a reserved block, none cut off, no leader crossing another leader or running through another label. Each mode is shot once the worker says the view has settled in it (D4-88's signal: the transition done and 30 frames since), not after a fixed wait; round 2's Schlieren shots showed the exploded engine.
+
+Round 3 (W2A-I1..I5, D4-85, D4-87, D4-88): the worker's faults are annunciated (SIM STOPPED, GPU ERRORS (n), MOCK RASTER, REFUSED); the fan map is drawn from its own lowest speed line (30.6 %), so the idle point is on the chart, and its margin below that line is dimmed and tagged `below map` (no amber); the callouts are laid out at their rendered size with the fewest leader crossings, and the closed views (Realistic, Schlieren) call out only the fan and the exhaust; the engine view warms every mode's pipelines behind the boot spinner; the backing store is capped at 1920 x 1080 px up to quality high.
 
 | File (`docs/look-dev/ui/`) | What it shows |
 |---|---|
@@ -53,7 +55,7 @@ The browser suite (`tests/browser/app.test.tsx`) checks the bar at 1920 x 1001 a
 
 The suite writes these to `reports/ui/` (ignored) on every run; `VITE_UI_LOOKDEV=1` writes them here. The shared Chrome runs at the OS's 1.5x scale; the JPEGs are scaled to the CSS size.
 
-Not right yet: at ground idle the Data plane is mostly the darkest viridis purple (the ambient part of the near field at Mach about 0, W2V-N21); the callouts are hidden in Exploded (they do not follow the explode offsets); the colormaps of the contract (`colormaps`) are not the flow visuals' (fixed per quantity), so they are not offered.
+Not right yet: at ground idle the Data plane is mostly the darkest viridis purple (the ambient part of the near field at Mach about 0, W2V-I7, flowviz's, D4-86); the callouts are hidden in Exploded (they do not follow the explode offsets); in the cut views they still cluster on the core; the colormaps of the contract (`colormaps`) are not the flow visuals' (fixed per quantity), so they are not offered.
 
 ## Look-dev round 5 (w2/lookdev-5: W2L-I1..I5, P4's last 0.5 ms, the pass-8 visual notes)
 

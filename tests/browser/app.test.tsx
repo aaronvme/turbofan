@@ -328,6 +328,36 @@ describe('the app in Chrome', () => {
       layout.push(...layoutProblems().map((p) => `drawer open: ${p}`));
       const drawer = await shoot();
       await commands.writeFile(`${OUT}/${size.id}-6-drawer.jpg`, drawer.jpeg, 'base64');
+      // D4-85's record: the engine render back in Realistic once the frame-cost window (120
+      // frames) holds only settled Realistic frames, beside P4's 8 ms (indicative: shared machine)
+      await page.getByRole('button', { name: 'Diagnostics' }).click();
+      await page.getByRole('button', { name: "What's simulated" }).click();
+      await toMode('realistic');
+      const v0 = useApp.getState().snapshot?.version ?? 0;
+      await until(
+        'a full frame-cost window',
+        () => (useApp.getState().snapshot?.version ?? 0) >= v0 + 50,
+      );
+      const settled = useApp.getState().diagnostics;
+      await commands.writeFile(
+        `reports/ui/render-${size.id}.json`,
+        `${JSON.stringify(
+          {
+            viewport: `${String(size.w)}x${String(size.h)}`,
+            devicePixelRatio: window.devicePixelRatio,
+            backingStore: settled?.backingStore,
+            realisticRenderGpuMs: settled?.budget.renderGpuMs,
+            flowVisualsGpuMs: settled?.budget.flowVisualsGpuMs,
+            fps: settled?.budget.fps,
+            p4BudgetMs: 8,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      rows.push(
+        `realistic again (a full window): render ${settled?.budget.renderGpuMs?.toFixed(1) ?? '-'} ms · flow ${settled?.budget.flowVisualsGpuMs.toFixed(1) ?? '-'} ms · ${String(settled?.budget.fps)} fps at dpr ${String(window.devicePixelRatio)}`,
+      );
       // D4-85: ultra is the explicit opt-in to the full device pixel ratio
       const dpr = useApp.getState().diagnostics?.backingStore.dpr ?? 0;
       await page.getByRole('combobox', { name: 'Quality' }).selectOptions('ultra');
