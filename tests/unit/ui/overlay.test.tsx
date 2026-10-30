@@ -144,6 +144,46 @@ describe('the overlay (RTL)', { timeout: TIMEOUT_MS }, () => {
   });
 });
 
+describe(
+  'the texts (W2A-N8) and the conservative defaults (W2A-N3)',
+  { timeout: TIMEOUT_MS },
+  () => {
+    it('names the FADEC limiter in words and the burner state at steady idle', () => {
+      mount(snapshotOf());
+      render(<Overlay />);
+      const engine = screen.getByRole('region', { name: 'Engine display' });
+      expect(within(engine).getByText('RUN · idle floor')).toBeTruthy();
+      expect(engine.textContent).not.toMatch(/idleFloor/);
+      // no start in progress: the readout is the burner's, not "Start lit"
+      expect(within(engine).getByText('Burner')).toBeTruthy();
+      expect(within(engine).queryByText('Start')).toBeNull();
+    });
+
+    it('the diagnostics show a dash, not 0.00 ms, and SOLVER IDLE for a solver that is not drawn', async () => {
+      mount(snapshotOf());
+      render(<Overlay />);
+      await userEvent.click(screen.getByRole('button', { name: 'Diagnostics' }));
+      const d = screen.getByRole('region', { name: 'Diagnostics' });
+      expect(within(d).getByText('SOLVER IDLE')).toBeTruthy();
+      const solverRow = within(d).getByText('Solver', { selector: 'dt' }).parentElement;
+      expect(solverRow?.querySelector('dd')?.textContent).toBe('– ms');
+    });
+
+    it('a solver field whose link is not known yet is labelled uncoupled in the legend (M8)', () => {
+      mount(snapshotOf({ mode: 'data', flow: 'solver' }), diagnosticsOf({ field: null }));
+      render(<Overlay />);
+      const legend = screen.getByRole('region', { name: 'Flow legend' });
+      expect(within(legend).getByText(/solver \(uncoupled until W3\)/)).toBeTruthy();
+      expect(legend.textContent).not.toMatch(/coupled\)/);
+      expect(
+        within(screen.getByRole('group', { name: 'Data provenance' })).getByText(
+          'FIELD: solver (uncoupled until W3)',
+        ),
+      ).toBeTruthy();
+    });
+  },
+);
+
 describe('the compressor maps at ground idle (W2A-I2, D4-87)', { timeout: TIMEOUT_MS }, () => {
   // the charts' plot rectangle in their 300 x 168 viewBox (charts.tsx's margins)
   const inPlot = (c: Element | undefined) => {

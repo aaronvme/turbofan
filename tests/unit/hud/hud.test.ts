@@ -33,7 +33,7 @@ import {
 } from '../../../src/hud/annunciators';
 import { referenceEngine } from '../../../src/cycle/engine';
 import { createCycleModel } from '../../../src/cycle/model';
-import { DEFAULT_CYCLE_INPUTS } from '../../../src/contracts/cycle';
+import { DEFAULT_CYCLE_INPUTS, FADEC_LIMITERS } from '../../../src/contracts/cycle';
 import { compressorPoint } from '../../../src/cycle/componentMaps';
 
 const engine = referenceEngine();
@@ -321,13 +321,16 @@ describe('callout layout', () => {
     }
   });
 
-  it('W2A-I3: in Realistic only the parts the closed nacelle shows are called out; none in Exploded', () => {
+  it('W2A-I3: the closed modes (Realistic, Schlieren) call out only what the nacelle shows; none in Exploded', () => {
     const ids = componentAnchors(ENGINE_DEFINITION).map((a) => a.id);
     expect(ids).toEqual(expect.arrayContaining(['fan', 'hpc', 'combustor', 'exhaust']));
-    expect(ids.filter((id) => calloutShownIn('realistic', id))).toEqual(
-      ids.filter((id) => id === 'fan' || id === 'exhaust'),
-    );
-    for (const mode of ['cutaway', 'schlieren', 'data'] as const)
+    // Schlieren draws the closed engine as a silhouette (its look mode is Realistic's)
+    for (const mode of ['realistic', 'schlieren'] as const)
+      expect(
+        ids.filter((id) => calloutShownIn(mode, id)),
+        mode,
+      ).toEqual(ids.filter((id) => id === 'fan' || id === 'exhaust'));
+    for (const mode of ['cutaway', 'data'] as const)
       expect(
         ids.every((id) => calloutShownIn(mode, id)),
         mode,
@@ -411,6 +414,23 @@ describe('fidelity ledger', () => {
     expect(() => parseFidelityLedger('# Other\n')).toThrow(/heading/);
     expect(() => parseFidelityLedger('## 1. Fidelity ledger\n\ntext\n')).toThrow(/no rows/);
   });
+
+  it('W2A-N4: splits a row on its unescaped pipes only, and unescapes the others', () => {
+    const doc = [
+      '## 1. Fidelity ledger',
+      '',
+      '| Thing | Status | Source |',
+      '|---|---|---|',
+      '| Flow visuals | **Derived** | the speed \\|u\\|, composited after the tone map (D4-76) |',
+      '',
+    ].join('\n');
+    const [row] = parseFidelityLedger(doc);
+    expect(row?.thing).toBe('Flow visuals');
+    expect(row?.source).toBe('the speed |u|, composited after the tone map (D4-76)');
+    // the document's own flow-visuals row keeps its |u| and what follows it
+    const real = parseFidelityLedger(md).find((r) => r.source.includes('|u|'));
+    expect(real?.source).toMatch(/\|u\|, composited after the tone map/);
+  });
 });
 
 describe('format', () => {
@@ -427,6 +447,20 @@ describe('format', () => {
     expect(f.tsfc(null, 'si').value).toBe(f.MISSING);
     expect(f.tsfc(1e-5, 'si').value).toBe('10.00');
     expect(f.tsfc(1e-5, 'imperial').value).toBe('0.353');
+  });
+
+  it('W2A-N8: names the FADEC limiter in words, not as a code identifier', () => {
+    expect(FADEC_LIMITERS.map((l) => f.limiterText(l))).toEqual([
+      'no limiter',
+      'N1 target',
+      'accel schedule',
+      'decel schedule',
+      'idle floor',
+      'N1 limit',
+      'N2 limit',
+      'EGT limit',
+      'start schedule',
+    ]);
   });
 
   it('shows missing values as a dash and never -0', () => {
@@ -494,9 +528,10 @@ describe('annunciators', () => {
       'CYCLE: MODEL',
       'FIELD: MOCK',
     ]);
+    // W2A-N3: a solver of unknown coupling is labelled the conservative way, uncoupled
     expect(provenanceBadges({ cycle: 'mock', flow: 'solver' }).map((b) => b.level)).toEqual([
       'caution',
-      'normal',
+      'advisory',
     ]);
     expect(provenanceBadges({ cycle: 'model', flow: 'none' })[1]?.text).toBe('FIELD: NONE');
   });
@@ -530,7 +565,7 @@ describe('annunciators', () => {
       )[1]?.text,
     ).toBe('FIELD: MOCK');
     expect(provenanceBadges({ cycle: 'model', flow: 'solver' }, null)[1]?.text).toBe(
-      'FIELD: SOLVER',
+      'FIELD: solver (uncoupled until W3)',
     );
     // the fallback is also annunciated (visible, never silent), with the reason in the text
     expect(fieldFallbackAnnunciation(uncoupled)).toBeNull();
@@ -539,6 +574,24 @@ describe('annunciators', () => {
     expect(a?.level).toBe('caution');
     expect(a?.text).toBe('MOCK FALLBACK: solver lost: GPU device lost');
     expect(a?.detail).toMatch(/^MOCK fallback/);
+  });
+
+  it('W2A-N8: a running solver that is not drawn reads idle, not running', () => {
+    const running = {
+      status: 'running',
+      error: null,
+      mode: 'tracking',
+      stats: null,
+      reduction: null,
+    } as const;
+    expect(flowAnnunciation(running, false)).toMatchObject({
+      level: 'normal',
+      text: 'SOLVER IDLE',
+    });
+    expect(flowAnnunciation(running, true).text).toBe('SOLVER RUNNING');
+    expect(flowAnnunciation({ ...running, status: 'lost', error: 'x' }, false).text).toBe(
+      'SOLVER LOST',
+    );
   });
 
   it('W2A-I1: the worker faults are annunciated: a stopped sim, GPU errors, the MOCK raster, refused commands', () => {

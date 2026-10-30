@@ -314,7 +314,11 @@ describe('the app in Chrome', () => {
         );
         // the engine is drawn: the centre of the view is not one flat colour
         expect(shot.centreStd, `${mode}: centre luminance spread`).toBeGreaterThan(0.03);
-        expect(shot.centreLit, `${mode}: lit fraction of the centre`).toBeGreaterThan(0.02);
+        // and lit, except in Schlieren, which draws the engine as a dim silhouette by design
+        // (the beauty x 0.22 inside the engine box, src/render/post.ts). Round 2's Schlieren
+        // shots passed this only because they showed the exploded engine (W2A-I4).
+        if (mode !== 'schlieren')
+          expect(shot.centreLit, `${mode}: lit fraction of the centre`).toBeGreaterThan(0.02);
         expect(problems(), mode).toEqual([]);
       }
       // the drawer (Diagnostics and What's simulated) opens without covering the other panels

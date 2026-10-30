@@ -6,8 +6,8 @@
 // pinned here, so device loss ignored (M13) or a Status that never shows a fault (M14) fail.
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Overlay, Status } from '../../../src/ui/App';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { BOOT_SLOW_MS, Overlay, Status } from '../../../src/ui/App';
 import { useApp } from '../../../src/ui/store';
 import { diagnosticsOf, mount, snapshotOf } from './fixtures';
 
@@ -87,7 +87,51 @@ describe('the worker messages in the store (W2A-I1)', { timeout: TIMEOUT_MS }, (
   });
 });
 
+describe('a new session (W2A-N11)', { timeout: TIMEOUT_MS }, () => {
+  it("resetSession forgets the last worker's snapshot, connection, faults and field choice", () => {
+    const snapshot = snapshotOf();
+    useApp.setState({
+      connection: { state: 'running', adapter: 'old' },
+      snapshot,
+      diagnostics: diagnosticsOf(),
+      simStopped: 'cycle step failed',
+      gpuErrors: ['x'],
+      gpuErrorCount: 1,
+      refused: ['y'],
+      field: 'solver',
+      units: 'imperial',
+    });
+    act(() => {
+      useApp.getState().resetSession();
+    });
+    const s = useApp.getState();
+    expect(s.connection.state).toBe('booting');
+    expect(s.snapshot).toBeNull();
+    expect(s.diagnostics).toBeNull();
+    expect(s.simStopped).toBeNull();
+    expect([s.gpuErrors, s.gpuErrorCount, s.refused]).toEqual([[], 0, []]);
+    expect(s.trails).toEqual({ fan: [], hpc: [] });
+    // the new worker starts on the MOCK field; the viewer's own settings stay
+    expect(s.field).toBe('mock');
+    expect(s.units).toBe('imperial');
+  });
+});
+
 describe('Status: the boot and the fault screens (M14)', () => {
+  it('says so when the boot takes longer than BOOT_SLOW_MS (W2A-N11)', () => {
+    vi.useFakeTimers();
+    try {
+      render(<Status />);
+      expect(screen.getByRole('status').textContent).not.toMatch(/longer than usual/);
+      act(() => {
+        vi.advanceTimersByTime(BOOT_SLOW_MS + 1);
+      });
+      expect(screen.getByRole('status').textContent).toMatch(/longer than usual/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows the spinner while booting and nothing once running', () => {
     const { container, rerender } = render(<Status />);
     expect(screen.getByRole('status').textContent).toMatch(/Starting the GPU/);

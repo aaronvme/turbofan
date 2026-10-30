@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MOCK_FIELD_MAX_AGE_MS,
   MOCK_FIELD_N1_STEP,
+  MOCK_RASTER_TIMEOUT_MS,
   createRasterScheduler,
 } from '../../../src/shell/mockRaster';
 
@@ -28,6 +29,18 @@ describe('the MOCK raster scheduler', () => {
     expect(s.due(20 - MOCK_FIELD_N1_STEP * 1.1, 1100)).toBe(true);
     expect(s.due(20, 1000 + MOCK_FIELD_MAX_AGE_MS * 0.9)).toBe(false);
     expect(s.due(20, 1000 + MOCK_FIELD_MAX_AGE_MS * 1.1)).toBe(true);
+  });
+
+  it('W2A-N7: a raster in flight past the timeout has timed out (a worker that never answers)', () => {
+    const s = createRasterScheduler();
+    expect(s.timedOut(1e9)).toBe(false);
+    s.requested(20, 1000);
+    expect(s.timedOut(1000 + MOCK_RASTER_TIMEOUT_MS * 0.9)).toBe(false);
+    expect(s.timedOut(1000 + MOCK_RASTER_TIMEOUT_MS * 1.1)).toBe(true);
+    s.settled();
+    expect(s.timedOut(1000 + MOCK_RASTER_TIMEOUT_MS * 2)).toBe(false);
+    // the timeout is far above a raster's measured cost (150-515 ms of CPU)
+    expect(MOCK_RASTER_TIMEOUT_MS).toBeGreaterThanOrEqual(10 * 515);
   });
 
   it('a failed raster settles too, so the next stale state asks again', () => {

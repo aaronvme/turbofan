@@ -41,15 +41,19 @@ export function componentAnchors(def: EngineDefinition): WorldAnchor[] {
 
 /**
  * The parts the closed engine shows: the fan through the intake and the exhaust's nozzle. In
- * Realistic the nacelle is opaque, so a callout on a core part would point at nothing seen
- * (critic pass 13's visual note; W2A-I3: fewer labels on the core, fewer crossings).
+ * Realistic and Schlieren (whose engine is the closed one, as a silhouette) the nacelle is
+ * opaque, so a callout on a core part would point at nothing seen (critic pass 13's visual note;
+ * W2A-I3: fewer labels on the core, fewer crossings).
  */
 const SEEN_CLOSED: ReadonlySet<ComponentId> = new Set(['fan', 'exhaust']);
 
-/** Whether a mode calls a component out: the open modes all, Realistic what it shows, Exploded none. */
+/**
+ * Whether a mode calls a component out: the cut modes (Cutaway, Data) all, the closed ones
+ * (Realistic, Schlieren) what they show, Exploded none (the parts move off the anchors).
+ */
 export function calloutShownIn(mode: ViewMode, id: ComponentId): boolean {
   if (mode === 'exploded') return false;
-  return mode !== 'realistic' || SEEN_CLOSED.has(id);
+  return mode === 'cutaway' || mode === 'data' || SEEN_CLOSED.has(id);
 }
 
 /**

@@ -62,6 +62,7 @@ export function diagnosticsOf(o: Partial<AppDiagnostics> = {}): AppDiagnostics {
     view: { mode: 'realistic', settledFrames: 40 },
     backingStore: { width: 1994, height: 1039, dpr: 1.0387 },
     warmUpMs: 2100,
+    warmUpSteps: [],
     lostSolveCause: null,
     errors: [],
     adapter: 'intel arc',
