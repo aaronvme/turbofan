@@ -74,4 +74,24 @@ describe('W2F-I1: the lost-solve cause', { timeout: 120_000 }, () => {
     expect(b.m.lostSolveCause()).toBeNull();
     warn.mockRestore();
   });
+
+  it('W2A-N6: a held episode ends in the sub-idle model, so the relight holding again logs again', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { m, ctl } = model();
+    ctl.lose = 'diverged';
+    expect(m.step(0.1, inputs).gasPathSolve.status).toBe('held');
+    expect(warn).toHaveBeenCalledTimes(1);
+    // a flameout while held: unlit, the sub-idle model; the auto igniters relight it after 3 s
+    m.injectFault('flameout');
+    const idle = { ...inputs, throttleLever: 0 };
+    let s = m.step(0.1, idle);
+    for (let k = 0; k < 150 && s.gasPathSolve.status !== 'subIdle'; k++) s = m.step(0.1, idle);
+    expect(s.gasPathSolve.status).toBe('subIdle');
+    for (let k = 0; k < 150 && s.gasPathSolve.status !== 'held'; k++) s = m.step(0.1, idle);
+    // lit again above the switch, its first matched solve lost: a new held episode, logged
+    expect(s.combustorLit).toBe(true);
+    expect(s.gasPathSolve.status).toBe('held');
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
 });

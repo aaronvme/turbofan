@@ -19,7 +19,7 @@ const { PART_POWER_FIT_CALIBRATION, referenceEngine, solveGasPath } = engine;
 /** The gas-path evaluation count (D4-84 meter) where the checkout has one, else NaN. */
 const evaluations = (): number => {
   const f = (engine as Record<string, unknown>).gasPathEvaluations;
-  return typeof f === 'function' ? Number((f as () => number)()) : NaN;
+  return typeof f === 'function' ? (f as () => number)() : NaN;
 };
 
 const arg = (name: string): string | undefined =>

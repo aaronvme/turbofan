@@ -12,8 +12,13 @@ import {
   type CycleModel,
   type CycleState,
 } from '../../../src/contracts/cycle';
-import { solveGasPath } from '../../../src/cycle/engine';
-import { SUBIDLE_N2_PERCENT, createCycleModel } from '../../../src/cycle/model';
+import { gasPathEvaluations, solveGasPath } from '../../../src/cycle/engine';
+import { HELD_RETRY_BUDGET, RETRY_OVERSHOOT, UNBOUNDED_RETRY } from '../../../src/cycle/heldRetry';
+import {
+  SUBIDLE_N2_PERCENT,
+  createCycleModel,
+  type CycleModelOptions,
+} from '../../../src/cycle/model';
 import { factValue } from '../../../src/engine/facts';
 
 const TIMEOUT_MS = 120_000;
@@ -55,15 +60,16 @@ const last = (s: readonly CycleState[]): CycleState => {
 
 describe('D4-13: a lost gas-path solve is held and flagged', { timeout: TIMEOUT_MS }, () => {
   /** 2 s into a ground-idle slam: N2 well above the switch, the gas path far from the idle anchor. */
-  function accelerating(loss: Loss) {
+  function accelerating(loss: Loss, opts: CycleModelOptions = {}) {
     const { ctl, solver } = switchableSolver();
-    const m = createCycleModel({ gasPathSolver: solver });
+    const m = createCycleModel({ gasPathSolver: solver, ...opts });
     const idle = m.reset('groundIdle', ISA_SLS);
     const before = last(run(m, 2, 0.05, () => inputs({ throttleLever: 1 })));
     ctl.lose = loss;
     ctl.calls = 0;
+    const e0 = gasPathEvaluations();
     const held = m.step(0.1, inputs({ throttleLever: 1 }));
-    return { m, ctl, idle, before, held };
+    return { m, ctl, idle, before, held, evals: gasPathEvaluations() - e0 };
   }
 
   it('a converged run reports the matched solve and no lost solves', () => {
@@ -74,18 +80,25 @@ describe('D4-13: a lost gas-path solve is held and flagged', { timeout: TIMEOUT_
   });
 
   it('holds the last converged gas path, counts every lost solve, and never uses the sub-idle model', () => {
-    const { ctl, before, held } = accelerating('diverged');
+    const { ctl, before, held, evals } = accelerating('diverged');
     expect(held.n2Percent).toBeGreaterThan(SUBIDLE_N2_PERCENT);
     expect(held.combustorLit).toBe(true);
     expect(held.gasPathSolve.status).toBe('held');
     expect(held.gasPathSolve.lostSolves).toBeGreaterThan(0);
-    // each lost solve is the direct try and the continuation's steps from 1/2 down to 1/256
-    expect(ctl.calls).toBe(9 * held.gasPathSolve.lostSolves);
+    // D4-84: the retry spends at most its budget in the step (one Newton iteration over, at most)
+    expect(ctl.calls).toBeGreaterThan(0);
+    expect(evals).toBeLessThanOrEqual(HELD_RETRY_BUDGET + RETRY_OVERSHOOT);
     // the gas path is the last converged one, exactly: not re-modelled by the similarity model
     expect(held.stations).toEqual(before.stations);
     expect(held.netThrustN).toBe(before.netThrustN);
     expect(held.hpc).toEqual(before.hpc);
     expect(validateCycleState(held, refs)).toEqual([]);
+  });
+
+  it('the unbounded D4-13 retry: each lost solve is the direct try and the walk from 1/2 to 1/256', () => {
+    const { ctl, held } = accelerating('diverged', { heldRetry: UNBOUNDED_RETRY });
+    expect(held.gasPathSolve.status).toBe('held');
+    expect(ctl.calls).toBe(9 * held.gasPathSolve.lostSolves);
   });
 
   it('resumes the matched solve once it converges again; the count stays until a reset', () => {
@@ -104,7 +117,7 @@ describe('D4-13: a lost gas-path solve is held and flagged', { timeout: TIMEOUT_
   });
 
   it('a converged root that is not physical (bypass ratio below 1) is a lost solve too', () => {
-    const { ctl, before, held } = accelerating('nonPhysical');
+    const { ctl, before, held } = accelerating('nonPhysical', { heldRetry: UNBOUNDED_RETRY });
     expect(held.gasPathSolve.status).toBe('held');
     expect(held.gasPathSolve.lostSolves).toBeGreaterThan(0);
     expect(ctl.calls).toBe(9 * held.gasPathSolve.lostSolves);
