@@ -92,7 +92,7 @@ import {
   type CompressionSystem,
 } from './surgeSystem';
 import { P3_DETECTOR_START, feedP3, type P3DecayDetector } from './surgeDetection';
-import { solveMatched, type GasPathAnchor } from './matchedSolve';
+import { solveMatched, type GasPathAnchor, type SolveFailure } from './matchedSolve';
 import {
   DECEL_FACTOR,
   EGT_ERROR_SCALE_K,
@@ -274,7 +274,16 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 /** HPC exit pressure during a surge relative to the matched point's: Psi / Psi_eq, at least 0.2. */
 const surgePressureFactor = (g: GreitzerState, eq: GreitzerState) => Math.max(0.2, g.psi / eq.psi);
 
-class TurbofanCycleModel implements CycleModel {
+/**
+ * The model's own diagnostics beside the CycleModel contract (W2F-I1): the app's worker reads them
+ * and shows them next to `gasPathSolve` (the snapshot contract is unchanged).
+ */
+export interface CycleDiagnostics {
+  /** Why the last matched solve was lost, null when none was lost since the reset. */
+  lostSolveCause(): string | null;
+}
+
+class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
   readonly source = 'model' as const;
   readonly definition: EngineDefinition;
   private readonly e: SizedEngine;
@@ -339,6 +348,10 @@ class TurbofanCycleModel implements CycleModel {
   private held!: Snapshot;
   /** Matched solves lost since the last reset (D4-13). */
   private lostSolves = 0;
+  /** W2F-I1: why the last matched solve was lost (null: none since the reset). */
+  private lostCause: string | null = null;
+  /** True while the gas path is held: a held episode is logged once, at its first lost solve. */
+  private holding = false;
   private inputs: CycleInputs = DEFAULT_CYCLE_INPUTS;
 
   constructor(definition: EngineDefinition, opts: CycleModelOptions) {
@@ -408,6 +421,8 @@ class TurbofanCycleModel implements CycleModel {
     }
     this.n1Target = 0;
     this.lostSolves = 0;
+    this.lostCause = null;
+    this.holding = false;
     // the steady idle point is a converged gas path at the ambient (a start replaces it with the
     // sub-idle model's before the matched model is ever tried)
     this.held = this.fromPoint(idle.point);
@@ -421,6 +436,10 @@ class TurbofanCycleModel implements CycleModel {
 
   state(): CycleState {
     return this.last;
+  }
+
+  lostSolveCause(): string | null {
+    return this.lostCause;
   }
 
   step(dtS: number, inputs: CycleInputs): CycleState {
@@ -777,8 +796,10 @@ class TurbofanCycleModel implements CycleModel {
       return this.held;
     }
     // converged on a physical root, directly or by continuation from the last converged point
-    const s = solveMatched(this.solveGas, this.e, c, this.anchor, this.n1, this.n2, this.wf);
+    const why: SolveFailure = { cause: null };
+    const s = solveMatched(this.solveGas, this.e, c, this.anchor, this.n1, this.n2, this.wf, why);
     if (s !== null) {
+      this.holding = false;
       this.anchor = { n1Rpm: this.n1, n2Rpm: this.n2, wfKgPerS: this.wf, x: s.x };
       this.held = this.fromPoint(s.point);
       return this.held;
@@ -786,6 +807,14 @@ class TurbofanCycleModel implements CycleModel {
     // D4-13: lost; never the similarity model above the switch. The next try starts from the
     // last converged point again (the anchor does not move).
     this.lostSolves++;
+    this.lostCause = why.cause ?? 'no attempt was made';
+    if (!this.holding) {
+      // W2F-I1: once per held episode, with its cause (the app's diagnostics show it too)
+      console.warn(
+        `[cycle] matched gas-path solve lost at N2 ${this.pct2().toFixed(1)} %: ${this.lostCause}`,
+      );
+      this.holding = true;
+    }
     return { ...this.held, solve: 'held' };
   }
 
@@ -1032,7 +1061,7 @@ class TurbofanCycleModel implements CycleModel {
 export function createCycleModel(
   opts: CycleModelOptions = {},
   definition: EngineDefinition = ENGINE_DEFINITION,
-): CycleModel {
+): CycleModel & CycleDiagnostics {
   const m = new TurbofanCycleModel(definition, opts);
   m.reset('shutdown');
   return m;

@@ -13,7 +13,7 @@ const CORE = { lines: 90, functions: 90, branches: 85, statements: 90 };
 
 export default defineConfig({
   test: {
-    include: ['tests/unit/**/*.test.ts', 'src/**/*.test.ts'],
+    include: ['tests/unit/**/*.test.ts', 'tests/unit/**/*.test.tsx', 'src/**/*.test.ts'],
     environment: 'node',
     coverage: {
       provider: 'v8',
