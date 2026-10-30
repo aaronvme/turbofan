@@ -49,7 +49,7 @@ The browser suite (`tests/browser/app.test.tsx`) checks the bar at 1920 x 1001 a
 | `1366-1-realistic.jpg` ... `1366-5-data.jpg` | The same at 1366 x 768 (the mode keys hide; nothing else changes) |
 | `1920-6-drawer.jpg`, `1366-6-drawer.jpg` | Data with Diagnostics and What's simulated open in the drawer |
 | `1920-data-solver.jpg` | Data on the live solver's field: the badge says "FIELD: solver (uncoupled until W3)", the legend "Flow solver (uncoupled until W3)" (D4-82) |
-| `01-realistic-idle.jpg` | Round 1's shot (the MCP at 1.5x, the old layout), kept for comparison |
+| `before/01-realistic-idle.jpg` | Round 1's shot (the MCP at 1.5x, the old layout, tracers in Realistic before D4-83), kept for comparison (W2A-N12) |
 
 The suite writes these to `reports/ui/` (ignored) on every run; `VITE_UI_LOOKDEV=1` writes them here. The shared Chrome runs at the OS's 1.5x scale; the JPEGs are scaled to the CSS size.
 

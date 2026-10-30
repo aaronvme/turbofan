@@ -1,15 +1,17 @@
 /* A restrained, dark technical overlay: tabular numerals, one accent, cockpit status colours
-   (white normal, cyan advisory, amber caution, red warning), contrast >= 4.5:1 for text. */
+   (white normal, cyan advisory, amber caution, red warning), contrast >= 4.5:1 for text: --faint
+   is 4.9:1 on the panel over a mid studio grey (128) and 5.7:1 over the darkest backdrop (W2A-N9,
+   the critic's w2a-contrast probe; it was 3.3:1 and 4.1:1). */
 :root {
   color-scheme: dark;
   --bg: #07090c;
-  --panel: rgb(11 14 19 / 0.8);
+  --panel: rgb(11 14 19 / 0.86);
   --panel-solid: #0d1117;
   --line: rgb(255 255 255 / 0.08);
   --line-strong: rgb(255 255 255 / 0.16);
   --fg: #e6e9ee;
   --muted: #9aa3b1;
-  --faint: #6b7483;
+  --faint: #838c9b;
   --accent: #7cc4ff;
   --normal: #e6e9ee;
   --advisory: #5ad1f0;
@@ -143,6 +145,11 @@ button:disabled {
   border-radius: var(--radius);
   padding: 9px 12px 10px;
   box-shadow: 0 8px 30px rgb(0 0 0 / 0.35);
+}
+/* the drawer sits over the view's brightest boards (the Data plane): nearly opaque, so its muted
+   notes read on panel, not on purple (critic pass 13's visual note 4) */
+.drawer .panel {
+  background: rgb(11 14 19 / 0.95);
 }
 .panel-head {
   display: flex;
