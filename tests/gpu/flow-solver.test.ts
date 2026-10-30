@@ -156,6 +156,8 @@ describe('GpuFlowSolver (the FlowSolver contract)', () => {
     expect(g.far.velocity).toBe(f.far.velocity);
     expect(g.version).toBe(v + 1);
     expect(g.source).toBe('solver');
+    // D4-82: no body forces or combustor sources until W3's coupling drives it
+    expect(g.coupling).toBe('uncoupled');
     // the snapshot's provenance is copied from the field and the cycle model, not declared
     const sources = snapshotSources(createMockCycle(ENGINE_DEFINITION), g);
     expect(sources).toEqual({ cycle: 'mock', flow: 'solver' });

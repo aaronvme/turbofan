@@ -64,6 +64,7 @@ describe('mock flow field: layout and encoding (D0-4)', () => {
     expect(takeoff.label).toBe('MOCK');
     // W0C-I3: the provenance travels with the data, so the GPU FlowField built from it keeps it
     expect(takeoff.source).toBe('mock');
+    expect(takeoff.coupling).toBe('mock'); // D4-82
     expect(takeoff.version).toBe(7);
     expect(takeoff.reference).toEqual(REF);
     expect(takeoff.extents).toEqual(FIELD_EXTENTS);

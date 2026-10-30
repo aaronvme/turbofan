@@ -168,9 +168,26 @@ describe('flow-visual passes (D4-2: outside P4, inside the flow-visuals budget)'
     ]);
   });
 
-  it('count 0 when a frame has none', () => {
+  it('count 0 when no frame in the window drew any', () => {
     const r = new RollingPassStats(2);
     r.push(sumByGroup([{ label: 'Opaque', ms: 1 }]), 1);
     expect(r.medians().flow).toBe(0);
+  });
+
+  // W2V-N13: a frame from before the flow was switched on, or one whose flow queries were all
+  // dropped, has no flow time: counting it as 0 showed D4-2's scheduler the visuals low
+  it('skip the frames without a flow time instead of counting them as 0', () => {
+    const r = new RollingPassStats(6);
+    for (let k = 0; k < 3; k++) r.push(sumByGroup([{ label: 'Opaque', ms: 4 }]), 1);
+    r.push(sumByGroup([{ label: 'Opaque', ms: 4 }]), 1, 1.2);
+    r.push(sumByGroup([{ label: 'Opaque', ms: 4 }]), 1, Number.NaN);
+    r.push(sumByGroup([{ label: 'Opaque', ms: 4 }]), 1, 1.4);
+    expect(r.medians().flow).toBeCloseTo(1.3, 12);
+    expect(r.medians().gpuTotal).toBe(4);
+  });
+
+  it('a frame whose flow durations are all invalid has no flow time (NaN), not 0', () => {
+    expect(sumFlowMs([{ label: 'Flow Overlay', ms: Number.NaN }])).toBeNaN();
+    expect(sumFlowMs([{ label: 'Opaque', ms: 1 }])).toBeNaN();
   });
 });

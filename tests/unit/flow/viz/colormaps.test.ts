@@ -8,13 +8,17 @@ import {
   srgbToLinear,
   type ColormapId,
 } from '../../../../src/flow/viz/colormaps';
+import { gamma, gasConstant } from '../../../../src/thermo/gas';
 import {
+  airGammaR,
   deriveQuantities,
+  GAMMA_R_TABLE,
   FIELD_QUANTITIES,
   FIELD_QUANTITY_IDS,
   normalizeQuantity,
 } from '../../../../src/flow/viz/fields';
 import {
+  CROP_OUTLINE,
   cropAlpha,
   FLOW_VIZ_MODES,
   FLOW_VIZ_MODE_IDS,
@@ -104,6 +108,21 @@ describe('cut-plane quantities', () => {
     expect(q.speed).toBeCloseTo(170.15, 9);
   });
 
+  // W2V-N11: the tested Mach is the drawn one: air's gamma R from the table the shader samples
+  // (PHYSICS.md ledger: the cut plane's speed of sound is air's), whatever the fuel-air ratio
+  it("uses air's gamma R from the shader's table, nearest entry, at any fuel-air ratio", () => {
+    expect(GAMMA_R_TABLE.values.length).toBe(GAMMA_R_TABLE.n);
+    for (const tK of [250, 288.15, 900, 1700]) {
+      expect(airGammaR(tK) / (gamma(tK, 0) * gasConstant(0))).toBeCloseTo(1, 2);
+      const i = Math.round(((tK - GAMMA_R_TABLE.t0) / (GAMMA_R_TABLE.t1 - GAMMA_R_TABLE.t0)) * (GAMMA_R_TABLE.n - 1));
+      expect(airGammaR(tK)).toBe(GAMMA_R_TABLE.values[i]);
+    }
+    const hot = { ...ambient, tK: 1500, uxMPerS: 400, urMPerS: 0, uthetaMPerS: 0, fluidFraction: 1 };
+    const burnt = deriveQuantities({ ...hot, fuelAirRatio: 0.03 });
+    expect(burnt.mach).toBe(deriveQuantities(hot).mach);
+    expect(burnt.mach).toBeCloseTo(400 / Math.sqrt(airGammaR(1500) * 1500), 12);
+  });
+
   it('includes the swirl in the speed', () => {
     const q = deriveQuantities({
       ...ambient,
@@ -143,6 +162,17 @@ describe('modes', () => {
     expect(lookModeFor('data')).toBe('cutaway');
   });
 
+  // D4-83: the cinematic view read tracers as hair; they stay as an option there, on by default
+  // in the cut modes
+  it('gives Realistic no tracers by default (an option), and the cut modes tracers on', () => {
+    expect(FLOW_VIZ_MODES.realistic.tracersByDefault).toBe(false);
+    expect(FLOW_VIZ_MODES.cutaway.tracersByDefault).toBe(true);
+    expect(FLOW_VIZ_MODES.data.tracersByDefault).toBe(true);
+    // the schlieren has none to offer
+    expect(FLOW_VIZ_MODES.schlieren.particleOpacity).toBe(0);
+    expect(FLOW_VIZ_MODES.realistic.particleOpacity).toBeGreaterThan(0);
+  });
+
   it('keeps Realistic subtle and puts the legend wherever a field is drawn', () => {
     expect(FLOW_VIZ_MODES.realistic.particleOpacity).toBeLessThanOrEqual(0.35);
     expect(FLOW_VIZ_MODES.realistic.cutPlane).toBe(false);
@@ -177,17 +207,37 @@ describe('modes', () => {
       expect(c.rMax).toBeLessThan(1.5);
       expect(c.xMin).toBeLessThan(-0.6);
       expect(c.xMax).toBeGreaterThan(3.6);
-      expect(c.fadeM).toBeGreaterThan(0);
     }
     expect(nearFieldCrop(null)).toBeNull();
-    expect(cropAlpha({ xMin: -1, xMax: 4, rMax: 1.2, fadeM: 0.2 }, 0, 0.5)).toBe(1);
-    expect(cropAlpha({ xMin: -1, xMax: 4, rMax: 1.2, fadeM: 0.2 }, 0, 1.2)).toBe(0);
-    expect(cropAlpha({ xMin: -1, xMax: 4, rMax: 1.2, fadeM: 0.2 }, -1.1, 0.5)).toBe(0);
-    expect(cropAlpha({ xMin: -1, xMax: 4, rMax: 1.2, fadeM: 0.2 }, 0, 1.1)).toBeCloseTo(0.5, 12);
+  });
+
+  // D4-83: a crisp edge with a thin outline, not a fade (the fade left a purple fog round the
+  // engine: viridis' darkest end out to 1.15 R)
+  it('D4-83: the crop has a crisp edge (no fade) and a thin outline', () => {
+    const c = { xMin: -1, xMax: 4, rMax: 1.2 };
+    expect(cropAlpha(c, 0, 0.5)).toBe(1);
+    expect(cropAlpha(c, 0, 1.2 - 1e-3)).toBe(1);
+    expect(cropAlpha(c, 0, 1.2 + 1e-3)).toBe(0);
+    expect(cropAlpha(c, -1 + 1e-3, 0.5)).toBe(1);
+    expect(cropAlpha(c, -1 - 1e-3, 0.5)).toBe(0);
+    expect(cropAlpha(c, 4 + 1e-3, 0.5)).toBe(0);
+    expect('fadeM' in (FLOW_VIZ_MODES.data.crop ?? {})).toBe(false);
+    // the outline: about a pixel, light and translucent (it frames, it does not compete)
+    expect(CROP_OUTLINE.widthPx).toBeGreaterThanOrEqual(1);
+    expect(CROP_OUTLINE.widthPx).toBeLessThanOrEqual(2);
+    expect(CROP_OUTLINE.alpha).toBeGreaterThan(0.3);
+    expect(CROP_OUTLINE.alpha).toBeLessThanOrEqual(0.8);
   });
 
   it('states the schlieren sensitivity (knife-edge cut-off a/f, rad)', () => {
     expect(FLOW_VIZ_MODES.schlieren.schlierenRangeRad).toBeGreaterThan(0);
     expect(FLOW_VIZ_MODES.schlieren.schlierenRangeRad).toBeLessThan(1e-2);
+  });
+
+  // W2V-N10: the comment's own estimate of the core jet's deflection (about 1e-3 rad; the
+  // critic's probe 9.9e-4) must sit inside the grey scale, not at 2x its range
+  it('W2V-N10: a/f covers the estimated core-jet deflection (about 1e-3 rad)', () => {
+    expect(FLOW_VIZ_MODES.schlieren.schlierenRangeRad).toBeGreaterThanOrEqual(9.9e-4);
+    expect(FLOW_VIZ_MODES.schlieren.schlierenRangeRad).toBeLessThan(2e-3);
   });
 });

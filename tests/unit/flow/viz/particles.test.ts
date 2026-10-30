@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   advectParticle,
+  advectSubstepped,
   createRng,
   particleAlpha,
   seedParticle,
@@ -169,5 +170,93 @@ describe('fade', () => {
     expect(particleAlpha(1, 2, 0.5)).toBeLessThan(1);
     // monotone fade-in
     expect(particleAlpha(0.05, 2, 1)).toBeLessThan(particleAlpha(0.1, 2, 1));
+  });
+});
+
+// W2V-N12: the step uses the field's odd extension across the axis (sampleCpuField's ghost row:
+// u_r and u_theta change sign), so a midpoint beyond the axis gives the end step the mirrored
+// u_r, as a plain midpoint step in the full meridional plane would
+describe('advection across the axis (the odd extension, W2V-N12)', () => {
+  // a smooth odd field: u_r = -a r, crossing at the midpoint when a dt > 2
+  const a = 3000;
+  const field: MeridionalSampler = (_x, r) => ({ ux: 0, ur: -a * r, ut: 0, fluid: 1 });
+  /** The midpoint step in the full plane (r of either sign), folded back at the end. */
+  const fullPlane = (r: number, dt: number) => {
+    const ext = (rr: number) => (rr >= 0 ? -a * rr : -(-a * -rr));
+    const rm = r + 0.5 * dt * ext(r);
+    const re = r + dt * ext(rm);
+    return { r: Math.abs(re), flipped: re < 0 };
+  };
+
+  it('negates the sampled u_r when the midpoint lies beyond the axis', () => {
+    const dt = 1e-3; // a dt = 3: the midpoint is at -r/2
+    const want = fullPlane(0.01, dt);
+    const p = advectParticle({ x: 0, r: 0.01, theta: 0.3 }, dt, field);
+    expect(p?.r).toBeCloseTo(want.r, 12);
+    expect(p?.theta).toBeCloseTo(want.flipped ? 0.3 + Math.PI : 0.3, 12);
+  });
+
+  it('is unchanged when the midpoint stays on its side', () => {
+    const dt = 1e-4;
+    const p = advectParticle({ x: 0, r: 0.01, theta: 0 }, dt, field);
+    expect(p?.r).toBeCloseTo(fullPlane(0.01, dt).r, 12);
+  });
+});
+
+// W2V-I4: at x1/10 a core-jet tracer moves ~0.75 m (110 texels) per frame, and one RK2 step's
+// start/mid/end checks skip thin walls (the core cowl's trailing edge, the splitter lip). The
+// substeps keep every step within one texel, so the fluid checks are half a texel apart
+describe('substepped advection (a CFL-like limit, W2V-I4)', () => {
+  const cell = 7 / 1024; // the near extent's texel, m
+  /** A one-texel solid wall at x in [0.5, 0.5 + cell], bilinear-like: fluid falls to 0 over it. */
+  const wall: MeridionalSampler = (x) => {
+    const c = 0.5 + cell / 2;
+    const fluid = Math.min(1, Math.abs(x - c) / cell);
+    return { ux: 450, ur: 0, ut: 0, fluid };
+  };
+  const dt = 1 / 60 / 10; // one 60 Hz frame at x1/10
+
+  it('a single RK2 step tunnels through a one-texel wall at x1/10 (the bug)', () => {
+    expect(advectParticle({ x: 0.1, r: 0.5, theta: 0 }, dt, wall)).not.toBeNull();
+  });
+
+  it('the substeps stop at it', () => {
+    expect(advectSubstepped({ x: 0.1, r: 0.5, theta: 0 }, dt, wall, cell, 128)).toBeNull();
+  });
+
+  it('keeps every substep within one texel and the checks within half of one', () => {
+    const xs: number[] = [];
+    const rec: MeridionalSampler = (x, r) => {
+      xs.push(x);
+      return { ux: 450, ur: 30, ut: 20 * r, fluid: 1 };
+    };
+    const p = advectSubstepped({ x: 0.1, r: 0.5, theta: 0 }, dt, rec, cell, 128);
+    expect(p).not.toBeNull();
+    const sorted = [...xs].sort((u, v) => u - v);
+    for (let k = 1; k < sorted.length; k++)
+      expect((sorted[k] ?? 0) - (sorted[k - 1] ?? 0)).toBeLessThanOrEqual(cell / 2 + 1e-12);
+    // a uniform axial flow is integrated exactly whatever the substeps
+    expect(p?.x).toBeCloseTo(0.1 + 450 * dt, 12);
+  });
+
+  it('takes one step when the motion is under a texel (the default x1/200 at low speed)', () => {
+    const calls: number[] = [];
+    const slow: MeridionalSampler = (x) => {
+      calls.push(x);
+      return { ux: 10, ur: 0, ut: 0, fluid: 1 };
+    };
+    const one = advectParticle({ x: 0, r: 0.5, theta: 0 }, 1e-4, slow);
+    const n = calls.length;
+    calls.length = 0;
+    expect(advectSubstepped({ x: 0, r: 0.5, theta: 0 }, 1e-4, slow, cell, 128)).toEqual(one);
+    expect(calls.length).toBe(n);
+  });
+
+  it('beyond the substep cap the particle falls behind; it never tunnels', () => {
+    const p = advectSubstepped({ x: 0.1, r: 0.5, theta: 0 }, 0.01, uniform(450), cell, 8);
+    expect(p).not.toBeNull();
+    const moved = (p?.x ?? 0) - 0.1;
+    expect(moved).toBeLessThanOrEqual(8 * cell + 1e-12);
+    expect(moved).toBeGreaterThan(0.99 * 8 * cell);
   });
 });
