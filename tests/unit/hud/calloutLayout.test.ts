@@ -19,7 +19,6 @@ import {
   type CalloutView,
 } from '../../../src/hud/anchors';
 import {
-  fitViewOffset,
   layoutAxial,
   layoutCallouts,
   leaderCrossings,
@@ -309,38 +308,6 @@ describe('D4-97 item 2 (W2A-I8) and W2A-N25: the framings, checked by projecting
     expect(Math.abs(box.x + box.w / 2 - (free.x + free.w / 2))).toBeLessThan(0.1 * free.w);
     expect(Math.abs(box.y + box.h / 2 - (free.y + free.h / 2))).toBeLessThan(0.1 * free.h);
     expect(box.w).toBeLessThan(box0.w);
-  });
-});
-
-describe('Schlieren framing: the content fitted into the free area (D4-92 zz)', () => {
-  const canvas = { w: 1920, h: 1001 };
-  const free: Rect = { x: 330, y: 60, w: 1240, h: 820 };
-  const map = (o: ReturnType<typeof fitViewOffset>, u: number, v: number): [number, number] => [
-    ((u - o.x) * canvas.w) / o.w,
-    ((v - o.y) * canvas.h) / o.h,
-  ];
-
-  it('moves and, if it must, zooms out the view so the box (the engine and its plume) is inside the free area', () => {
-    const box: Rect = { x: 370, y: 110, w: 1400, h: 760 };
-    const o = fitViewOffset(box, canvas, free, 0.6);
-    expect(o.fullW).toBe(canvas.w);
-    expect(o.fullH).toBe(canvas.h);
-    const [x0, y0] = map(o, box.x, box.y);
-    const [x1, y1] = map(o, box.x + box.w, box.y + box.h);
-    expect(x0).toBeGreaterThanOrEqual(free.x - 1e-9);
-    expect(x1).toBeLessThanOrEqual(free.x + free.w + 1e-9);
-    expect(y0).toBeGreaterThanOrEqual(free.y - 1e-9);
-    expect(y1).toBeLessThanOrEqual(free.y + free.h + 1e-9);
-    // centred in the free area
-    expect((x0 + x1) / 2).toBeCloseTo(free.x + free.w / 2, 6);
-  });
-
-  it('does not zoom in a box that fits, and stops zooming out at the limit', () => {
-    const small: Rect = { x: 600, y: 300, w: 400, h: 200 };
-    const o = fitViewOffset(small, canvas, free, 0.6);
-    expect(o.w).toBeCloseTo(canvas.w, 9);
-    const huge: Rect = { x: -2000, y: -1000, w: 6000, h: 3000 };
-    expect(fitViewOffset(huge, canvas, free, 0.6).w).toBeCloseTo(canvas.w / 0.6, 9);
   });
 });
 

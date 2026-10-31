@@ -56,7 +56,14 @@ import {
   type WarmScheduler,
 } from '../shell/warmUp';
 import type { RasterReply, RasterRequest } from './mockRasterWorker';
-import { applyOrbit, framedOrbit, orbitFromPose, orbitPose, type OrbitState } from '../shell/orbit';
+import {
+  applyOrbit,
+  cutViewOrbit,
+  framedOrbit,
+  orbitFromPose,
+  orbitPose,
+  type OrbitState,
+} from '../shell/orbit';
 import type { AppDiagnostics, CycleChoice, FromWorker, ToWorker } from '../shell/protocol';
 import type { ViewMode } from '../contracts/ui';
 import type { AxialAnchor, Rect } from '../hud/callouts';
@@ -138,9 +145,15 @@ interface App {
   mockRasterMs: number | null;
   mockRasters: number;
   orbit: OrbitState;
-  /** D4-92 (zz): the orbit before Schlieren's framing (restored on leaving it), and the free area. */
-  orbitBeforeSchlieren: OrbitState | null;
+  /**
+   * D4-92 (zz), D4-97 item 2: the framing the shown view has (Schlieren's, the cut views' for
+   * their label rows), the orbit before it (restored on leaving it; null once the viewer moves
+   * the camera, W2A-N24), the free area and the part of it above the dock (the cut views' rows).
+   */
+  framing: Framing;
+  orbitBeforeFraming: OrbitState | null;
   free: Rect | null;
+  rows: Rect | null;
   /** The browser suite's steady frame CPU (the `debug` message; 0: none), ms. */
   debugFrameCpuMs: number;
   size: { width: number; height: number };
@@ -196,8 +209,7 @@ function applyView(a: App) {
   a.appliedView = v;
   if (was !== null && was.quality !== v.quality) applySize(a);
   if (was?.viewMode !== v.viewMode) {
-    if (v.viewMode === 'schlieren' || was?.viewMode === 'schlieren')
-      frameSchlieren(a, v.viewMode === 'schlieren');
+    frameView(a, framingOf(v.viewMode));
     // D4-83: Realistic draws its haze and schlieren always, its tracers only when asked
     const fm = flowModeFor(v.viewMode);
     a.view.setFlowMode(fm);
@@ -326,30 +338,43 @@ function projectAnchors(a: App): AxialAnchor[] {
   });
 }
 
+type Framing = 'schlieren' | 'cut' | null;
+
+/** The framing a view mode has: Schlieren's (D4-92 zz), the cut views' rows (D4-97 item 2). */
+const framingOf = (m: ViewMode): Framing =>
+  m === 'schlieren' ? 'schlieren' : m === 'cutaway' || m === 'data' ? 'cut' : null;
+
 /**
  * D4-92 (zz): Schlieren's plume clear of the panels: entering it frames the engine and its jet in
- * the free area (an orbit, dollied out and panned), and leaving it puts the orbit back.
+ * the free area (an orbit, dollied out and panned). D4-97 item 2 (W2A-I8): the cut views frame
+ * the engine for their label rows, a row above and below it in the free area over the dock, at
+ * no less than the minimum engine scale (U5). Leaving a framed view puts the orbit back, unless
+ * the viewer moved the camera in it (W2A-N24). `again`: the area changed (the dock's legend, a
+ * resize), so the same framing is redone from the orbit before it.
  */
-function frameSchlieren(a: App, entering: boolean) {
-  if (!entering) {
-    if (a.orbitBeforeSchlieren !== null) a.orbit = a.orbitBeforeSchlieren;
-    a.orbitBeforeSchlieren = null;
-    return;
+function frameView(a: App, to: Framing, again = false) {
+  if (to === a.framing && !again) return;
+  if (again && a.orbitBeforeFraming === null) return;
+  if (a.orbitBeforeFraming !== null) a.orbit = a.orbitBeforeFraming;
+  a.orbitBeforeFraming = null;
+  a.framing = to;
+  const area = to === 'schlieren' ? a.free : to === 'cut' ? (a.rows ?? a.free) : null;
+  if (to === null || area === null) return;
+  const start = a.orbit;
+  const canvas = { w: a.size.width, h: a.size.height };
+  const rings = to === 'schlieren' ? SCHLIEREN_RINGS : ENGINE_RINGS;
+  const project = (o: OrbitState) => {
+    const pose = orbitPose(o);
+    a.view.setCameraPose(pose.position, pose.target);
+    return screenBox(viewProjection(a), rings, canvas.w, canvas.h);
+  };
+  if (to === 'cut') a.orbit = cutViewOrbit(start, project, canvas, area, a.view.camera.fov);
+  else {
+    const box = project(start);
+    if (box === null) return;
+    a.orbit = framedOrbit(start, box, canvas, area, a.view.camera.fov, SCHLIEREN_MIN_SCALE);
   }
-  if (a.free === null) return;
-  const pose = orbitPose(a.orbit);
-  a.view.setCameraPose(pose.position, pose.target);
-  const box = screenBox(viewProjection(a), SCHLIEREN_RINGS, a.size.width, a.size.height);
-  if (box === null) return;
-  a.orbitBeforeSchlieren = a.orbit;
-  a.orbit = framedOrbit(
-    a.orbit,
-    box,
-    { w: a.size.width, h: a.size.height },
-    a.free,
-    a.view.camera.fov,
-    SCHLIEREN_MIN_SCALE,
-  );
+  a.orbitBeforeFraming = start;
 }
 
 /** Starts the solver at boot (its status shows in the diagnostics); rejects with why it failed. */
@@ -560,12 +585,26 @@ function handle(a: App, m: ToWorker) {
     }
     case 'orbit':
       a.orbit = applyOrbit(a.orbit, m.input);
+      // W2A-N24: the viewer's own camera is kept on leaving a framed view
+      a.orbitBeforeFraming = null;
       return;
-    case 'viewArea':
+    case 'viewArea': {
+      const moved = (p: Rect | null, q: Rect) =>
+        p === null ||
+        Math.max(
+          Math.abs(p.x - q.x),
+          Math.abs(p.y - q.y),
+          Math.abs(p.w - q.w),
+          Math.abs(p.h - q.h),
+        ) > 1;
+      const changed = moved(a.free, m.free) || moved(a.rows, m.rows);
       a.free = m.free;
+      a.rows = m.rows;
+      if (changed) frameView(a, a.framing, true);
       return;
+    }
     case 'camera': {
-      a.orbitBeforeSchlieren = null;
+      a.orbitBeforeFraming = null;
       const p = LOOK_PRESETS[m.preset];
       a.view.camera.fov = p.fovDeg;
       a.view.camera.updateProjectionMatrix();
@@ -635,8 +674,10 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     mockRasterMs: null,
     mockRasters: 0,
     orbit: orbitFromPose(preset.camera, preset.target),
-    orbitBeforeSchlieren: null,
+    framing: null,
+    orbitBeforeFraming: null,
     free: null,
+    rows: null,
     debugFrameCpuMs: 0,
     size: { width: m.width, height: m.height },
     dpr: m.dpr,

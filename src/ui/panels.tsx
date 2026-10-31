@@ -549,13 +549,15 @@ export function Callouts({ snapshot }: { readonly snapshot: SimSnapshot }) {
           return { x: b.left - r.left, y: b.top - r.top, w: b.width, h: b.height };
         }),
       );
-      // D4-92 (zz): the view's free area (the centre column), for Schlieren's framing
+      // D4-92 (zz): the view's free area (the centre column), for Schlieren's framing, and
+      // (D4-97 item 2) its part above the dock, for the cut views' label rows
       const c = document.querySelector('.center')?.getBoundingClientRect();
-      if (c !== undefined)
-        post({
-          type: 'viewArea',
-          free: { x: c.left - r.left, y: c.top - r.top, w: c.width, h: c.height },
-        });
+      const dock = document.querySelector('.center .dock')?.getBoundingClientRect();
+      if (c !== undefined) {
+        const free = { x: c.left - r.left, y: c.top - r.top, w: c.width, h: c.height };
+        const bottom = dock === undefined ? c.bottom : Math.min(c.bottom, dock.top - 8);
+        post({ type: 'viewArea', free, rows: { ...free, h: Math.max(1, bottom - c.top) } });
+      }
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;

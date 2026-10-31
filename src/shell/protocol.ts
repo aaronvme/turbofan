@@ -39,8 +39,11 @@ export type ToWorker =
   | { readonly type: 'command'; readonly message: SimCommandMessage }
   | { readonly type: 'orbit'; readonly input: OrbitInput }
   | { readonly type: 'camera'; readonly preset: CameraPresetId }
-  /** D4-92 (zz): the view's free area between the panels, CSS px (Schlieren's framing). */
-  | { readonly type: 'viewArea'; readonly free: Rect }
+  /**
+   * D4-92 (zz): the view's free area between the panels, CSS px (Schlieren's framing), and
+   * (D4-97 item 2) the part of it above the dock (the cut views' framing for their label rows).
+   */
+  | { readonly type: 'viewArea'; readonly free: Rect; readonly rows: Rect }
   | { readonly type: 'field'; readonly source: FieldChoice }
   /**
    * The browser suite's controls, never sent by the app: a steady frame CPU (the worker pads each

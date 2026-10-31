@@ -123,6 +123,8 @@ export function layoutCallouts(
   reserved: readonly Rect[] = [],
   /** Places tried before the offsets (D4-92 zz: the cut views' row places). */
   preferred: (id: string) => readonly Rect[] = () => [],
+  /** D4-97 item 2: only the preferred places (the cut views' rows), no offsets. */
+  preferredOnly = false,
 ): PlacedCallout[] {
   const order = anchors
     .filter((a) => callable(a, reserved))
@@ -133,7 +135,12 @@ export function layoutCallouts(
     const out: PlacedCallout[] = [];
     const boxes: Rect[] = [
       ...preferred(a.id),
-      ...OFFSETS.map(([dx, dy]) => ({ x: dx >= 0 ? a.x + dx : a.x + dx - w, y: a.y + dy, w, h })),
+      ...(preferredOnly ? [] : OFFSETS).map(([dx, dy]) => ({
+        x: dx >= 0 ? a.x + dx : a.x + dx - w,
+        y: a.y + dy,
+        w,
+        h,
+      })),
     ];
     for (const box of boxes) {
       const onScreen =
@@ -264,10 +271,11 @@ const ROW_GAP = 12;
  * D4-92 (zz): the cut views' labels go outward, in a row above the engine's screen box and one
  * below it, the parts alternating between them in axial order (fan first), each label as near
  * above (or below) its anchor as the row allows, the row's order kept left to right, so the
- * leaders fan out from the parts instead of running along the shaft. A label its row has no room
- * for (a panel, the screen's edge) is placed by the general search among the placed ones, or
- * hidden. Of the two ways to start the alternation, the one that places more labels with fewer
- * leader crossings wins.
+ * leaders fan out from the parts instead of running along the shaft. D4-97 item 2: the camera is
+ * framed for the rows (the worker's cut-view framing), and a label its row has no room for (a
+ * panel, the screen's edge, the rows' own width) is hidden, by priority, never placed on the
+ * section it names. Of the two ways to start the alternation, the one that places more labels
+ * (by priority) with fewer leader crossings wins.
  */
 export function layoutAxial(
   anchors: readonly AxialAnchor[],
@@ -328,36 +336,29 @@ export function layoutAxial(
   // panel, the fewest leader crossings) and its offsets for a label its row has no room for
   const attempt = (parity: number) => {
     const r = rows(parity);
-    return layoutCallouts(vis, size, viewport, reserved, (id) => {
-      const box = r.get(id);
-      return box === undefined ? [] : [box];
-    });
+    return layoutCallouts(
+      vis,
+      size,
+      viewport,
+      reserved,
+      (id) => {
+        const box = r.get(id);
+        return box === undefined ? [] : [box];
+      },
+      true,
+    );
   };
+  // the shown labels by priority rank, then their count, then fewer crossings
+  const rank = (p: readonly PlacedCallout[]) =>
+    [...vis]
+      .sort((a, b) => b.priority - a.priority)
+      .map((a) => (p.some((q) => q.id === a.id) ? '1' : '0'))
+      .join('');
   const tries = [attempt(0), attempt(1)];
-  tries.sort((p, q) => q.length - p.length || leaderCrossings(p) - leaderCrossings(q));
+  tries.sort(
+    (p, q) =>
+      (rank(q) > rank(p) ? 1 : rank(q) < rank(p) ? -1 : 0) ||
+      leaderCrossings(p) - leaderCrossings(q),
+  );
   return tries[0] ?? [];
-}
-
-/**
- * D4-92 (zz): a camera view offset (three's setViewOffset) that fits a screen box (the content,
- * at the view without an offset) into the free area between the panels: centred in it, zoomed out
- * if the box is larger than the area (never below `minScale`), never zoomed in.
- */
-export function fitViewOffset(
-  box: Rect,
-  canvas: { readonly w: number; readonly h: number },
-  free: Rect,
-  minScale: number,
-): { fullW: number; fullH: number; x: number; y: number; w: number; h: number } {
-  const s = Math.max(minScale, Math.min(1, free.w / box.w, free.h / box.h));
-  const cx = box.x + box.w / 2;
-  const cy = box.y + box.h / 2;
-  return {
-    fullW: canvas.w,
-    fullH: canvas.h,
-    x: cx - (free.x + free.w / 2) / s,
-    y: cy - (free.y + free.h / 2) / s,
-    w: canvas.w / s,
-    h: canvas.h / s,
-  };
 }

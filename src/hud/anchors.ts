@@ -10,19 +10,22 @@ export interface WorldAnchor {
   readonly name: string;
   readonly x: number;
   readonly r: number;
-  /** Callouts for the core components first, the ducts last. */
+  /**
+   * Higher first: D4-97 item 2's stated priority (fan, combustor, HPT, LPT, exhaust, then HPC,
+   * booster, bypass duct), which picks the labels shown when the cut views' rows lack room.
+   */
   readonly priority: number;
 }
 
 const PRIORITY: Partial<Record<ComponentId, number>> = {
   fan: 9,
   combustor: 8,
-  hpc: 7,
-  hpt: 6,
-  lpt: 5,
-  booster: 4,
-  bypassDuct: 3,
-  exhaust: 2,
+  hpt: 7,
+  lpt: 6,
+  exhaust: 5,
+  hpc: 4,
+  booster: 3,
+  bypassDuct: 2,
 };
 
 export function componentAnchors(def: EngineDefinition): WorldAnchor[] {

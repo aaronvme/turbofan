@@ -4,6 +4,8 @@
 // camera with EngineView.setCameraPose. Spherical coordinates about a target on the engine axis;
 // y is up, the engine axis is x (src/contracts/engine.ts).
 
+import { UI_LEVELS } from '../hud/uiLevels';
+
 export interface OrbitState {
   readonly target: readonly [number, number, number];
   /** Azimuth about +y from +z toward +x, rad. */
@@ -143,4 +145,38 @@ export function framedOrbit(
   ) as [number, number, number];
   if (k === 1 && Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return s;
   return { ...s, target, distance };
+}
+
+type Box = { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+
+/** D4-97 item 2: the area the engine may fill in a cut view: the free area less a label row above and below. */
+export function rowsInset(free: Box, rowPx: number): Box {
+  return { x: free.x, y: free.y + rowPx, w: free.w, h: Math.max(1, free.h - 2 * rowPx) };
+}
+
+/**
+ * D4-97 item 2 (W2A-I8): the cut views' framing: the engine's screen box (`project` gives it at an
+ * orbit) brought inside the free area above the dock less a label row above and below
+ * (UI_LEVELS.calloutRowPx), by framedOrbit, re-projected after each pass (a dolly shrinks the near
+ * parts more than the far ones, so one pass leaves a residual). Never below the minimum engine
+ * scale (UI_LEVELS.cutViewMinScale of the starting orbit's size), never zoomed in.
+ */
+export function cutViewOrbit(
+  s: OrbitState,
+  project: (o: OrbitState) => Box | null,
+  canvas: { readonly w: number; readonly h: number },
+  rows: Box,
+  fovDeg: number,
+  passes = 3,
+): OrbitState {
+  const area = rowsInset(rows, UI_LEVELS.calloutRowPx);
+  let o = s;
+  for (let k = 0; k < passes; k++) {
+    const box = project(o);
+    if (box === null) return o;
+    // what is left of the minimum scale after the passes so far
+    const minScale = Math.min(1, (UI_LEVELS.cutViewMinScale * o.distance) / s.distance);
+    o = framedOrbit(o, box, canvas, area, fovDeg, minScale);
+  }
+  return o;
 }
