@@ -27,3 +27,8 @@ GATES @1cf2f11..5a2354d (code unchanged since d9701ad except a comment)
 - typecheck: clean. lint (ESLint + Prettier): clean.
 - coverage, test:mesh, test:gpu, test:gpu-ladder: RUNNING detached at handoff time (`reports/scratch/k/gates.cmd`, logs `reports/scratch/k/g-*.log`, status `gates.status`); not yet reported. Re-run or read those logs before merging.
 - Already run on this branch: test:gpu-ladder `d463.test.ts` alone, PASSED at 0.02 (771c3fb; FAILED at 0.003, 2f704b4 as TDD). Unit `tests/unit/flow/gpu`, `tests/unit/spikes`, `tests/unit/lookdev`: all passed. test:browser `rotorMotion.test.ts`: the tile test passed, the warp test FAILS on W2L-I6's half-baseline ratio (0.601 against 0.6, GOTCHAS 1).
+
+ROUND 2 (D4-93, coordinator), IN PROGRESS at this hand-back
+- 0d08669 (TDD): W2L-I6's warp bound leaves out disoccluded pixels (forward-backward check with the earlier LP geometry's backward field, 1 px), 0.6 kept against all four baselines; W2L-I8's cutaway preset leaves out the tiles at the cut faces (caps-on / caps-off stills, one tile around) from both counts, MARGIN unchanged. NOT YET RUN in the browser.
+- PHYSICS.md 3.4 preamble: official P-runs need Chrome holding the OS focus (D4-73, D4-93).
+- NOT DONE: SOLVER.md 15.3 (E-L5 / E-L9a / B at the cut: read reports/scratch/k/g-gpu.log and g-gpuladder.log), the browser run of 0d08669, LOOKDEV.md's rationale line, `git merge main` (previewed: clean, only docs/SOLVER.md on both sides) with the test ENGINE_MACH_CUT === GLOBAL_MACH_CUT, and the gates on the merged tree.
