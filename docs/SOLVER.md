@@ -571,3 +571,17 @@ The reference does not edit this section (like §14), so the two branches' SOLVE
 - **At 0.02 the GPU passes D4-79's rule on the contract case, and keeps decaying past 20000** (D4-89's question). Over 15000-20000 its weighted residual is flat within its oscillation (0.30-0.43, trend 0.994 per 1000; 0.358 → 0.382), as the CPU's (0.33-0.47); from 20000 to 40000 it falls 2.6× (0.382 → 0.150, 0.953 per 1000) and L2(p′) falls from 0.486 to 0.328. No growth, so D4-63 stays closed on the GPU as on the CPU.
 - The GPU follows the CPU to 3-4 digits through 2000 iterations (L2 0.5846 / 0.7779 / 0.6987 at 100 / 1000 / 2000 on both), and later stays close: over the 200 checkpoints |GPU/CPU − 1| is 0.15 % at the median and 1.8 % at the 90th percentile in L2 (10 % at most, at 14500), 0.8 % and 12 % in the weighted residual (21 % at most; the small late residual oscillates, and a checkpoint samples its phase).
 - At 0.003 the GPU reproduces D4-81's growth (CPU: L2 1.27× at 2000, 4.36× at 10000, 5.39× at 15000; residual 3.55 at 100, 8.73 at 10000, 10.0 at 15000), so the test fails without the mirror (its TDD commit).
+
+**15.3 W2R-I19's rows at the cut (D4-62, D4-71, D4-93).** The flux-scale rows of §12.2 are in force on the GPU in place of D4-48's 1e-3 and round 2's extra 1e-6 on E-L5: **B ≤ 2e-10, E-L5 ≤ 3e-7, E-L9a ≤ 1e-10** (`FLUX_SCALE_TOLERANCE` in `tests/gpu/helpers/solver.ts`, read by `tests/gpu/oracle.test.ts` for E and `tests/gpu-ladder/ladder.test.ts` for B). B, E-L5 and E-L9a run the plain scheme, so the cut does not enter them; C-pre and S run the engine's preconditioning in force on both sides, minMach = M_cut = 0.02 (15.1). Measured by round 1's gate run (Dawn, 2026-10-30, test:gpu 23:51 and test:gpu-ladder 23:52-23:57, the code of b777653; logs `reports/scratch/k/g-gpu.log` and `g-gpuladder.log`, outside git):
+
+| row | measured | must hold (§12.2) | margin |
+|---|---|---|---|
+| E-L5: the residual over the flux scale (10 iterations) | 2.67e-8 | ≤ 3e-7 | 11 × |
+| E-L9a: the residual over the flux scale (10 iterations) | 2.46e-12 | ≤ 1e-10 | 41 × |
+| B: the residual over the flux scale (100 iterations; r_flux / r_ref 1.15e10) | 1.266e-11 | ≤ 2e-10 | 16 × |
+| B: max \|u − u∞\| | 1.95e-5 m/s | ≤ 10 × the oracle's 1.49e-5 | 7.6 × |
+| C-pre at 0.02: e_q after 1 / 10 / 100 | 5.13e-7 / 3.77e-7 / 1.05e-6 | ≤ 1e-5 / 1e-4 / 1e-3 | 19 / 270 / 950 × |
+| S at 0.02: e_q after 1 / 10 / 100 | 5.32e-7 / 4.77e-7 / 7.67e-6 | ≤ 1e-5 / 1e-4 / 1e-3 | 19 / 210 / 130 × |
+
+- The three flux-scale numbers are §12.2's measurements of record (2.67e-8, 1.27e-11, 2.46e-12, critic pass 10 and w2-solver-int) to their figures: the mirror changed no WGSL (15.1), so the kernel's f32 arithmetic is the one the rows were set from, and D4-62's rule (re-measure and restate only after a change to it) does not fire.
+- The suites in that run: test:gpu 70 passed (12 files), test:gpu-ladder 13 passed + 1 expected fail (L9a's D4-45 steadiness, `it.fails`, KNOWN-FAIL D4-57).
