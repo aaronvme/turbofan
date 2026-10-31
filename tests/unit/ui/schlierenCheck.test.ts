@@ -80,11 +80,11 @@ describe('the Schlieren signature (W2A-I6, W2A-I10)', () => {
     expect(s.pass).toBe(true);
   });
 
-  it('states its bars: the grey share between Schlieren (0.77-0.82 in Chrome) and the controls (<= 0.35)', () => {
+  it('states its bars: the grey share midway between Schlieren on the canvas (0.84-0.90 in Chrome) and the controls (<= 0.55)', () => {
     expect(SCHLIEREN_BARS).toEqual({
       greyMin: 0.4,
       greyMax: 0.6,
-      greyShareMin: 0.6,
+      greyShareMin: 0.7,
       silhouetteRatioMax: 0.5,
       jetStdMin: 0.08,
     });

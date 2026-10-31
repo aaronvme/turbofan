@@ -113,8 +113,9 @@ export function leaderCrossings(placed: readonly PlacedCallout[]): number {
 /**
  * Places the labels in priority order, each at the first candidate offset that is on screen,
  * clear of the reserved panels, the placed labels and the other anchors' dots, and (W2A-I3) whose
- * leader crosses no placed leader or label; failing that, at the first clear one (a crossing is
- * better than a hidden label); failing that, hidden.
+ * leader crosses no placed leader or label; failing that, at a clear one with the fewest crossings
+ * (a crossing is better than a hidden label; W2A-N21: any of them, not only the first); failing
+ * that, hidden.
  */
 export function layoutCallouts(
   anchors: readonly Anchor[],
@@ -224,11 +225,10 @@ export function layoutCallouts(
       }
       if (ok) free.push({ g, t });
     }
-    const crossing = free.find((f) => f.t > 0);
-    for (const f of [
-      ...free.filter((f) => f.t === 0),
-      ...(crossing === undefined ? [] : [crossing]),
-    ]) {
+    // W2A-N21: every crossing place too, the fewest crossings first (the bound above prunes
+    // them): the first one can block a later label that another would let through
+    const crossing = free.filter((f) => f.t > 0).sort((p, q) => p.t - q.t);
+    for (const f of [...free.filter((f) => f.t === 0), ...crossing]) {
       chosen.push(f.g);
       const done = search(i + 1, crossings + f.t);
       chosen.pop();

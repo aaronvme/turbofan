@@ -197,6 +197,7 @@ describe('the progressive warm-up (D4-91)', () => {
       () => (useApp.getState().diagnostics?.warm.queue.length ?? 1) === 0,
       120_000,
     );
+    // U7 (D4-97 item 4): the background warm-up's own row, all nine warm, s after ready (recorded)
     const allWarmMs = Math.round(performance.now() - ready);
     rec.unsubscribe();
     const after = rec.list.filter((a) => a.t >= click);

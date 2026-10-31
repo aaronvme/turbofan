@@ -24,11 +24,12 @@ export const SCHLIEREN_BARS = {
   greyMin: 0.4,
   greyMax: 0.6,
   /**
-   * At least this share of the free area outside the engine is that grey. W2A-I10: between
-   * Schlieren's 0.77-0.82 and its controls' <= 0.35 (the studio's own grey, about 0.47, is in the
-   * band: round 5's 0.3 passed the 1920 cut views once flowviz's floor showed the studio).
+   * At least this share of the free area outside the engine is that grey. W2A-I10: midway
+   * between Schlieren on the canvas (0.84-0.90) and its controls (<= 0.55: the cut views framed
+   * for their rows, D4-97 item 2, show more of the studio, whose own grey, about 0.47, is in the
+   * band; round 5's 0.3 passed the 1920 cut views once flowviz's floor showed the studio).
    */
-  greyShareMin: 0.6,
+  greyShareMin: 0.7,
   /** The silhouette's mean over the field's grey mean (0.22 x the beauty by design). */
   silhouetteRatioMax: 0.5,
   /** The jet's luminance spread (bands of +-1000 urad span most of 0..1). */
