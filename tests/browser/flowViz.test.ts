@@ -13,7 +13,9 @@
 // - W2V-I5: the overlay is drawn unjittered, so a still frame repeats exactly (TRAA's jitter,
 //   the negative control, makes it crawl);
 // - [timing] the flow visuals at the default preset, 1080p, back to back (D4-42 style, but
-//   indicative: not D0-1's protocol, and other processes share the GPU).
+//   indicative: not D0-1's protocol, and other processes share the GPU). D4-96 item 4: recorded
+//   on every run; D4-2's 2 ms bar fails the suite only with VITE_UI_QUIET=1 (src/flow/viz/
+//   timingRow.ts); the measure of record is the official P4 / P4flow capture.
 // W2V-N8: the frames and timing.json go to reports/flow/ (ignored); VITE_FLOW_LOOKDEV=1 writes
 // them to docs/look-dev/flow/ instead (a deliberate look-dev re-shoot).
 import { commands } from 'vitest/browser';
@@ -40,6 +42,7 @@ import {
   FLOW_VIZ_MODES,
   type FlowVizModeId,
 } from '../../src/flow/viz/modes';
+import { flowTimingProblems, quietRun } from '../../src/flow/viz/timingRow';
 import { FLOW_SOLVER_LIMITS } from '../../src/gpu/device';
 import { mockSteadyState } from '../../src/mocks/mockCycle';
 import { createMockFlowField } from '../../src/mocks/mockFlowField';
@@ -48,10 +51,10 @@ import type { LookPresetId } from '../../src/render/presets';
 
 const W = 960;
 const H = 540;
-const OUT =
-  (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_FLOW_LOOKDEV === '1'
-    ? 'docs/look-dev/flow'
-    : 'reports/flow';
+const ENV = (import.meta as { env?: Record<string, string | undefined> }).env;
+const OUT = ENV?.VITE_FLOW_LOOKDEV === '1' ? 'docs/look-dev/flow' : 'reports/flow';
+/** D4-96 item 4: the timing row's bar gates only a quiet run (app-ui's W2A-N16 flag). */
+const QUIET = quietRun(ENV);
 
 function canvas(w = W, h = H): HTMLCanvasElement {
   const c = document.createElement('canvas');
@@ -766,14 +769,17 @@ describe('flow visuals', () => {
     const med = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? NaN;
     const flowMs = med(pairs.map((p) => p.flow));
     const deltaRender = med(pairs.map((p) => p.on - p.off));
-    await annotate(
-      `[timing] flow visuals (realistic, default preset, 1080p, back to back, indicative): ${flowMs.toFixed(3)} ms (render passes ${med(pairs.map((p) => p.overlay)).toFixed(3)}, compute ${med(pairs.map((p) => p.compute ?? NaN)).toFixed(3)}); P4 render total off ${med(pairs.map((p) => p.off)).toFixed(2)} / on ${med(pairs.map((p) => p.on)).toFixed(2)} ms (paired change ${deltaRender.toFixed(3)} ms); with the tracers on ${tracers.flow.toFixed(3)} ms (compute ${(tracers.compute ?? NaN).toFixed(3)}) ${JSON.stringify(pairs)}`,
-    );
+    // D4-96 item 4: recorded on every run (the log line and timing.json); the 2 ms bar fails the
+    // suite only in a quiet run (VITE_UI_QUIET=1, app-ui's W2A-N16 flag); a reading that measured
+    // nothing fails every run
+    const problems = flowTimingProblems({ visualsMs: flowMs, tracersMs: tracers.flow }, QUIET);
+    const record = `[timing] flow visuals (realistic, default preset, 1080p, back to back, indicative; ${QUIET ? 'quiet run: gated' : 'not a quiet run: recorded, not gated'} at ${String(FLOW_VISUALS_BUDGET_MS)} ms): ${flowMs.toFixed(3)} ms (render passes ${med(pairs.map((p) => p.overlay)).toFixed(3)}, compute ${med(pairs.map((p) => p.compute ?? NaN)).toFixed(3)}); P4 render total off ${med(pairs.map((p) => p.off)).toFixed(2)} / on ${med(pairs.map((p) => p.on)).toFixed(2)} ms (paired change ${deltaRender.toFixed(3)} ms); with the tracers on ${tracers.flow.toFixed(3)} ms (compute ${(tracers.compute ?? NaN).toFixed(3)}) ${JSON.stringify(pairs)}`;
+    console.warn(record);
+    await annotate(record);
     await commands.writeFile(
       `${OUT}/timing.json`,
-      `${JSON.stringify({ note: 'indicative, back to back, 1080p, threeQuarterFront, realistic flow mode (D4-83: no tracers by default; tracers: the option on); not D0-1', pairs, tracers }, null, 2)}\n`,
+      `${JSON.stringify({ note: 'indicative, back to back, 1080p, threeQuarterFront, realistic flow mode (D4-83: no tracers by default; tracers: the option on); not D0-1. D4-96: gated at the 2 ms bar only in a quiet run (VITE_UI_QUIET=1)', quiet: QUIET, budgetMs: FLOW_VISUALS_BUDGET_MS, flowMs, pairs, tracers, problems }, null, 2)}\n`,
     );
-    expect(flowMs).toBeLessThanOrEqual(FLOW_VISUALS_BUDGET_MS);
-    expect(tracers.flow).toBeLessThanOrEqual(FLOW_VISUALS_BUDGET_MS);
+    expect(problems, record).toEqual([]);
   });
 });
