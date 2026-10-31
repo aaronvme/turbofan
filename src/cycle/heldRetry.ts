@@ -13,10 +13,14 @@
 //   resumes on the next step where it stopped: its target is fixed when it sets out, so a walk spread
 //   over several steps converges on the same root, to the bit, as the walk run at once. While a walk
 //   is in flight the direct solve gets DIRECT_SHARE of the budget, so the walk always moves on.
-// - The matched path is unchanged: a direct solve that converges is not charged while the model is
-//   not holding, and the budget (1.5x the largest converged direct solve in the cycle suite) never
-//   cuts one. Only a failed direct solve and the walk spend the budget; once the model holds,
-//   everything does, so a step that starts held costs at most the budget plus one Newton iteration.
+// - The matched path is unchanged where it was measured: a direct solve that converges is not
+//   charged while the model is not holding, and the budget is 1.5x the largest converged direct
+//   solve in the cycle suite, so on that suite it never cut one. That holds on the suite, not by
+//   construction (W2H-N1): the direct's cap counts the step's carried spend, so after a snapshot
+//   that recovers in the same step, a non-holding direct gets only what is left (on the fit ramp
+//   two such cuts, at 8.85 and 11.40 s, were losses anyway; D4-91 (4) keeps the charging). Only a
+//   failed direct solve and the walk spend the budget; once the model holds, everything does, so a
+//   step that starts held costs at most the budget plus one Newton iteration.
 // - Not budgeted: the model's entry from the sub-idle similarity model (a start, a relight) keeps
 //   D4-13's whole walk in one snapshot (model.ts), since it is not a held retry.
 // - D4-92 (c), W2H-B1: a held episode that has lasted ESCALATE_AFTER_S runs D4-13's whole walk once,
@@ -38,7 +42,8 @@ import {
 /**
  * Retry work one step may spend, in gas-path evaluations. It is 1.5x the largest converged direct
  * solve in the whole cycle suite (77 evaluations, 10 Newton iterations; an instrumented run on
- * 2026-10-30), so the budget never cuts the matched path; a held step then costs 120-137
+ * 2026-10-30), so on the suite it never cut the matched path (W2H-N1: not by construction, see
+ * the header); a held step then costs 120-137
  * evaluations, about 3-8 ms at the 0.025-0.055 ms per evaluation measured in Node on the shared
  * machine (tools/cycle/held-cost.ts), beside the 2-4 ms matched step and well inside 16.7 ms.
  */
@@ -123,6 +128,7 @@ export interface RetryArgs {
   /** True while the model holds its gas path (the last snapshot was lost). */
   readonly holding: boolean;
   readonly policy: RetryPolicy;
+  /** The step's spend so far; retryMatched adds what it spends to it (W2H-N5: not pure). */
   readonly spend: StepSpend;
   readonly state: RetryState;
   readonly why: SolveFailure;
@@ -131,7 +137,10 @@ export interface RetryArgs {
 const sameTarget = (a: GasPathTarget, b: GasPathTarget) =>
   a.n1Rpm === b.n1Rpm && a.n2Rpm === b.n2Rpm && a.wfKgPerS === b.wfKgPerS;
 
-/** One snapshot's matched solve under the D4-84 bounds (see the header). */
+/**
+ * One snapshot's matched solve under the D4-84 bounds (see the header). It charges its work to
+ * `a.spend`, which the model carries through the step's snapshots (W2H-N5).
+ */
 export function retryMatched(a: RetryArgs): RetryOutcome {
   const { policy, spend, state } = a;
   const stopAt = (cap: number) => {

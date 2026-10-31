@@ -73,35 +73,43 @@ const COMPRESSOR_STATIONS = [
 ] as const satisfies readonly (readonly [string, StationId, StationId])[];
 
 /**
- * A solution the transient may use: converged, and on a physical root. The bypass ratio, unknown
- * 1, is above 1 (a root with it near zero exists and is not the engine), and every compressor
- * raises the total temperature (D4-94: after a long hold the matched path followed a converged
- * branch on which the booster cooled the flow, T25 up to 61-82 K below T2, out to an HPC speed off
- * its map). A solver that throws (a thermo state out of range, or a programming error) has no
- * solution there. The reason a solution is refused goes into `why` (W2F-I1), so a lost solve keeps
- * its cause: a thrown error by its name and message, so a TypeError cannot pass for a physical
- * loss. A solve its control stopped (D4-84) is neither: it was interrupted, not refused.
+ * Why a solution is not one the transient may use, or null if it is: converged (below
+ * ACCEPTED_RESIDUAL), and on a physical root. The bypass ratio, unknown 1, is above 1 (a root with
+ * it near zero exists and is not the engine), and every compressor raises the total temperature
+ * (D4-94: after a long hold the matched path followed a converged branch on which the booster
+ * cooled the flow, T25 up to 61-82 K below T2, out to an HPC speed off its map).
+ */
+function refusal(s: GasPathSolution): string | null {
+  if (!(s.maxResidual < ACCEPTED_RESIDUAL)) {
+    return `residual ${Number(s.maxResidual.toPrecision(3))} not below ${ACCEPTED_RESIDUAL.toExponential()}`;
+  }
+  const bpr = at(s.x, 1);
+  if (!(bpr > 1)) return `non-physical root (BPR ${Number(bpr.toPrecision(3))})`;
+  const st = s.point.stations;
+  for (const [name, inlet, exit] of COMPRESSOR_STATIONS) {
+    const rise = st[exit].ttK - st[inlet].ttK;
+    if (!(rise > 0)) {
+      return `non-physical root (${name} total-temperature rise ${Number(rise.toPrecision(3))} K)`;
+    }
+  }
+  return null;
+}
+
+/**
+ * A solve's outcome: a solution the transient may use (refusal), or refused. A solver that throws
+ * (a thermo state out of range, or a programming error) has no solution there. The reason a
+ * solution is refused goes into `why` (W2F-I1), so a lost solve keeps its cause: a thrown error by
+ * its name and message, so a TypeError cannot pass for a physical loss. A solve its control
+ * stopped (D4-84) is neither: it was interrupted, not refused.
  */
 function attempt(f: () => GasPathSolution, why: SolveFailure): Attempted {
   try {
     const s = f();
     if (s.stopped === true) return { kind: 'stopped', solution: s };
-    if (!(s.maxResidual < ACCEPTED_RESIDUAL)) {
-      why.cause = `residual ${Number(s.maxResidual.toPrecision(3))} not below ${ACCEPTED_RESIDUAL.toExponential()}`;
+    const cause = refusal(s);
+    if (cause !== null) {
+      why.cause = cause;
       return { kind: 'refused' };
-    }
-    const bpr = at(s.x, 1);
-    if (!(bpr > 1)) {
-      why.cause = `non-physical root (BPR ${Number(bpr.toPrecision(3))})`;
-      return { kind: 'refused' };
-    }
-    const st = s.point.stations;
-    for (const [name, inlet, exit] of COMPRESSOR_STATIONS) {
-      const rise = st[exit].ttK - st[inlet].ttK;
-      if (!(rise > 0)) {
-        why.cause = `non-physical root (${name} total-temperature rise ${Number(rise.toPrecision(3))} K)`;
-        return { kind: 'refused' };
-      }
     }
     return { kind: 'solved', solution: s };
   } catch (e) {
@@ -113,7 +121,10 @@ function attempt(f: () => GasPathSolution, why: SolveFailure): Attempted {
 /**
  * The matched solve at the target, warm-started on the anchor (no walk). null when it is refused
  * or `stop` interrupts it; a stopped solve is abandoned (the next step's target is elsewhere), and
- * if nothing else said why, `why.cause` says that the budget stopped it.
+ * if nothing else said why, `why.cause` says that the budget stopped it. W2H-N2: a stopped solve
+ * whose solution already passes every check is used (on the fit ramp, residuals of 5e-10 after 9
+ * iterations, stopped one iteration short of Newton's own tolerance). Only the direct solve: a
+ * walk's stopped solve resumes, so a sliced walk stays the unsliced walk.
  */
 export function solveDirect(
   solve: GasPathSolver,
@@ -128,6 +139,7 @@ export function solveDirect(
   const r = attempt(() => solve(e, c, t.n1Rpm, t.n2Rpm, t.wfKgPerS, anchor.x, true, control), why);
   if (r.kind === 'solved') return r.solution;
   if (r.kind === 'stopped') {
+    if (refusal(r.solution) === null) return r.solution;
     why.cause ??= `not converged within the held-retry budget (residual ${Number(r.solution.maxResidual.toPrecision(3))} after ${r.solution.iterations} iterations)`;
   }
   return null;
