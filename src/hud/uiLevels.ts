@@ -1,7 +1,8 @@
 // D4-87, D4-91 and D4-97: the app shell's display levels, pre-registered in docs/PHYSICS.md 3.5
 // and mirrored here verbatim (tests/unit/hud/uiLevels.test.ts checks the text and the numbers).
-// The compressor maps' surge-margin annunciation reads U1; the browser suite's first-switch and
-// boot bars read U2 and U3 (indicative; they gate only an official quiet run, W2A-N16).
+// The compressor maps' surge-margin annunciation reads U1; the browser suite's first-switch, boot
+// and cold-switch bars read U2-U4 (indicative; they gate only an official quiet run, W2A-N16); the
+// cut views' framing reads U5; U6 and U7 are recorded rows with no bar (D4-97 item 4).
 
 export const UI_ROWS = {
   U1: {
@@ -29,6 +30,18 @@ export const UI_ROWS = {
       "The cut views' framing (D4-97 item 2, W2A-I8): entering Cutaway or Data dollies the camera out and pans it until the engine's screen box (the nacelle to the core nozzle) lies inside the free area above the dock less a label row of 52 px (the tallest label, its 12 px gap and 3 px) above and below it, never below 0.6 of its size at the orbit before (the minimum engine scale, as Schlieren's framing); leaving them puts the orbit back. A label with no room in its row is hidden, by priority: fan, combustor, HPT, LPT, exhaust, then HPC, booster, bypass duct (`src/shell/orbit.ts` cutViewOrbit, `src/hud/callouts.ts` layoutAxial)",
     passText:
       "at 1366 x 768 and 1920 x 1001 the axial rows hold: every label shown sits in a row above or below the engine's screen box, clear of it, each row in the parts' axial order (`tests/browser/app.test.tsx`)",
+  },
+  U6: {
+    checkText:
+      "Cutaway's own warm frames (D4-97 item 4, accepted as measured): the background warm-up's frames for Cutaway, once a session, a few seconds after ready; a node build cannot be split, so one large material is let through a frame (`tests/browser/warmStall.test.ts`, the main-thread probe: warm frames, the most warm-frame CPU, those over 16.7 ms, the longest frame gap)",
+    passText:
+      'recorded on every run, indicative, no bar: critic pass 17 measured 47 warm frames at ≤ 41 ms of CPU each over about 2 s, the longest frame gap 34 ms',
+  },
+  U7: {
+    checkText:
+      "The background warm-up's own time (D4-97 item 4): all nine configurations warm, in s after ready, with a switch into Cutaway as soon as it is warm (`tests/browser/firstSwitch.test.tsx`, 1366 x 768)",
+    passText:
+      'recorded on every run, indicative, no bar: critic pass 17 measured all nine warm 7.0 s after ready, the longest snapshot gap while warming 108 ms (to Cutaway) and 125 ms (to Schlieren)',
   },
 } as const;
 

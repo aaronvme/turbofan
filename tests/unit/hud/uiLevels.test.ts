@@ -53,6 +53,12 @@ describe('the UI levels mirror docs/PHYSICS.md 3.5 (D4-91)', () => {
     expect(UI_LEVELS.calloutRowPx).toBe(52);
     expect(rows[4]?.check).toContain('52 px');
     expect(rows[4]?.check).toContain('fan, combustor, HPT, LPT, exhaust');
+    // D4-97 item 4: Cutaway's own warm frames and the background warm-up, recorded, no bar
+    expect(rows.slice(5).map((r) => r.id)).toEqual(['U6', 'U7']);
+    for (const r of rows.slice(5))
+      expect(r.pass).toMatch(/^recorded on every run, indicative, no bar/);
+    expect(rows[5]?.pass).toContain('47 warm frames at ≤ 41 ms');
+    expect(rows[6]?.pass).toContain('7.0 s after ready');
   });
 
   it('the map annunciates at U1: amber below 5 %, normal at exactly 5 % (W2A-N19), red at 0', () => {
