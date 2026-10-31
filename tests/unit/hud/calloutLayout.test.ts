@@ -201,6 +201,22 @@ describe('the cut views: labels outward in axial order (D4-92 zz)', () => {
     for (const p of placed)
       for (const q of placed) if (q !== p) expect(overlaps(p.box, q.box, 4)).toBe(false);
   });
+
+  it('round 5: a part under a panel (the open drawer) is not called out, in either layout', () => {
+    // the drawer over the view's right: the exhaust's and the LPT's anchors are under it
+    const drawer: Rect = { x: 870, y: 46, w: 196, h: 600 };
+    const covered = cut.filter((a) => a.x >= drawer.x).map((a) => a.id);
+    expect(covered.sort()).toEqual(['exhaust', 'lpt']);
+    const withDrawer = [...reserved, drawer];
+    for (const placed of [
+      layoutAxial(cut, size, vp, withDrawer, band),
+      layoutCallouts(cut, size, vp, withDrawer),
+    ]) {
+      const ids = placed.map((p) => p.id);
+      for (const id of covered) expect(ids, id).not.toContain(id);
+      expect(ids.length).toBeGreaterThan(0);
+    }
+  });
 });
 
 describe('Schlieren framing: the content fitted into the free area (D4-92 zz)', () => {
