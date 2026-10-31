@@ -273,6 +273,8 @@ export interface WarmFrameReport {
   readonly pending: number;
   /** The new object whose own CPU (nested passes excluded) was the longest, and its ms. */
   readonly slowest: { readonly name: string; readonly ms: number };
+  /** CPU ms outside three's object draws (its pass bookkeeping, and any wait on the GPU process). */
+  readonly outsideMs: number;
   readonly done: boolean;
 }
 
@@ -596,6 +598,7 @@ async function assemble(
     deferred: number;
     budget: number;
     slowest: { name: string; ms: number };
+    objectsMs: number;
   } | null = null;
   const seen = new Set<string>();
   const targetIds = new WeakMap<object, number>();
@@ -863,6 +866,7 @@ async function assemble(
         deferred: 0,
         budget: budget.cpuMs,
         slowest: { name: '', ms: 0 },
+        objectsMs: 0,
       };
       warm = w;
       // three calls renderer.renderObject for every object of every pass (shadows included):
@@ -889,6 +893,7 @@ async function assemble(
           const own = ms - (stack.pop()?.childMs ?? 0);
           const parent = stack.at(-1);
           if (parent !== undefined) parent.childMs += ms;
+          else w.objectsMs += ms;
           if (isNew) {
             w.newMs += own;
             seen.add(key);
@@ -924,6 +929,7 @@ async function assemble(
         created: w.created,
         pending: pendingPipelines.size,
         slowest: w.slowest,
+        outsideMs: performance.now() - t0 - w.objectsMs,
         done:
           w.newObjects === 0 && w.deferred === 0 && w.created === 0 && pendingPipelines.size === 0,
       };

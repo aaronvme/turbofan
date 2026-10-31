@@ -110,3 +110,37 @@ export function orbitInputForKey(key: string, shift = false): OrbitInput | null 
       return null;
   }
 }
+
+/**
+ * D4-92 (zz): an orbit that brings a screen box (the content at this orbit) into the free area
+ * between the panels: dollied out by the scale fitViewOffset would zoom out by, then panned at
+ * the target's depth by what is left of the offset. Unchanged when the box fits and is centred.
+ */
+export function framedOrbit(
+  s: OrbitState,
+  box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
+  canvas: { readonly w: number; readonly h: number },
+  free: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
+  fovDeg: number,
+  minScale: number,
+): OrbitState {
+  const k = Math.max(minScale, Math.min(1, free.w / box.w, free.h / box.h));
+  // the target is at the canvas centre; dollying out by 1/k scales offsets from it by about k
+  const tx = canvas.w / 2;
+  const ty = canvas.h / 2;
+  const dx = free.x + free.w / 2 - (tx + k * (box.x + box.w / 2 - tx));
+  const dy = free.y + free.h / 2 - (ty + k * (box.y + box.h / 2 - ty));
+  const distance = s.distance / k;
+  const perPx = (2 * distance * Math.tan((fovDeg * Math.PI) / 360)) / canvas.h;
+  const a = s.azimuth;
+  const e = s.elevation;
+  // the camera's right and up (orbitPose's camera looks at the target)
+  const right = [Math.cos(a), 0, -Math.sin(a)] as const;
+  const up = [-Math.sin(a) * Math.sin(e), Math.cos(e), -Math.cos(a) * Math.sin(e)] as const;
+  // content moves right on screen when the camera moves left, and down when it moves up
+  const target = [0, 1, 2].map(
+    (i) => (s.target[i] ?? 0) - (right[i] ?? 0) * dx * perPx + (up[i] ?? 0) * dy * perPx,
+  ) as [number, number, number];
+  if (k === 1 && Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return s;
+  return { ...s, target, distance };
+}

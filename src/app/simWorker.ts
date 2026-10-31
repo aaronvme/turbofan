@@ -315,7 +315,7 @@ function warmSlot(a: App, frame: number, lastFrameMs: number) {
     a.warmFrames++;
     if (r.cpuMs > a.warmCpuMaxMs) {
       a.warmCpuMaxMs = r.cpuMs;
-      a.warmSlowest = `${id}: ${r.slowest.name} ${r.slowest.ms.toFixed(0)} ms`;
+      a.warmSlowest = `${id}: ${r.slowest.name} ${r.slowest.ms.toFixed(0)} ms, outside the draws ${r.outsideMs.toFixed(0)} ms`;
     }
     if (r.done) a.warm.done(id);
   } catch (e) {

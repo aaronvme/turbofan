@@ -158,3 +158,48 @@ export function calloutPoint(
   if (seenThroughIntake(v.eye, face, g)) return face;
   return [g.lipX, g.lipR * Math.cos(theta), g.lipR * Math.sin(theta)];
 }
+
+/**
+ * Points round the engine's outside, from the intake lip to `xEnd` (the nacelle, then the core
+ * cowl, then the cowl's last radius): rings of 16 for its screen box (the cut views' label rows,
+ * Schlieren's framing with its plume).
+ */
+export function engineRings(def: EngineDefinition, xEnd: number): [number, number, number][] {
+  const g = calloutGeometry(def);
+  const nac = def.flowpath.curves.nacelleOuter;
+  const cowl = def.flowpath.curves.coreCowl;
+  const cowlEnd = cowl.points.at(-1)?.r ?? 0;
+  const out: [number, number, number][] = [];
+  const n = 12;
+  for (let k = 0; k <= n; k++) {
+    const x = g.lipX + ((xEnd - g.lipX) * k) / n;
+    const r = radiusAt(nac, x) ?? radiusAt(cowl, x) ?? cowlEnd;
+    for (let j = 0; j < 16; j++) {
+      const t = (2 * Math.PI * j) / 16;
+      out.push([x, r * Math.cos(t), r * Math.sin(t)]);
+    }
+  }
+  return out;
+}
+
+/** The CSS-pixel box of the points in view (null: none is). */
+export function screenBox(
+  m: ArrayLike<number>,
+  points: readonly (readonly [number, number, number])[],
+  width: number,
+  height: number,
+): { x: number; y: number; w: number; h: number } | null {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const p of points) {
+    const s = projectPoint(m, p, width, height);
+    if (!s.visible) continue;
+    x0 = Math.min(x0, s.x);
+    y0 = Math.min(y0, s.y);
+    x1 = Math.max(x1, s.x);
+    y1 = Math.max(y1, s.y);
+  }
+  return x0 <= x1 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : null;
+}
