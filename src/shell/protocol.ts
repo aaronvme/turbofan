@@ -112,6 +112,8 @@ export interface AppDiagnostics {
     readonly queue: readonly string[];
     readonly frames: number;
     readonly cpuMaxMs: number;
+    /** The slowest warm frame's configuration and its slowest new object, with its own ms. */
+    readonly slowest: string;
     readonly gaveUp: readonly string[];
   };
   /** D4-85: the canvas's backing store, px, and the pixel ratio it renders at. */

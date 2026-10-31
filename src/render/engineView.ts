@@ -271,6 +271,8 @@ export interface WarmFrameReport {
   /** Render pipelines created (asynchronously) in this frame, and all still compiling. */
   readonly created: number;
   readonly pending: number;
+  /** The new object whose own CPU (nested passes excluded) was the longest, and its ms. */
+  readonly slowest: { readonly name: string; readonly ms: number };
   readonly done: boolean;
 }
 
@@ -593,6 +595,7 @@ async function assemble(
     newMs: number;
     deferred: number;
     budget: number;
+    slowest: { name: string; ms: number };
   } | null = null;
   const seen = new Set<string>();
   const targetIds = new WeakMap<object, number>();
@@ -817,15 +820,21 @@ async function assemble(
       for (const c of configs) {
         const s0 = performance.now();
         let cpuMs = 0;
+        let slowest = { name: '', ms: 0 };
         // every pipeline of the configuration created at once, compiled in parallel, waited on
         for (let k = 0; k < 8; k++) {
           const r = view.warmFrame(c, { cpuMs: Infinity });
           cpuMs += r.cpuMs;
+          if (r.slowest.ms > slowest.ms) slowest = r.slowest;
           if (r.done) break;
           await Promise.all([...pendingPipelines]);
           await device.device.queue.onSubmittedWorkDone();
         }
-        configurations.push({ name: warmName(c), ms: performance.now() - s0, cpuMs });
+        configurations.push({
+          name: `${warmName(c)} (slowest ${slowest.name} ${slowest.ms.toFixed(0)} ms)`,
+          ms: performance.now() - s0,
+          cpuMs,
+        });
       }
       return { ms: performance.now() - t0, configurations };
     },
@@ -847,26 +856,49 @@ async function assemble(
       flowViz.setTracers(flowTracers);
       applyFlowMode();
       view.setMode(c.look, true);
-      const w = { created: 0, newObjects: 0, newMs: 0, deferred: 0, budget: budget.cpuMs };
+      const w = {
+        created: 0,
+        newObjects: 0,
+        newMs: 0,
+        deferred: 0,
+        budget: budget.cpuMs,
+        slowest: { name: '', ms: 0 },
+      };
       warm = w;
       // three calls renderer.renderObject for every object of every pass (shadows included):
       // an object not drawn before is let through while the budget lasts (at least one a frame)
       const own = renderer as unknown as { renderObject?: unknown };
+      // a pass's updateBefore renders its inputs inside the object that samples them (the output
+      // quad holds TRAA, which holds the scene passes), so the budget is the warm frame's elapsed
+      // CPU, checked as each new object starts, and each object's own time excludes its nested ones
+      const stack: { childMs: number }[] = [];
       own.renderObject = function (this: WebGPURenderer, ...args: RenderObjectArgs) {
         const key = renderKey(args);
-        if (seen.has(key)) {
-          baseRenderObject.apply(this, args);
-          return;
-        }
-        if (w.newObjects > 0 && w.newMs >= w.budget) {
+        const isNew = !seen.has(key);
+        if (isNew && w.newObjects > 0 && performance.now() - t0 >= w.budget) {
           w.deferred++;
           return;
         }
+        if (isNew) w.newObjects++;
         const s0 = performance.now();
-        baseRenderObject.apply(this, args);
-        w.newMs += performance.now() - s0;
-        w.newObjects++;
-        seen.add(key);
+        stack.push({ childMs: 0 });
+        try {
+          baseRenderObject.apply(this, args);
+        } finally {
+          const ms = performance.now() - s0;
+          const own = ms - (stack.pop()?.childMs ?? 0);
+          const parent = stack.at(-1);
+          if (parent !== undefined) parent.childMs += ms;
+          if (isNew) {
+            w.newMs += own;
+            seen.add(key);
+            if (own > w.slowest.ms) {
+              const [object, , , , material] = args;
+              const m = material as { name?: string; type?: string };
+              w.slowest = { name: object.name || m.name || m.type || 'object', ms: own };
+            }
+          }
+        }
       };
       try {
         drawFrame(0, true);
@@ -891,6 +923,7 @@ async function assemble(
         deferred: w.deferred,
         created: w.created,
         pending: pendingPipelines.size,
+        slowest: w.slowest,
         done:
           w.newObjects === 0 && w.deferred === 0 && w.created === 0 && pendingPipelines.size === 0,
       };

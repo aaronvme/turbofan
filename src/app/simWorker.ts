@@ -135,6 +135,8 @@ interface App {
   preparing: ViewMode | null;
   warmFrames: number;
   warmCpuMaxMs: number;
+  /** The slowest warm frame's configuration and its slowest object (where a hitch comes from). */
+  warmSlowest: string;
   appliedView: RenderState | null;
   errors: string[];
   refused: string[];
@@ -311,7 +313,10 @@ function warmSlot(a: App, frame: number, lastFrameMs: number) {
   try {
     const r = a.view.warmFrame(WARM_CONFIGS[id], { cpuMs: WARM_BUDGET_MS });
     a.warmFrames++;
-    a.warmCpuMaxMs = Math.max(a.warmCpuMaxMs, r.cpuMs);
+    if (r.cpuMs > a.warmCpuMaxMs) {
+      a.warmCpuMaxMs = r.cpuMs;
+      a.warmSlowest = `${id}: ${r.slowest.name} ${r.slowest.ms.toFixed(0)} ms`;
+    }
     if (r.done) a.warm.done(id);
   } catch (e) {
     a.warm.done(id);
@@ -412,6 +417,7 @@ function loop(a: App) {
           ...a.warm.state(),
           frames: a.warmFrames,
           cpuMaxMs: a.warmCpuMaxMs,
+          slowest: a.warmSlowest,
           gaveUp: a.warm.gaveUp(),
         },
         backingStore: {
@@ -549,6 +555,7 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     preparing: null,
     warmFrames: 0,
     warmCpuMaxMs: 0,
+    warmSlowest: '',
     appliedView: null,
     errors: [],
     refused: [],

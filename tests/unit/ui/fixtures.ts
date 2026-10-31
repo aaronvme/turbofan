@@ -65,6 +65,7 @@ export function diagnosticsOf(o: Partial<AppDiagnostics> = {}): AppDiagnostics {
       queue: [],
       frames: 0,
       cpuMaxMs: 0,
+      slowest: '',
       gaveUp: [],
     },
     backingStore: { width: 1994, height: 1039, dpr: 1.0387 },
