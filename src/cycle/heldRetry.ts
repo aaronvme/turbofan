@@ -19,6 +19,9 @@
 //   everything does, so a step that starts held costs at most the budget plus one Newton iteration.
 // - Not budgeted: the model's entry from the sub-idle similarity model (a start, a relight) keeps
 //   D4-13's whole walk in one snapshot (model.ts), since it is not a held retry.
+// - D4-92 (c), W2H-B1: a held episode that has lasted ESCALATE_AFTER_S runs D4-13's whole walk once,
+//   unbudgeted, in one snapshot (model.ts), so that every episode recovers within D4-92 (b)'s 0.5 s
+//   at every frame step. It is a one-off cost per episode, an exception beside P5 like the entry.
 
 import type { GasPathSolution, OperatingConditions, SizedEngine } from './engine';
 import {
@@ -42,6 +45,14 @@ import {
 export const HELD_RETRY_BUDGET = 120;
 /** D4-84 (a): sim time between the starts of two continuation walks, s. */
 export const WALK_INTERVAL_S = 0.5;
+/**
+ * D4-92 (c): sim time a held episode lasts before it escalates, once, to D4-13's whole walk, s.
+ * Half of D4-92 (b)'s 0.5 s bound: the escalated walk runs at the first snapshot past it, so an
+ * episode it recovers ends inside the bound at every frame step up to 1/30 s, and one it does not
+ * recover has the bounded retry for the rest. Critic pass 15's scenario holds at most 0.36 s with it
+ * at 1/120-1/30 s (tools/cycle/held-reach.ts), against 0.54-7.9 s without.
+ */
+export const ESCALATE_AFTER_S = 0.25;
 /** The share of the budget the direct solve may spend while a walk is in flight. */
 export const DIRECT_SHARE = 0.5;
 /**
@@ -57,6 +68,11 @@ export interface RetryPolicy {
   readonly budget: number;
   /** Sim time between the starts of two continuation walks, s. */
   readonly walkIntervalS: number;
+  /**
+   * Sim time a held episode lasts before it runs D4-13's whole walk once (D4-92 (c)), s; the model
+   * applies it (retryMatched does not read it). Default ESCALATE_AFTER_S; Infinity: never.
+   */
+  readonly escalateAfterS?: number;
   /**
    * A monotone work count, read as a difference: gas-path evaluations by default. A test can count
    * its own double's work; a host could pass a clock with a budget in ms (not deterministic).
