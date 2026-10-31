@@ -44,6 +44,41 @@ describe('the preparing view (D4-91)', { timeout: TIMEOUT_MS }, () => {
   });
 });
 
+describe('W2A-N22: the background warm-up on screen (Diagnostics)', { timeout: TIMEOUT_MS }, () => {
+  it('says how many configurations are warm, what it waits for, and any given up on', () => {
+    mount(
+      snapshotOf(),
+      diagnosticsOf({
+        warm: {
+          warm: ['realistic', 'realistic+tracers', 'cutaway+tracers'],
+          queue: [
+            'schlieren',
+            'data:mach+tracers',
+            'exploded',
+            'data:p+tracers',
+            'data:rho+tracers',
+            'data:t+tracers',
+          ],
+          frames: 52,
+          cpuMaxMs: 41,
+          slowest: '',
+          gaveUp: ['exploded'],
+          suspended: true,
+        },
+      }),
+    );
+    useApp.setState({ panels: { ...useApp.getState().panels, diagnostics: true } });
+    render(<Overlay />);
+    const d = screen.getByRole('region', { name: 'Diagnostics' });
+    expect(d.textContent).toMatch(/Boot warm-up \(D4-91\)/);
+    expect(d.textContent).not.toMatch(/D4-88/);
+    expect(d.textContent).toMatch(/3 of 9 warm/);
+    expect(d.textContent).toMatch(/next schlieren/);
+    expect(d.textContent).toMatch(/paused \(input\)/);
+    expect(d.textContent).toMatch(/given up: exploded/);
+  });
+});
+
 describe('W2A-N15 and N17', { timeout: TIMEOUT_MS }, () => {
   it('SIM STOPPED says a reload restarts it (a reset does not)', () => {
     const [a] = faultAnnunciations({
