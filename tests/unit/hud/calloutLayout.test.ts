@@ -59,6 +59,29 @@ const OFFSETS = [
 ] as const;
 
 describe('W2A-N13: the search places the most labels', () => {
+  it('W2A-N21: a label with no crossing-free place may take any crossing place, not only the first (critic 17 probe, a dense case)', () => {
+    // 5 anchors in 360 x 280, 140 x 36 labels: all five fit, but only with a label at a crossing
+    // place other than its first (the first blocks a later label)
+    const pts = [
+      [244, 143],
+      [133, 153],
+      [247, 80],
+      [66, 87],
+      [181, 93],
+    ] as const;
+    const anchors = pts.map(([x, y], i) => ({
+      id: `a${String(i)}`,
+      x,
+      y,
+      visible: true,
+      priority: pts.length - i,
+    }));
+    const got = layoutCallouts(anchors, () => ({ w: 140, h: 36 }), { w: 360, h: 280 });
+    expect(got.map((p) => p.id).sort()).toEqual(['a0', 'a1', 'a2', 'a3', 'a4']);
+    for (const p of got)
+      for (const q of got) if (p !== q) expect(overlaps(p.box, q.box, 4)).toBe(false);
+  });
+
   it('never shows fewer labels than a brute force over the same places (critic 15 probe, 400 seeded cases)', () => {
     let seed = 12345;
     const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
