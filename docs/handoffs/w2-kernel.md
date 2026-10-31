@@ -30,7 +30,7 @@ GATES @1cf2f11..5a2354d (code unchanged since d9701ad except a comment)
 - coverage, test:mesh, test:gpu, test:gpu-ladder: RUNNING detached at handoff time (`reports/scratch/k/gates.cmd`, logs `reports/scratch/k/g-*.log`, status `gates.status`); not yet reported. Re-run or read those logs before merging.
 - Already run on this branch: test:gpu-ladder `d463.test.ts` alone, PASSED at 0.02 (771c3fb; FAILED at 0.003, 2f704b4 as TDD). Unit `tests/unit/flow/gpu`, `tests/unit/spikes`, `tests/unit/lookdev`: all passed. test:browser `rotorMotion.test.ts`: the tile test passed, the warp test FAILS on W2L-I6's half-baseline ratio (0.601 against 0.6, GOTCHAS 1).
 
-ROUNDS 2-3 (D4-93's open list): items 1-4 DONE; item 5 (the gates on the merged tree) RUNNING at this hand-back
+ROUNDS 2-3 (D4-93's open list): items 1-4 DONE; item 5: the six gates pass on the merged tree @dd008d8, test:browser RUNNING at this hand-back
 The rounds above (round 1) are history. Round 2 wrote the two measurement fixes; round 3 ran them, merged main and pinned the cut.
 
 DONE
@@ -45,9 +45,11 @@ DONE
 - dd008d8: the stale comments now say the cut is merged and pinned (`tests/gpu/helpers/solver.ts`, `tests/ladder/oracle.ts`, `src/flow/gpu/params.ts`, the machCut header). SOLVER.md 15.1's coupling note records the merge and the pin.
 
 NEXT
-1. **Item 5, the gates on the merged tree @dd008d8:** test:gpu and test:gpu-ladder are RUNNING detached at this hand-back (PID 4224; `reports/scratch/k3/gates.cmd`; summary `gates.log`, logs `g-gpu.log` and `g-gpuladder.log`, status `gates.status`). Read those logs, or re-run them, and record the numbers under GATES R3 below.
+1. test:browser on the merged tree: RUNNING detached at this hand-back (PID 22640, started 04:20 with 2.84 GB free; log `reports/scratch/k3/browser.log`, status `browser.status`). Record it under GATES R3. Main's `engineView.ts` warm-up is in the merged tree, so the rotor tests run again there.
+2. The critic reviews rounds 1-3 (D4-93). Points to judge: GOTCHAS R1-R2.
+3. From round 1, still open: an official `--flow` capture in a quiet window (D0-1; Chrome holds the OS focus, D4-73), and the P1 bench under D4-73.
 
-GATES R3 @dd008d8 (main cf87af0 merged; code unchanged by 5222f9d and later, which touch only the handoff)
+GATES R3 @dd008d8 (main cf87af0 merged; the commits after it touch only the handoff), detached, one at a time (`reports/scratch/k3/gates.cmd`, logs `g-*.log`; every script exited 0, 03:58-04:20)
 - typecheck: clean.
 - lint: ESLint `--max-warnings 0` clean, Prettier clean.
 - coverage (`--coverage.reportsDirectory=reports/scratch/k3/coverage`): 123 files, 2183 passed + 11 expected fail.
@@ -55,11 +57,8 @@ GATES R3 @dd008d8 (main cf87af0 merged; code unchanged by 5222f9d and later, whi
   - Core lines: thermo 100 %, cycle 99.59 %, flow/reference 100 %, geometry 99.59 %, src/flow 99.19 %. `src/flow/coupling` has no files.
 - test:mesh: 29 passed.
 - test:gpu: 12 files, 70 passed. Same numbers as 15.3: E-L5 2.67e-8, E-L9a 2.46e-12, C-pre 5.13e-7 / 3.77e-7 / 1.05e-6, S 5.32e-7 / 4.77e-7 / 7.67e-6.
-- test:gpu-ladder: RUNNING (above).
-- test:browser: NOT YET RUN on the merged tree. Run it once, detached, with ≥ 2 GB free: `npx vitest run -c vitest.browser.config.ts --api 63391`. rotorMotion alone passed at 02cee6f, before the merge (DONE above).
-2. Then test:browser once, detached, with ≥ 2 GB free: `npx vitest run -c vitest.browser.config.ts --api 63391`. Main's `engineView.ts` warm-up is in the merged tree, so the rotor tests are checked again there.
-3. The critic reviews rounds 1-3 (D4-93). Points to judge: GOTCHAS R1-R2.
-4. From round 1, still open: an official `--flow` capture in a quiet window (D0-1; Chrome holds the OS focus, D4-73), and the P1 bench under D4-73.
+- test:gpu-ladder: 3 files, 13 passed + 1 expected fail (L9a's D4-45 steadiness, `it.fails`). Same numbers as round 1: B 1.266e-11 ≤ 2e-10 (velocity 1.954e-5); D4-63 on the GPU (a) 0.778 / 0.486 and (b) 0.491 / 0.211; L7 1.779; L8 0.754 %.
+- test:browser: RUNNING (NEXT 1). Before the merge, rotorMotion alone passed at 02cee6f (DONE above).
 
 GOTCHAS
 - R1. **What the cut-face band costs (W2L-I8), for the critic.** It is not a failure. The band leaves out 40 % of the frame in the cutaway preset and 48 % in the close-up and the control, and it held all 30 tiles the cutaway floor counted. So in the cut views the bound now judges the open wedge and the outside. It follows the preset, so it also covers the close-up, which passed without it (6.50 against 1.75 + 6). The control still shows the ghosting (13.63 against 6.50). The rule was stated before the run and is unchanged.
