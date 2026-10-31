@@ -14,9 +14,10 @@
 // rotated per repetition (D2-12), every frame of a run kept (p10/p50/p90 per pass), the
 // median of the runs, and each run marked INVALID on the occlusion signature or a hidden
 // page, a blur or a page without the OS focus at its start or end (D2-11 as amended by D3-6;
-// D4-46 for back to back; D4-73: the focus emulation is off, spikes/lib/focus.ts). The conditions (battery,
-// power plan, CPU load, Chrome, adapter) are recorded at the start and the end, and the OS
-// power source before and after every run (W2L-I4). Official only under D0-1's protocol with
+// D4-46 for back to back; D4-73: the focus emulation is off, spikes/lib/focus.ts). The
+// conditions (battery, power plan, CPU load, Chrome, adapter) are recorded at the start and
+// the end, and the OS power source before and after every run (W2L-I4). Official only under
+// D0-1's protocol with
 // the OS power source on AC throughout (a run on battery is then INVALID), nothing else running
 // and Chrome in the foreground; otherwise the numbers are indicative.
 //
