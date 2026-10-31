@@ -14,9 +14,13 @@
 // - D4-13: the similarity model runs only in a genuine sub-idle state (a start, a windmill, a
 //   shutdown). A matched solve lost above the switch (no convergence, or a non-physical root)
 //   holds the last converged gas path and says so in the state (gasPathSolve: status 'held', the
-//   lost solves counted since the reset); the shafts integrate the held power balance and every
-//   substep retries the solve from the last converged point. A failed warm-started solve is
-//   retried by continuation from that point before it counts as lost (matchedSolve.ts).
+//   lost solves counted since the reset); the shafts integrate the held power balance. A failed
+//   warm-started solve is retried by continuation from that point before it counts as lost
+//   (matchedSolve.ts). D4-84 bounds that retry per step (heldRetry.ts): the direct solve every
+//   step, the walk at most once per 0.5 s of sim time, both inside a per-step work budget, a walk
+//   resumed where the budget stopped it. The entry from the sub-idle model (a start, a relight)
+//   keeps the whole walk in one snapshot. D4-92 (W2H-B1): a held episode that lasts 0.25 s runs
+//   the whole walk once, unbudgeted, and while held the spools are bounded at their redlines.
 // - FADEC: throttle -> N1 target; one Wf/P3 ("ratio unit") integrator driven by the selected
 //   loop (max of N1 target and the N2 idle floor, then min of the N1, N2 and EGT limiters), with
 //   rate feedback for damping, clamped between decel and accel schedules built from the steady
@@ -62,6 +66,7 @@ import { hermite1 } from './componentMaps';
 import {
   referenceEngine,
   egtShunt,
+  gasPathEvaluations,
   groundIdle,
   solveGasPath,
   solveSteady,
@@ -69,6 +74,7 @@ import {
   vbvScheduleFraction,
   vsvOffsetRad,
   type EnginePoint,
+  type GasPathSolution,
   type OperatingConditions,
   type SizedEngine,
   type SteadySolution,
@@ -92,6 +98,16 @@ import {
   type CompressionSystem,
 } from './surgeSystem';
 import { P3_DETECTOR_START, feedP3, type P3DecayDetector } from './surgeDetection';
+import {
+  ESCALATE_AFTER_S,
+  HELD_RETRY_BUDGET,
+  NO_RETRY,
+  WALK_INTERVAL_S,
+  retryMatched,
+  type RetryPolicy,
+  type RetryState,
+  type StepSpend,
+} from './heldRetry';
 import { solveMatched, type GasPathAnchor, type SolveFailure } from './matchedSolve';
 import {
   DECEL_FACTOR,
@@ -178,6 +194,12 @@ export interface CycleModelOptions {
    * can lose a solve on purpose (D4-13).
    */
   readonly gasPathSolver?: typeof solveGasPath;
+  /**
+   * D4-84: the held retry's bounds (heldRetry.ts): the per-step budget (HELD_RETRY_BUDGET
+   * gas-path evaluations), the walk interval (WALK_INTERVAL_S) and the meter (gasPathEvaluations).
+   * UNBOUNDED_RETRY is D4-13's retry, the whole walk on every lost snapshot.
+   */
+  readonly heldRetry?: Partial<RetryPolicy>;
 }
 
 interface Schedules {
@@ -281,6 +303,11 @@ const surgePressureFactor = (g: GreitzerState, eq: GreitzerState) => Math.max(0.
 export interface CycleDiagnostics {
   /** Why the last matched solve was lost, null when none was lost since the reset. */
   lostSolveCause(): string | null;
+  /**
+   * Held episodes since the reset that escalated to D4-13's whole walk (D4-92 (c)): each is one
+   * unbudgeted snapshot, the exception beside P5.
+   */
+  heldRetryEscalations(): number;
 }
 
 class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
@@ -352,6 +379,17 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
   private lostCause: string | null = null;
   /** True while the gas path is held: a held episode is logged once, at its first lost solve. */
   private holding = false;
+  /** D4-92 (c): sim time the held episode began, whether it has escalated, escalations so far. */
+  private heldSinceS = 0;
+  private escalated = false;
+  private escalations = 0;
+  /** True after a sub-idle snapshot: the next matched solve is the entry (a start, a relight). */
+  private entering = false;
+  /** D4-84: the held retry's bounds, what it carries between snapshots, and this step's spend. */
+  private readonly retryPolicy: RetryPolicy;
+  private readonly escalateAfterS: number;
+  private retry: RetryState = NO_RETRY;
+  private spend: StepSpend = { spent: 0 };
   private inputs: CycleInputs = DEFAULT_CYCLE_INPUTS;
 
   constructor(definition: EngineDefinition, opts: CycleModelOptions) {
@@ -364,6 +402,20 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
     }
     this.surgeSystem = compressionSystem(definition);
     this.solveGas = opts.gasPathSolver ?? solveGasPath;
+    this.retryPolicy = {
+      budget: opts.heldRetry?.budget ?? HELD_RETRY_BUDGET,
+      walkIntervalS: opts.heldRetry?.walkIntervalS ?? WALK_INTERVAL_S,
+      meter: opts.heldRetry?.meter ?? gasPathEvaluations,
+    };
+    this.escalateAfterS = opts.heldRetry?.escalateAfterS ?? ESCALATE_AFTER_S;
+    if (!(this.retryPolicy.budget > 0)) {
+      throw new Error(`heldRetry.budget ${this.retryPolicy.budget} must be above 0`);
+    }
+    if (!(this.retryPolicy.walkIntervalS >= 0)) {
+      throw new Error(
+        `heldRetry.walkIntervalS ${this.retryPolicy.walkIntervalS} must be at least 0`,
+      );
+    }
   }
 
   reset(initial: CycleInitialCondition, ambient: AmbientConditions = ISA_SLS): CycleState {
@@ -423,6 +475,10 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
     this.lostSolves = 0;
     this.lostCause = null;
     this.holding = false;
+    this.entering = false;
+    this.escalations = 0;
+    this.retry = NO_RETRY;
+    this.spend = { spent: 0 };
     // the steady idle point is a converged gas path at the ambient (a start replaces it with the
     // sub-idle model's before the matched model is ever tried)
     this.held = this.fromPoint(idle.point);
@@ -442,6 +498,10 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
     return this.lostCause;
   }
 
+  heldRetryEscalations(): number {
+    return this.escalations;
+  }
+
   step(dtS: number, inputs: CycleInputs): CycleState {
     const problems = validateCycleInputs(inputs);
     if (problems.length > 0) throw new Error(`invalid cycle inputs: ${problems.join('; ')}`);
@@ -450,6 +510,8 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
       this.sched = buildSchedules(this.e, inputs.ambient);
     }
     this.inputs = inputs;
+    // D4-84: the held retry's budget is per step (the app steps once a frame)
+    this.spend = { spent: 0 };
     const n = Math.ceil(dtS / DT_INTERNAL - 1e-9);
     let snap = this.snapshot(inputs);
     for (let i = 0; i < n; i++) snap = this.substep(dtS / n, inputs, snap);
@@ -474,11 +536,16 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
       this.lit = false;
       this.flags = { ...this.flags, flameout: true };
       this.fuelOnTime = this.t;
-    } else if (this.pending === 'surge' && this.pct2() >= SUBIDLE_N2_PERCENT) {
-      // below the sub-idle speed the HPC is not pressurised: nothing to surge, the fault is dropped
+    }
+    // W2H-I3: a surge starts only from a solved gas path. A held snapshot is the last converged
+    // point's, not the state's, so an injected surge waits for the solve to recover (D4-92 (b)
+    // bounds that at 0.5 s). Below the sub-idle speed the HPC is not pressurised: nothing to surge,
+    // the fault is dropped.
+    const surgeWaits = this.pending === 'surge' && prev.solve === 'held';
+    if (this.pending === 'surge' && !surgeWaits && this.pct2() >= SUBIDLE_N2_PERCENT) {
       this.startSurge(prev, true);
     }
-    this.pending = null;
+    this.pending = surgeWaits ? 'surge' : null;
     const n2p = this.pct2();
     const idleN2 = cal.groundIdleN2Percent;
     const egt = prev.stations['49.5'].ttK + egtShunt(this.definition, this.n2);
@@ -652,6 +719,16 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
     const n2Old = this.pct2();
     this.n1 = Math.max(0, this.n1 + (a1 * dt * 60) / (2 * Math.PI));
     this.n2 = Math.max(0, this.n2 + (a2 * dt * 60) / (2 * Math.PI));
+    if (snap.solve === 'held') {
+      // D4-92 (a), W2H-B1/I1: held, the spools still follow the held power balance (D4-17), but
+      // never past their redlines. That balance is the last converged point's, not the state's, so
+      // integrating it without limit invents an acceleration no gas path supports (N1 168-275 %).
+      // Not frozen: the state a solve is lost at can have no reachable root (a relight's entry at
+      // N1 32 %, N2 80 % holds 12 s with the spools frozen, at every frame step), and it is the
+      // spools moving on that lets the retry find one, as D4-13's does within 0.15 s.
+      this.n1 = Math.min(this.n1, lim.n1MaxRpm);
+      this.n2 = Math.min(this.n2, lim.n2MaxRpm);
+    }
     this.dn1 = (this.pct1() - n1Old) / dt;
     this.dn2 = (this.pct2() - n2Old) / dt;
     this.t += dt;
@@ -667,6 +744,7 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
     // surge: beyond the surge line in the matched regime
     if (
       this.surge === null &&
+      snap.solve !== 'held' &&
       snap.hpc.surgeMarginFraction < 0 &&
       this.pct2() >= SUBIDLE_N2_PERCENT
     ) {
@@ -791,15 +869,18 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
       ? { ...conditionsOf(inp), vbvFraction: this.e.calibration.vbv.maxFraction }
       : conditionsOf(inp);
     if (!(this.lit && this.pct2() >= SUBIDLE_N2_PERCENT && this.wf > 0)) {
-      // a genuine sub-idle state: a start, a windmill, a shutdown. It ends a held episode, so
-      // the next loss above sub-idle is logged as a new one (W2A-N6)
-      this.holding = false;
+      // a genuine sub-idle state: a start, a windmill, a shutdown. A held episode ends here
+      // (W2A-N6), and so does its walk.
       this.held = this.subIdle(c);
+      this.holding = false;
+      this.entering = true;
+      this.retry = NO_RETRY;
       return this.held;
     }
     // converged on a physical root, directly or by continuation from the last converged point
     const why: SolveFailure = { cause: null };
-    const s = solveMatched(this.solveGas, this.e, c, this.anchor, this.n1, this.n2, this.wf, why);
+    const s = this.entering ? this.enter(c, why) : this.retried(c, why);
+    this.entering = false;
     if (s !== null) {
       this.holding = false;
       this.anchor = { n1Rpm: this.n1, n2Rpm: this.n2, wfKgPerS: this.wf, x: s.x };
@@ -807,17 +888,62 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
       return this.held;
     }
     // D4-13: lost; never the similarity model above the switch. The next try starts from the
-    // last converged point again (the anchor does not move).
+    // last converged point again (the anchor moves only to a converged point).
     this.lostSolves++;
-    this.lostCause = why.cause ?? 'no attempt was made';
+    this.lostCause = why.cause ?? this.lostCause ?? 'no solve fitted in the held-retry budget';
     if (!this.holding) {
       // W2F-I1: once per held episode, with its cause (the app's diagnostics show it too)
       console.warn(
         `[cycle] matched gas-path solve lost at N2 ${this.pct2().toFixed(1)} %: ${this.lostCause}`,
       );
       this.holding = true;
+      this.heldSinceS = this.t;
+      this.escalated = false;
     }
     return { ...this.held, solve: 'held' };
+  }
+
+  /**
+   * The entry from the sub-idle model (a start, a relight): the anchor is the last matched point
+   * before it (a start's is the reset's idle point), often far from the state, and D4-13's whole walk
+   * runs in this one snapshot. It is not a held retry, so D4-84 does not budget it.
+   */
+  private enter(c: OperatingConditions, why: SolveFailure): GasPathSolution | null {
+    this.retry = NO_RETRY;
+    return solveMatched(this.solveGas, this.e, c, this.anchor, this.n1, this.n2, this.wf, why);
+  }
+
+  /** D4-84: the matched solve, its retry bounded by the step's budget (heldRetry.ts). */
+  private retried(c: OperatingConditions, why: SolveFailure): GasPathSolution | null {
+    if (this.holding && !this.escalated && this.t - this.heldSinceS >= this.escalateAfterS) {
+      // D4-92 (c): once per episode, D4-13's whole walk from the anchor, unbudgeted. It counts as a
+      // walk start, so the bounded retry's next walk waits its interval from here.
+      this.escalated = true;
+      this.escalations++;
+      this.retry = { walk: null, walkStartedS: this.t };
+      return solveMatched(this.solveGas, this.e, c, this.anchor, this.n1, this.n2, this.wf, why);
+    }
+    const r = retryMatched({
+      solve: this.solveGas,
+      e: this.e,
+      c,
+      anchor: this.anchor,
+      target: { n1Rpm: this.n1, n2Rpm: this.n2, wfKgPerS: this.wf },
+      tS: this.t,
+      holding: this.holding,
+      policy: this.retryPolicy,
+      spend: this.spend,
+      state: this.retry,
+      why,
+    });
+    this.retry = r.state;
+    if (r.kind === 'matched') return r.solution;
+    if (r.reached !== null) {
+      // a walk converged on the state it set out for: the freshest converged gas path to hold
+      this.anchor = r.reached.anchor;
+      this.held = this.fromPoint(r.reached.solution.point);
+    }
+    return null;
   }
 
   /** The HPC margin against the surge line lowered by hpcSurgeMarginLoss: (1 + m)(1 - loss) - 1. */

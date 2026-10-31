@@ -1062,6 +1062,19 @@ const tiesOf = (e: SizedEngine): DesignTies => ({
   areas: { core: e.design.coreNozzleAreaM2, bypass: e.design.bypassNozzleAreaM2 },
 });
 
+/** Gas-path evaluations so far (in this realm); see gasPathEvaluations. */
+let evaluations = 0;
+
+/**
+ * D4-84: how many times the gas path has been evaluated so far. The held retry meters its per-step
+ * work with it: a deterministic count, so the model stays free of the wall clock, and close to the
+ * CPU time, since the evaluation dominates a solve (6 finite differences and the line search per
+ * Newton iteration). Read it as a difference.
+ */
+export function gasPathEvaluations(): number {
+  return evaluations;
+}
+
 /** One evaluation of the gas path at given speeds, fuel flow and the six gas unknowns. */
 export function evaluateGasPath(
   e: SizedEngine,
@@ -1072,6 +1085,7 @@ export function evaluateGasPath(
   x: readonly number[],
   lit = true,
 ): EnginePoint {
+  evaluations++;
   return gasPath(e.maps, tiesOf(e), e.calibration, c, { n1Rpm, n2Rpm, wf, lit, x });
 }
 
@@ -1088,6 +1102,16 @@ export interface GasPathSolution {
   readonly iterations: number;
   readonly converged: boolean;
   readonly maxResidual: number;
+  /** D4-84: stopped by its control between Newton iterations, to be resumed from x. */
+  readonly stopped?: boolean;
+}
+
+/** D4-84: how a budgeted caller drives one gas-path solve. */
+export interface SolveControl {
+  /** Asked before each Newton iteration; true stops the solve there. */
+  readonly stop?: () => boolean;
+  /** The iteration limit (default C7's MAX_NEWTON_ITERATIONS); a resumed solve gets what is left. */
+  readonly maxIterations?: number;
 }
 
 /** Solves the six gas-path residuals at given speeds and fuel flow (the transient's inner loop). */
@@ -1099,14 +1123,16 @@ export function solveGasPath(
   wf: number,
   guess: readonly number[],
   lit = true,
+  control: SolveControl = {},
 ): GasPathSolution {
   const r = newton(
     (x) => [...evaluateGasPath(e, c, n1Rpm, n2Rpm, wf, x, lit).residuals],
     guess.slice(0, 6),
     {
       tolerance: MATCH_TOLERANCE,
-      maxIterations: MAX_NEWTON_ITERATIONS,
+      maxIterations: control.maxIterations ?? MAX_NEWTON_ITERATIONS,
       maxStep: MAX_STEP.slice(0, 6),
+      stop: control.stop,
     },
   );
   return {
@@ -1115,6 +1141,7 @@ export function solveGasPath(
     iterations: r.iterations,
     converged: r.converged,
     maxResidual: r.maxResidual,
+    stopped: r.stopped,
   };
 }
 

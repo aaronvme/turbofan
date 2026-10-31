@@ -424,6 +424,45 @@ export const THRESHOLDS = {
       reportedTargetMs: pass(10, 'ms', '≤ 10 ms'),
     },
   },
+  // D4-90 (flagged contract addition): D4-84's held-frame bar, gated in Node in the held retry's
+  // own deterministic unit (gas-path evaluations); the browser's wall time is a record
+  P5: {
+    id: 'P5',
+    section: '3.4',
+    checkText:
+      "Held gas-path frame (D4-84, D4-90): the W1K-I2 part-power fit's 1 s lever ramp from ground idle (the W2F-N5 case), stepped at 60 Hz, with the matched gas-path solve held",
+    passText:
+      "Gated in Node, deterministic: every step that starts held costs ≤ 137 gas-path evaluations (the retry budget plus one Newton iteration), and every step ≤ 217 (plus one converged direct solve). The browser's held-frame wall time, ≤ 16.7 ms, is recorded beside it and counts only in an official run under D0-1, like P1 and P4.",
+    targetsFrom: 'PHYSICS',
+    values: {
+      leverRampS: check(1, 's', '1 s'),
+      stepRateHz: check(60, 'Hz', '60 Hz'),
+      maxHeldStepEvaluations: pass(137, 'evaluations', '≤ 137'),
+      maxStepEvaluations: pass(217, 'evaluations', '≤ 217'),
+      heldFrameMs: pass(16.7, 'ms', '≤ 16.7 ms'),
+    },
+  },
+  // D4-94 (flagged contract addition): D4-92 (b)'s recovery bound, written as a test row before the
+  // round-2 fix, made a P5 row
+  P5b: {
+    id: 'P5b',
+    section: '3.4',
+    checkText:
+      "Held gas-path recovery (D4-92 (b), D4-94): the default reference model in critic pass 15's scenario, ISA SLS from ground idle with take-off at 3 s, an injected surge at 10 s and a flameout at 20 s with the auto relight, run for 35 s, at every frame step from 1/120 to 1/30 s (120 Hz to 30 Hz; sampled at 1/120, 1/60, 0.020, 0.0205, 0.021, 0.025 and 1/30 s)",
+    passText:
+      "Gated in Node, deterministic: every held episode (a run of consecutive held steps, its length the steps times the frame step) lasts ≤ 0.5 s of sim time, and N1 stays at or below its redline (ENGINE_FACTS n1MaxRpm) while held. The recorded exception beside P5, like the sub-idle entry: an episode held for 0.25 s escalates once to D4-13's whole walk in one snapshot, unbudgeted (3,100-4,400 gas-path evaluations, 50-240 ms in Node), outside P5's per-step bars.",
+    targetsFrom: 'PHYSICS',
+    values: {
+      takeoffAtS: check(3, 's', 'take-off at 3 s'),
+      surgeAtS: check(10, 's', 'surge at 10 s'),
+      flameoutAtS: check(20, 's', 'flameout at 20 s'),
+      scenarioS: check(35, 's', '35 s'),
+      maxStepRateHz: check(120, 'Hz', '120 Hz'),
+      minStepRateHz: check(30, 'Hz', '30 Hz'),
+      maxHeldEpisodeS: pass(0.5, 's', '≤ 0.5 s'),
+      escalateAfterS: pass(0.25, 's', 'held for 0.25 s'),
+    },
+  },
 } as const satisfies Record<string, ThresholdSpec>;
 
 export type ThresholdId = keyof typeof THRESHOLDS;

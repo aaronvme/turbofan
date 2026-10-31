@@ -15,7 +15,7 @@ const inputs: CycleInputs = {
   throttleLever: 1,
 };
 
-type Loss = 'none' | 'diverged' | 'nonPhysical' | 'typeError';
+type Loss = 'none' | 'diverged' | 'nonPhysical' | 'coolingBooster' | 'typeError';
 
 function model() {
   const ctl: { lose: Loss } = { lose: 'none' };
@@ -24,6 +24,13 @@ function model() {
     const s = solveGasPath(...args);
     if (ctl.lose === 'diverged') return { ...s, converged: false, maxResidual: 1e-3 };
     if (ctl.lose === 'nonPhysical') return { ...s, x: s.x.map((v, i) => (i === 1 ? 0.5 : v)) };
+    if (ctl.lose === 'coolingBooster') {
+      // D4-94: W2H-B1's branch, the booster exit 61 K below the engine inlet
+      const st = s.point.stations;
+      const cold = { ...st['25'], ttK: st['2'].ttK - 61 };
+      const stations = { ...st, '24': { ...st['24'], ttK: cold.ttK }, '25': cold };
+      return { ...s, point: { ...s.point, stations } };
+    }
     return s;
   };
   const m = createCycleModel({ gasPathSolver: solver });
@@ -49,6 +56,11 @@ describe('W2F-I1: the lost-solve cause', { timeout: 120_000 }, () => {
     m.step(0.1, inputs);
     m.step(0.1, inputs);
     expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\[cycle\] matched gas-path solve lost at N2 \d+\.\d %: TypeError: cannot read/,
+      ),
+    );
     warn.mockRestore();
   });
 
@@ -72,6 +84,37 @@ describe('W2F-I1: the lost-solve cause', { timeout: 120_000 }, () => {
     b.ctl.lose = 'none';
     b.m.reset('groundIdle', ISA_SLS);
     expect(b.m.lostSolveCause()).toBeNull();
+    warn.mockRestore();
+  });
+
+  it('D4-94: a root on which the booster cools the flow is held, with its cause named', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { m, ctl } = model();
+    ctl.lose = 'coolingBooster';
+    const s = m.step(0.1, inputs);
+    expect(s.gasPathSolve.status).toBe('held');
+    expect(m.lostSolveCause()).toMatch(/^non-physical root \(booster total-temperature rise -\d/);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it('W2A-N6: a held episode ends in the sub-idle model, so the relight holding again logs again', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { m, ctl } = model();
+    ctl.lose = 'diverged';
+    expect(m.step(0.1, inputs).gasPathSolve.status).toBe('held');
+    expect(warn).toHaveBeenCalledTimes(1);
+    // a flameout while held: unlit, the sub-idle model; the auto igniters relight it after 3 s
+    m.injectFault('flameout');
+    const idle = { ...inputs, throttleLever: 0 };
+    let s = m.step(0.1, idle);
+    for (let k = 0; k < 150 && s.gasPathSolve.status !== 'subIdle'; k++) s = m.step(0.1, idle);
+    expect(s.gasPathSolve.status).toBe('subIdle');
+    for (let k = 0; k < 150 && s.gasPathSolve.status !== 'held'; k++) s = m.step(0.1, idle);
+    // lit again above the switch, its first matched solve lost: a new held episode, logged
+    expect(s.combustorLit).toBe(true);
+    expect(s.gasPathSolve.status).toBe('held');
+    expect(warn).toHaveBeenCalledTimes(2);
     warn.mockRestore();
   });
 

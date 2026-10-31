@@ -1,6 +1,6 @@
 # Mutation scores (D3-13)
 
-Stryker 10.1.1, vitest runner, `coverageAnalysis: perTest`, `ignoreStatic: true`, concurrency 6, the runner's default `related` test selection. The base test set is `vitest.mutation.config.ts`: the fast core suites without the slow whole-engine transient files (`model.test.ts`, `modelPaths.test.ts`, `surgeRecovery.test.ts`). A targeted run narrows it with `MUTATION_TESTS` (comma-separated globs; the config reads it), and each row below names its set. A score measured on a narrow set is a lower bound for the full fast set. Every run was in the foreground and under 10 min.
+Stryker 10.1.1, vitest runner, `coverageAnalysis: perTest`, `ignoreStatic: true`, concurrency 6, the runner's default `related` test selection. The base test set is `vitest.mutation.config.ts`: the fast core suites without the slow whole-engine transient files (`model.test.ts`, `modelPaths.test.ts`, `surgeRecovery.test.ts`, and since D4-84 `heldFrame.test.ts`). A targeted run narrows it with `MUTATION_TESTS` (comma-separated globs; the config reads it), and each row below names its set. A score measured on a narrow set is a lower bound for the full fast set. Every run was in the foreground and under 10 min.
 
 Columns:
 - **killed**: a test failed.
@@ -70,3 +70,37 @@ The targeted sets made these runs fast (gas 12 s, engine 83 s): with the base se
 - **engine.ts (108 survived, 9 no cov).** The part-power loss terms (36) and the part-speed ramp (5) are checked by partPower.test.ts, c10.test.ts and c11.test.ts, which are not in this targeted set. The sizing's design-point evaluation and the map scale factors (32) and the sizing loop (7) are absorbed by the sizing itself, which re-solves the design point to its targets, and the residual normalisations (3, plus 4 in the steady specs) only scale a residual whose root does not move. The nozzle's sonic-throat Newton (9): it converges either way, and the general path gives the same zero-flow state at pt = p_amb. tsfc's `fn > 0` (2): no matched point has a non-positive thrust. groundIdle's path specs (4): the IDLE_PATH continuation reaches the same idle from a different start. The no-cov mutants are `solveGasPath` (8), which only the transient's tests call (matchedSolve, gasPathHold), and one error string.
 - **model.ts (349 survived, 187 no cov).** By region (survived / no cov): the start sequence 126 / 43, the sub-idle similarity model 55 / 0, compose 36 / 17, the surge episode 31 / 66, the shaft dynamics and start supervision 32 / 8, the fuel loops 30 / 1, surgeAt 0 / 22, the recovery 2 / 16, reset and the schedules 15 / 9, the rest 24 / 5. The fast tests run the model only in the D4-13 cases (a slam's first 2 s, a dry crank, an idle flameout and a fuel cutoff); the start, the surge and the recovery are checked by the slow transient files. The 145 timeouts are mostly mutants that make a run loop or the continuation walk longer. The next cheap step: factor the sub-idle model (a pure function of the idle anchor) and the start sequence's state machine out of the class, as was done for the FADEC laws.
 - **boundedLeastSquares.ts, partPower.ts:** not re-run this round; see the 2026-10-26 notes in the git history of this file (shape guards and fallbacks the callers never reach; the forward-difference direction at the upper bound; partPower's residual normalisations).
+
+## cycle-hold round 3 (2026-10-31, w2/cycle-hold be61d28): the held retry's targeted run
+
+`reports/cycle-hold/mutate.cmd`, concurrency 3, the branch's ranges over rounds 1-3: `heldRetry.ts`, `matchedSolve.ts`, `newton.ts:86-96`, `engine.ts:1066-1090,1118-1146`, `surgeSystem.ts:137-178` (hpcCubic and its D4-94 guard), and `model.ts:395-419,540-548,722-752,867-947`. Test set (`MUTATION_TESTS`): heldRetry, heldModel, matchedSolve, numerics, gasPathHold, lostSolveCause and surge. The slow heldFrame and heldRecovery stay out (`vitest.mutation.config.ts` excludes them, and with per-test coverage nearly every mutant here would run them, hours at concurrency 3). The hand mutants in `reports/cycle-hold/mutants3.sh` stand in for them: 15 of 16 are killed by the fast set, and B3 (the sub-idle entry through the budgeted retry) is killed by heldFrame.
+
+| File | Mutants | Killed | Timeout | Survived | No cov | Score |
+|---|---|---|---|---|---|---|
+| heldRetry.ts | 97 | 94 | 0 | 3 | 0 | 96.9 % |
+| matchedSolve.ts | 157 | 148 | 2 | 7 | 0 | 95.5 % |
+| surgeSystem.ts (137-178) | 48 | 45 | 0 | 3 | 0 | 93.8 % |
+| newton.ts (86-96) | 23 | 21 | 0 | 2 | 0 | 91.3 % |
+| engine.ts (two ranges) | 14 | 12 | 0 | 2 | 0 | 85.7 % |
+| model.ts (four ranges) | 205 | 147 | 0 | 50 | 8 | 71.7 % |
+| **total (544; 3 ignored)** | | **467** | **2** | **67** | **8** | **86.2 %** (87.5 % of covered) |
+
+Before the round's survivor tests (be61d28) the same run gave 445 / 2 / 84 / 13, 82.2 %.
+
+The survivors:
+- **Equivalent, or a boundary of measure zero (17):**
+  - `heldRetry.ts` 156 `<=`: a direct solve started with its cap already reached stops before its first iteration. 172 (both): `advanceWalk`'s own check before a solve pauses at once.
+  - `matchedSolve.ts` 138, 201 (3) and 203 (2): a control of `{ stop: undefined }` is no control, and `maxIterations` of 25 − 0 is the default. 251: a default `why` of `{}` reads the same as `{ cause: null }`.
+  - `surgeSystem.ts` 170 `>=`: H exactly 0.
+  - `engine.ts` 1130/1134, `newton.ts` 89/95: as in round 1.
+- **Outside the round's code, inside its line ranges:**
+  - `surgeSystem.ts` 158/165: the least-squares lines, which no fast test reaches off the shut-off bound.
+  - `model.ts` 732-742: the shaft rates and the start supervision, about 35 survivors, which only the slow start tests reach.
+  - `model.ts` 545/746/748/749/751: the pre-existing parts of the surge-start conditions (the N2 boundary, a surge already running, the forced flag).
+  - `model.ts` 869/871: the recovery's VBV and the sub-idle switch.
+- **The round's own code:**
+  - `model.ts` 722 (the clamp also on matched snapshots): equivalent on every tested path, since the FADEC keeps a matched N1 under the redline.
+  - 876: B3, killed by heldFrame.
+  - 881: equivalent.
+  - 893: the fallback cause, reached only by a reset's first lost snapshot with no attempt left.
+  - 918 `>`: the 0.25 s boundary.

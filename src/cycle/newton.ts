@@ -2,6 +2,10 @@
 // Steps are capped per unknown (maxStep, in the unknown's own units) and backtracked by halving
 // while the residual 2-norm does not fall; a residual function that throws (a thermo state out of
 // range) counts as an infinite residual during the line search.
+//
+// D4-84: an optional stop, asked before each iteration, ends the solve there (stopped, not
+// converged). Between iterations the state is only x, so a solve resumed from the returned x with
+// the iterations left takes the same iterates as one never stopped.
 
 export interface NewtonOptions {
   /** Converged when max |residual| is below this. */
@@ -11,6 +15,8 @@ export interface NewtonOptions {
   readonly maxStep: readonly number[];
   /** Relative finite-difference step (default 1e-7, about sqrt of the residual noise). */
   readonly fdStep?: number;
+  /** Asked before each iteration; true stops the solve there (D4-84: a per-step work budget). */
+  readonly stop?: () => boolean;
 }
 
 export interface NewtonResult {
@@ -19,6 +25,8 @@ export interface NewtonResult {
   readonly maxResidual: number;
   readonly iterations: number;
   readonly converged: boolean;
+  /** True when `stop` ended the solve before it converged or ran out of iterations. */
+  readonly stopped: boolean;
 }
 
 import { at } from './at';
@@ -77,7 +85,12 @@ export function newton(
   let x = [...x0];
   let r = f(x);
   let iterations = 0;
+  let stopped = false;
   while (maxAbs(r) >= opts.tolerance && iterations < opts.maxIterations) {
+    if (opts.stop?.() === true) {
+      stopped = true;
+      break;
+    }
     iterations++;
     const jac: number[][] = r.map(() => []);
     for (let j = 0; j < x.length; j++) {
@@ -118,5 +131,12 @@ export function newton(
     r = accepted.r;
   }
   const maxResidual = maxAbs(r);
-  return { x, residual: r, maxResidual, iterations, converged: maxResidual < opts.tolerance };
+  return {
+    x,
+    residual: r,
+    maxResidual,
+    iterations,
+    converged: maxResidual < opts.tolerance,
+    stopped,
+  };
 }

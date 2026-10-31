@@ -183,8 +183,12 @@ describe('D3-17 / C12: a lowered HPC surge line (Delta PRS, SAE ARP1420)', () =>
     const worn = createCycleModel({ hpcSurgeMarginLoss: loss }).reset('groundIdle', ISA_SLS).hpc
       .surgeMarginFraction;
     expect(worn).toBeCloseTo((1 + clean) * (1 - loss) - 1, 12);
-    expect(() => createCycleModel({ hpcSurgeMarginLoss: -0.01 })).toThrow();
-    expect(() => createCycleModel({ hpcSurgeMarginLoss: 1 })).toThrow();
+    expect(() => createCycleModel({ hpcSurgeMarginLoss: -0.01 })).toThrow(
+      /hpcSurgeMarginLoss -0.01 must be in \[0, 1\)/,
+    );
+    expect(() => createCycleModel({ hpcSurgeMarginLoss: 1 })).toThrow(
+      /hpcSurgeMarginLoss 1 must be/,
+    );
   });
 });
 
@@ -269,6 +273,27 @@ describe('the compression-system pieces, checked independently (D3-13 mutation s
       expect(fit.rms).toBeCloseTo(Math.sqrt(sq / line.length), 12);
       expect(fit.rms).toBeGreaterThan(0);
     }
+  });
+
+  it('D4-94: hpcCubic rejects a speed line whose cubic has H <= 0, by name, instead of integrating it', () => {
+    // Above the map's top speed line the extrapolated line's pressure rises with flow, so the least
+    // squares put the shut-off head above the peak (at 1.22, W2H-I3's ISA+30 point: psi0 2.9e4,
+    // H -1.5e4). A Greitzer episode on that cubic integrated to a NaN P3.
+    const sys = compressionSystem(def);
+    const p = REF.design.point;
+    const inlet = {
+      pt25Pa: p.stations['25'].ptPa,
+      tt25K: p.stations['25'].ttK,
+      n2Rpm: p.n2Rpm,
+      rJPerKgK: gasConstant(0),
+    };
+    for (const nc of [1.2, 1.22, 1.25]) {
+      expect(() => hpcCubic(REF.maps.hpc, nc, sys, inlet)).toThrow(RangeError);
+      expect(() => hpcCubic(REF.maps.hpc, nc, sys, inlet)).toThrow(
+        new RegExp(`^HPC cubic at corrected speed ${nc}: H -[0-9.e+]+ must be > 0 `),
+      );
+    }
+    expect(hpcCubic(REF.maps.hpc, 1.15, sys, inlet).h).toBeGreaterThan(0);
   });
 
   it('engineGreitzerParams: the equilibrium is at the requested flow, with B passed through', () => {
