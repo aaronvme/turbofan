@@ -1,0 +1,92 @@
+// Critic pass 17, w2/app-ui rounds 4-5 (W2A-N13's prune and the round-5 panel rule): is
+// layoutCallouts exact, i.e. does it return the best layout by its own objective (the shown labels
+// compared by priority rank, a higher one shown outranking any lower ones, then the fewest leader
+// crossings) over the same candidate places? An exhaustive search over every candidate place
+// (collisions pruned only), on random cases, against the module.
+//   ROOT=<checkout> CALLOUTS=<callouts.ts> CASES=3000 [BIG=1 | N=5 VPW=360 VPH=280] node --import ./tools/mesh/ts-resolve.mjs <this file>
+// CALLOUTS may point at a copy with SEARCH_NODES lifted, to tell the node budget from the search.
+import { pathToFileURL } from 'node:url';
+const ROOT = process.env.ROOT ?? '.';
+const mod = await import(pathToFileURL(process.env.CALLOUTS ?? `${ROOT}/src/hud/callouts.ts`).href);
+const { layoutCallouts, overlaps, leaderCrossings, leaderEnd } = mod;
+type R = { x: number; y: number; w: number; h: number };
+type P = { x: number; y: number };
+const OFFSETS = [[18,-34],[18,14],[-18,-34],[-18,14],[40,-62],[-40,-62],[40,42],[-40,42],[70,-10],[-70,-10],[60,-96],[-60,-96],[60,76],[-60,76],[110,-40],[-110,-40],[110,20],[-110,20]];
+const GAP = 4;
+const sgn = (p: P, q: P, r: P) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
+const cross = (a: P, b: P, c: P, d: P) => sgn(a, b, c) * sgn(a, b, d) < 0 && sgn(c, d, a) * sgn(c, d, b) < 0;
+const crossBox = (a: P, b: P, r: R) => {
+  const c = [{ x: r.x, y: r.y }, { x: r.x + r.w, y: r.y }, { x: r.x + r.w, y: r.y + r.h }, { x: r.x, y: r.y + r.h }];
+  return c.some((p, i) => cross(a, b, p, c[(i + 1) % 4]!));
+};
+const tangled = (pa: P, pb: R, qa: P, qb: R) => {
+  const pe = leaderEnd(pa, pb); const qe = leaderEnd(qa, qb);
+  return cross(pa, pe, qa, qe) || crossBox(pa, pe, qb) || crossBox(qa, qe, pb);
+};
+let seed = Number(process.env.SEED ?? 4242);
+const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+const cases = Number(process.env.CASES ?? 3000);
+const big = process.env.BIG === '1';
+let short = 0, moreCross = 0, underPanel = 0, maxNodesCase = 0;
+let example: unknown = null;
+let exampleShort: unknown = null;
+for (let c = 0; c < cases; c++) {
+  // small: 3-5 anchors, 140 x 36 labels in 420 x 300 (pass 15's probe, one more anchor);
+  // BIG: 6 anchors in a 900 x 520 view with a side panel, 128 x 34 labels (the app's scale)
+  const n = process.env.N ? Number(process.env.N) : big ? 6 : 3 + Math.floor(rnd() * 3);
+  const vp = process.env.VPW ? { w: Number(process.env.VPW), h: Number(process.env.VPH) } : big ? { w: 900, h: 520 } : { w: 420, h: 300 };
+  const size = big ? { w: 128, h: 34 } : { w: 140, h: 36 };
+  const reserved: R[] = big ? [{ x: 0, y: 0, w: 900, h: 40 }, { x: 680, y: 40, w: 220, h: 400 }] : [];
+  const anchors = Array.from({ length: n }, (_, i) => ({
+    id: `a${i}`,
+    x: big ? 120 + rnd() * 640 : 60 + rnd() * 300,
+    y: big ? 120 + rnd() * 300 : 40 + rnd() * 220,
+    visible: true,
+    priority: n - i,
+  }));
+  const got = layoutCallouts(anchors, () => size, vp, reserved);
+  for (const p of got) if (reserved.some((r) => p.anchor.x >= r.x && p.anchor.x <= r.x + r.w && p.anchor.y >= r.y && p.anchor.y <= r.y + r.h)) underPanel++;
+  const callable = anchors.filter((a) => !reserved.some((r) => a.x >= r.x && a.x <= r.x + r.w && a.y >= r.y && a.y <= r.y + r.h));
+  const order = [...callable].sort((a, b) => b.priority - a.priority || (a.id < b.id ? -1 : 1));
+  const cand = order.map((a) => {
+    const out: R[] = [];
+    for (const [dx, dy] of OFFSETS) {
+      const box = { x: dx >= 0 ? a.x + dx : a.x + dx - size.w, y: a.y + dy, ...size };
+      const on = box.x >= 0 && box.y >= 0 && box.x + size.w <= vp.w && box.y + size.h <= vp.h;
+      const cov = order.some((o) => o !== a && overlaps(box, { x: o.x - 3, y: o.y - 3, w: 6, h: 6 }));
+      if (on && !cov && !reserved.some((t) => overlaps(box, t, GAP))) out.push(box);
+    }
+    return out;
+  });
+  let best: { s: boolean[]; x: number } | null = null;
+  const better = (s: boolean[], x: number) => {
+    if (best === null) return true;
+    for (let k = 0; k < s.length; k++) if (s[k] !== best.s[k]) return s[k];
+    return x < best.x;
+  };
+  const placed: { a: P; b: R }[] = [];
+  const shown: boolean[] = [];
+  const dfs = (i: number, x: number) => {
+    if (i === order.length) { if (better(shown, x)) best = { s: [...shown], x }; return; }
+    const a = order[i]!;
+    for (const b of cand[i] ?? []) {
+      if (placed.some((p) => overlaps(p.b, b, GAP))) continue;
+      const t = placed.filter((p) => tangled(a, b, p.a, p.b)).length;
+      placed.push({ a, b }); shown.push(true); dfs(i + 1, x + t); shown.pop(); placed.pop();
+    }
+    shown.push(false); dfs(i + 1, x); shown.pop();
+  };
+  dfs(0, 0);
+  const gotShown = order.map((a) => got.some((p: { id: string }) => p.id === a.id));
+  const gotX = leaderCrossings(got);
+  const b = best as { s: boolean[]; x: number } | null;
+  if (b === null) continue;
+  const sameShown = JSON.stringify(gotShown) === JSON.stringify(b.s);
+  if (!sameShown) { short++; exampleShort ??= { anchors: anchors.map((a) => [a.id, Math.round(a.x), Math.round(a.y)]), got: gotShown, gotX, best: b.s, bestX: b.x }; }
+  else if (gotX > b.x) moreCross++;
+  if ((!sameShown || gotX > b.x) && example === null)
+    example = { anchors: anchors.map((a) => [a.id, Math.round(a.x), Math.round(a.y)]), got: gotShown, gotX, best: b.s, bestX: b.x };
+}
+console.log(`cases ${cases}${big ? ' (BIG)' : ''}: shows fewer (by priority) than the best ${short}; same labels, more crossings ${moreCross}; a placed label's anchor under a panel ${underPanel}`);
+if (example !== null) console.log('first:', JSON.stringify(example));
+if (exampleShort !== null) console.log('first short:', JSON.stringify(exampleShort));

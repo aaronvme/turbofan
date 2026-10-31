@@ -4661,3 +4661,230 @@ None.
 1. **W2L-I9:** for the default cutaway pose, a narrower band whose legacyTraa control fails (stated before the run), or that pose out of the moving bound with the reason stated? Either way, every banded pose gets its own control.
 2. **W2H-I4:** confirm that W2H-I1 stays open on the fit with this evidence (an ISA+15 ramp ends held at the redline; the fit's surge-plus-flameout run throws in the sub-idle model after N2 falls 41 points while held), and that the part-power round also bounds the held spools below.
 3. **N3:** adopt P5's check-text clarification ("23 s from ground idle: 3 s at idle, the 1 s ramp, then take-off lever")? It states the window D4-90 measured; the bar is unchanged.
+
+## Critic pass 17: w2/app-ui @0f3b21e (rounds 4-5)
+
+**Scope.** `ff95d99..0f3b21e` (code at 3612355; main 10b78ad merged in 602f9bb): D4-91's progressive warm-up, D4-95 items 1-4 (the quiet rule, Schlieren's 44-pipeline warm frame, the guard on three's internals, the warm-up under load), W2A-I6's Schlieren check, U1-U3 and N19, D4-92 (zz)'s callouts, N13-N18 and N20, and the re-shot `docs/look-dev/ui/`. The builder's three questions are answered below.
+
+**Setup** (2026-10-31, the critic worktree):
+- `critic` merged main 664203f (a fast-forward from 4f37377). A throwaway local branch `trial17` took one `--no-ff` merge of w2/app-ui @0f3b21e (93a9d9b) with two doc conflicts, both resolved by keeping both sides:
+  - `docs/PHYSICS.md` at its end: cycle-hold's P5 and P5b rows, then app-ui's §3.5 (U1-U3), as expected;
+  - `docs/GPU_FACTS.md`: **both branches added an M56** (main's is kernel's Playwright focus emulation; app-ui's are M56 and M57). I kept main's M56 and renumbered app-ui's to M57 and M58 in the trial (W2A-N27).
+- `src/ui/dock.tsx` and `src/ui/global.css` auto-merged: flowviz round 4's legend band is in the merged app (checked in my shots, Visual review).
+- Every gate ran alone and detached (`Start-Process`, one script, a status line per step with the free memory and the power state), on trial17. Then the probes and the hand mutants, after the gates (nothing mutated `src` while a gate read it).
+- The builder's worktree was only read.
+- `critic` is checked out again and clean. The local branch `trial17` (93a9d9b, unpushed) is left in place, because the PreToolUse hook blocked `git branch -D`: the orchestrator can delete it. No detached run or Chrome is left going.
+
+Checklists: react-reviewer, typescript-reviewer, silent-failure-hunter and pr-test-analyzer, applied by hand as one review. D4-85, D4-87, D4-88, D4-91, D4-92, D4-95 and D4-96 were checked against the code: nothing here contradicts them (D4-91's "never a freeze" is W2A-I7's subject; D4-92 (zz)'s outward labels are met at 1920 only, W2A-I8).
+
+**What holds (read, then probed or mutated):**
+- **The scheduler (`src/shell/warmUp.ts`).**
+  - A pending switch and any input suspend the background: `next()` extends the quiet to now + 1 s on every pending frame (`:150`) and gives the background nothing while `now < quietUntil` (`:152-156`). An earlier input cannot shorten it (`Math.max`).
+  - The worker's "pending" is `preparing !== null || settledFrames === 0` (`simWorker.ts:380`), so it covers the 1.4 s wedge, and the 1 s runs from the last pending frame. The inputs are every message but `init` and `viewArea` (`simWorker.ts:534`).
+  - The queue cannot starve on its own: no message reaches the worker periodically. `resize` is sent only on a change (`client.ts:74-80`), commands and orbit only on the viewer's acts, and `viewArea` is not an input. Continuous orbiting holds the background back, as D4-95 says it should.
+  - Mutants W1-W4 and Q1 are killed (Mutants).
+- **The warm frame puts the view's state back** (`engineView.ts:865-958`): mode, cut, explode, spool factor, the flow mode, quantity and tracers, and the fan frame are saved and restored in a `finally`. The flow mode is re-applied, so `post.setFlowComposite` and flowViz's plane material are back. Everything else the frame sets (module offsets, visibility, caps, the wedge, glow, the fan rect) is recomputed by the real frame after it. The pass timer discards the frame, the render scale is not stepped, and the tracers' compute is not run. The one exception is W2A-I9.
+- **TRAA's state is put back** (`post.ts:455-476`). The warm frame resolves into a throwaway history (three's resolve material samples the real history's texture, bound at setup, so the real history is read, never written). The previous depth, the jitter index and the six camera uniforms are restored. three r186's `updateBefore` (TRAANode.js:347-436) mutates nothing else that persists: `setSize` follows the beauty's size, which the real frame shares.
+- **The warm key is three's render object key.** `RenderObjects.get` chains object, material, render context and lights node under a per-pass map (three.webgpu.js:31541-31551). `renderKey` takes the same four and the pass id from `renderObject`'s arguments, plus `_currentRenderContext`, which `_renderObjectDirect` passes on.
+  - Two places where three makes more render objects than the key sees, both counted inside the new object's draw, so neither escapes the budget: a transparent double-sided material draws a `backSide` pass inside the same `renderObject` call, and a cache-key change re-creates a render object under the same key.
+  - Any miss would be counted (`unbudgeted`), and warmStall fails on one. In my run, no configuration built an unbudgeted pipeline and none recompiled an object the boot drew (Gates).
+  - Mutant K1 (the key without the render context) is killed.
+- **Schlieren's composite now builds the beauty first, and the image is the same** (`post.ts:607-620`). The select is unchanged, and the passes render once a frame.
+  - Checked in Chrome (`w2a-schlieren-same.py.txt`, the luminance inside the 1366 view): HEAD against round 4's order (mutant S2, shot) gives a mean |ΔL| of 0.48/255, 1.5 % of pixels over 8 and 0.12 % over 24.
+  - That is within the run-to-run noise: HEAD against the builder's own shot is 0.58, 1.8 % and 0.34 %. The knife edge off (S1) is 3.1, 5.8 % and 3.3 %.
+  - The signatures agree to the third digit: grey share 0.774 / 0.774, silhouette 0.253 / 0.254, jet spread 0.174 / 0.174. My HEAD Schlieren signatures also equal the builder's at both sizes.
+  - S2 is killed by warmStall's "recompiled" (42 engine objects rebuilt).
+- **The guard test** (`tests/unit/render/threeInternals.test.ts`) fails when a named internal moves: mutants G1-G3 in `node_modules/three` are killed. G4 survives, by design (W2A-N26).
+- **N13's prune is now sound.** With the 2000-node budget lifted, a branch is cut on crossings only when the best already shows the same labels so far and every later one, and a label is hidden early only when the best shows it on the same prefix. Both cuts leave the result unchanged. The search is still not exact, for another reason (W2A-N21).
+- **The panel-covered rule** (`callouts.ts:62-65`, both layouts) is right. A panel covers the part (the drawer is opaque, the columns 0.86 alpha), so a leader into it would point at nothing the viewer sees. It hides only parts whose anchor point is covered: 6 of 8 labels at 1920 with the drawer open, 2 at 1366, where the drawer covers most of the engine. The drawn bar does not check it (W2A-N28).
+- **U1-U3 and N19**: `uiLevels.ts` mirrors §3.5 verbatim (its test reads PHYSICS.md), the map reads U1, and the 5.0 % case is pinned (mutant U1 killed). **N14**: `faults.ts` is pure and the worker calls it; the messages are unchanged (F1 killed). **N15-N18, N20**: as the handoff says. N20 is checked every run in warmStall: no pipeline on the solver's first bind or a profile change.
+- **React and TypeScript.** No effect posts on every render. `viewArea` is posted from the callouts' layout effect on a mode, panel or size change; StrictMode's double run posts it twice, which is harmless. The preparing chip is `role="status"` with its name, and renders nothing for null. The worker's new messages and fields are typed end to end. The only casts are the three internals, now in one module.
+
+#### Blocking
+None.
+
+#### Important
+- **W2A-I7: a cold switch has no bound; under a steady frame CPU over 8.3 ms it never leaves "Preparing"** (`src/shell/warmUp.ts:151`, `:155-163`; pinned as intended at `tests/unit/shell/warmUp.test.ts:208-213`).
+  - Every slot needs the last frame's CPU ≤ `SLOT_FRAME_CPU_MS`, the asked view's included. `MAX_WARM_FRAMES` counts the slots given, not the frames waited, so the give-up never comes either.
+  - The probe (`docs/reviews/probes/w2a-cold-switch.probe.ts.txt`) clicks Cutaway at t = 0 and runs 10 min at 60 fps:
+    - a steady 8.4 ms frame: **0 slots, never warm, nothing given up**;
+    - 11.2 ms (critic 15's held frame in the worker): the same;
+    - 8.0 ms, or a loaded 9-14 ms with one frame in 50 at 8 ms: slots from the first frame.
+  - The failure: a machine whose shown view costs a little more CPU than this one gets a switch that shows "Preparing the Cutaway view…" for good. This one is near the edge already: under load the builder's gate run took 45-48 s to Cutaway, and my run's median frame at the fit's idle is 7.7 ms, 0.6 ms under the bar. The background never warms either, so every mode switch is that switch. The app is stuck in Realistic, with a spinner that says it is working.
+  - D4-91 says a cold switch "switches as soon as the mode is ready", never a freeze. D4-95 item 3 keeps the slot rule for the background; this is the viewer's own switch.
+  - Fix: for the asked view only, a bound in frames waited. For example, after 60 frames preparing, take the next SLOT_EVERY slot whatever the last frame's CPU, and count waited frames toward the give-up. Pre-register the bound (e.g. "shown within N s at any frame CPU") and pin it with a unit case at a steady 11.2 ms.
+- **W2A-I8 (visual): at 1366 x 768 the cut views' eight labels still sit on the section they name** (`src/hud/callouts.ts:272-339`; `1366-2-cutaway.jpg`, `1366-5-data.jpg`, and my merged run's).
+  - D4-92 (zz) asked for labels "placed outward in axial order so they label their parts instead of reading as a list". At 1920 half do: the four in the row above the engine are clean, the other four sit beside their anchors on the core.
+  - At 1366 the engine's screen box fills the free area, so neither row has room and the general search clusters all eight on the core. Booster, HPC, Fan, Low-pressure turbine, Bypass duct, Combustor, Core exhaust and High-pressure turbine cover roughly 470-1045 x 195-350 px, the section they name.
+  - The axial order is lost too: the Low-pressure turbine's label sits left of the High-pressure turbine's.
+  - Nothing overlaps or is clipped, so the bar passes, but the part ↔ label link is round 3's.
+  - Fix: frame the cut views for their rows, as Schlieren's `framedOrbit` does: dolly out until the engine box leaves a row's height above and below in the free area, at most to a stated scale. Or show fewer labels at that size, by priority, with the rest in a key. Shoot both sizes.
+- **W2A-I9: a warm frame zeroes the next real frame's camera motion** (`src/render/post.ts:638-645`, `:727-738`; the claim at `:175-176` and in the handoff).
+  - `renderFrame` copies `currViewProj` into `prevViewProj` and then writes this frame's into `currViewProj`, on every call, the warm one included. The warm path restores `prevViewProj` and `havePrev` but not `currViewProj`.
+  - So the real frame after a warm frame copies *this* frame's view-projection into `prevViewProj`: previous = current.
+  - With the lean G-buffer (the default, `post.ts:209-210`) that matrix is the camera velocity of every scene pixel (`cameraLoad`, `:392-399`), and of the rotors (`:414-418`). So in that frame TRAA reprojects its history as if the camera had not moved.
+  - When it shows: the camera moves while warm frames run. Input suspends only the background; a cold switch's own view keeps warming while the viewer orbits under "Preparing" (seconds quiet, tens of seconds loaded). Every second frame is then reprojected with no camera motion, so the image smears and judders while dragged.
+  - Restoring `prevViewProj` is a no-op, since the next real frame overwrites it from `currViewProj`.
+  - Fix: save and restore `currViewProj` and `currViewProjInv` in the warm path (or skip the matrix roll when `warm`). Add a check that a warm frame between two real frames leaves the second's `prevViewProj` equal to the first's `currViewProj`, e.g. a debug read of the uniforms in warmStall.
+- **W2A-I10: W2A-I6 is not closed: the Schlieren check passes a Schlieren with no knife-edge image, and on the merged tree it passes the Cutaway and Data frames at 1920** (`tests/browser/lib/schlierenCheck.ts:19-29, 93-99`; `tests/browser/app.test.tsx:349-354`; mutant S1; my `reports/ui/1920-shots.txt`).
+  - **S1 survives in Chrome.** With the knife edge compositing nothing (`eps` x 0, `post.ts:608`) the jet is gone: a uniform grey behind the nozzle (`reports/scratch/c17/s1-ui`, viewed). Yet the 1366 signature passes: grey share 0.866, silhouette 0.253, jet spread **0.100 ≥ 0.08**.
+    - The signature is computed on the page screenshot, overlay included (`app.test.tsx:74-75`, `shoot()`). The Core exhaust callout, a dark glass box with white text, sits right behind the nozzle in Schlieren, inside the jet box.
+    - In the S1 shot every dark pixel past the silhouette at x = 950-990 is that label (rows 265-300). So the "banded jet" the bar sees is partly the label's text.
+    - That is W2A-I6's own named failure ("a Schlieren that composites nothing ... passes the suite"). D4-91 item 2 accepts the skipped lit-centre bar only with a check that sees it.
+    - The unit test's bandless frame fails as it should only because it has no overlay in the jet box.
+  - **The cut views pass at 1920 on the merged tree.** Flowviz's floor (D4-86, on main) took the purple board out of the cut views, so the studio's grey shows round them.
+    - My run: Cutaway grey share 0.315, silhouette 0.41, jet spread 0.137, **pass: true**; Data 0.313 / 0.43 / 0.135, **pass: true**.
+    - The builder's shots, from before that merge, show 0.234 / 0.40 / 0.095 and 0.234 / 0.42 / 0.094, failing on the grey share alone. At 1366 both still fail on it (0.22-0.23).
+  - **Two of the three bars fail no control.**
+    - The grey bar (0.3) sits under Realistic's and Exploded's own 0.31-0.35 at 1920.
+    - The jet bar (0.08) sits under all four controls' 0.11-0.15 and under S1's 0.10.
+    - Only the silhouette bar fails anything (Realistic 1.18, Exploded 0.68 against 0.5), and the test makes only Realistic and Exploded controls.
+    - The unit test's "studio background" is 0.12-0.22 luminance; the real studio is 0.47.
+  - **Fix, as D4-96 asked for W2L-I9: each bar gets its own failing control, stated before the run.**
+    - Compute the signature on the canvas alone (the overlay hidden for that shot, or the worker's own frame), not on the page with its callouts and legend.
+    - Make S1 (`eps` x 0) a standing control, e.g. a debug flag that zeroes the knife edge in the same run.
+    - Make Cutaway and Data controls too.
+    - Put the grey share between Schlieren's 0.77-0.82 and the controls' ≤ 0.35 (e.g. 0.6).
+    - Write the unit test's controls at the studio's measured grey, and add one with a label-like box in the jet region.
+
+#### Nits
+- **W2A-N21: the layout search is still not exact; it tries only the first crossing place per label** (`src/hud/callouts.ts:220-224`).
+  - N13's prune is sound now. But a label with no crossing-free place gets one crossing place, the first, so a layout that needs it at its second (the first blocking a later label) is never tried.
+  - The probe (`docs/reviews/probes/w2a-callout-exact.probe.ts.txt`) compares the search's own objective (the shown labels by priority rank, then the fewest crossings) with an exhaustive search over the same places:
+    - pass 15's regime (3-5 anchors, 140 x 36 in 420 x 300): exact, 0 of 3000;
+    - the app's scale (6 anchors, 128 x 34 in 900 x 520 with a side panel): 0 of 200 short of the best; 2 of 200 with one crossing more, the node budget's (0 with it lifted);
+    - dense cases (5 anchors in 360 x 280), **budget lifted**: 17 of 1500 show one label fewer than possible and 11 have more crossings;
+    - with every crossing place tried, 0 and 0.
+  - First case: anchors (244, 143), (133, 153), (247, 80), (66, 87), (181, 93): the 5th is hidden though all five fit.
+  - The unit test's brute force counts labels in pass 15's sparse regime, so it cannot see this.
+  - Fix: try every crossing place, ordered by its crossings (the bound prunes them), and add a dense case from the probe.
+- **W2A-N22: the background warm-up's state is not on screen, and its give-up is not "said"** (`src/ui/panels.tsx:384-385`; `src/shell/warmUp.ts:76-80`).
+  - Diagnostics shows only "Pipeline warm-up (D4-88) … ms at boot", with the old decision's label.
+  - Nothing on screen shows the queue, the configurations given up on after MAX_WARM_FRAMES (whose last pipelines then compile on first use, a stall), or the suspension. They are in the snapshot only.
+  - Fix: a Diagnostics row ("Background warm-up: 7 of 9 warm, …; given up: …") under D4-91's label.
+- **W2A-N23: the boot's `warmUp` stops after 8 warm frames without saying whether it finished** (`src/render/engineView.ts:849-856`; `src/app/simWorker.ts:671`).
+  - `WarmUpReport` has no done flag, and the worker marks the boot configurations warm regardless.
+  - If a boot configuration is still compiling after 8 rounds, the first real frames compile the rest synchronously, after `ready`, unseen.
+  - Fix: report `done` per configuration; leave an unfinished one to the scheduler (not marked warm), or push an error.
+- **W2A-N24: Schlieren's restore discards an orbit made in Schlieren** (`src/app/simWorker.ts:330-335`, `:556`).
+  - Leaving Schlieren puts back the orbit from before it; only a camera preset cancels that. A viewer who orbits in Schlieren and then switches jumps back to the old pose.
+  - Fix: an orbit input in Schlieren cancels the restore too (or the restore undoes only the framing's dolly and pan).
+- **W2A-N25: `fitViewOffset` is dead, and `framedOrbit` is tested only loosely** (`src/hud/callouts.ts:346-363`, `src/shell/orbit.ts:119-146`; `tests/unit/hud/calloutLayout.test.ts:222-252`, `:276-287`).
+  - The app frames Schlieren with `framedOrbit`. `fitViewOffset` is used nowhere but its tests, which check its fit exactly.
+  - `framedOrbit`'s test checks only that the distance and target changed, not that the content box lands in the free area. In the shots it fills the free area edge to edge (Visual review).
+  - Fix: delete `fitViewOffset`; test `framedOrbit` by projecting `engineRings` after the orbit.
+- **W2A-N26: the guard pins the internals by name, not what TRAA's `updateBefore` rolls** (`tests/unit/render/threeInternals.test.ts:149-182`).
+  - G4 (three's `updateBefore` given one more piece of per-frame state) passes the guard, yet a warm frame would no longer put TRAA back.
+  - That is the upgrade case D4-95 item 4 is for.
+  - Fix: pin `updateBefore`'s source (a hash, or the list of `this._…` it assigns), so any change to it fails CI and is read.
+- **W2A-N27: GPU_FACTS numbering collides at the merge.** Main's M56 is kernel's Playwright focus emulation (`docs/handoffs/w2-kernel.md:24` cites it); app-ui adds M56 and M57.
+  - `post.ts:605` ("GPU_FACTS M56") and the handoff cite app-ui's numbers.
+  - Fix at the merge: app-ui's become M57 and M58, as in trial17, and the citation follows.
+- **W2A-N28: the drawn layout bar does not check round 5's rule or leaders against panels** (`tests/browser/app.test.tsx:193-237`).
+  - `calloutProblems` checks labels against labels and reserved blocks, and leaders against leaders and labels.
+  - An anchor under a reserved block, or a leader that crosses one, passes in Chrome. Only the pure layout's unit test holds the rule, and nothing checks a leader through a panel.
+  - Fix: add both to `calloutProblems`.
+
+**The builder's three questions:**
+1. **The quiet rule as read: yes to both.**
+   - A cold switch's own view must warm during the quiet, or it could never be shown. U2 is the first switch into a *warmed* mode, so that view's warm frames are not in U2's window. The cost is W2A-I9: those frames run while the viewer may be orbiting.
+   - `viewArea` is right not to be an input. The overlay posts it on a mode, panel or size change. The mode change is already a command and the size change a `resize`, so counting it would double-count. A panel toggle is a main-thread act that reaches the worker only as `viewArea`, but it moves no 3D content.
+2. **Cutaway's own warm frames:** accept them as measured. My main-thread probe: 47 warm frames over 1.9 s, at most 41 ms of warm-frame CPU, the longest frame gap 34 ms. In the app, the longest snapshot gap while warming was 108 ms (Cutaway) and 125 ms (Schlieren); every configuration was warm 7.0 s after ready.
+   - A single node build cannot be split, so "one always let through" is the floor of this design. It costs about two dropped frames each, for about 2 s, once, a few seconds after boot, behind the viewer's quiet second.
+   - What it does need: the slot rule must not be what makes the viewer's own switch wait (W2A-I7), and the cost should be recorded beside U2/U3 as the background's own row (its longest gap and its count of frames over 16.7 ms), indicative, so a regression shows.
+3. **The panel-covered rule: keep it.** A label must never point under a panel, and the rule hides only what a panel covers (above). Two follow-ups: the drawn bar should check it (W2A-N28), and at 1366 the cut views need the room that W2A-I8 asks for more than this rule needs changing.
+
+### Visual review (all 13 shots in `docs/look-dev/ui/` at both sizes, and my trial17 run's 13 in `reports/ui/`, which carry flowviz's floor)
+**What reads, at the bar:**
+- **The chrome holds up:**
+  - restrained glass panels, tabular numerals in every readout and table;
+  - the coloured badges (CYCLE: MODEL, FIELD: MOCK, MATCHED, SOLVER IDLE/RUNNING);
+  - legible small text;
+  - nothing clipped or overlapping at either size, the drawer included. At 1366 the drawer now stops above the taller legend.
+- **The closed views' Fan label is on the fan** (pass 15 visual note 1, fixed): its dot sits on the fan face seen through the intake, with the label beside it over the spinner, in Realistic and Schlieren at both sizes. Core exhaust sits on the core cowl.
+- **The 1920 cut views' top row reads well:** Fan, Bypass duct, Combustor and Low-pressure turbine in axial order under the top bar, with vertical leaders to dots on their parts. The Bypass duct's dot is in the duct now.
+- **Schlieren is framed in the free area** (pass 15 note 3, fixed):
+  - at 1366 the engine is dollied out and the banded jet ends at the right column's edge instead of running under it;
+  - at 1920 the engine and jet fill the free area from the left column to the right.
+- **The legend's floored band shows in the merged app:**
+  - Cutaway: "Not drawn: 0 to 17.5 m/s (the ambient ± 2.5 % of the scale)";
+  - Data: "Not drawn: 0 to 0.04 M …";
+  - a hatched swatch at the bar's left end, at both sizes.
+  - The purple board is gone from both cut views: the studio shows round the near field.
+
+**Short of "ultra high level":**
+1. **The 1366 cut views' labels** (W2A-I8): eight dark boxes over the section, the main thing those views exist to show. At 1920 the four labels beside their anchors (Booster, HPC, HPT, Core exhaust) also sit over the core.
+2. **Schlieren has no margin at 1920:** the nacelle's lip touches the left column and its lower lip the station strip. A framing margin of a few per cent of the free area would let it breathe.
+3. **Flowviz's crop outline (W2V-N25) now crosses the app's shots:** with the board gone, its thin light lines run across the studio in both cut views at both sizes (top left of the nacelle, and right of the plume). They read like stray leader lines next to the callouts' own.
+4. **Exploded has no labels at all**, though it is the view where the parts stand apart and a name on each would read best. That is not a regression, and not in D4-92; a suggestion for the callouts' next round.
+5. **Small ones:**
+   - "Preparing the Data view…" also shows for a quantity change inside Data (a cold `data:p` while Data:mach shows). "Preparing the pressure field…" would say what is happening.
+   - The T-s "45" still sits on the 4 → 45 line at 1920.
+   - The fan at idle is still a bristly smear in Realistic (render's, W1L).
+   - Visual notes 5 and 7 are open, as the handoff says.
+
+### Gates (trial17: main 664203f + w2/app-ui @0f3b21e)
+Power: on battery (status 1, 73 %) at the start, then **on AC (status 2) from the end of lint onward**. Every timing row below ran on AC, on a shared machine, so the rows are indicative (D0-1).
+
+| gate | result |
+|---|---|
+| `npm run typecheck` | clean, 15 s (battery, 73 %) |
+| `npm run lint` (ESLint + Prettier) | clean, 71 s (battery → AC) |
+| `npm run coverage` (own reportsDirectory) | 135 files, 2320 passed + 11 expected fail (2331), exit 0 (the per-directory thresholds hold), 769 s. Statements 98.55 %, branches 87.87 %, functions 99.55 %, lines 99.54 %. Core lines: thermo 100 %, cycle 99.62 %, flow/reference 100 %, geometry 99.59 %, src/flow 99.50 %. New modules at 100 % lines: warmUp (94.4 % branches), faults, uiLevels, settle, pixelCap, callouts (86.2 %), anchors (87.0 %), orbit (78.7 %) |
+| `npm run test:mesh` | 2 files, 29 passed |
+| `npm run test:gpu` | 12 files, 70 passed, 46 s. C-pre 5.13e-7 / 3.77e-7 / 1.05e-6, S 5.32e-7 / 4.77e-7 / 7.67e-6 (pass 16's) |
+| `npm run test:gpu-ladder` | 3 files, 13 passed + 1 expected fail (L9a's D4-45 steadiness), 301 s. B 1.954e-5 (oracle 1.49e-5); D4-63 on the GPU (a) 0.7779 / 0.4859, (b) 0.4913 / 0.2111, trend 0.9939; L7 1.779; L8 0.754 %. Equal to pass 16's: app-ui touches no solver code |
+| `npm run test:browser` | **14 files, 44 passed**, 0 WebGPU errors, exit 0, 445 s, **AC (2/86 → 2/90)**, 6.48 GB free at the start, no other vitest-browser or Chrome for Testing process. `docs/` stayed clean (the shots went to `reports/ui/`) |
+
+**The browser run's records** (AC, shared machine, not quiet; `reports/ui/first-switch-*.json`, `warm-stall.json`):
+- **U3, boot to ready:** 3.85-4.28 s over the four first-switch cases (≤ 5 s).
+- **U2, the first switch into a warmed mode** (the longest snapshot gap in the 3 s after the click):
+  - Schlieren 72 ms (echo 205 ms);
+  - Cutaway 81 ms (echo 123 ms);
+  - while the queue warms (6 queued at the echo), 72 ms, with 0 warm frames from the echo to settled (1.55 s), resumed 2.55 s after the click, and all 9 warm 7.0 s after ready.
+- **The background warm-up's longest gap:** 108 ms to Cutaway, 125 ms to Schlieren.
+- **A cold switch into Data:** "preparing" after 98 ms, shown after 3.07 s, the longest gap 91 ms, 43 snapshots while preparing.
+- **warmStall, the main-thread probe:**
+  - Cutaway: 47 warm frames, 42 pipelines, at most 41 ms of warm-frame CPU, the longest frame gap 34 ms, GPU ping ≤ 67 ms;
+  - Schlieren: 3 frames, 2 pipelines, 8 ms;
+  - every Data quantity and Exploded: 2-3 frames, ≤ 11 ms;
+  - no unbudgeted pipeline, nothing recompiled;
+  - N20: the solver's bind and the profile change built 0 pipelines (frame CPU ≤ 9 ms).
+- **D4-85's render, indicative:** Realistic over a full window 9.96 ms at 1366 (backing 1920 x 1079) and 9.72 ms at 1920 (1994 x 1039), against P4's 8 ms. Chrome ran at DPR 1.5.
+- **The flow timing row** (`reports/flow/timing.json`): Realistic flow 0.58-0.70 ms, **tracers 1.05 ms ≤ 2 ms**.
+- **W2F-N5's held frame** (`frame-cost.json`): median frame CPU 7.7 ms at the fit's idle (cycle 2.4 ms), held 8.7 ms, max 95 ms over the slam; 982 lost solves, 158 of 384 snapshots held.
+
+### Mutants (by hand on trial17; `pass17-mutants.sh.txt`; each file restored from a copy after, `git status` and three's md5 checked)
+| set | killed | survived |
+|---|---|---|
+| Scheduler (`warmUp.ts`; `warmUp.test.ts`) | W1 (a pending switch no longer suspends), W2 (input and switches ignored), W3 (a cold switch waits behind the quiet), W4 (the give-up never fires) | none |
+| The chip and the faults (RTL, Node) | P1 (the chip never cleared: it shows a mode when null), F1 (the fatal on every failure past the max) | none |
+| Callouts (`calloutLayout.test.ts`, `uiLevels.test.ts`) | L1 (a label under a panel: round 5's rule dropped), L2 (N13's old prune), L3 (the cut views on the lower face), U1 (amber at exactly 5 %) | none |
+| The guard (`threeInternals.test.ts`; `node_modules/three` edited) | G1 (TRAANode's `_jitterIndex` renamed), G2 (RenderObjects.get's chain reordered), G3 (`renderObject`'s `lightsNode` renamed) | G4 (TRAA's `updateBefore` rolls one more field: W2A-N26) |
+| Chrome (targeted runs) | S2 (round 4's composite order: warmStall, 42 recompiled), K1 (the warm key without the render context: 8 unbudgeted), Q1 (the worker never reports a pending switch: firstSwitch, resumed at 1.22 s before settling at 1.59 s) | **S1 (the knife edge off: the Schlieren check passes, W2A-I10)** |
+
+**Totals:** 16 of 18 (unit and RTL 10/10, guard 3/4, Chrome 3/4). Not mutants: the probes. They are the cold switch at a steady frame CPU (W2A-I7), the exact search (W2A-N21), and the S2 image comparison.
+
+### Verdict: **MERGE**
+- B 0, I 4 (W2A-I7..I10), N 8 (W2A-N21..N28).
+- D4-91's progressive warm-up and D4-95 items 1-4 are in as decided:
+  - boot to ready 3.9-4.3 s;
+  - a warmed switch 72-81 ms with the queue active;
+  - Schlieren's warm frame 8 ms (was 645-706);
+  - the guard fails CI when a named internal moves.
+- The callouts meet D4-92 (zz) at 1920. N13's prune is sound. The gates are green on the combined tree, and 16 of 18 hand mutants are killed.
+- None of the four Important findings makes main worse on the target machine. All four go to app-ui's next round:
+  - **I7 first:** a dead switch on a slower machine. On this one, the fit's idle frame is 0.6 ms under the slot bar.
+  - I9 is a two-line render fix.
+  - I10 is a test whose controls must fail.
+  - I8 is the 1366 framing.
+- At the merge:
+  - keep both sides of `docs/PHYSICS.md` (P5/P5b, then §3.5);
+  - renumber app-ui's GPU_FACTS entries M57/M58 and update the citation (W2A-N27).
+  - Flowviz's dock and legend edits auto-merge and show in the app (D4-95).
+
+### Questions for the orchestrator
+1. **W2A-I7:** what bound for a cold switch? I suggest that the asked view takes a slot after at most 60 frames of preparing, whatever the last frame's CPU (still one every SLOT_EVERY). The bar would be pre-registered as "a cold switch is shown within N s at any frame CPU", with the give-up counting frames waited. Or should the asked view ignore the CPU rule outright, since the viewer is waiting on it?
+2. **W2A-I8:** for the 1366 cut views, should the camera dolly out to make room for the label rows (as Schlieren's framing does, at a stated minimum scale), or should that size show fewer labels by priority?
+3. **W2A-I10:** confirm that W2A-I6 stays open. The signature would move to the canvas alone, with each bar given its own failing control (S1 standing, plus Cutaway and Data), per D4-96's rule.
+4. **The builder's question 2:** accept Cutaway's own warm frames as measured (47 frames, ≤ 41 ms, ~2 s, once), and add the background warm's own indicative row beside U2/U3 (its longest gap and its frames over 16.7 ms)?
