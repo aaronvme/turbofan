@@ -3485,6 +3485,17 @@ None.
     - full coverage, test:mesh and the targeted Stryker run.
 
     Then the critic reviews it.
+- **D4-95 (w2/app-ui round 4 @46310e5 and w2/flowviz round 4 @7dac273): the warm-up's open items, and the flow-floor follow-ups.**
+  - **App-ui round 4's result:** D4-91's progressive warm-up brought boot-to-ready from 10.8-12.7 s to 3.9-4.4 s on a quieter run (U3 ≤ 5 s). Four items remain:
+  1. **U2 (first switch into a warmed mode ≤ 250 ms) failed when a background warm frame landed in the switch window.** Cutaway measured 706 ms on the quieter run, and both modes 133-636 ms loaded. Background warming is suspended around user input and mode switches: no warm slot while a switch is pending, nor for 1 s after any input or switch. U2 stays at 250 ms.
+  2. **Schlieren's warm frame stalls the GPU process once for 0.65-1.1 s,** while the worker's CPU for that frame is a few ms. Something still compiles synchronously at first draw; the render owner finds it in the next app-ui round (e.g. a lazily created pipeline the warm-up doesn't reach). If it isn't found in that round, Schlieren is warmed at boot, provided boot stays ≤ 5 s in a quiet run. Accepting the hitch is not adopted.
+  3. **The background warm-up is slow under load:** 17-34 s to Cutaway ready, because a slot needs the previous frame under 8.3 ms. That's indicative on a shared machine. It's measured in a quiet run, and the slot rule isn't loosened now.
+  4. **The warm-up relies on pinned three r186 internals.** A unit test pins the internals it uses, so a three upgrade fails CI before it fails at startup. The startup throw stays as the second line of defence.
+  - **Flowviz round 4:**
+    - its additive edits to app-ui's `src/ui/dock.tsx` and `src/ui/global.css` (the legend's floored band) merge with flowviz. App-ui's next round merges main and adopts or moves them;
+    - the Mach and speed floor is measured from rest, because `FieldReference` has no flight speed. W3's flight conditions add it to the contract.
+  - **The indicative flow-visuals timing row failed in both builders' browser runs:** tracers at 1080p measured 3.27-3.44 ms against 2 ms, with both builders using the GPU at once. It's indicative. The critic reruns it on the trial merge with nothing else on the GPU. If it still fails there, it's a regression to find, not a bar to move.
+  - **Flowviz's coverage run had one timeout** (`floor.test.ts`'s take-off case, at vitest's 5 s default, on the loaded machine). Like the other model-heavy tests, it gets an explicit timeout; that isn't a threshold.
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
