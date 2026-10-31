@@ -58,13 +58,23 @@ export interface Diff {
   readonly tilesOver25: number;
 }
 
-export function diff(a: Grab, b: Grab, threshold: number): Diff {
+/**
+ * Tile-wise difference; `skip` (tile column, tile row) leaves a tile out of every count (the
+ * rotor test's band at the cut faces, D4-93).
+ */
+export function diff(
+  a: Grab,
+  b: Grab,
+  threshold: number,
+  skip?: (tileX: number, tileY: number) => boolean,
+): Diff {
   const { w, h } = a;
   let changed = 0;
   let worst = 0;
   let over = 0;
   for (let ty = 0; ty < h; ty += TILE)
     for (let tx = 0; tx < w; tx += TILE) {
+      if (skip?.(tx / TILE, ty / TILE) === true) continue;
       let n = 0;
       let m = 0;
       for (let y = ty; y < Math.min(h, ty + TILE); y++)
