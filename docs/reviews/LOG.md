@@ -3517,6 +3517,24 @@ None.
     - D4-97 items 1-4;
     - W2A-I9, the warm frame zeroing the next frame's camera motion (`post.ts` restores `prevViewProj` but not `currViewProj`, about two lines, with a test that a warm frame leaves the next frame's motion vectors intact);
     - the nits N21-N28, including N26 (TRAA `updateBefore` state outside the guard) and N27 (`post.ts:605` citing M56, now M57).
+- **D4-98 (w2/app-ui round 6 @d267488 and w2/followups-2 @d2750c5): U4's fix, and the fit's intermittent throw.**
+  1. **U4 isn't met, so the fix is to the scheduling, not the bar.** A cold switch now always resolves. Before, it never did above an 8.3 ms frame; now it takes 3.10-3.19 s at a steady 8.4 or 11.2 ms and 1.95-2.53 s at a light CPU, against U4's 2 s. The time is the 60-frame wait plus the view's own 45-47 warm frames at one every 2 frames. **Adopted:** the wait shortens to 30 frames, and after it the asked view warms every frame instead of every second frame. The user is already waiting on "Preparing", so the frame budget is the cheaper thing to spend. That gives about 30 + 47 frames, roughly 1.3 s at 60 Hz. U4 stays at 2 s; it isn't restated.
+  2. **The part-power fit's intermittent throw becomes W2H-I5 (important):** "enthalpy 4475806.6 is outside the range of [200, 3500] K" stopped the sim once in the browser's held-frame test on the fit. The gate run passed it.
+     - It's the same family as critic 16's W2H-I4: the sub-idle model throws after a held balance has dragged N2 down.
+     - It's intermittent because the browser test steps the sim with real frame times.
+     - The browser test steps on a fixed dt, so the gate is deterministic.
+     - The cause goes to the part-power round with W2H-I1/I4. Until then the app shows SIM STOPPED (W2A-I1), which is visible, never silent.
+     - The default model can't reach it: critic 16's sweeps found no throw.
+  3. **The Schlieren grey-share bar at 0.7** was set after seeing the framed cut views (0.50-0.55) and the shipped Schlieren (0.84-0.90). It tightens the bar (it was 0.3), and every control fails its named bar. It's accepted, with the data stated in the test, and the critic judges its margin.
+  4. **The test-only `debug` worker message** (frame-CPU padding, the knife edge) is accepted. It isn't in `src/contracts` and doesn't count as viewer input. The production build must ignore it (the critic checks).
+  5. **The display rules are accepted:** the callout priority follows D4-97, and in the cut views a label with no room in its row is hidden, never placed on the section.
+  - **App-ui round 7 (small):**
+    - item 1 (U4), with the Chrome cold-switch times at a steady 8.4 and 11.2 ms;
+    - the fixed-dt held-frame browser test (item 2);
+    - the visual notes: the 1366 drawer shot's long leader; Schlieren's left margin at 1920; Exploded under the right column; flowviz's crop outline crossing the cut views like a leader (W2V-N25);
+    - N23.
+
+    Then critic pass 18 reviews w2/followups-2 and app-ui rounds 6-7 together.
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
