@@ -8,6 +8,7 @@ import { parseFidelityLedger, type LedgerKind } from '../hud/ledger';
 import { layoutCallouts, leaderEnd, type Rect } from '../hud/callouts';
 import { componentAnchors } from '../hud/anchors';
 import {
+  faultAnnunciations,
   fieldFallbackAnnunciation,
   flagAnnunciations,
   flowAnnunciation,
@@ -99,6 +100,8 @@ export function TopBar({ snapshot }: { readonly snapshot: SimSnapshot }) {
   const units = useApp((s) => s.units);
   const setUnits = useApp((s) => s.setUnits);
   const link = useApp((s) => s.diagnostics?.field ?? null);
+  // W2A-I1: a stopped sim's clock is frozen, so it offers no pause and says so
+  const stopped = useApp((s) => s.simStopped !== null);
   const { clock, view } = snapshot;
   return (
     <header className="topbar" data-reserve>
@@ -111,14 +114,16 @@ export function TopBar({ snapshot }: { readonly snapshot: SimSnapshot }) {
         <button
           type="button"
           aria-pressed={clock.paused}
+          disabled={stopped}
           onClick={() => {
             send({ type: 'pause', paused: !clock.paused });
           }}
         >
           {clock.paused ? 'Resume' : 'Pause'}
         </button>
-        <span className="mono" aria-label="Simulated time">
+        <span className={stopped ? 'mono warning' : 'mono'} aria-label="Simulated time">
           t {fmt.simTime(clock.simTimeS)}
+          {stopped ? ' · stopped' : ''}
         </span>
         <label className="compact">
           <span className="sr-only">Time scale</span>
@@ -179,6 +184,9 @@ export function TopBar({ snapshot }: { readonly snapshot: SimSnapshot }) {
   );
 }
 
+/** The fault chips that open the Diagnostics drawer, which lists their messages. */
+const OPENS_DIAGNOSTICS = new Set(['gpuErrors', 'raster', 'refused']);
+
 export function Annunciators({
   snapshot,
   diagnostics,
@@ -186,22 +194,55 @@ export function Annunciators({
   readonly snapshot: SimSnapshot;
   readonly diagnostics: AppDiagnostics | null;
 }) {
+  const simStopped = useApp((s) => s.simStopped);
+  const gpuErrors = useApp((s) => s.gpuErrorCount);
+  const refused = useApp((s) => s.refused.length);
+  const openPanel = useApp((s) => s.openPanel);
   const gas = gasPathAnnunciation(snapshot.cycle, diagnostics?.lostSolveCause ?? null);
   const fallback = fieldFallbackAnnunciation(diagnostics?.field ?? null);
+  // W2A-I1: the worker's faults outside the field switch, on screen
+  const faults = faultAnnunciations({
+    simStopped,
+    gpuErrors,
+    raster: diagnostics?.raster ?? null,
+    refused,
+  });
   const list = [
+    ...faults.filter((a) => a.id === 'simStopped'),
     ...flagAnnunciations(snapshot.cycle),
     ...(gas.level === 'normal' ? [] : [gas]),
     ...(fallback === null ? [] : [fallback]),
+    ...faults.filter((a) => a.id !== 'simStopped'),
   ];
   return (
-    <div className="annunciators" role="status" aria-live="polite" aria-label="Annunciators">
+    <div
+      className="annunciators"
+      role="status"
+      aria-live="polite"
+      aria-label="Annunciators"
+      data-reserve
+    >
       {list.map((a) =>
-        // a held gas path states its cause beside it (D4-17, W2F-I1), not only in a tooltip
-        a.id === 'gasPath' && a.level === 'warning' ? (
+        // a held gas path and a stopped sim state their cause beside them (D4-17, W2F-I1,
+        // W2A-I1), not only in a tooltip
+        (a.id === 'gasPath' || a.id === 'simStopped') && a.level === 'warning' ? (
           <div key={a.id} className="annunciation">
             <Badge a={a} />
             <span className="annunciation-detail">{a.detail}</span>
           </div>
+        ) : OPENS_DIAGNOSTICS.has(a.id) ? (
+          <button
+            key={a.id}
+            type="button"
+            className="badge"
+            data-level={a.level}
+            title={a.detail}
+            onClick={() => {
+              openPanel('diagnostics');
+            }}
+          >
+            {a.text}
+          </button>
         ) : (
           <Badge key={a.id} a={a} />
         ),
@@ -262,10 +303,11 @@ export function FidelityPanel() {
 function BudgetBar({ d }: { readonly d: AppDiagnostics }) {
   const b = d.budget;
   const frame = SOLVER_BUDGET.frameMs;
+  // `shown` null: not measured (an undrawn solver shows a dash, not 0.00 ms; W2A-N8)
   const parts = [
-    { id: 'render', label: 'Render', ms: b.renderGpuMs ?? 0 },
-    { id: 'flow', label: 'Flow visuals', ms: b.flowVisualsGpuMs },
-    { id: 'solver', label: 'Solver', ms: b.solverGpuMs ?? 0 },
+    { id: 'render', label: 'Render', ms: b.renderGpuMs ?? 0, shown: b.renderGpuMs },
+    { id: 'flow', label: 'Flow visuals', ms: b.flowVisualsGpuMs, shown: b.flowVisualsGpuMs },
+    { id: 'solver', label: 'Solver', ms: b.solverGpuMs ?? 0, shown: b.solverGpuMs },
   ];
   const total = parts.reduce((t, p) => t + p.ms, 0);
   return (
@@ -291,7 +333,7 @@ function BudgetBar({ d }: { readonly d: AppDiagnostics }) {
               <span className="swatch" data-part={p.id} />
               {p.label}
             </dt>
-            <dd>{fmt.ms(p.ms)} ms</dd>
+            <dd>{fmt.ms(p.shown)} ms</dd>
           </div>
         ))}
         <div>
@@ -332,6 +374,16 @@ function BudgetBar({ d }: { readonly d: AppDiagnostics }) {
           <dt>Frame rate</dt>
           <dd>{b.fps} fps</dd>
         </div>
+        <div>
+          <dt>Backing store (D4-85)</dt>
+          <dd>
+            {d.backingStore.width} × {d.backingStore.height} @ {fmt.fixed(d.backingStore.dpr, 2)}
+          </dd>
+        </div>
+        <div>
+          <dt>Pipeline warm-up (D4-88)</dt>
+          <dd>{fmt.ms(d.warmUpMs)} ms at boot</dd>
+        </div>
       </dl>
     </div>
   );
@@ -350,7 +402,7 @@ export function DiagnosticsPanel({
   const setField = useApp((s) => s.setField);
   const link = diagnostics?.field ?? null;
   const gas = gasPathAnnunciation(snapshot.cycle, diagnostics?.lostSolveCause ?? null);
-  const flow = flowAnnunciation(snapshot.flow);
+  const flow = flowAnnunciation(snapshot.flow, snapshot.sources.flow === 'solver');
   const st = snapshot.flow.stats;
   return (
     <section className="panel diagnostics" aria-label="Diagnostics" data-reserve>
@@ -423,7 +475,12 @@ export function DiagnosticsPanel({
         <div>
           <dt>Drawn</dt>
           <dd className="wrap">
-            {link === null ? 'no field bound yet' : provenanceLabel(link.coupling, link.fallback)}
+            {link === null
+              ? 'no field bound yet'
+              : field !== link.asked
+                ? // the choice is on its way (the solver starts, then binds; W2A-N1)
+                  `${provenanceLabel(link.coupling, link.fallback)} (switching to the ${field === 'solver' ? 'solver' : 'MOCK'}…)`
+                : provenanceLabel(link.coupling, link.fallback)}
           </dd>
         </div>
       </dl>
@@ -457,49 +514,112 @@ export function DiagnosticsPanel({
 }
 
 const NAMES = new Map(componentAnchors(ENGINE_DEFINITION).map((a) => [a.id, a.name]));
+/** A label's box before it has been measured (the layout then uses its rendered size). */
 const LABEL = { w: 132, h: 34 };
 
-/** The 3D-anchored callouts: the worker's projected anchors, laid out so that none collide. */
+type Size = { readonly w: number; readonly h: number };
+
+/**
+ * The 3D-anchored callouts: the worker's projected anchors, laid out so that none collide and
+ * their leaders cross nothing where they can (W2A-I3). The layout reserves each label's rendered
+ * box: the labels are measured as drawn (border-box, one line each), and a label with no place
+ * yet is drawn hidden so that it is measured too. The reserved panels are measured when one
+ * resizes or a panel opens (W2A-N10), not on every snapshot.
+ */
 export function Callouts({ snapshot }: { readonly snapshot: SimSnapshot }) {
   const anchors = useApp((s) => s.anchors);
   const units = useApp((s) => s.units);
+  const panels = useApp((s) => s.panels);
   const ref = useRef<HTMLDivElement>(null);
   const [reserved, setReserved] = useState<Rect[]>([]);
   const [vp, setVp] = useState({ w: 1, h: 1 });
+  const [sizes, setSizes] = useState<Readonly<Record<string, Size>>>({});
   useLayoutEffect(() => {
     const host = ref.current;
     if (host === null) return;
-    const r = host.getBoundingClientRect();
-    setVp({ w: r.width, h: r.height });
-    setReserved(
-      [...document.querySelectorAll('[data-reserve]')].map((el) => {
-        const b = el.getBoundingClientRect();
-        return { x: b.left - r.left, y: b.top - r.top, w: b.width, h: b.height };
-      }),
-    );
-  }, [snapshot.version]);
-  const placed = layoutCallouts(anchors, () => LABEL, vp, reserved);
+    const measure = () => {
+      const r = host.getBoundingClientRect();
+      setVp({ w: r.width, h: r.height });
+      setReserved(
+        [...document.querySelectorAll('[data-reserve]')].map((el) => {
+          const b = el.getBoundingClientRect();
+          return { x: b.left - r.left, y: b.top - r.top, w: b.width, h: b.height };
+        }),
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(host);
+    for (const el of document.querySelectorAll('[data-reserve]')) ro.observe(el);
+    return () => {
+      ro.disconnect();
+    };
+  }, [panels, snapshot.view.viewMode]);
+  // laid out again only when an anchor, a size or the room changes (not on every snapshot)
+  const key = anchors
+    .map((a) => `${a.id}:${a.visible ? `${a.x.toFixed(1)},${a.y.toFixed(1)}` : '-'}`)
+    .join('|');
+  const placed = useMemo(
+    () => layoutCallouts(anchors, (id) => sizes[id] ?? LABEL, vp, reserved),
+    // `key` stands for the anchors' values: a new array of the same anchors is no change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key, sizes, vp, reserved],
+  );
+  const placedIds = new Set(placed.map((p) => p.id));
+  // the labels as drawn (their values change with the snapshot): a change of a px or more is
+  // laid out again
+  useLayoutEffect(() => {
+    const host = ref.current;
+    if (host === null) return;
+    let next: Record<string, Size> | null = null;
+    for (const el of host.querySelectorAll<HTMLElement>('.callout[data-id]')) {
+      const b = el.getBoundingClientRect();
+      const id = el.dataset.id ?? '';
+      // not laid out (a DOM without layout): keep the default
+      if (b.width === 0 || b.height === 0 || id === '') continue;
+      const size = { w: Math.ceil(b.width), h: Math.ceil(b.height) };
+      const was = sizes[id];
+      if (was?.w === size.w && was.h === size.h) continue;
+      next ??= { ...sizes };
+      next[id] = size;
+    }
+    if (next !== null) setSizes(next);
+  }, [sizes, placed, snapshot.version, units]);
   const st = snapshot.cycle.stations;
   const value = (id: string): string => {
+    // every value with its unit (W2A-N8)
+    const t = (k: keyof typeof st) => {
+      const v = fmt.temperature(st[k].ttK, units);
+      return `${v.value} ${v.unit}`;
+    };
     switch (id) {
       case 'fan':
         return `N1 ${fmt.fixed(snapshot.cycle.n1Percent, 1)} %`;
       case 'hpc':
-        return `PR ${fmt.fixed(snapshot.cycle.hpc.pressureRatio, 1)} · T3 ${fmt.temperature(st['3'].ttK, units).value}`;
+        return `PR ${fmt.fixed(snapshot.cycle.hpc.pressureRatio, 1)} · T3 ${t('3')}`;
       case 'combustor':
-        return `T4 ${fmt.temperature(st['4'].ttK, units).value} ${fmt.temperature(1, units).unit}`;
+        return `T4 ${t('4')}`;
       case 'hpt':
-        return `T45 ${fmt.temperature(st['45'].ttK, units).value}`;
+        return `T45 ${t('45')}`;
       case 'lpt':
-        return `T5 ${fmt.temperature(st['5'].ttK, units).value}`;
+        return `T5 ${t('5')}`;
       case 'booster':
         return `P25 ${fmt.pressure(st['25'].ptPa, units).value} ${fmt.pressure(1, units).unit}`;
-      case 'bypassDuct':
-        return `W13 ${fmt.massFlow(st['13'].wKgPerS, units).value}`;
+      case 'bypassDuct': {
+        const w = fmt.massFlow(st['13'].wKgPerS, units);
+        return `W13 ${w.value} ${w.unit}`;
+      }
       default:
-        return `T8 ${fmt.temperature(st['8'].ttK, units).value}`;
+        return `T8 ${t('8')}`;
     }
   };
+  const label = (id: string) => (
+    <>
+      <span>{NAMES.get(id as never) ?? id}</span>
+      <b>{value(id)}</b>
+    </>
+  );
   return (
     <div className="callouts" ref={ref} aria-hidden="true">
       <svg className="leaders">
@@ -507,22 +627,30 @@ export function Callouts({ snapshot }: { readonly snapshot: SimSnapshot }) {
           const e = leaderEnd(p.anchor, p.box);
           return (
             <g key={p.id}>
-              <line x1={p.anchor.x} y1={p.anchor.y} x2={e.x} y2={e.y} />
+              <line data-id={p.id} x1={p.anchor.x} y1={p.anchor.y} x2={e.x} y2={e.y} />
               <circle cx={p.anchor.x} cy={p.anchor.y} r={2.5} />
             </g>
           );
         })}
       </svg>
       {placed.map((p) => (
+        // keyed apart from the measuring copy: a label that gets a place is drawn there at once
         <div
-          key={p.id}
+          key={`${p.id}:placed`}
           className="callout"
-          style={{ transform: `translate(${p.box.x}px, ${p.box.y}px)`, width: p.box.w }}
+          data-id={p.id}
+          style={{ transform: `translate(${p.box.x}px, ${p.box.y}px)` }}
         >
-          <span>{NAMES.get(p.id as never) ?? p.id}</span>
-          <b>{value(p.id)}</b>
+          {label(p.id)}
         </div>
       ))}
+      {anchors
+        .filter((a) => a.visible && !placedIds.has(a.id))
+        .map((a) => (
+          <div key={`${a.id}:measure`} className="callout measure" data-id={a.id}>
+            {label(a.id)}
+          </div>
+        ))}
     </div>
   );
 }

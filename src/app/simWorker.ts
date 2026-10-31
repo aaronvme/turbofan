@@ -24,7 +24,7 @@ import { GpuFlowSolver } from '../flow/gpu/device/flowSolver';
 import { solverBudgetMs } from '../flow/gpu/scheduler';
 import { loadMeshAsset, parseMeshManifest } from '../flow/mesh/loader';
 import { FLOW_SOLVER_LIMITS, type GpuErrorReport } from '../gpu/device';
-import { anchorWorld, componentAnchors, projectPoint } from '../hud/anchors';
+import { anchorWorld, calloutShownIn, componentAnchors, projectPoint } from '../hud/anchors';
 import { createMockFlowField } from '../mocks/mockFlowField';
 import { createEngineView, type EngineView } from '../render/engineView';
 import { LOOK_PRESETS } from '../render/presets';
@@ -35,6 +35,8 @@ import { createSimCore, type SimCore } from '../shell/simCore';
 import { createFieldSwitch, type FieldSwitch } from '../shell/fieldSwitch';
 import { cutPlaneQuantity, flowModeFor } from '../shell/viewState';
 import { createRasterScheduler, type RasterScheduler } from '../shell/mockRaster';
+import { backingDpr, backingSize } from '../shell/pixelCap';
+import { createSettleTracker, type SettleTracker } from '../shell/settle';
 import type { RasterReply, RasterRequest } from './mockRasterWorker';
 import { applyOrbit, orbitFromPose, orbitPose, type OrbitState } from '../shell/orbit';
 import type { AppDiagnostics, CycleChoice, FromWorker, ToWorker } from '../shell/protocol';
@@ -57,6 +59,8 @@ const TIMINGS_EVERY = 15;
 /** The frame-cost window, frames (2 s at 60 fps: a held episode's frames stay in view). */
 const COST_WINDOW = 120;
 const MAX_ERRORS = 8;
+/** Snapshot posts that may fail in a row before the overlay is told the app cannot go on. */
+const MAX_FAILED_POSTS = 3;
 
 const anchors = componentAnchors(ENGINE_DEFINITION);
 
@@ -97,10 +101,20 @@ interface App {
   raster: Worker | null;
   rasterDue: RasterScheduler;
   rasterId: number;
+  /** Why the last raster (or the raster worker) failed (W2A-I1: annunciated). */
+  rasterError: string | null;
   mockRasterMs: number | null;
   mockRasters: number;
   orbit: OrbitState;
   size: { width: number; height: number };
+  /** The device pixel ratio from the main thread, and the one rendered at (D4-85's cap). */
+  dpr: number;
+  renderDpr: number;
+  /** D4-88: the frames the view has been settled in the asked mode. */
+  settle: SettleTracker;
+  settledFrames: number;
+  warmUpMs: number;
+  warmUpSteps: readonly { readonly name: string; readonly ms: number; readonly cpuMs: number }[];
   appliedView: RenderState | null;
   errors: string[];
   refused: string[];
@@ -116,12 +130,20 @@ function pushError(a: App, message: string) {
   if (a.errors.length > MAX_ERRORS) a.errors.shift();
 }
 
+/** D4-85: the canvas at the CSS size, its backing store capped up to quality high. */
+function applySize(a: App) {
+  const { width, height } = a.size;
+  a.renderDpr = backingDpr(width, height, a.dpr, a.core.view.quality);
+  a.view.setSize(width, height, a.renderDpr);
+}
+
 /** Applies the render state the core holds to the view (only what changed). */
 function applyView(a: App) {
   const v = a.core.view;
   const was = a.appliedView;
   if (was === v) return;
   a.appliedView = v;
+  if (was !== null && was.quality !== v.quality) applySize(a);
   if (was?.viewMode !== v.viewMode) {
     // D4-83: Realistic draws its haze and schlieren always, its tracers only when asked
     const fm = flowModeFor(v.viewMode);
@@ -147,40 +169,55 @@ function rasterHere(a: App, state: CycleState) {
   return field;
 }
 
+/** The raster worker is gone: raster on the frame from now on, and say so (annunciated). */
+function rasterOnFrame(a: App, message: string) {
+  a.rasterError = message;
+  pushError(a, message);
+  console.warn(message);
+  a.raster = null;
+  a.rasterDue.settled();
+}
+
 /** The raster worker (src/shell/mockRaster.ts: the raster is ~10 frames of CPU). */
 function startRaster(a: App): Worker | null {
   try {
     const w = new Worker(new URL('./mockRasterWorker.ts', import.meta.url), { type: 'module' });
     w.onmessage = (e: MessageEvent<RasterReply>) => {
-      a.rasterDue.settled();
       const r = e.data;
+      // W2A-N7: only the reply to the request in flight settles it (a late one is dropped)
+      if (r.id !== a.rasterId) return;
+      a.rasterDue.settled();
       if ('error' in r) {
-        pushError(a, `MOCK raster: ${r.error}`);
+        a.rasterError = `MOCK raster: ${r.error}`;
+        pushError(a, a.rasterError);
         console.warn(`MOCK raster failed: ${r.error}`);
         return;
       }
+      a.rasterError = null;
       a.mockRasterMs = r.ms;
       a.mockRasters++;
       a.fields?.setMock(r.field);
     };
     w.onerror = (e) => {
       // say so, and raster on the frame from now on (slower frames, never a stale field)
-      const msg = `MOCK raster worker failed (${e.message}): rasterizing on the frame`;
-      pushError(a, msg);
-      console.warn(msg);
+      rasterOnFrame(a, `MOCK raster worker failed (${e.message}): rasterizing on the frame`);
       w.terminate();
-      a.raster = null;
-      a.rasterDue.settled();
     };
     return w;
   } catch (e) {
-    pushError(a, `MOCK raster worker: ${e instanceof Error ? e.message : String(e)}`);
+    a.rasterError = `MOCK raster worker: ${e instanceof Error ? e.message : String(e)}: rasterizing on the frame`;
+    pushError(a, a.rasterError);
     return null;
   }
 }
 
 /** Asks for a new MOCK raster when N1 moved or the last is old (one in flight at a time). */
 function refreshMock(a: App, state: CycleState, nowMs: number) {
+  // W2A-N7: a raster worker that never answers is given up on, visibly
+  if (a.raster !== null && a.rasterDue.timedOut(nowMs)) {
+    a.raster.terminate();
+    rasterOnFrame(a, 'MOCK raster worker did not answer: rasterizing on the frame');
+  }
   if (a.fields === null || !a.rasterDue.due(state.n1Percent, nowMs)) return;
   a.rasterDue.requested(state.n1Percent, nowMs);
   if (a.raster === null) {
@@ -210,10 +247,13 @@ function projectAnchors(a: App): Anchor[] {
   cam.updateMatrixWorld();
   const vp = cam.projectionMatrix.clone().multiply(cam.matrixWorldInverse).elements;
   const theta = Math.atan2(cam.position.z, cam.position.y);
-  const shown = a.core.view.viewMode !== 'exploded' && a.core.view.overlays.callouts;
+  // W2A-N10: only on a settled view (during a transition the parts are not at the anchors)
+  const mode = a.core.view.viewMode;
+  const shown = a.core.view.overlays.callouts && a.settledFrames > 0;
   return anchors.map((w) => {
     const p = projectPoint(vp, anchorWorld(w, theta), a.size.width, a.size.height);
-    return { id: w.id, x: p.x, y: p.y, visible: shown && p.visible, priority: w.priority };
+    const visible = shown && calloutShownIn(mode, w.id) && p.visible;
+    return { id: w.id, x: p.x, y: p.y, visible, priority: w.priority };
   });
 }
 
@@ -244,6 +284,7 @@ function loop(a: App) {
   const cycleMs = new Rolling(COST_WINDOW);
   const frameMs = new Rolling(COST_WINDOW);
   const stamps: number[] = [];
+  let failedPosts = 0;
   let stats = a.view.stats();
   const tick = (t: number) => {
     if (a.lost) return;
@@ -259,11 +300,12 @@ function loop(a: App) {
       try {
         a.core.advance(dt);
       } catch (e) {
-        // a throwing model is a bug: stop the sim, keep rendering, say so (never silent)
+        // a throwing model is a bug: stop the sim, keep rendering, say so (never silent): the
+        // overlay annunciates SIM STOPPED with this message (W2A-I1)
         a.simFailed = true;
-        const msg = `cycle step failed: ${e instanceof Error ? e.message : String(e)}`;
+        const msg = `cycle step failed: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`;
         pushError(a, msg);
-        post({ type: 'fatal', message: msg });
+        post({ type: 'sim-stopped', message: msg });
       }
       held = a.core.state().gasPathSolve.status === 'held';
       cycleMs.push(performance.now() - c0, held);
@@ -278,6 +320,7 @@ function loop(a: App) {
     const pose = orbitPose(a.orbit);
     a.view.setCameraPose(pose.position, pose.target);
     a.view.frame(Math.min(dt, 0.1));
+    a.settledFrames = a.settle.frame(a.core.view.viewMode, a.view.viewSettled());
     if (frame % TIMINGS_EVERY === 0) {
       stats = a.view.stats();
       const m = stats.timings;
@@ -307,6 +350,14 @@ function loop(a: App) {
           fps: stamps.length,
         },
         field: a.fields?.state() ?? null,
+        raster: { onFrame: a.raster === null, lastError: a.rasterError },
+        view: { mode: a.core.view.viewMode, settledFrames: a.settledFrames },
+        backingStore: {
+          ...backingSize(a.size.width, a.size.height, a.renderDpr),
+          dpr: a.renderDpr,
+        },
+        warmUpMs: a.warmUpMs,
+        warmUpSteps: a.warmUpSteps,
         lostSolveCause: a.cycle.lostSolveCause(),
         errors: [...a.errors],
         adapter: `${a.view.device.info.vendor} ${a.view.device.info.architecture}`.trim(),
@@ -321,8 +372,14 @@ function loop(a: App) {
           anchors: projectAnchors(a),
           refused: a.refused.splice(0),
         });
+        failedPosts = 0;
       } catch (e) {
-        pushError(a, `snapshot: ${e instanceof Error ? e.message : String(e)}`);
+        // the errors travel in the snapshot, so a post that keeps failing (a DataCloneError)
+        // would freeze the overlay with no message: say so once it is not a one-off (W2A-N2)
+        const msg = `snapshot: ${e instanceof Error ? e.message : String(e)}`;
+        pushError(a, msg);
+        if (++failedPosts === MAX_FAILED_POSTS)
+          post({ type: 'fatal', message: `${msg} (${MAX_FAILED_POSTS} posts in a row failed)` });
       }
     }
     frame++;
@@ -337,7 +394,8 @@ function handle(a: App, m: ToWorker) {
       return;
     case 'resize':
       a.size = { width: m.width, height: m.height };
-      a.view.setSize(m.width, m.height, m.dpr);
+      a.dpr = m.dpr;
+      applySize(a);
       return;
     case 'command': {
       const problems = a.core.command(m.message);
@@ -356,8 +414,13 @@ function handle(a: App, m: ToWorker) {
       return;
     }
     case 'field':
-      // drawn once bound; a fallback and its reason are in the switch's state (D4-82)
-      void a.fields?.choose(m.source);
+      // drawn once bound; a fallback and its reason are in the switch's state (D4-82). A choice
+      // that throws (the fallback's own bind) is an error, never an unhandled rejection (W2A-N1)
+      a.fields?.choose(m.source).catch((e: unknown) => {
+        const msg = `field ${m.source}: ${e instanceof Error ? e.message : String(e)}`;
+        pushError(a, msg);
+        console.warn(msg);
+      });
       return;
   }
 }
@@ -384,18 +447,20 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
       });
     } else post({ type: 'gpu-error', message });
   };
+  const cycle = createCycleModel(cycleOptions(m.cycle ?? 'reference'));
+  const core = createSimCore({ cycle });
+  // D4-85: the backing store capped from the first frame
+  const renderDpr = backingDpr(m.width, m.height, m.dpr, core.view.quality);
   const view = await createEngineView({
     gpu: navigator.gpu,
     canvas: m.canvas,
     definition: ENGINE_DEFINITION,
     width: m.width,
     height: m.height,
-    dpr: m.dpr,
+    dpr: renderDpr,
     preferredLimits: FLOW_SOLVER_LIMITS,
     onError,
   });
-  const cycle = createCycleModel(cycleOptions(m.cycle ?? 'reference'));
-  const core = createSimCore({ cycle });
   const preset = LOOK_PRESETS.threeQuarterFront;
   const a: App = {
     view,
@@ -407,10 +472,17 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     raster: null,
     rasterDue: createRasterScheduler(),
     rasterId: 0,
+    rasterError: null,
     mockRasterMs: null,
     mockRasters: 0,
     orbit: orbitFromPose(preset.camera, preset.target),
     size: { width: m.width, height: m.height },
+    dpr: m.dpr,
+    renderDpr,
+    settle: createSettleTracker(),
+    settledFrames: 0,
+    warmUpMs: 0,
+    warmUpSteps: [],
     appliedView: null,
     errors: [],
     refused: [],
@@ -438,12 +510,18 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
       pushError(a, message);
     },
   });
+  // D4-88: every mode's pipelines compiled behind the boot spinner (the MOCK is bound, so the
+  // flow layers draw), so the viewer's first switch into a mode does not stall the worker
+  const warm = await view.warmUp();
+  a.warmUpMs = warm.ms;
+  a.warmUpSteps = warm.configurations;
   // messages wait in `pending` until the field is bound (a 'field' choice needs the switch)
   app = a;
   for (const p of pending.splice(0)) handle(a, p);
   post({
     type: 'ready',
     adapter: `${view.device.info.vendor} ${view.device.info.description}`.trim(),
+    warmUpMs: warm.ms,
   });
   loop(a);
 }

@@ -5,10 +5,15 @@
 import { useMemo } from 'react';
 import { referenceEngine } from '../cycle/engine';
 import {
+  chartSpeedPercents,
+  FAN_LINES,
+  HPC_LINES,
   mapGeometry,
   niceTicks,
   placeSpeedLabels,
+  plotPoint,
   scaleOf,
+  surgeMarginView,
   type MapGeometry,
   type MapPoint,
 } from '../hud/compressorMap';
@@ -36,9 +41,13 @@ export function mapGeometries(): { fan: MapGeometry; hpc: MapGeometry } {
       designCorrectedRpm: e.design.corrSpeed[w],
       referenceRpm: ref,
     });
+    // W2A-I2: each map from its own lowest speed line up, so ground idle's fan point (just
+    // below the fan map's 30.6 % line) is inside the chart
+    const fan = frame('fan', e.calibration.n1ReferenceRpm);
+    const hpc = frame('hpc', e.calibration.n2ReferenceRpm);
     maps = {
-      fan: mapGeometry(frame('fan', e.calibration.n1ReferenceRpm), [60, 70, 80, 90, 100, 105]),
-      hpc: mapGeometry(frame('hpc', e.calibration.n2ReferenceRpm)),
+      fan: mapGeometry(fan, chartSpeedPercents(fan, FAN_LINES)),
+      hpc: mapGeometry(hpc, chartSpeedPercents(hpc, HPC_LINES)),
     };
   }
   return maps;
@@ -68,6 +77,18 @@ function AxisTitles({ x, y }: { readonly x: string; readonly y: string }) {
   );
 }
 
+/** A small chevron at (x, y) pointing along (dx, dy): the point is beyond the plot's edge. */
+function offMarker(x: number, y: number, dx: number, dy: number): string {
+  const n = Math.hypot(dx, dy) || 1;
+  const ux = dx / n;
+  const uy = dy / n;
+  const tip = [x + 9 * ux, y + 9 * uy];
+  const back = [x + 4 * ux, y + 4 * uy];
+  const px = -uy * 4;
+  const py = ux * 4;
+  return `M${(back[0] ?? 0) + px} ${(back[1] ?? 0) + py}L${tip[0] ?? 0} ${tip[1] ?? 0}L${(back[0] ?? 0) - px} ${(back[1] ?? 0) - py}`;
+}
+
 const path = (pts: readonly MapPoint[], x: (v: number) => number, y: (v: number) => number) =>
   pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p[0]).toFixed(1)} ${y(p[1]).toFixed(1)}`).join('');
 
@@ -90,23 +111,45 @@ export function CompressorMapChart({
   const xt = niceTicks(g.bounds.wc[0], g.bounds.wc[1], 4);
   const yt = niceTicks(g.bounds.pr[0], g.bounds.pr[1], 4);
   const margin = point.surgeMarginFraction;
-  // the speed lines' stall ends crowd near design speed: only the labels that fit are drawn
+  // D4-87: below the map's lowest speed line the margin is extrapolated: dimmed, tagged, no amber
+  const sm = surgeMarginView(g, point);
+  // the speed lines' stall ends crowd near design speed: only the labels that fit are drawn (the
+  // map's own lowest line is labelled by its rounded percent)
   const labels = placeSpeedLabels(
     g.speedLines.map((s) => ({
-      percent: s.percent,
+      percent: Math.round(s.percent),
       x: x(s.points[0]?.[0] ?? 0),
       y: y(s.points[0]?.[1] ?? 0),
     })),
   );
-  const label = `${title} map: corrected flow ${fmt.fixed(point.correctedFlowKgPerS, 1)} kg/s, pressure ratio ${fmt.fixed(point.pressureRatio, 2)}, surge margin ${fmt.fixed(100 * margin, 1)} %`;
+  // the point where it is on the plot, or on the plot's edge with a marker (W2A-I2)
+  const op = plotPoint(
+    x(point.correctedFlowKgPerS),
+    y(point.pressureRatio),
+    { x: M.l, y: M.t, w: W - M.l - M.r, h: H - M.t - M.b },
+    3,
+  );
+  const label = `${title} map: corrected flow ${fmt.fixed(point.correctedFlowKgPerS, 1)} kg/s, pressure ratio ${fmt.fixed(point.pressureRatio, 2)}, surge margin ${fmt.fixed(100 * margin, 1)} %${sm.tag === null ? '' : `, ${sm.tag} (extrapolated)`}`;
   return (
     <figure className="chart">
       <figcaption>
         <span>{title}</span>
-        <span className={margin < 0.05 ? 'value caution' : 'value'}>
-          SM {fmt.fixed(100 * margin, 1)}
-          <small>%</small> · η {fmt.fixed(100 * point.isentropicEfficiency, 1)}
-          <small>%</small>
+        <span className="value-group">
+          {sm.tag !== null && (
+            <span className="tag" title="below the map's lowest speed line: extrapolated (D4-87)">
+              {sm.tag}
+            </span>
+          )}
+          <span
+            className={
+              sm.level === 'caution' || sm.level === 'warning' ? `value ${sm.level}` : 'value'
+            }
+            data-level={sm.level}
+          >
+            SM {fmt.fixed(100 * margin, 1)}
+            <small>%</small> · η {fmt.fixed(100 * point.isentropicEfficiency, 1)}
+            <small>%</small>
+          </span>
         </span>
       </figcaption>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={label}>
@@ -154,18 +197,16 @@ export function CompressorMapChart({
             />
           );
         })}
-        <circle
-          className="op-ring"
-          cx={x(point.correctedFlowKgPerS)}
-          cy={y(point.pressureRatio)}
-          r={6}
-        />
-        <circle
-          className="op"
-          cx={x(point.correctedFlowKgPerS)}
-          cy={y(point.pressureRatio)}
-          r={2.6}
-        />
+        {op.off !== null && (
+          // off the plot: a chevron on the edge, pointing the way the point left
+          <path
+            className="op-off"
+            d={offMarker(op.x, op.y, op.off.dx, op.off.dy)}
+            aria-hidden="true"
+          />
+        )}
+        <circle className="op-ring" cx={op.x} cy={op.y} r={6} data-below-map={sm.tag !== null} />
+        <circle className="op" cx={op.x} cy={op.y} r={2.6} data-below-map={sm.tag !== null} />
         <AxisTitles x="W√θ/δ kg/s" y="PR" />
       </svg>
     </figure>

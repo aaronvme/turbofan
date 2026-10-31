@@ -49,6 +49,46 @@ describe('the overlay (RTL)', { timeout: TIMEOUT_MS }, () => {
     expect(sentCommands(post)).toContainEqual({ type: 'setThrottle', lever: 0.6 });
   });
 
+  it('W2A-I5: the lever shows what it sent until the snapshot echoes its seq: quick presses add up', () => {
+    const s = snapshotOf();
+    const post = mount(s);
+    render(<Overlay />);
+    const lever = screen.getByRole<HTMLInputElement>('slider', { name: 'Thrust lever' });
+    // an ArrowUp: one step from the value the lever shows now
+    const press = () => {
+      fireEvent.change(lever, {
+        target: { value: String((Math.round(Number(lever.value) * 100) + 1) / 100) },
+      });
+    };
+    press();
+    press();
+    const levers = () =>
+      sentCommands(post).flatMap((c) => (c.type === 'setThrottle' ? [c.lever] : []));
+    expect(levers()).toEqual([0.01, 0.02]);
+    press();
+    press();
+    press();
+    expect(levers()).toEqual([0.01, 0.02, 0.03, 0.04, 0.05]);
+    expect(lever.value).toBe('0.05');
+    const seqs = post.mock.calls.flatMap(([m]) => (m.type === 'command' ? [m.message.seq] : []));
+    const at = (seq: number, value: number) => {
+      act(() => {
+        useApp.setState({
+          snapshot: { ...s, lastCommandSeq: seq, inputs: { ...s.inputs, throttleLever: value } },
+        });
+      });
+    };
+    // a snapshot that has applied only the second press does not pull the lever back
+    at(seqs[1] ?? -1, 0.02);
+    expect(lever.value).toBe('0.05');
+    expect(screen.getByText('lever 5 %')).toBeTruthy();
+    // once the echo reaches the last press, the lever shows the sim's own value again
+    at(seqs[4] ?? -1, 0.05);
+    expect(lever.value).toBe('0.05');
+    at((seqs[4] ?? -1) + 1, 0);
+    expect(lever.value).toBe('0');
+  });
+
   it('a mode radio and the 1-5 keys send setViewMode', async () => {
     const post = mount(snapshotOf());
     render(<Overlay />);
@@ -101,6 +141,74 @@ describe('the overlay (RTL)', { timeout: TIMEOUT_MS }, () => {
     for (const role of ['button', 'switch', 'radio', 'slider', 'combobox'] as const)
       expect(screen.queryAllByRole(role, { name: unnamed }), role).toEqual([]);
     expect(screen.getAllByRole('button').length).toBeGreaterThan(20);
+  });
+});
+
+describe(
+  'the texts (W2A-N8) and the conservative defaults (W2A-N3)',
+  { timeout: TIMEOUT_MS },
+  () => {
+    it('names the FADEC limiter in words and the burner state at steady idle', () => {
+      mount(snapshotOf());
+      render(<Overlay />);
+      const engine = screen.getByRole('region', { name: 'Engine display' });
+      expect(within(engine).getByText('RUN · idle floor')).toBeTruthy();
+      expect(engine.textContent).not.toMatch(/idleFloor/);
+      // no start in progress: the readout is the burner's, not "Start lit"
+      expect(within(engine).getByText('Burner')).toBeTruthy();
+      expect(within(engine).queryByText('Start')).toBeNull();
+    });
+
+    it('the diagnostics show a dash, not 0.00 ms, and SOLVER IDLE for a solver that is not drawn', async () => {
+      mount(snapshotOf());
+      render(<Overlay />);
+      await userEvent.click(screen.getByRole('button', { name: 'Diagnostics' }));
+      const d = screen.getByRole('region', { name: 'Diagnostics' });
+      expect(within(d).getByText('SOLVER IDLE')).toBeTruthy();
+      const solverRow = within(d).getByText('Solver', { selector: 'dt' }).parentElement;
+      expect(solverRow?.querySelector('dd')?.textContent).toBe('– ms');
+    });
+
+    it('a solver field whose link is not known yet is labelled uncoupled in the legend (M8)', () => {
+      mount(snapshotOf({ mode: 'data', flow: 'solver' }), diagnosticsOf({ field: null }));
+      render(<Overlay />);
+      const legend = screen.getByRole('region', { name: 'Flow legend' });
+      expect(within(legend).getByText(/solver \(uncoupled until W3\)/)).toBeTruthy();
+      expect(legend.textContent).not.toMatch(/coupled\)/);
+      expect(
+        within(screen.getByRole('group', { name: 'Data provenance' })).getByText(
+          'FIELD: solver (uncoupled until W3)',
+        ),
+      ).toBeTruthy();
+    });
+  },
+);
+
+describe('the compressor maps at ground idle (W2A-I2, D4-87)', { timeout: TIMEOUT_MS }, () => {
+  // the charts' plot rectangle in their 300 x 168 viewBox (charts.tsx's margins)
+  const inPlot = (c: Element | undefined) => {
+    const x = Number(c?.getAttribute('cx'));
+    const y = Number(c?.getAttribute('cy'));
+    return x >= 40 && x <= 300 - 8 && y >= 10 && y <= 168 - 30;
+  };
+
+  it("draws both operating points inside the plots; the fan's margin below its map is dimmed and tagged, not amber", () => {
+    mount(snapshotOf());
+    render(<Overlay />);
+    const maps = screen.getByRole('region', { name: 'Compressor maps' });
+    const [fan, hpc] = within(maps).getAllByRole('figure');
+    if (fan === undefined || hpc === undefined) throw new Error('no map figures');
+    expect(fan.textContent).toMatch(/^Fan/);
+    expect(inPlot(fan.querySelector('circle.op') ?? undefined)).toBe(true);
+    expect(inPlot(hpc.querySelector('circle.op') ?? undefined)).toBe(true);
+    // D4-87: the fan's idle margin is an extrapolation below the map, not a caution
+    const sm = within(fan).getByText(/^SM/);
+    expect(sm.getAttribute('data-level')).toBe('belowMap');
+    expect(sm.className).not.toMatch(/caution|warning/);
+    expect(within(fan).getByText('below map')).toBeTruthy();
+    expect(fan.querySelector('circle.op')?.getAttribute('data-below-map')).toBe('true');
+    expect(within(hpc).getByText(/^SM/).getAttribute('data-level')).toBe('normal');
+    expect(within(hpc).queryByText('below map')).toBeNull();
   });
 });
 

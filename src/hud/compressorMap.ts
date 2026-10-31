@@ -19,6 +19,11 @@ export interface SpeedLine {
 }
 
 export interface MapGeometry {
+  /**
+   * The map's lowest speed line, % of the reference speed: below it the model's point (and its
+   * surge margin) is a similarity extrapolation (src/cycle/componentMaps.ts), not the map (D4-87).
+   */
+  readonly lowestPercent: number;
   readonly speedLines: readonly SpeedLine[];
   /** The stall R-line across the speeds, low flow to high. */
   readonly surgeLine: readonly MapPoint[];
@@ -37,7 +42,28 @@ export interface MapFrame {
 }
 
 export const SPEED_LINE_PERCENTS = [50, 60, 70, 80, 85, 90, 95, 100, 105] as const;
+/** The round speed lines each chart draws above its map's lowest line (chartSpeedPercents). */
+export const FAN_LINES = [40, 50, 60, 70, 80, 90, 100, 105] as const;
+export const HPC_LINES = SPEED_LINE_PERCENTS;
+/** A round line this close above the map's lowest line, %, is left out (their labels crowd). */
+const MIN_LINE_GAP_PERCENT = 5;
 const SAMPLES = 24;
+
+/** The map's lowest speed line (its first corrected-speed node), % of the reference speed. */
+export function lowestMapPercent(f: MapFrame): number {
+  const m = f.map.map;
+  return (100 * (m.nc[0] ?? m.design.nc) * f.designCorrectedRpm) / (m.design.nc * f.referenceRpm);
+}
+
+/**
+ * The speed lines a chart draws (W2A-I2): the map's own lowest line, so the chart's range runs
+ * down to where the map ends (the fan's idle point sits just below it), then the round lines
+ * above it.
+ */
+export function chartSpeedPercents(f: MapFrame, round: readonly number[]): number[] {
+  const low = lowestMapPercent(f);
+  return [low, ...round.filter((p) => p >= low + MIN_LINE_GAP_PERCENT)];
+}
 
 /** Speed lines from the stall R-line to the map's last R-line, and the surge line. */
 export function mapGeometry(
@@ -72,7 +98,66 @@ export function mapGeometry(
       w1 = Math.max(w1, w);
       p1 = Math.max(p1, pr);
     }
-  return { speedLines, surgeLine, bounds: { wc: [w0, w1], pr: [1, p1] } };
+  return {
+    lowestPercent: lowestMapPercent(f),
+    speedLines,
+    surgeLine,
+    bounds: { wc: [w0, w1], pr: [1, p1] },
+  };
+}
+
+/** A surge margin under this fraction is a caution on the map (the chart's amber, app-ui's). */
+export const SM_CAUTION_FRACTION = 0.05;
+
+export interface SurgeMarginView {
+  /**
+   * D4-87: `belowMap` when the point is below the map's lowest speed line (an extrapolation,
+   * dimmed, never amber or red); on the map, red at or past the surge line, amber under
+   * SM_CAUTION_FRACTION.
+   */
+  readonly level: 'normal' | 'caution' | 'warning' | 'belowMap';
+  readonly tag: 'below map' | null;
+}
+
+export function surgeMarginView(
+  g: Pick<MapGeometry, 'lowestPercent'>,
+  p: Pick<MapOperatingPoint, 'correctedSpeedFraction' | 'surgeMarginFraction'>,
+): SurgeMarginView {
+  if (!(100 * p.correctedSpeedFraction >= g.lowestPercent))
+    return { level: 'belowMap', tag: 'below map' };
+  const m = p.surgeMarginFraction;
+  return {
+    level: !(m > 0) ? 'warning' : m < SM_CAUTION_FRACTION ? 'caution' : 'normal',
+    tag: null,
+  };
+}
+
+/**
+ * Where a chart draws a point, px: where it is inside the plot, else on the plot's edge (inset
+ * by `inset`) with the side it left by, so the chart can mark it off the map (W2A-I2). A
+ * non-finite coordinate is off the plot too.
+ */
+export function plotPoint(
+  x: number,
+  y: number,
+  plot: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
+  inset: number,
+): { x: number; y: number; off: { dx: -1 | 0 | 1; dy: -1 | 0 | 1 } | null } {
+  const x0 = plot.x + inset;
+  const x1 = plot.x + plot.w - inset;
+  const y0 = plot.y + inset;
+  const y1 = plot.y + plot.h - inset;
+  const side = (v: number, lo: number, hi: number): -1 | 0 | 1 =>
+    Number.isNaN(v) || v < lo ? -1 : v > hi ? 1 : 0;
+  const dx = side(x, x0, x1);
+  const dy = side(y, y0, y1);
+  const clamp = (v: number, lo: number, hi: number) =>
+    Number.isNaN(v) ? lo : Math.max(lo, Math.min(hi, v));
+  return {
+    x: clamp(x, x0, x1),
+    y: clamp(y, y0, y1),
+    off: dx === 0 && dy === 0 ? null : { dx, dy },
+  };
 }
 
 /** A trail of recent operating points, newest last, at most `max` long (a new array). */
