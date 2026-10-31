@@ -31,11 +31,17 @@ export function createViewProjRoll(prev: Matrix4, curr: Matrix4, currInv: Matrix
       if (!havePrev) prev.copy(curr);
       havePrev = true;
     },
+    // W2A-I9: all three, since the next roll copies `curr` into `prev`: restoring `prev` alone
+    // left the warm frame's matrix as current, and the real frame after it had no camera motion
     save() {
       const p = prev.clone();
+      const c = curr.clone();
+      const ci = currInv.clone();
       const had = havePrev;
       return () => {
         prev.copy(p);
+        curr.copy(c);
+        currInv.copy(ci);
         havePrev = had;
       };
     },

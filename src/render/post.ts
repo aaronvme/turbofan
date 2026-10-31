@@ -174,7 +174,8 @@ export interface LookPipeline {
    * Renders a frame. Tests and debugging: `traa` false skips TRAA (and depth of field);
    * `linear` writes half the linear radiance, with no tone map or sRGB encoding (and no DoF).
    * `warm` (D4-91, a warm frame the caller's real frame overwrites): TRAA's history and the
-   * rotor motion's previous view-projection are left as they were.
+   * motion vectors' view-projections (previous, current and its inverse: W2A-I9) are left as
+   * they were.
    */
   render(traa?: boolean, linear?: boolean, warm?: boolean): void;
   dispose(): void;
@@ -608,7 +609,7 @@ export function createPipeline(
       // the other composites, so TRAA's chain renders the scene passes before anything below
       // reads their depth (the same image: the passes render once a frame). Reading the depth
       // first rendered the scene pass a call level up, and three keys its render contexts by the
-      // call depth (GPU_FACTS M56): every engine object got a second render object, node build
+      // call depth (GPU_FACTS M57): every engine object got a second render object, node build
       // (~15 ms each) and pipeline on Schlieren's first frame
       const dim = display().rgb.mul(0.22).toVar();
       const eps = schTex.sample(screenUV).x;
