@@ -10,6 +10,7 @@
 //   kernel's mirror) ray for ray;
 // - W2V-I7 (D4-86): at ground idle the Data plane leaves the ambient air undrawn, on the MOCK and
 //   the uncoupled solver, and keeps the take-off flow beyond its floor;
+// - W2V-I8: the floor holds on the GPU for p, rho, T and Mach (the nearest LUT entry of each map);
 // - W2V-I5: the overlay is drawn unjittered, so a still frame repeats exactly (TRAA's jitter,
 //   the negative control, makes it crawl);
 // - [timing] the flow visuals at the default preset, 1080p, back to back (D4-42 style, but
@@ -22,12 +23,18 @@ import { commands } from 'vitest/browser';
 import { afterAll, describe, expect, it } from 'vitest';
 import { Vector3, Vector4, type PerspectiveCamera } from 'three/webgpu';
 import { ISA_SLS } from '../../src/contracts/ambient';
-import { FIELD_EXTENTS } from '../../src/contracts/flow';
+import { FIELD_EXTENTS, fieldReferenceFromAmbient } from '../../src/contracts/flow';
 import { ENGINE_DEFINITION } from '../../src/engine/definition';
 import { GpuFlowSolver } from '../../src/flow/gpu/device/flowSolver';
 import { loadMeshAsset, parseMeshManifest } from '../../src/flow/mesh/loader';
 import { bakeLut, lightnessL } from '../../src/flow/viz/colormaps';
-import { airGammaR, FIELD_QUANTITIES } from '../../src/flow/viz/fields';
+import {
+  airGammaR,
+  ambientValue,
+  FIELD_QUANTITIES,
+  normalizeQuantity,
+  type FieldQuantityId,
+} from '../../src/flow/viz/fields';
 import { gladstoneDaleK } from '../../src/flow/viz/optics';
 import { densityGradientRaster, sampleGradientRaster } from '../../src/flow/viz/particleKernel';
 import {
@@ -512,6 +519,118 @@ describe('flow visuals', () => {
     } finally {
       s.dispose();
     }
+  });
+
+  // W2V-I8 (critic pass 16): the case above reads Mach only (the dark end of viridis), so the
+  // floor of p, rho and T was unverified where it is drawn: a shader T floor centred on 0 K instead
+  // of T_inf (the critic's mutant V1) passed it, and the legend's "Not drawn: 243 to 333 K" would
+  // sit over a plane that draws all of it. The bar, stated before it runs (the critic's fix): on
+  // the MOCK at ground idle, the plane alone (every mesh hidden, no tracers), for each of p, rho,
+  // T and Mach, the share of the plane's footprint (the floor-off plane, alpha >= 0.5) drawn in
+  // the ambient's own colour band, a pixel whose nearest LUT entry of the quantity's own map is
+  // within 5 % of the map (AMBIENT_BAND entries) of the ambient's entry, is <= 10 % with the
+  // floor; with it off (noFlowFloor) it is > 30 %, so the measure sees the band it checks (the
+  // critic's probe: p 98.0 -> 0.5 %, rho 90.5 -> 0.9 %, T 90.5 -> 1.0 %, Mach 46.2 -> 6.6 %; T
+  // 90.5 -> 90.5 % under V1). |u| is Cutaway's quantity: reported, not gated.
+  it('W2V-I8: at ground idle every Data quantity leaves its ambient band undrawn (p, rho, T, Mach; nearest LUT entry)', async ({
+    annotate,
+  }) => {
+    const c = canvas();
+    const v = await createEngineView({
+      gpu: navigator.gpu,
+      canvas: c,
+      definition: ENGINE_DEFINITION,
+      width: W,
+      height: H,
+      dpr: 1,
+    });
+    views.push(v);
+    const MAX_IN_BAND = 0.1;
+    const MIN_IN_BAND_FLOOR_OFF = 0.3;
+    const AMBIENT_BAND = 0.05 * 255;
+    const ref = fieldReferenceFromAmbient(ISA_SLS);
+    v.setPreset('cutaway');
+    v.setMode('cutaway', true);
+    v.setFlowMode('data');
+    v.setThrottle(0, true);
+    v.setFlowField(
+      createMockFlowField(ENGINE_DEFINITION, mockSteadyState(ENGINE_DEFINITION, 0), ISA_SLS),
+    );
+    const rows: string[] = [];
+    const failures: string[] = [];
+    const quantities: readonly FieldQuantityId[] = ['p', 'rho', 't', 'mach', 'speed'];
+    for (const q of quantities) {
+      v.setFlowQuantity(q);
+      const read = async (floorOff: boolean) => {
+        v.setDebugFlags({
+          hide: '.',
+          noFlowParticles: true,
+          ...(floorOff ? { noFlowFloor: true } : {}),
+        });
+        for (let k = 0; k < 30; k++) v.frame(1 / 60);
+        return (await v.readFlowTarget('overlay')).rgba;
+      };
+      const old = await read(true);
+      const now = await read(false);
+      const lut = bakeLut(FIELD_QUANTITIES[q].colormap);
+      const ambient = 255 * normalizeQuantity(q, ambientValue(q, ref));
+      // the nearest LUT entry of a pixel's (un-premultiplied) 8-bit colour, cached per colour
+      const cache = new Map<number, number>();
+      const inBand = (o: Float32Array, k: number) => {
+        const a = o[k + 3] ?? 0;
+        const [r, g, b] = [0, 1, 2].map((ch) =>
+          Math.min(255, Math.round((255 * (o[k + ch] ?? 0)) / a)),
+        ) as [number, number, number];
+        const key = (r << 16) | (g << 8) | b;
+        let best = cache.get(key);
+        if (best === undefined) {
+          let bd = Infinity;
+          best = 0;
+          for (let i = 0; i < 256; i++) {
+            const d =
+              (r - (lut[4 * i] ?? 0)) ** 2 +
+              (g - (lut[4 * i + 1] ?? 0)) ** 2 +
+              (b - (lut[4 * i + 2] ?? 0)) ** 2;
+            if (d < bd) {
+              bd = d;
+              best = i;
+            }
+          }
+          cache.set(key, best);
+        }
+        return Math.abs(best - ambient) <= AMBIENT_BAND;
+      };
+      let footprint = 0;
+      let bandOff = 0;
+      let bandOn = 0;
+      let drawn = 0;
+      for (let k = 0; k < old.length; k += 4) {
+        if ((old[k + 3] ?? 0) < 0.5) continue;
+        footprint++;
+        if (inBand(old, k)) bandOff++;
+        if ((now[k + 3] ?? 0) >= 0.5) {
+          drawn++;
+          if (inBand(now, k)) bandOn++;
+        }
+      }
+      const gated = q !== 'speed';
+      const off = bandOff / footprint;
+      const on = bandOn / footprint;
+      rows.push(
+        `${q}: ${String(footprint)} px; in the ambient band ${(100 * off).toFixed(1)} % floor off, ${(100 * on).toFixed(1)} % with the floor; drawn ${((100 * drawn) / footprint).toFixed(1)} %${gated ? '' : ' (reported, not gated)'}`,
+      );
+      if (gated && !(footprint > 20_000 && off > MIN_IN_BAND_FLOOR_OFF && on <= MAX_IN_BAND))
+        failures.push(q);
+    }
+    v.setDebugFlags({});
+    console.warn(
+      `W2V-I8 the floor for every Data quantity (MOCK, ground idle)\n${rows.join('\n')}`,
+    );
+    await annotate(`[look] W2V-I8: ${rows.join('; ')}`);
+    await commands.writeFile(`${OUT}/floor-quantities.txt`, `${rows.join('\n')}\n`);
+    await v.device.device.queue.onSubmittedWorkDone();
+    expect(v.stats().errors).toEqual([]);
+    expect(failures, rows.join('\n')).toEqual([]);
   });
 
   // W2V-I3: the TSL march (flowViz.ts) against its TS model (schlieren.ts) on the same rays: the
