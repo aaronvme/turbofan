@@ -39,7 +39,8 @@ GOTCHAS
 GATES @ the commit adding this section (shared machine, usage brake: partial)
 - typecheck clean; ESLint + Prettier clean on src/cycle, tests/unit/cycle, tools/cycle.
 - heldRecovery.test.ts 9 passed (@0f9af06); heldFrame.test.ts 11 passed (@80fbcae). heldRetry, gasPathHold, lostSolveCause, surgeDetection, surge: 5 files, 68 passed.
-- NOT RUN: full `npm run coverage`, `test:mesh`, the other slow transient files (model, modelPaths, surgeRecovery), the fingerprint probe, Stryker.
+- surgeRecovery (incl. the W1K-I2 fit slam pin), model, modelPaths (the other slow transient files): 3 files, 37 passed (@2ccab8d).
+- NOT RUN: full `npm run coverage`, `test:mesh`, the fingerprint probe, Stryker.
 
 ---
 
