@@ -271,7 +271,7 @@ describe('D4-63 on the GPU: the engine default at rest on the 130k mesh, 20000 i
       rows.push(
         {
           id: 'D4-63 GPU',
-          metric: `reported (extension): weighted residual at ${end} / at ${ITERATIONS}, max over ${ITERATIONS}-${end} / at ${ITERATIONS}`,
+          metric: `reported (extension): weighted residual at ${end} / at ${ITERATIONS}`,
           threshold: 'reported',
           value: at(residual, end) / resEnd,
           pass: 'reported',
