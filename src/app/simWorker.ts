@@ -156,6 +156,8 @@ interface App {
   warmCpuMaxMs: number;
   /** The slowest warm frame's configuration and its slowest object (where a hitch comes from). */
   warmSlowest: string;
+  /** D4-95: the background waited in the last frame (an input or a switch less than 1 s ago). */
+  warmSuspended: boolean;
   appliedView: RenderState | null;
   errors: string[];
   refused: string[];
@@ -368,10 +370,15 @@ async function startSolver(a: App): Promise<GpuFlowSolver> {
 /**
  * D4-91: one warm frame in this frame's slot, if it has one (src/shell/warmUp.ts): the asked
  * view's configuration first, then the background order. A warm frame that throws is an error,
- * said, and its configuration is given up on (shown anyway), never a stuck "preparing".
+ * said, and its configuration is given up on (shown anyway), never a stuck "preparing". D4-95:
+ * the background waits while a switch is pending (the asked view not shown yet, or its transition
+ * not settled) and for a second after it and after any input (handle()).
  */
 function warmSlot(a: App, frame: number, lastFrameMs: number) {
-  const id = a.warm.next(frame, lastFrameMs, configFor(a.core.view));
+  const nowMs = performance.now();
+  const switchPending = a.preparing !== null || a.settledFrames === 0;
+  const id = a.warm.next(frame, lastFrameMs, configFor(a.core.view), { nowMs, switchPending });
+  a.warmSuspended = a.warm.suspended(nowMs);
   if (id === null) return;
   try {
     const r = a.view.warmFrame(WARM_CONFIGS[id], { cpuMs: WARM_BUDGET_MS });
@@ -482,6 +489,7 @@ function loop(a: App) {
           cpuMaxMs: a.warmCpuMaxMs,
           slowest: a.warmSlowest,
           gaveUp: a.warm.gaveUp(),
+          suspended: a.warmSuspended,
         },
         backingStore: {
           ...backingSize(a.size.width, a.size.height, a.renderDpr),
@@ -521,6 +529,9 @@ function loop(a: App) {
 }
 
 function handle(a: App, m: ToWorker) {
+  // D4-95: the viewer's input suspends the background warm-up for a second (the overlay's own
+  // layout report, viewArea, is not an input: it follows the panels and the window)
+  if (m.type !== 'init' && m.type !== 'viewArea') a.warm.input(performance.now());
   switch (m.type) {
     case 'init':
       return;
@@ -626,6 +637,7 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     warmFrames: 0,
     warmCpuMaxMs: 0,
     warmSlowest: '',
+    warmSuspended: false,
     appliedView: null,
     errors: [],
     refused: [],

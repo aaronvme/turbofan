@@ -107,7 +107,8 @@ export interface AppDiagnostics {
   };
   /**
    * D4-91's background warm-up (src/shell/warmUp.ts): the configurations compiled and still
-   * queued, the warm frames so far, the slowest warm frame's CPU ms, those given up on.
+   * queued, the warm frames so far, the slowest warm frame's CPU ms, those given up on. D4-95:
+   * whether the background waited in this frame (an input or a switch less than 1 s ago).
    */
   readonly warm: {
     readonly warm: readonly string[];
@@ -117,6 +118,7 @@ export interface AppDiagnostics {
     /** The slowest warm frame's configuration and its slowest new object, with its own ms. */
     readonly slowest: string;
     readonly gaveUp: readonly string[];
+    readonly suspended: boolean;
   };
   /** D4-85: the canvas's backing store, px, and the pixel ratio it renders at. */
   readonly backingStore: { readonly width: number; readonly height: number; readonly dpr: number };

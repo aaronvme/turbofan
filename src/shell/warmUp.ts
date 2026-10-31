@@ -5,6 +5,10 @@
 // per frame-budget slot (EngineView.warmFrame: one budgeted frame of it, its pipelines compiled
 // asynchronously). A view asked for before its configuration is warm is not shown yet: the view
 // shown stays, the overlay says "preparing", and the switch happens as soon as it is warm.
+// D4-95: the background warm-up is suspended around the viewer's input and mode switches (a warm
+// frame that lands in a switch's window shows as a hitch in it, U2): no background slot while a
+// switch is pending, nor for QUIET_AFTER_INPUT_MS after any input or switch. A cold switch still
+// prepares its own view in that time, since the viewer waits for that one.
 
 import type { RenderState, ViewMode } from '../contracts/ui';
 import type { FieldQuantityId } from '../flow/viz/fields';
@@ -74,6 +78,16 @@ export const SLOT_FRAME_CPU_MS = 8.3;
  * slowest, Cutaway, took 6.9-14.5 s to compile in one frame at boot (round 3).
  */
 export const MAX_WARM_FRAMES = 400;
+/** D4-95: no background slot for this long after any input or switch, ms. */
+export const QUIET_AFTER_INPUT_MS = 1000;
+
+/** D4-95: the frame's time and whether a mode switch is pending, for the quiet rule. */
+export interface WarmClock {
+  /** The frame's time, ms (the clock input() is given). */
+  readonly nowMs: number;
+  /** A mode switch not yet done: the asked view not yet shown, or its transition not settled. */
+  readonly switchPending: boolean;
+}
 
 /** The configuration a view needs compiled before it is shown. */
 export function configFor(view: RenderState): WarmConfigId {
@@ -96,9 +110,18 @@ export function configFor(view: RenderState): WarmConfigId {
 export interface WarmScheduler {
   /**
    * The configuration to warm in this frame (null: no slot, or all warm): the asked view's first,
-   * then the background order.
+   * then the background order, which waits while the clock says suspended (D4-95).
    */
-  next(frame: number, lastFrameCpuMs: number, asked: WarmConfigId): WarmConfigId | null;
+  next(
+    frame: number,
+    lastFrameCpuMs: number,
+    asked: WarmConfigId,
+    clock: WarmClock,
+  ): WarmConfigId | null;
+  /** D4-95: a viewer input (a command, the orbit, a camera preset, a field choice, a resize). */
+  input(nowMs: number): void;
+  /** D4-95: whether the background waits at this time (an input or a switch less than 1 s ago). */
+  suspended(nowMs: number): boolean;
   /** The configuration is compiled (its warm frame drew it whole, nothing pending). */
   done(id: WarmConfigId): void;
   isWarm(id: WarmConfigId): boolean;
@@ -112,16 +135,24 @@ export function createWarmScheduler(): WarmScheduler {
   const frames = new Map<WarmConfigId, number>();
   const given: WarmConfigId[] = [];
   let lastSlot = -Infinity;
+  // the background waits until then: QUIET_AFTER_INPUT_MS after the last input or pending switch
+  let quietUntil = -Infinity;
+  const quiet = (untilMs: number) => {
+    quietUntil = Math.max(quietUntil, untilMs);
+  };
   const isWarm = (id: WarmConfigId) => warm.includes(id);
   const done = (id: WarmConfigId) => {
     if (!isWarm(id)) warm.push(id);
   };
   const queue = () => [...BOOT_CONFIGS, ...BACKGROUND_ORDER].filter((id) => !isWarm(id));
   return {
-    next(frame, cpuMs, asked) {
+    next(frame, cpuMs, asked, clock) {
+      if (clock.switchPending) quiet(clock.nowMs + QUIET_AFTER_INPUT_MS);
       if (frame - lastSlot < SLOT_EVERY || !(cpuMs <= SLOT_FRAME_CPU_MS)) return null;
+      const suspended = clock.nowMs < quietUntil;
       for (;;) {
-        const id = !isWarm(asked) ? asked : queue()[0];
+        // while suspended only a cold switch's own view (the one the viewer waits for)
+        const id = !isWarm(asked) ? asked : suspended ? undefined : queue()[0];
         if (id === undefined) return null;
         const n = frames.get(id) ?? 0;
         if (n >= MAX_WARM_FRAMES) {
@@ -134,6 +165,10 @@ export function createWarmScheduler(): WarmScheduler {
         return id;
       }
     },
+    input(nowMs) {
+      quiet(nowMs + QUIET_AFTER_INPUT_MS);
+    },
+    suspended: (nowMs) => nowMs < quietUntil,
     done,
     isWarm,
     gaveUp: () => [...given],
