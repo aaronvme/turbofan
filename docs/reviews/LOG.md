@@ -3496,6 +3496,17 @@ None.
     - the Mach and speed floor is measured from rest, because `FieldReference` has no flight speed. W3's flight conditions add it to the contract.
   - **The indicative flow-visuals timing row failed in both builders' browser runs:** tracers at 1080p measured 3.27-3.44 ms against 2 ms, with both builders using the GPU at once. It's indicative. The critic reruns it on the trial merge with nothing else on the GPU. If it still fails there, it's a regression to find, not a bar to move.
   - **Flowviz's coverage run had one timeout** (`floor.test.ts`'s take-off case, at vitest's 5 s default, on the loaded machine). Like the other model-heavy tests, it gets an explicit timeout; that isn't a threshold.
+- **D4-96 (critic pass 16's questions; w2/kernel, w2/cycle-hold and w2/flowviz round 4 merged on main 3a99b7c): the follow-ups.**
+  1. **W2L-I9:** in the default cutaway pose, the cut-face band excludes every tile that tells TRAA's legacy pipeline from the shipped one, so that pose's row can't fail, which in effect widens the bar (D4-74). **Adopted:** a narrower band (the cap pixels only, without the extra tile ring) with **its own failing control in every banded pose**. Only if no band lets the control fail while the shipped pipeline passes is the default cutaway pose taken out of the moving bound, with the reason stated. The close-up keeps its control, which still fails with the band.
+  2. **W2H-I4: confirmed.** W2H-I1 stays open on the part-power fit; the fit's recovery doesn't rely on N2, and the "physical root" claim is withdrawn (the step after recovery is still on the booster-cooling branch). The part-power round also bounds the held spools from below: N2 falling from 98 to 57 % on a held balance is as non-physical as the runaway.
+  3. **N3: adopted.** P5's check text states its window ("23 s from ground idle: 3 s at idle, the 1 s ramp, then the take-off lever"). That names the window D4-90 measured; the bar doesn't change. It's a flagged contract text edit.
+  4. **The indicative flow-visuals timing row** (tracers at 1080p ≤ 2 ms) failed three times under another builder's concurrent GPU work: 3.27, 3.44 and 2.95 ms. Quiet, it measured 1.20 ms (critic 16). The iGPU shares power with the CPU (D0-1). It now records on every run and fails the suite only with the quiet flag, as app-ui's N16 did for the UI timing bars. The measure of record stays the official P4 / P4flow run, and the bar doesn't change.
+  - **Also in the follow-ups round:**
+    - W2K-I1: restore `spikes/README.md:77`'s D0-1 checklist line, lost to a `$1` artefact, before the next official window;
+    - W2V-I8: a GPU test of the T floor centred on T∞ (critic 16's 0 K mutant passes the suite today);
+    - the inferno ΔE comment (CIEDE2000 6.6-8.3, a visible band);
+    - K4: a GPU test of a global M_cut ≥ 1.
+  - App-ui rounds 4-5 (@0f3b21e) go to critic pass 17. They adopt flowviz's dock/legend edits when they merge main (D4-95).
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
