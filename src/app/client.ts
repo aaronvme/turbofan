@@ -16,6 +16,8 @@ export interface ClientOptions {
 }
 
 export function startClient(canvas: HTMLCanvasElement, options: ClientOptions = {}): Client {
+  // a new worker: nothing of the last one's session may pass for this one's (W2A-N11)
+  useApp.getState().resetSession();
   const app = useApp.getState();
   if (!('gpu' in navigator)) {
     app.setConnection({ state: 'unsupported', message: 'This browser has no WebGPU.' });
@@ -39,6 +41,12 @@ export function startClient(canvas: HTMLCanvasElement, options: ClientOptions = 
   };
   worker.onerror = (e) => {
     useApp.getState().setConnection({ state: 'failed', message: `worker: ${e.message}` });
+  };
+  // a message that cannot be deserialized never reaches onmessage: say so (W2A-N2)
+  worker.onmessageerror = () => {
+    useApp
+      .getState()
+      .setConnection({ state: 'failed', message: 'worker: a message could not be read' });
   };
 
   const size = () => {

@@ -3416,6 +3416,31 @@ None.
 - **D4-86 (decision 3): W2V-N21 is raised to important (W2V-I7).** At ground idle almost the whole Data plane is the colormap's darkest end (Mach ≈ 0 outside the nacelle), so the Data view reads as a purple board. The ambient region must read as quiet, not as a colour field: a neutral or transparent floor below a small threshold of the field's own range, or a range from the near field rather than the whole plane. It's flowviz's code; it goes to a small flowviz round with a screenshot before and after, and it doesn't block the app-ui merge.
 - **D4-87 (critic pass 13 question tt): a surge margin taken below the map's lowest speed line is shown as an extrapolation, not as a caution.** At ground idle the fan's corrected speed is below the map's 60 % line, so the cycle model's 3.6 % is extrapolated off the map. The UI shows it dimmed and tagged "below map", with no amber, whenever the operating point is below the map's lowest speed line. Amber and red apply only on the map. This holds until the map backlog (D4-3) extends the fan map down to idle. The idle operating point must still be visible on the fan map (W2A-I2): the chart's range includes it, or it sits at the edge with an off-map marker. It's app-ui's next round, TDD.
 - **D4-88 (question uu): the engine view owns pipeline warm-up, and the app shell calls it.** EngineView gets a `warmUp()` (a flagged render edit) that compiles every mode's pipelines, including the flow layers, before first use, e.g. a `compileAsync` per mode plus one offscreen frame of each flow layer. The worker calls it behind the boot spinner and reports `ready` only after it. The browser suite's shots wait for a settled-view signal from the snapshot, not a fixed 1.5 s (W2A-I4). Both go in app-ui's next round, with the first switch into Schlieren and Cutaway measured before and after.
+- **D4-89 (w2/reference-9 round 13 @d05e16d, plus the orchestrator's owed runs): the global M_cut 0.02 is adopted, and D4-63 is closed on the CPU reference.**
+  - **The source:** the plain scheme decays on the contract case. (a) is 0.366 at 1000-2000 and 0.043 at 20000. (b) is 0.641 for 20000 over 10000 and 0.159 for 20000 over 100. So the growth was the preconditioning at M_cut 0.003.
+  - **The fix passes every D4-79 row on both cases:**
+    - the contract case at 0.02: (a) 0.778 / 0.488, (b) 0.524 / 0.223;
+    - the linear part at 0.02 (run detached in the cap pause at d05e16d): (a) 0.506 / 0.0555, (b) 0.596 / 0.302, peak max |p′| 7.75 < 100.
+  - **Rule 2 holds:** every ladder row that passed at 0.003 still passes at 0.02 (8447e99: L7 ratio 1.779 ≤ 3, L8 0.754 %, f32 12/12, floor 4/4). The 3 known failures are unchanged (L8 convergence, L9a, L9b). test:mesh passed 29. 0.05 was not needed.
+  - **Recorded, not gating:** on the contract case the late decay at 0.02 is slow. L2 holds at 0.48-0.51 over 13k-20k, and the residual sits at 0.33-0.42 over 15k-20k, rising 0.35 → 0.40 over the last 1000. D4-79's checkpoints pass, but they don't show decay over 15k-20k, and the 10k checkpoint is a local high. The kernel round reports the GPU's residual trend to 20k at 0.02. If it grows past 20k, D4-63 reopens with that data.
+  - **The mirror (kernel round, w2/solver):** D4-40's adapter default in `src/flow/gpu/device/flowSolver.ts` becomes minMach = M_cut = 0.02, as a parameter. The kernel already takes minMach² and machCut. The GPU tests move from 0.003 to the cut, and their D4-62 / D4-71 tolerances are re-checked.
+  - The adoption commit came before the ladder confirmed it (round 13's note). The ladder then passed, so nothing reverts.
+- **D4-90 (w2/cycle-hold @f7338c0): D4-84's bounded retry answers.** On the part-power fit's ramp, a held step falls from 439 / 554 / 643 ms (median / p95 / max) to 2.39 / 2.97 / 4.45 ms in Node, at 120 gas-path evaluations per step.
+  1. **The bar becomes P5,** a flagged contract addition to `thresholds.ts` and a PHYSICS.md row. The gate is deterministic, in Node: on the fit ramp every step that starts held costs ≤ 137 gas-path evaluations, and every step ≤ 217. The browser's held-frame wall time (≤ 16.7 ms) is recorded beside it, and it counts only in an official quiet run, like P1 and P4. The cycle-hold branch adds the row before its review.
+  2. **The sub-idle entry is accepted for W2.** It costs 448-654 evaluations, 19-59 ms, once per start or relight, on a frame that ends matched. That's a single hitch at an event, not a held stream. W3's start scenario revisits it with a better entry anchor, with no new status or contract change now.
+  3. **The later recovery is accepted:** 3.37 s against 2.97 s in episode 1. D4-84's 0.5 s walk interval stays, since the budget bounds the frame either way.
+  4. **Spool runaway while held is raised as W2H-I1 (important).** It's existing D4-17 behaviour, not from this branch: on the fit's second episode the solve never recovers, and N1 reaches 260-275 % on the held power balance. A held point must not integrate the spools past their limits on a stale balance. It only bites on the part-power fit, which is on the backlog (D4-2), and the default model doesn't hold on the ramp. So it doesn't block the cycle-hold merge, but it must be fixed before the fit ships, in the part-power round with the fit's never-recovering episode. Until then the app annunciates a held gas path, and the critic checks the default model can't reach it.
+- **D4-91 (w2/app-ui round 3 @ff95d99 and critic pass 14's questions): the warm-up is made progressive, and two UI levels are pre-registered.**
+  1. **Boot:** D4-88's warm-up moved the first-switch stall into boot. The first switch now takes 52 ms into Schlieren (was 1323-1581) and 70 ms into Cutaway (was 421-2818), but boot-to-ready is 10-26 s (was 2.4-4.7). About 80 % of that is the GPU process compiling Cutaway's pipelines. **Adopted: a progressive warm-up.**
+     - The worker posts `ready` once the default mode (Realistic) is compiled.
+     - The other modes warm in the background, Cutaway and Schlieren first, at most one configuration per frame-budget slot.
+     - A switch into a mode not yet warmed shows a visible "preparing view" state, never a freeze, and switches as soon as the mode is ready.
+     - Bars, indicative on the shared machine: boot-to-ready ≤ 5 s, and the first switch into a warmed mode ≤ 250 ms.
+     - An async compile through three's internals and fewer cut-view pipelines are not adopted now. They come back only if the background warm-up can't keep up.
+  2. **Schlieren's lit-centre check:** skipping it is accepted only with a Schlieren-specific content check in its place. For example, the knife-edge image's luminance varies across the jet and nacelle region instead of being uniform. The true view draws the engine as a dim silhouette, so a lit centre is the wrong test there.
+  3. **UI levels, pre-registered in PHYSICS.md's UI rows:** surge margin amber below 5 % and red at or below 0, on the map only (D4-87); the first switch into a warmed mode ≤ 250 ms; boot-to-ready ≤ 5 s (both indicative; official only in a quiet run).
+  4. **(vv):** a non-holding direct solve keeps being charged against the step's budget. P5 bounds a step's total work, which is what the frame budget needs, and on the fit ramp those cuts were genuine losses. P5's limits stand.
+  5. **(ww):** yes. Critic pass 15 finishes pass 14 (A's remaining gates and mutants; B's verdict, its mutants and the default-model sweep for W2H-I1), and reviews app-ui round 3 in the same combined trial merge.
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
@@ -3899,3 +3924,404 @@ The chrome is close to the target. The fan map, the callouts and the true Schlie
 **Orchestrator questions:**
 - (tt) The fan's surge margin at ground idle reads 3.6 %, in amber: the cycle model's `surgeMarginFraction`, below the fan map's lowest (60 %) speed line, so off the drawn map. Is that number meaningful there? Should the UI show it as a caution, or mark it "below the map" until the part-power map backlog (D4-3) extends the fan map?
 - (uu) Who owns warming the flow modes' pipelines at boot (W2A-I4b): app-ui (calling each mode once behind the boot spinner) or the render/flowviz owner (a `warmUp()` on EngineView)?
+
+## Critic pass 14: w2/reference-9 @d05e16d and w2/cycle-hold @f2c0779 (PARTIAL: STOP-CLEAN)
+
+**Stopped on the coordinator's STOP-CLEAN at the usage brake (83 %).** Only coverage ran on the combined tree. The hand mutants (`pass14-mutants.sh.txt`) and the probe's default-model sweep (`w2h-held.probe.ts.txt` mode 1) are written but **not run**. No detached run is left going. `critic` is clean and checked out again. The local trial branch `trial14` (21b241d, unpushed) is left in place, because a PreToolUse hook blocked `git branch -D`: the orchestrator can delete it.
+
+Reviewed 2026-10-30 on a throwaway trial branch in the critic worktree: main c2dc8da, then `--no-ff` merges of w2/reference-9 @d05e16d and w2/cycle-hold @f2c0779, both clean (no conflicts; the branches touch disjoint files). The gates ran on that tree. `critic` was restored afterwards. Probes: `docs/reviews/probes/w2h-held.probe.ts.txt` (the held retry on the default model and on the fit ramp) and `pass14-mutants.sh.txt` (hand mutants). The orchestrator's `d463lin.log`, round 13's `reports/scratch/r13/logs` (with `ladder-reports/`) and cycle-hold's `reports/cycle-hold/mutate.*` plus `reports/mutation/mutation.json` were read in place; nothing in a builder worktree was written.
+
+### A. w2/reference-9, rounds 10-13 (`bcacc0a..d05e16d`; round 13 = `c2d7c9f..d05e16d`)
+
+Pass 12 covered a5d86dd..c2d7c9f (the D4-77 monitor, D4-79 in `cases/d463.ts`). This pass reviews round 13 on top of that.
+
+- **The global M_cut is the Weiss-Smith/Turkel floor D4-81/D4-59 describe, and it is off by default.**
+  - `withGlobalCut` (`src/flow/reference/solver.ts:80-89`) returns the options unchanged when `globalMachCut` is absent. Otherwise it gives minMach' = max(minMach, cut) and M_cut' = max(M_cut ?? minMach, cut), and it throws RangeError on NaN, ±∞ or a negative cut.
+  - The constructor stores the floored pair once (`this.pre`, :163-165), and every consumer reads it:
+    - the far field's β², `min(1, max(M∞², minMach'²))` (:172);
+    - the flux scaling's `this.machCut` (:174), which `assembleResidual` gets at :304, :320 and :359;
+    - the preconditioned-CFL switch (:177);
+    - the per-cell β of `computeBeta` (:536), which also feeds the local dt.
+  - No other code reads `opts.lowMachPreconditioning` (grep), and physical time ignores it, as before.
+  - M_cut ≥ 1 stays ≥ 1, so the scaling stays off. minMach ≥ 1 stays ≥ 1, so the scheme stays plain. With no cut, D4-40's 0.003 contract is bitwise unchanged: the solver test files, `precondition.test.ts` and the GPU tests' `ENGINE_PRECONDITIONING` still run at 0.003.
+- **The cases and the oracle constants are right.**
+  - `GLOBAL_MACH_CUT = 0.02` and `ENGINE_PRECONDITIONING_CUT = {minMach 0.003, globalMachCut 0.02}` (`tests/ladder/oracle.ts:59-65`). In force this is minMach = M_cut = 0.02, D4-59's configuration.
+  - The cut is applied to every preconditioned CPU ladder run D4-81 lists: L7 (`l7.ts:58`; it binds at M 0.01 and is inert at M 0.3), L8 (`l8.ts:24`), §12.2's C-pre and S (`f32.ts:84,91`), and the d463 default (`d463.ts:69-75`).
+  - `d463plain.ts` passes `null`, which gives no preconditioning and CFL 1.5. `d463mcut02.ts` and `d463mcut05.ts` pass {0.003, cut}.
+  - The pin is lifted, `it.fails` → `it` (`d463.test.ts:46`), with the history kept in the comment.
+- **The run evidence matches the logs.** I recomputed every number from the JSON:
+  - `plain.json`: (a) 0.3663 / 0.04334; (b) 0.6408 / 0.1585; residual 3.89e-2 / 9.63e-3 / 6.17e-3 at 100 / 10k / 20k; peak 6.59.
+  - `mcut02.json`: (a) 0.7779 / 0.4876; (b) 0.5236 / 0.2234; residual 1.806 / 0.771 / 0.404; 0.601 at 11000; max over 10k-20k 0.852; peak 4.21. These match SOLVER.md §10's table and the handoff.
+  - `ladder.log` (8447e99, 76 min): 12 files passed and 3 failed, 14 tests passed and 3 failed. The 3 failures are the known ones (L8 convergence 37500; L9a Euler work, from its steadiness 1.062e-5; L9b convergence 20000). The rest pass:
+    - L7: 0.01093, |Cd| 0.001307, ratio 1.779, the sequence 0.128 / 0.039 / 0.011;
+    - L8: 0.7536 %, steadiness 3.24e-5;
+    - §12.2: C-pre 1.43e-7 / 1.79e-7 / 1.06e-6 and S 1.25e-7 / 1.11e-7 / 2.02e-6;
+    - floor 4/4;
+    - the ladder's own d463 run, identical to run 2.
+  - The orchestrator's linear part (`d463lin.log` `@@RESULT@@`) gives (a) 0.5056 / 0.05553, (b) 0.5959 / 0.3022 and peak 7.75, exactly D4-89's figures.
+  - The code at d05e16d equals 8447e99 in `src` and `tests` (`git diff 8447e99 d05e16d -- src tests` is empty), so I did not rerun the ladder.
+- **Would a test fail if the cut were ignored or misapplied?** By reading, yes:
+  - the test compares whole states after 3 iterations, plus dt, the residual and the CFL, against the run at minMach = M_cut = the cut;
+  - `not.toEqual` against the run without the cut catches an ignored cut;
+  - on this mesh the pulse reaches the far-field row at the top (g ≈ 0.12 there), so the test should see the far field's β.
+
+  This is UNCHECKED by mutation: hand mutants A1-A4 (the far field's β, M_cut, β and the CFL switch, each unfloored) are in `pass14-mutants.sh.txt`, not run. No Stryker run on `withGlobalCut`.
+
+#### Blocking
+None.
+
+#### Important
+None.
+
+#### Nits
+- **W2R-N28: SOLVER.md §10's "slow late decay" ranges are tighter than the data.** The text (also in the handoff and D4-89) says L2(p′) "holds at 0.48-0.51 from 13000 to 20000" and the residual "0.33-0.42 from 15000". `mcut02.json` gives 0.463-0.531 over 13000-20000 (0.464 at 14400, 0.531 at 13000) and 0.332-0.465 over 15000-20000 (0.465 at 15100). The conclusion holds (no decay over 15k-20k; recorded, not gating), but the ranges should be the measured ones, since D4-89's reopen trigger compares the GPU's trend against them. Fix: restate them in §10 in the kernel round.
+- **W2R-N29: SOLVER.md §10 has no linear-part row at the cut.** D4-79 requires it, and D4-89 quotes the orchestrator's run, but the only record is a job-tmp log outside the repo. This is W2R-N26's gap. Fix: add the row (0.5056 / 0.0555, 0.5959 / 0.3022, peak 7.75; the cell mean at 20000 over 100 is 5.06, reported) and the JSON to `reports/ladder/D4-63-linear.json` in the next reference or kernel round.
+- **W2R-N30: `L8_MACH_CUT` is now silently floored at 0.02** (`tests/ladder/cases/l8.ts:10-11,24`). A sweep with `L8_MACH_CUT=0.005` runs at 0.02 and prints rows labelled with its own value. The header comment "minMach = M_cut … the engine's value" (0.003) is stale too. Fix: drop the env override, or pass `globalMachCut` only when the env is unset, and say "in force 0.02" in the comment.
+
+#### Verdict A: **MERGE, provisional** (D4-89 already adopted it)
+It is pending the gates not yet run on the combined tree (typecheck, lint, test:mesh, test:gpu, test:browser) and hand mutants A1-A4. The cut does what D4-81 says, the default contract is untouched, and the evidence matches the logs. The nits go to the kernel round (W2R-N28/N29) or the next reference round.
+
+### B. w2/cycle-hold @f2c0779 (`42cf8e9..f2c0779`)
+
+- **A sliced walk is the unsliced walk.**
+  - Newton's only state between iterations is x. r = f(x) is recomputed on resume, deterministically. `stop` is asked only while the loop condition holds, so a stopped solve always has iterations left (`newton.ts:89-93`).
+  - `advanceWalk` keeps `done`, `step`, `x`, `solves` and the paused iterate with its used iterations. It resumes with `maxIterations = 25 − used` (`matchedSolve.ts:162-191`), and the target is fixed in `startWalk`. The bit-identity tests slice the start's walk at 5/23/60 evaluations.
+  - The iteration-limit arithmetic is not pinned by any test: Stryker 169 ×6, and hand mutant B1 below (W2H-I2).
+- **`UNBOUNDED_RETRY` is D4-13, and the matched path is unchanged where it matters.** I ran `w2f-fingerprint` (pass 7) three ways:
+  - 42cf8e9, as it was;
+  - the trial tree with `heldRetry: UNBOUNDED_RETRY`;
+  - the trial tree on its default.
+
+  42cf8e9 and the unbounded trial tree give the same 5 hashes, held path included: slam-chop 677bc456…, c12 c34d477c…, start dd082a71…, hot-surge-flameout 63915b7e…, part-lever 0b0723fc…. On its default the trial tree changes only hot-surge-flameout (c9b5371f…), the one scenario that holds, as the handoff says. The policy with `budget = ∞` and interval 0 is call for call `solveMatched`:
+  - the direct is never stopped;
+  - the walk always sets out (t − t_last ≥ 0);
+  - the walk is never paused, so `sameTarget` holds and the result is matched;
+  - `lostCause` always gets `why.cause`.
+- **The meter is deterministic.** `gasPathEvaluations` is a module counter that `evaluateGasPath` increments (`engine.ts:1065-1089`). `retryMatched` reads it only around its own solves, so nothing else runs inside a window, and a test double brings its own meter. The per-step reset is in `step()` (`model.ts:496`). The one host dependence is the documented per-`step()` budget: a held episode lasts longer in sim time at a larger frame dt.
+- **The held state stays visible (W2F-I1).**
+  - The status is 'held' on every lost snapshot, `lostSolves` counts each one, and the warning comes once per episode.
+  - W2A-N6 is fixed (the sub-idle path ends the episode, `model.ts:840-845`).
+  - A budget-cut direct names itself ("not converged within the held-retry budget (residual … after k iterations)"), and a snapshot with no attempt keeps the episode's cause (`model.ts:859`).
+  - The annunciator (app-ui) reads `gasPathSolve`, which is unchanged.
+- **P5.**
+  - The contract edit is one new `THRESHOLDS.P5` entry (`thresholds.ts:427-444`) and a matching PHYSICS.md §3.4 row; nothing else in the contract changed.
+  - `thresholds.test.ts` counts P1-P5 (4+12+13+5) and checks 137 / 217 / 16.7 / 60 Hz. The existing mirror tests (same IDs, same order, same text) cover the row.
+  - `heldFrame.test.ts` reads `stepRateHz`, `leverRampS`, `maxHeldStepEvaluations` and `maxStepEvaluations` from P5 (`:29-31, :62, :98-111`).
+- **W2H-I1 on the default model: only partly checked.**
+  - Of the 5 fingerprint scenarios, only hot-surge-flameout (ISA+30, surge, flameout and relight) holds on the default model, for 0.62 s. The default model held 0 times on the fit's ramp (D4-84).
+  - The wider sweep in `w2h-held.probe.ts.txt` mode 1 is NOT run: 6 ambients × 6 plans × 60 Hz and 0.02 s, each reporting lost solves, the longest hold and N1 while held.
+  - So "the default model can't reach the runaway" is not yet confirmed beyond those cases.
+
+#### Blocking
+None.
+
+#### Important
+- **W2H-I2: the "iterations left" of a resumed solve is untested** (`src/cycle/matchedSolve.ts:166-169`).
+  - Six Stryker mutants of `used > 0 ? { maxIterations: MAX_NEWTON_ITERATIONS - used } : {}` survive cycle-hold's targeted run: always, never, `≥`, `≤`, `{}`, and `25 + used`. That run's tests were heldRetry, matchedSolve, numerics, gasPathHold and lostSolveCause, not the slow heldFrame. Whether heldFrame kills them is UNCHECKED (hand mutant B1 is not run). The finding stands either way: no fast test pins it.
+  - The failure scenario is the fit ramp's common case: a walk solve that fails by running out of C7's 25 iterations. Sliced, under this mutant, it gets up to 25 + used. So it can converge where the unsliced walk failed, or fail later, and the branch's central claim, "a walk spread over several steps makes the same solves, to the bit", would silently break. The sliced-walk tests slice only converging solves, and the failing-everywhere test fails by refusal, not by exhausting iterations.
+  - Fix (test only): a Newton double whose residual needs more than 25 iterations, e.g. r ← 0.9 r. Slice its walk at k evaluations and assert the same refusal after exactly 25 iterations in total per solve, with the same points as unsliced. Then rerun Stryker on lines 162-191.
+
+#### Nits
+- **W2H-N1: "the budget never cuts the matched path" holds on the suite, not by construction** (`heldRetry.ts:121-132`, the header and the handoff).
+  - The direct solve's stop counts the step's *carried* spend even when the model is not holding. So after a snapshot that recovers in the same step, the next snapshot's matched-path direct gets only the remainder, and a non-holding direct that needs more than 120 evaluations (about 15 Newton iterations, below C7's 25) is cut too.
+  - On the fit ramp the probe traces two such cuts (8.85 s: recovered with 45 evaluations, then cut after 7 iterations at 4.29e-3; 11.40 s: 66, then cut after 6 iterations). Each started a new held episode and warning.
+  - A trial with the carried spend ignored when not holding leaves both still failing after 10 iterations (4.29e-3, 9.21e-3), so they are genuine losses, not artefacts.
+  - Fix: state the bound as observed (the fingerprints and heldFrame's three scenarios). Or start a non-holding direct's cap from its own work, then recheck P5's every-step row.
+- **W2H-N2: a stopped solve that already passes `ACCEPTED_RESIDUAL` is thrown away** (`matchedSolve.ts:74`: `stopped` is tested before acceptance).
+  - On the fit ramp, 5 solves stopped at residuals below 1e-6 (steps 632 and 680-683, e.g. 4.98e-10 after 9 iterations, against 1e-6). With a walk in flight the direct gets DIRECT_SHARE (60), restarts from the anchor every step, and stops one iteration short each time.
+  - Accepting them (trial) changed nothing measurable here: the same 798 held steps and 1594 lost. So it is a nit, but the module's own definition says such a solution is usable.
+  - Fix: accept a stopped direct solve that passes the residual and BPR checks; keep the walk as it is for bit-identity.
+- **W2H-N3: P5 does not say how long the ramp runs.** `heldFrame.test.ts` gates 10 s after the ramp starts (`ramp(10)`, to 13 s). The fit's second episode (13.05 s, the W2H-I1 runaway) and a 79-evaluation converged direct at 13.03 s (against `CONVERGED_DIRECT = 80`) fall just outside. Over 23 s the bars still hold (held-cost: held max 136, all steps ≤ 217). Fix: put the run length in P5's row (and the 3 s idle lead), or gate the handoff's 20 s.
+- **W2H-N4: Stryker survivors that are test gaps, not equivalents** (`heldRetry.ts`, `matchedSolve.ts`):
+  - `sameTarget` with the n1 or wf comparison forced true (116:3, 116:49): the `reached` tests change only n2;
+  - `walk === null` → true (143:7): a walk in flight is replaced once 0.5 s has passed. No fast test keeps a walk in flight past the interval. Hand mutant B2, against heldFrame, is not run;
+  - the solves-exhausted `lost` → `{}` (201): through `retryMatched` it would fall through to `matched` with an undefined solution. Only `solveMatched` tests reach it, and there null hides it;
+  - the walk's pre-solve `stop` check removed (158): the walk still pauses, through Newton's own check, one evaluation later.
+
+  Fix: three small double-based tests. The remaining survivors are equivalent (105, 108, 147, 217, `guess.slice`, `MAX_STEP.slice`, the jac init) or outside the branch and the targeted test set (`model.ts:837`, the sub-idle condition; the option checks and `entering` are reached only by heldFrame or the start tests; see the hand mutants).
+- **W2H-N5:** the `heldRetry.ts` header says "pure", but `retryMatched` mutates its `spend` argument (`:124-125`). Fix: say so in the doc, or return the spend.
+
+#### Mutation (cycle-hold's targeted Stryker run, read from `w2-cycle-hold/reports/mutation/mutation.json`, finished 18:58)
+| file | killed | timeout | survived | no coverage |
+|---|---|---|---|---|
+| matchedSolve.ts | 119 | 5 | 16 | 1 |
+| heldRetry.ts | 90 | 0 | 7 | 0 |
+| model.ts (393-406, 833-904) | 53 | 0 | 16 | 7 |
+| engine.ts (1066-1090, 1118-1146) | 12 | 0 | 2 | 0 |
+| newton.ts (86-96) | 21 | 0 | 2 | 0 |
+| **total (351; 3 ignored)** | **295** | **5** | **43** | **8** |
+
+The score is 300 / 351 = 85.5 % (87.5 % of covered). The survivors are classified in W2H-I2 and W2H-N4. model.ts's 16 survivors and 7 no-coverage mutants sit in lines that only heldFrame and the start tests reach, and that run excluded them (`model.ts:837`'s sub-idle condition is pre-existing).
+
+#### Verdict B: none yet (PARTIAL)
+B has no blocking finding so far, and one important finding (W2H-I2, test-only). Still unchecked:
+- hand mutants B1-B4 against heldFrame;
+- the default-model sweep (W2H-I1 reach);
+- the remaining gates.
+
+### Gates (the trial merge: main c2dc8da + w2/reference-9 @d05e16d + w2/cycle-hold @f2c0779)
+| gate | result |
+|---|---|
+| npm run coverage (own reportsDirectory) | 120 files passed; 2159 passed + 11 expected fail (2170); exit 0, so the per-directory thresholds hold; lines 99.32 %, statements 98.36 %, branches 87.52 %, functions 99.35 %; 876 s |
+| typecheck, lint | NOT RUN (STOP-CLEAN) |
+| test:mesh, test:gpu, test:browser | NOT RUN (STOP-CLEAN) |
+| test:ladder | not rerun, by instruction: src and tests at d05e16d equal 8447e99, whose ladder JSON is verified above |
+
+### Questions for the orchestrator (provisional)
+- (vv) W2H-N1: should a non-holding direct solve's budget count only its own work, not the step's carried spend? Then a step that recovers and then loses again could cost up to 274 evaluations. P5's every-step row (217) would need restating.
+- (ww) Next critic pass: finish B (run `pass14-mutants.sh.txt` and probe mode 1 on the trial merge), then typecheck, lint, test:mesh, test:gpu and test:browser.
+
+## Critic pass 15: w2/reference-9 @d05e16d, w2/cycle-hold @f2c0779, w2/app-ui @ff95d99
+
+**Scope.** This pass finishes pass 14 (A's remaining gates and hand mutants; B's verdict, its mutants and the default-model sweep D4-90 asked for) and reviews app-ui round 3 (`f6ee8e2..ff95d99`), all on one combined trial merge.
+
+**Setup** (2026-10-30, the critic worktree):
+- `critic` merged main ee97061 (b4f2b23). Then a throwaway local branch `trial15` took three `--no-ff` merges:
+  - w2/reference-9 @d05e16d (40de03e): clean;
+  - w2/cycle-hold @f2c0779 (2351c81): clean;
+  - w2/app-ui @ff95d99 (a0e44b8): **a conflict** in `src/cycle/model.ts` and `tests/unit/cycle/lostSolveCause.test.ts`. Both branches fixed W2A-N6. I took cycle-hold's lines in `model.ts`: its `holding = false`, `entering = true` and `retry = NO_RETRY` are a superset of app-ui's one line. In the test file I kept both N6 tests, renaming app-ui's to "W2A-N6 (app-ui): …". The orchestrator's merge will hit the same conflict (question yy).
+- In the trial, `src/flow/reference` and `tests/ladder` equal d05e16d, and `src/cycle` equals f2c0779.
+- Every gate ran alone and detached (`Start-Process`, a status file per step). test:browser started at 2.18 GB free.
+- Two short Node probes (the callout search, and the W2H traces with the fine sweep) overlapped the held sweep and my own C unit mutants, never a gate. The CB2 browser mutant started at 1.77 GB.
+- The builders' worktrees were only read. The probes imported main's and cycle-hold's `src` in place.
+- No dev server or MCP page was opened: the browser suite drives its own Chrome.
+- `critic` is checked out again and clean. The local branch `trial15` (a0e44b8, unpushed) is left in place, because the PreToolUse hook blocked the branch delete: the orchestrator can delete it. No detached run is left going.
+- Probes and mutants: `docs/reviews/probes/pass15-mutants.sh.txt`, `w2h-reach.probe.ts.txt`, `w2a-callout-search.probe.ts.txt`, `w2h-trace.probe.ts.txt` (two traces), plus pass 14's `w2h-held.probe.ts.txt` mode 1 with dt 0.05 added.
+
+### A. w2/reference-9 @d05e16d (finishing pass 14)
+
+Pass 14 reviewed round 13 and gave a provisional MERGE. This pass ran what it left open.
+
+- **Hand mutants A1-A4** (`pass14-mutants.sh.txt`, run as `docs/reviews/probes/pass15-mutants.sh.txt` section AB; `precondition.test.ts -t global`):
+  - A1, the far field's β from the unfloored minMach: **killed**.
+  - A3, the per-cell β read from the options as given: **killed**.
+  - A2, the flux's M_cut not floored: **survived, equivalent.** `computeBeta` floors every cell's β at minMach' = max(minMach, cut), so a face's mean β is ≥ cut, and SLAU2 takes mRef = min(1, max(β_face, M_cut)) (`slau2.ts:104`). An M_cut below β_face changes nothing. The M_cut floor in `withGlobalCut` is redundant while minMach is floored too. It is harmless, and the kernel mirror can keep both parameters.
+  - A4, the CFL default read from the minMach as given: **survived, a test gap** (W2R-N31). The two differ only for a cut ≥ 1, where pre.minMach ≥ 1 is the plain scheme but the mutant picks the preconditioned CFL.
+- **Gates on the combined tree:** all green (table below). `src` and `tests` under `src/flow/reference` and `tests/ladder` are byte-identical to d05e16d in the trial (no other branch touches them).
+
+#### Blocking
+None.
+
+#### Important
+None.
+
+#### Nits
+- **W2R-N31: a global M_cut ≥ 1 is untested** (`src/flow/reference/solver.ts:176-177`; `tests/unit/flow/precondition.test.ts:280-308`).
+  - The failure: `globalMachCut: 1` makes minMach' = M_cut' = 1, the plain scheme, which must keep the plain CFL 1.5. Mutant A4, the CFL switch reading the minMach as given (0.01 < 1), runs it at the preconditioned default instead, and every test passes.
+  - The fix: add `expect(run({ minMach: 0.01, globalMachCut: 1 })).toEqual(run())` beside the `minMach: 1` case, or reject a cut ≥ 1 with the RangeError the other bad cuts get.
+
+### B. w2/cycle-hold @f2c0779 (finishing pass 14)
+
+- **Hand mutants B1-B4** against heldRetry, heldFrame (the slow fit-ramp suite) and gasPathHold, plus lostSolveCause for B3:
+  - B1, a resumed solve gets C7's full 25 iterations: **survived.** This confirms W2H-I2: not even heldFrame pins the iterations left.
+  - B2, a walk in flight replaced once the interval has passed (Stryker 143:7): **survived** against heldFrame too, so W2H-N4's item is confirmed.
+  - B3, the sub-idle entry through the budgeted retry: **killed** (heldFrame's relight and start bit-identity, 2 tests).
+  - B4, a walk that converged on its old target does not move the anchor or the held point (`model.ts:897-901`, Stryker's 897): **survived** (W2H-N6).
+- **The default-model sweep (W2H-I1 reach).** `w2h-held.probe.ts.txt` mode 1 ran on trial15, with dt 0.05 added to its two steps: 6 ambients × 6 plans × dt 1/60, 0.02, 0.05.
+  - At 60 Hz nothing runs away. The longest hold is 0.58 s (TO + surge at 10 s + flameout at 20 s), and N1 while held stays ≤ 42.3 %. The other five plans never hold.
+  - **At dt 0.02 it does:** ISA SLS, take-off, surge at 10 s, flameout at 20 s and the auto relight. 859 lost solves, held 7.88 s without a break, and N1 198 % while held.
+  - At ISA+30 the same plan **threw**: `P3 NaN Pa and dt 2.27e-5 s must be > 0` (`surgeDetection.ts:29`, through `model.ts:723`). The sweep stopped there: the rest of ISA+30 and the ISA+40, ISA−40 and 3000 m rows at dt 0.02, and every row at dt 0.05, were not run.
+  - Then `docs/reviews/probes/w2h-reach.probe.ts.txt`: that plan at five frame steps, on main ee97061 (D4-13), on cycle-hold alone (f2c0779) and on trial15. Each tree ran its default policy, and the two with the bounded retry also ran `UNBOUNDED_RETRY`:
+
+| TO + surge 10 s + flameout 20 s, 35 s | dt 1/60 | 0.02 | 1/30 | 0.05 | 0.1 |
+|---|---|---|---|---|---|
+| ISA, main (D4-13): longest hold / max N1 held | 0.13 s / 35.4 % | 0.12 s / 35.8 % | 0.13 s / 35.2 % | 0.15 s / 35.0 % | 0.10 s / 31.5 % |
+| ISA, cycle-hold default (= trial15) | 0.58 s / 32.6 % | **7.88 s / 198.2 %** | 1.23 s / 31.9 % | 2.00 s / 31.8 % | 5.70 s / 31.5 % |
+| ISA, cycle-hold `UNBOUNDED_RETRY` | = main, every column | | | | |
+| ISA+30, main (D4-13) | 0.10 s / 38.4 % | 0.10 s / 38.4 % | 0.10 s / 38.3 % | 0.10 s / 38.1 % | 0.10 s / 37.4 % |
+| ISA+30, cycle-hold default (= trial15) | 0.57 s / 35.3 % | **throws at 25.46 s** | 1.43 s / 33.7 % | 1.80 s / 33.6 % | 7.70 s / 33.2 % |
+
+  - A finer sweep at ISA, default policy (`w2h-reach` with only these steps): **N1 runs away at dt 0.0200, 0.0205, 0.0210 and 0.0250 (168-218 %)**. It does not at 0.016-0.0195, 0.022-0.024 or 1/60. Those are 40-50 fps frames. The browser runs record 26-61 fps across the modes (`*-shots.txt`).
+  - The trace at dt 0.02:
+    - the relight's entry walk (3146 evaluations, unbudgeted) holds briefly, then the model matches at 23.7 s;
+    - on the way back up the matched solve is lost at 27.12 s (N1 84 %, N2 77 %; "residual 0.673 not below 1e-6");
+    - from there P3 stays frozen at 1.62 MPa, every step spends 16-126 evaluations, and none recovers. N1 climbs 84 → 106 % by 28.1 s and → 195 % by 34.6 s.
+  - The bleed rows (N1 36 % at full lever at ISA+30 with 8 % bleed and 150 kW, under `accelSchedule`) are identical on main, so they are not this branch's.
+
+#### Blocking
+- **W2H-B1: the bounded retry makes W2H-I1's spool runaway reachable on the default reference model, from the app's own controls** (`src/cycle/heldRetry.ts:119-166`, `src/cycle/model.ts:881-903`; D4-90 item 4).
+  - D4-90 left W2H-I1 for the part-power round only because "the default model doesn't hold on the ramp" and the critic would check that it can't reach the runaway. It can.
+  - The scenario uses only the app's controls: ISA SLS (the app's only ambient), Fault → Surge at take-off, then Flameout. The engine relights on its own.
+  - At a 50 fps frame (dt 0.02, also 0.0205, 0.021 and 0.025) the gas path holds without a break from 27.1 s. N1 integrates the stale balance to 198 % while the annunciator says GAS PATH HELD.
+  - On main the same run holds at most 0.15 s at every step size. So does this branch's own `UNBOUNDED_RETRY`. So the regression is the bounded policy. The likely mechanism: the per-`step()` budget, which is less retry work per sim second at a longer frame, together with the 0.5 s walk interval means the walk never catches the moving state.
+  - Where it does recover, the default model now holds 4-57 times longer than D4-13 (0.58 vs 0.13 s at 60 Hz, 5.70 vs 0.10 s at dt 0.1). D4-90 item 3 accepted 3.37 s against 2.97 s on the fit ramp only.
+  - The fix (TDD; this scenario at dt 0.02 as the failing test, with N1 ≤ the N1 limit while held and the hold no longer than D4-13's by a stated factor). Either:
+    - (a) bring W2H-I1's fix forward into this branch: a held point never integrates the spools past their limits on a stale balance;
+    - (b) or let a held episode that outlasts a stated bound, e.g. two walk intervals, escalate to D4-13's whole walk in one snapshot. That is a one-off hitch, as D4-90 accepted for the sub-idle entry.
+
+  Either way, rerun this probe and P5's rows.
+
+#### Important
+- **W2H-I2** (pass 14): stands, now confirmed by B1 against heldFrame too.
+- **W2H-I3: a surge that starts from a held state integrates to a NaN P3 and the model throws** (`src/cycle/model.ts:711-740`, `src/cycle/surgeDetection.ts:29`).
+  - The scenario: the B1 plan at ISA+30 (318.15 K), dt 0.02 (`w2h-trace.probe.ts.txt` part 2).
+  - The HPC margin goes negative while matched at 25.36 s (−0.001), and the solve is lost at 25.40 s.
+  - At 25.44 s the held point moves while held: P3 2 099 458 → 2 120 502 Pa, SM −0.011. Only `reached` (`model.ts:897-901`) does that.
+  - At 25.46 s the surge integration feeds `feedP3` a NaN, and the step throws. In the app that is SIM STOPPED.
+  - D4-13 never holds there, so main does not throw. The app cannot set ISA+30 today (no ambient UI), so this is important rather than blocking. The ambient is in the sim command contract, and W3's scenarios will set it.
+  - The fix: a failing test of this run first. Then find where the surge model's state or equilibrium turns NaN on a held snapshot. Never feed the detector a non-finite P3: a NaN in the state is a bug to stop on, but at its source and with its cause.
+
+#### Nits
+- **W2H-N1..N5** (pass 14) stand.
+  - N1: D4-91 item 4 keeps the charging, so what is left is the claim "the budget never cuts the matched path" in the `heldRetry.ts` header and the handoff. It holds on the suite, not by construction: restate it.
+  - N4's 143:7 is confirmed by B2.
+- **W2H-N6: the model's use of `reached` is untested** (`src/cycle/model.ts:897-901`).
+  - B4 drops it (the anchor and the held point stay at the older converged point), and every test, heldFrame included, passes.
+  - The policy-level `reached` tests (heldRetry.test.ts) do not reach the model's wiring. It is the path that moves the held point in W2H-I3's run.
+  - Fix: a model-level double, a walk that converges on its old target while the state has moved, asserting the new anchor and the held point.
+
+### C. w2/app-ui round 3 (`f6ee8e2..ff95d99`)
+
+Checklists: react-reviewer, typescript-reviewer, silent-failure-hunter and pr-test-analyzer, applied by hand as one review. D4-84..D4-91 were checked against the code: nothing here contradicts them. D4-91's progressive warm-up is a later round, so the warm-up is judged against D4-88 as written. Its boot cost (9-23 s, boot-to-ready 10-26 s) is known and is D4-91's.
+
+**What the round fixes (checked by reading the code, plus the mutants below):**
+- **W2A-I1, the faults on screen.**
+  - A thrown cycle step posts `sim-stopped` once (`simWorker.ts:298-309`; `simFailed` guards the step).
+  - The store keeps `simStopped`, and the connection stays `running`, because the worker keeps rendering.
+  - The annunciators put SIM STOPPED first, with its message beside it. The clock reads "stopped", and Pause is disabled.
+  - GPU ERRORS (n), MOCK RASTER ON FRAME/FAILED and REFUSED (n) are chips that open Diagnostics.
+  - A `fatal` now always fails the app: the message-prefix test is gone.
+  - Every handler of `FromWorker` handles `sim-stopped`. The one consumer is `store.receive`; the browser suite's `problems()` reads the worker's `errors`, and those carry the message.
+  - RTL covers `receive` for all six messages and Status's screens, which kills pass 13's M13 and M14.
+  - Not silent anywhere I could find. The exception is the worker side, which has no test (N14).
+- **W2A-I2 + D4-87, the fan map.**
+  - Each map starts at its own lowest node (`lowestMapPercent`: the fan's 30.6 %), and the idle point is inside the plot (unit test, and visible in every shot).
+  - A point off the plot is clamped to the edge with a chevron.
+  - Below the lowest line the margin is dimmed (opacity 0.6) and tagged "below map", with a hollow point.
+  - The levels are `!(m > 0)` → warning and `m < 0.05` → caution, on the map only. That matches D4-91's pre-registered levels; the PHYSICS.md UI rows are not written yet.
+- **W2A-I3, the callouts.**
+  - `.callout` is `box-sizing: border-box; white-space: nowrap`.
+  - Each label is measured as drawn, an unplaced label hidden so it is measured too, and laid out at that size. The size does not depend on the position, so measuring and laying out converge.
+  - The browser bar now checks the drawn labels against each other and against the reserved blocks, text cut off, leader against leader, and leader through label. Mutant CB2 shows that it can fail; CB1 survives, as expected (Mutants).
+  - The search does not keep its "most labels" promise (W2A-N13).
+- **D4-88, `warmUp()` and `viewSettled()`.**
+  - `warmUp()` saves and restores `mode`, `cut`, `explode`, `spoolFactor`, `flowMode`, `flowQuantity` and `flowTracers`, and it re-applies the flow mode. Its last step is the saved mode, set `immediate`, so the meshes' visibility, the explode offsets and the composite match the saved state.
+  - What it does not put back is incidental: `fanFrame` advances about 10, TRAA's history and the timer's window hold the warm-up frames, and the tracers' buffers exist.
+  - The worker's first `applyView` (`appliedView` is null until the loop) re-applies the whole app view anyway, so in the app the restore is exact where it matters.
+  - `viewSettled()` compares `cut`, `explode` and `spoolFactor` against the mode's end values exactly. That is sound: the transition clamps to [0, 1], and `spoolDisplayFactor` returns exact 0 and 1 at its ends.
+  - The settle tracker zeroes on a switch, even when the first frame reads settled.
+- **W2A-I5, the lever.**
+  - `leverShown` holds the local value until `lastCommandSeq` reaches the sent seq, then shows the sim's own value. The RTL test includes the reset case (seq + 1, value 0, and the lever shows 0).
+  - It cannot stick: a `setThrottle` from the range input or a detent is always in [0, 1], so validation never refuses it, and a stopped sim still applies commands. A new session unmounts the quadrant (no snapshot), so the pending value goes.
+- **D4-85, the pixel cap.**
+  - `backingDpr` = min(2, dpr, √(2 073 600 / CSS px)) up to high, and min(2, dpr) on ultra. It is applied at init, on resize and on a quality change.
+  - The unit test covers the 1.5x case, a 2560 x 1440 window at 1x (0.75), ultra, and bad DPRs.
+  - Round 3's shots ran at DPR 1, but my gate run's Chrome was at 1.5 and exercised the cap (Gates). See N18 on "full DPR".
+- **The cheap nits** (N1-N4, N6-N12) and visual note 4: the code matches the handoff.
+
+#### Blocking
+None.
+
+#### Important
+- **W2A-I6 (round 4, D4-91 item 2): the Schlieren view has no Schlieren-specific content check** (`tests/browser/app.test.tsx:316-321`).
+  - D4-91 accepts the skipped lit-centre bar only with a Schlieren check in its place. What remains for Schlieren is the generic `centreStd > 0.03`.
+  - The exploded engine and the Realistic view pass it too: round 2's mislabelled Schlieren shots did. The true view sits near the bar, at 0.051 and 0.055 (`1920-shots.txt`, `1366-shots.txt`).
+  - The failure: a Schlieren that composites nothing (the knife-edge off, or the MOCK's gradient zero), or Realistic drawn under the Schlieren label, passes the suite.
+  - The fix, per D4-91: in Schlieren, the luminance across the jet region behind the nozzle varies (the knife-edge bands: its spread well above the background's). The engine box is a dim silhouette: its mean is below Realistic's by a stated factor.
+
+#### Nits
+- **W2A-N13: the callout search does not place the most labels, as its doc says** (`src/hud/callouts.ts:177-178`; the claim at `:136-139`).
+  - The prune `crossings >= best.crossings && bestShowsPrefix(chosen, i - 1)` cuts every branch whose shown prefix matches the best found so far. It ignores that such a branch may show a label *later* that the best hides.
+  - Once a first layout with 0 crossings exists, no other placement of the labels before a hidden one is ever tried. The search is greedy first-fit with a crossing preference.
+  - The probe (`docs/reviews/probes/w2a-callout-search.probe.ts.txt`) uses 3-4 random anchors, 140 x 36 labels in 420 x 300, against brute force over the same places:
+    - the module shows fewer labels than possible in **276 of 3000** cases;
+    - with the node budget lifted, still 65 of 600;
+    - with this prune removed as well, **0 of 600**;
+    - first case: anchors (270, 64), (237, 60), (267, 128), (270, 96), the 4th hidden though all 4 fit.
+  - No overlap results, so the browser bar cannot see it. In the app it can hide labels that would fit. In `1920-6` four are hidden; whether any of them would fit there is unchecked.
+  - The fix: prune on crossings only when the best also shows every label from i on (`best.chosen.slice(i).every((c) => c >= 0)`), and add a unit case where first-fit hides a label.
+- **W2A-N14: the worker's fault paths are untested** (`src/app/simWorker.ts:298-309, 376-383`, and the raster timeout at `:216-220`).
+  - Only the store and the RTL side are pinned. Posting `sim-stopped` as `gpu-error`, dropping the N2 fatal, or never calling `timedOut` would pass every suite: no test makes the cycle throw, a post fail, or the raster worker hang. The handoff's NEXT 4 says so.
+  - Fix: move the tick's fault handling into a pure shell function, tested in Node. Or add a browser case with a test-only `CycleChoice` whose step throws, asserting SIM STOPPED.
+- **W2A-N15: SIM STOPPED tells the viewer to "reset or reload", but a reset does not restart the sim** (`src/hud/annunciators.ts:194`, `src/app/simWorker.ts:298`).
+  - `simFailed` is never cleared, so Controls → Ground idle moves the frozen state to idle, and the clock stays stopped under the same warning.
+  - Fix: say "reload". Or let a `reset` clear `simFailed`, posting a `sim-resumed` the store clears `simStopped` on, with a test.
+- **W2A-N16: the first-switch bar is a hard wall-time gate** (`tests/browser/firstSwitch.test.tsx:107`).
+  - D4-91 registers ≤ 250 ms as indicative, official only in a quiet run, but the test fails the browser suite on a loaded run. The builder measured 75-188 ms loaded, against 250 ms.
+  - It also has no errors check (`problems()`), unlike app.test.
+  - Fix: record the gap and gate it only in a quiet run (or an env flag), as P1 and P4 do; add the errors check.
+- **W2A-N17: the "taking longer than usual" boot message is not reset for a new boot** (`src/ui/App.tsx:59-68`).
+  - `slow` stays true after a slow boot, so the next session (a cycle change) shows it at once.
+  - Fix: `setSlow(false)` when `booting` turns true.
+- **W2A-N18: "ultra keeps the full DPR" is "up to 2"** (`src/shell/pixelCap.ts:12, 21-23`). `MAX_DPR` still caps ultra: a 3x display gets 2, and the unit test pins it. That is fine, but D4-85 and LOOKDEV.md should say "the full DPR up to the client's cap of 2".
+- **W2A-N19: the caution's boundary is untested.** C1 (`m < SM_CAUTION_FRACTION` → `<=`) survives. D4-91's "amber below 5 %" makes exactly 5.0 % normal. Add the 0.05 case beside 0.03 in `hud.test.ts:110-114`.
+- **W2A-N20: the warm-up does not cover two first uses:** the solver's first bind (the handoff's NEXT 1) and a quality change (the shadow and post configurations of low, medium and ultra). Both can still stall a first use. That fits D4-91's background warm-up round.
+
+### Visual review (all 14 shots in `docs/look-dev/ui/`: the 13 of round 3 plus `before/01`; my gate run's 13, at DPR 1.5, were looked at too)
+
+**Fixed since pass 13, and it reads:**
+- The fan map now has its idle point: a hollow, dashed ring just under the surge line's foot, tagged "below map", with the margin greyed (`1920-1`, crop).
+- Schlieren is the true knife-edge view: a grey field, the engine as a dark silhouette, the jet in light and dark bands. Cutaway is fully open.
+- The callouts no longer touch each other or a panel in any shot, and the leaders do not cross.
+- The drawer is opaque: its note no longer sits on purple.
+- `--faint` text reads, and the limiter says "idle floor".
+
+**Still short of "ultra high level":**
+1. **The closed views' Fan callout labels the nacelle.** In Realistic and Schlieren its dot sits on the nacelle's flank, well behind the lip, not at the fan face (`1920-1`, `1366-1`, `-4`). The builder's NEXT 3 names it. Anchor it at the fan face, visible through the intake, or at the intake lip.
+2. **In the cut views the labels read as a list beside the shaft, not as labels of parts** (`1366-2`, `1366-5`, `1920-2`, `1920-5`).
+   - All eight dots sit on the core's centre band, and long, near-parallel leaders run along the shaft to labels placed by free space: Combustor right of the LPT, Core exhaust over the HPT, HPT over the booster. The Bypass duct's dot is on the core, not in the bypass stream.
+   - Nothing overlaps, but the part ↔ label link is weak. Put the bypass anchor in the duct, and put the labels outward, above and below the engine's silhouette, with leaders that keep the stations' axial order.
+3. **Schlieren's only content runs under the right column.** The jet's knife-edge plume goes from the nozzle into the Compressor maps panel at both sizes (`1920-4`, `1366-4`). Frame it in the open area: a camera target further aft, or a Schlieren preset.
+4. The cut plane's ambient purple board still fills Cutaway and Data (W2V-I7, flowviz's, D4-86).
+5. Render: Realistic over a full window is 8.3-10.1 ms (the builder's DPR 1 run, and mine at the cap), and Cutaway 16-18 ms shortly after its switch, against P4's 8 ms. It is recorded and indicative (D4-85). The fan at idle reads as a bristly smear of time copies in Realistic and Schlieren (render's, W1L).
+6. Small ones:
+   - the T-s's "2" label sits on the 2 → 3 line at 1920;
+   - visual notes 5 (a quadrant lever) and 7 (the burner along its isobar) are still open, as the handoff says.
+
+The chrome is at the bar: restrained glass panels, coloured badges, tabular numerals, legible small text, nothing clipped or overlapping. What still stands between it and the "ultra high level UI": the callouts' placement (items 1-2), the Schlieren framing (3) and flowviz's purple board (4).
+
+### Gates (trial15: main ee97061 + w2/reference-9 @d05e16d + w2/cycle-hold @f2c0779 + w2/app-ui @ff95d99)
+| gate | result |
+|---|---|
+| `npm run typecheck` | clean, 18 s |
+| `npm run lint` (ESLint + Prettier) | clean, 72 s |
+| `npm run coverage` (own reportsDirectory) | 122 files, 2203 passed + 11 expected fail (2214), exit 0 (the per-directory thresholds hold), 823 s. Statements 98.47 %, branches 87.67 %, functions 99.47 %, lines 99.44 %. New modules at 100 % lines: `pixelCap`, `settle`, `callouts`, `compressorMap`, `annunciators`, `anchors` (52 % in pass 13), `heldRetry`. `simCore` is 91.2 % (as before) |
+| `npm run test:mesh` | 2 files, 29 passed |
+| `npm run test:gpu` | 12 files, 68 passed, 54 s |
+| `npm run test:browser` | 13 files, 40 passed, 0 WebGPU errors, exit 0, 410 s, first run, 2.18 GB free at the start. `docs/` stayed clean |
+| `npm run test:ladder` | not rerun, by instruction (pass 14 verified 8447e99's JSON; A's files are unchanged) |
+
+**The browser run's records** (indicative, shared machine). Chrome ran at **DPR 1.5** this time (round 3's shots were at 1), so D4-85's cap was exercised:
+- **The pixel cap.**
+  - 1366 x 768 renders 1920 x 1079 (dpr 1.406), and 1920 x 1001 renders 1994 x 1039 (dpr 1.039). Both are ≤ 2.07 MP.
+  - Ultra renders 2049 x 1152 and 2880 x 1501, at the full 1.5.
+  - Realistic over a full window: **9.1 ms and 8.3 ms**, against P4's 8 ms. Round 2 measured 27.9 ms at 4.33 MP.
+- **The first switch** (D4-91's ≤ 250 ms):
+  - Schlieren: echo 90 ms, longest gap 58 ms;
+  - Cutaway: echo 84 ms, longest gap 67 ms;
+  - boot 10.0 and 11.7 s (the warm-up 8.9 and 10.7 s), against D4-91's 5 s: the progressive warm-up round.
+- **D4-90's browser row beside P5** (the fit's 1 s ramp, W2F-N5 record, cycle-hold's budget in the worker):
+  - a held frame's CPU is **11.2 ms median, 27.7 ms max** (the cycle step held 7.2, max 10.6), against 16.7 ms. Pass 13 measured 507 ms.
+  - 2205 lost solves, 364 of 392 snapshots held, and N1 ends at **134.9 %**: W2H-I1 on the fit, as known.
+
+### Mutants (by hand on trial15; `pass15-mutants.sh.txt`; each file restored after)
+| set | killed | survived |
+|---|---|---|
+| A (reference-9) | A1 (far-field β), A3 (per-cell β) | A2 (flux M_cut: **equivalent**), A4 (CFL switch: W2R-N31) |
+| B (cycle-hold, with heldFrame) | B3 (sub-idle entry) | B1 (iterations left: W2H-I2), B2 (walk replaced: W2H-N4), B4 (`reached` ignored: W2H-N6) |
+| C (app-ui, unit/RTL) | C2 (below-map off), C3 (lowest line dropped), C4 (lever back to the echo), C5 (lever sticks), C6 (store ignores sim-stopped), C7 (no SIM STOPPED), C8 (labels may collide), C9 (reserved ignored), C10 (crossings ignored), C11 (ultra capped), C12 (no cap), C13 (switch does not reset the settle count), C14 (Pause stays enabled) | C1 (caution at ≤ 5 %: W2A-N19) |
+| C (app-ui, Chrome layout bar) | CB2 (laid out at 60 x 20) | CB1 (laid out at the default 132 x 34) |
+
+- CB1 survives because the drawn labels are close to 132 x 34 now: border-box, and most are narrower. The 4 px gap absorbs the rest, so no drawn overlap occurs at either size. That is the fix working, not a blind bar.
+- CB2 lays the labels out at 60 x 20, far under their drawn ~140 x 36. The bar fails it in Cutaway, Data and with the drawer open: callouts overlapping callouts and the Diagnostics panel, and leaders running through labels. So the bar sees drawn labels and leaders.
+
+**Totals:** A 2/4 (2/3 of the non-equivalent), B 1/4, C 14/16 (13/14 unit and RTL, 1/2 in Chrome; CB1 survives as expected, above).
+
+### Verdicts
+- **A. w2/reference-9 @d05e16d: MERGE.** B 0, I 0, N 4 (W2R-N28..N31). Pass 14's provisional MERGE is final: the gates are green on the combined tree, and A2's survivor is equivalent.
+- **B. w2/cycle-hold @f2c0779: FIX FIRST (W2H-B1).**
+  - B 1 (W2H-B1), I 2 (W2H-I2, W2H-I3), N 6 (W2H-N1..N6).
+  - The bounded retry makes D4-90's W2H-I1 runaway reachable on the default model, from the app's Surge and Flameout buttons at 40-50 fps (N1 168-218 % while held). On main the same run holds ≤ 0.15 s.
+  - W2H-I3 (a NaN throw from the same held path at ISA+30) belongs in the same round. W2H-I2 and N6 are test-only.
+- **C. w2/app-ui @ff95d99 (round 3): MERGE.**
+  - B 0, I 1 (W2A-I6, round 4, as D4-91 item 2 allows), N 8 (W2A-N13..N20).
+  - W2A-I1..I5, D4-85, D4-87 and D4-88 are fixed as decided, with RTL and unit pins that kill 13 of 14 hand mutants. The gates are green on the combined tree.
+  - It merges on main alone: its `model.ts` line conflicts only with cycle-hold's (yy).
+
+### Questions for the orchestrator
+- (xx) W2H-B1: which fix for cycle-hold's next round?
+  - (a) Bring W2H-I1's fix forward: no spool integration past the limits on a stale held balance.
+  - (b) An escalation: a held episode past a bound, e.g. two walk intervals, runs D4-13's whole walk in one snapshot, as the sub-idle entry does.
+  - Also, does D4-90 item 3's "later recovery is accepted" (3.37 against 2.97 s on the fit ramp) cover the default model's holds? Where it recovers, they are 4-57 times D4-13's (0.58 against 0.13 s at 60 Hz, 5.7 against 0.1 s at dt 0.1). Or should P5 gain a recovery row on the default model?
+- (yy) Merge order. cycle-hold and app-ui both fixed W2A-N6, so they conflict in `src/cycle/model.ts` and `lostSolveCause.test.ts`. If app-ui merges first (B is FIX FIRST), cycle-hold's fix round merges main and keeps its own `model.ts` lines (a superset) and both tests, as trial15 did.
+- (zz) The callout layout (visual notes 1-2, W2A-N13): should round 4 re-anchor the closed views' Fan at the fan face and place the cut views' labels outward in axial order? Round 4 is also the progressive warm-up and W2A-I6.

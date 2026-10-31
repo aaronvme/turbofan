@@ -1,0 +1,77 @@
+# Critic pass 15: the hand mutants on trial15 (main ee97061 + w2/reference-9 @d05e16d + w2/cycle-hold @f2c0779 + w2/app-ui @ff95d99).
+# Three parts: mutants.sh (A1-A4, B1-B4: pass 14's, unchanged), mutantsC.inc (C1-C14, app-ui round 3, sourced by 'mutants.sh C'),
+# mutCB.sh (CB1: the callouts at the default size, in Chrome). Run from the worktree root with Git Bash.
+
+# ===== mutants.sh =====
+#!/usr/bin/env bash
+# Critic pass 15: hand mutants on trial15. Each is one sed on one src file, run against the named
+# tests, then restored with git checkout. KILLED = the tests fail. Usage: mutants.sh AB|C
+set -u
+cd /c/Users/Aaron/projects/turbofan/.claude/worktrees/critic
+T=reports/critic15/tmp; mkdir -p $T
+run() { # id file sed-expr tests... (-t filter allowed)
+  local id=$1 f=$2 e=$3; shift 3
+  cp "$f" $T/mut.bak
+  sed -i "$e" "$f"
+  if cmp -s "$f" $T/mut.bak; then echo "$id: SED DID NOT APPLY"; return; fi
+  if npx vitest run "$@" > $T/mut-$id.log 2>&1; then echo "$id: SURVIVED"; else echo "$id: KILLED ($(grep -cE '^\s+(×|FAIL)' $T/mut-$id.log) failing lines)"; fi
+  git checkout -- "$f"
+}
+if [ "${1:-AB}" = AB ]; then
+S=src/flow/reference/solver.ts
+PT="tests/unit/flow/precondition.test.ts -t global"
+run A1 $S 's/farFieldBeta2: Math.min(1, Math.max(mInf2, pre.minMach \* pre.minMach)),/farFieldBeta2: Math.min(1, Math.max(mInf2, (given?.minMach ?? 1) ** 2)),/' $PT
+run A2 $S 's/machCut: Math.max(pre.machCut ?? pre.minMach, cut),/machCut: pre.machCut ?? pre.minMach,/' $PT
+run A3 $S 's/const pre = tracking ? this.pre : undefined;/const pre = tracking ? this.opts.lowMachPreconditioning : undefined;/' $PT
+run A4 $S 's/opts.cfl ?? (pre !== undefined \&\& pre.minMach < 1/opts.cfl ?? (given !== undefined \&\& given.minMach < 1/' $PT
+H="tests/unit/cycle/heldRetry.test.ts tests/unit/cycle/heldFrame.test.ts tests/unit/cycle/gasPathHold.test.ts"
+run B1 src/cycle/matchedSolve.ts 's/maxIterations: MAX_NEWTON_ITERATIONS - used/maxIterations: MAX_NEWTON_ITERATIONS/' $H
+run B2 src/cycle/heldRetry.ts 's/if (walk === null \&\& (walkStartedS === null/if (true \&\& (walkStartedS === null/' $H
+run B3 src/cycle/model.ts 's/      this.entering = true;/      this.entering = false;/' $H tests/unit/cycle/lostSolveCause.test.ts
+run B4 src/cycle/model.ts 's/    if (r.reached !== null) {/    if (false \&\& r.reached !== null) {/' $H
+fi
+if [ "${1:-AB}" = C ]; then
+  [ -f reports/critic15/mutantsC.inc ] && . reports/critic15/mutantsC.inc
+fi
+echo "MUTANTS DONE"
+
+# ===== mutantsC.inc =====
+# C (w2/app-ui round 3) unit-level mutants; sourced by mutants.sh C
+HUD="tests/unit/hud/hud.test.ts"
+UI="tests/unit/ui/overlay.test.tsx tests/unit/ui/faults.test.tsx"
+SH="tests/unit/shell/viewCost.test.ts"
+CM=src/hud/compressorMap.ts
+run C1 $CM 's/m < SM_CAUTION_FRACTION ?/m <= SM_CAUTION_FRACTION ?/' $HUD $UI
+run C2 $CM 's/if (!(100 \* p.correctedSpeedFraction >= g.lowestPercent))/if (false)/' $HUD $UI
+run C3 $CM 's/return \[low, ...round.filter/return [...round.filter/' $HUD $UI
+run C4 src/ui/instruments.tsx 's/return pending !== null \&\& sim.lastCommandSeq < pending.seq ?/return false ?/' $UI
+run C5 src/ui/instruments.tsx 's/return pending !== null \&\& sim.lastCommandSeq < pending.seq ?/return pending !== null ?/' $UI
+run C6 src/ui/store.ts 's/set({ simStopped: m.message });/void m;/' $UI
+run C7 src/hud/annunciators.ts 's/if (f.simStopped !== null)/if (false)/' $HUD $UI
+run C8 src/hud/callouts.ts 's/if (overlaps(p.box, q.box, GAP)) collide/if (false) collide/' $HUD
+run C9 src/hud/callouts.ts 's/!reserved.some((t) => overlaps(box, t, GAP))/true/' $HUD
+run C10 src/hud/callouts.ts 's/else if (tangled(p, q)) tangle/else if (false) tangle/' $HUD
+run C11 src/shell/pixelCap.ts 's/if (quality === .ultra.) return dpr;//' $SH
+run C12 src/shell/pixelCap.ts 's/return Math.min(dpr, cap);/return dpr;/' $SH
+run C13 src/shell/settle.ts 's/frames = switched || !settled ? 0 : frames + 1;/frames = !settled ? 0 : frames + 1;/' $SH
+run C14 src/ui/panels.tsx 's/disabled={stopped}/disabled={false}/' $UI
+
+# ===== mutCB.sh =====
+#!/usr/bin/env bash
+# CB1: the callouts laid out at the default 132 x 34 px, not at their measured (drawn) size:
+# the pass-13 failure. KILLED = the browser layout bar fails.
+set -u
+cd /c/Users/Aaron/projects/turbofan/.claude/worktrees/critic
+T=reports/critic15/tmp; mkdir -p $T
+mkdir -p reports/critic15/ui-gate && cp -r reports/ui/. reports/critic15/ui-gate/ 2>/dev/null
+f=src/ui/panels.tsx
+cp $f $T/mutCB.bak
+sed -i 's/layoutCallouts(anchors, (id) => sizes\[id\] ?? LABEL, vp, reserved)/layoutCallouts(anchors, () => LABEL, vp, reserved)/' $f
+if cmp -s $f $T/mutCB.bak; then echo "CB1: SED DID NOT APPLY"; exit 0; fi
+if npx vitest run -c vitest.browser.config.ts tests/browser/app.test.tsx > $T/mut-CB1.log 2>&1; then echo "CB1: SURVIVED"; else echo "CB1: KILLED"; fi
+grep -E "overlaps|crosses|runs through|cut off" $T/mut-CB1.log | head -20
+git checkout -- $f
+echo "MUTCB DONE"
+
+# ===== mutCB2.sh (CB2: as mutCB.sh with this sed; KILLED) =====
+sed -i 's/layoutCallouts(anchors, (id) => sizes\[id\] ?? LABEL, vp, reserved)/layoutCallouts(anchors, () => ({ w: 60, h: 20 }), vp, reserved)/' $f

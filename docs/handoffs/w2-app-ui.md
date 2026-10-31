@@ -1,5 +1,84 @@
-w2/app-ui: round 2 DONE, ready for the critic. Main @7d6495c (flowviz round 3) is merged in; D4-82 and D4-83 are adopted in the shell; handoff NEXT 1-4 are done and NEXT 5's cheap parts are wired. (HEAD: the handoff commit; the code is at 016680a.)
+w2/app-ui: round 3 DONE (the critic pass 13 fix round, with D4-85, D4-87 and D4-88). Main @42cf8e9 is merged (a fast-forward; the lockfile did not change). HEAD: the handoff commit; the code is at d6fed99 and the shots at 2d9da68.
 
+# Round 3 (2026-10-30)
+
+DONE (each finding: its (TDD) commit, then the fix)
+- **W2A-I1, the worker's faults on screen** (4b529f8 TDD, 3f531cb). A thrown cycle step posts a new `sim-stopped` message (src/shell/protocol.ts). The annunciators show SIM STOPPED with the message beside it, the clock reads "stopped" and Pause is disabled. A `fatal` always stops the app; no message-prefix test anymore. GPU ERRORS (n), MOCK RASTER ON FRAME / FAILED (from the new `AppDiagnostics.raster`) and REFUSED (n) are chips that open Diagnostics. Pure: `faultAnnunciations` (src/hud/annunciators.ts). Tests: `tests/unit/ui/faults.test.tsx` (the store's `receive` for every message, which kills M13; Status's boot and fault screens, which kills M14; the chips) and simCore's equal-seq (M10) and refused-echo (M11) pins. N5's dead-guard fake (M1) is fixed too: the fake reads healthy after dispose.
+- **W2A-I2 + D4-87, the fan map at idle** (fff91a3 TDD, 3fcdbc7). Each map is drawn from its own lowest speed line (`lowestMapPercent`, `chartSpeedPercents`: the fan's 30.6 %, the HPC's 44 %), so the idle fan point (20 %, 65 kg/s, PR 1.02) is inside the chart. A point still off the plot is clamped to its edge with a chevron (`plotPoint`). Below the lowest line, `surgeMarginView` shows the margin dimmed with a "below map" tag and a hollow point. Amber (< 5 %) and red (<= 0) apply only on the map.
+- **W2A-I3, the callouts** (df1853d and df2cd39 TDD, 9ccc1dc; Schlieren's rule in ae0b8bf).
+  - The layout measures each label as drawn (border-box, one line; an unplaced label is drawn hidden so it is measured too), so the reserved box is the rendered box.
+  - A bounded search (2000 nodes, pair tests precomputed, about 1-2 ms) places the most labels with the fewest leader crossings (`leaderCrossings`). It has more outward offsets and is memoized on the anchors' values.
+  - Realistic and Schlieren (both the closed engine) call out only the fan and the exhaust (`calloutShownIn`).
+  - Callouts show only on a settled view (N10). The reserved panels are measured on resize and panel toggles (N10). Every value has its unit (N8).
+  - The browser layout bar now checks the drawn labels against each other, the reserved blocks and text cut-off, plus leader crossings. It passes in every mode at both sizes.
+- **W2A-I4 + D4-88, warm-up and the settled signal** (df1853d TDD, 094ccaf, 64f7732). **FLAGGED RENDER EDIT** in src/render/engineView.ts: `warmUp()` and `viewSettled()`.
+  - `warmUp()` renders one frame of each configuration and waits for `onSubmittedWorkDone` after each: Cutaway with tracers, Data with tracers at p, rho, T and Mach, Schlieren, Exploded, Realistic with tracers, and the boot view last. It then puts the state back and reports each step's wall and frame-CPU ms.
+  - I did not use `compileAsync`: three compiles for the renderer's current target and MRT, not the post passes', so only a real frame compiles the variants the app uses.
+  - The worker calls it after the MOCK is bound and posts `ready` only after it. The canvas is hidden while booting.
+  - `src/shell/settle.ts` counts the frames the view has been settled in the asked mode (`AppDiagnostics.view.settledFrames`). The shots wait for SETTLED_FRAMES (30) and two more snapshots, not a fixed 1.5 s.
+  - `setCycleState`'s source is now required (N3).
+- **W2A-I5, the lever** (df1853d TDD, beef497). The lever keeps a local value and its seq (`store.send` returns the seq) until the snapshot's `lastCommandSeq` reaches it (`leverShown`). RTL: quick changes send 0.01, 0.02, ... 0.05. In Chrome, five real ArrowUp presses land at 0.05 in the worker (the W2F-N5 test).
+- **D4-85, the pixel cap** (df1853d TDD, 094ccaf). `src/shell/pixelCap.ts` caps the backing store at 1920 x 1080 px (2.07 MP) up to quality high, at the true DPR on ultra (the client's cap of 2 stays). The worker applies it on resize and quality changes. Unit-tested; Diagnostics shows the backing store.
+- **Nits** (ae0b8bf TDD, f58e846, c54b3ca):
+  - N1: the field choice's rejection goes to the errors, and Diagnostics says "switching to the solver…" while it starts.
+  - N2: 3 failed snapshot posts in a row are fatal, and `onmessageerror` is handled.
+  - N3: an unknown coupling is "uncoupled" on the badge (a deliberate test change), and the dock's default is pinned (M8).
+  - N4: the ledger splits rows on unescaped pipes.
+  - N6: sub-idle ends a held episode (src/cycle/model.ts, one line).
+  - N7: a late raster reply is dropped; a raster worker silent for 10 s is given up on, visibly.
+  - N8: the limiter in words ("RUN · idle floor"), "Burner lit/out", a dash for an unmeasured solver, SOLVER IDLE when it is not drawn.
+  - N9: --faint #838c9b and the panel at 0.86 alpha (4.9:1 over a mid grey; was 3.3:1). The drawer's panels are nearly opaque (visual note 4).
+  - N10: `projectPoint` is tested.
+  - N11: `startClient` resets the session, and the spinner says so after 60 s.
+  - N12: round 1's shot moved to `docs/look-dev/ui/before/`.
+- d6fed99: flowviz's 40000-seed zone test has an explicit 60 s runtime limit. Under coverage on the loaded machine it took 5.1 s, past vitest's 5 s default. It is not a threshold.
+
+FIRST SWITCH (W2A-I4; `tests/browser/firstSwitch.test.tsx`, 1366 x 768, a fresh worker each)
+- Measured: the longest gap between snapshots in the 3 s after the click, the window's end included; snapshots normally come every 50 ms. The bar, new and pre-registered in the test: <= 250 ms.
+
+| | Schlieren: echo / longest gap | Cutaway: echo / longest gap | Boot (render to ready) |
+|---|---|---|---|
+| Before (two runs) | 1517 / 1323 ms; 1848 / 1581 ms | 461 / 421 ms (window not yet fixed); none / 2818 ms | 2.4-4.7 s |
+| After (the gate run) | 98 / 52 ms | 87 / 70 ms | 9.9-10.6 s |
+| After (loaded runs) | 230-326 / 75-188 ms | 104-160 / 82-127 ms | 14-26 s |
+
+- The warm-up costs 9.1-23 s at boot, behind the spinner. Of that, the Cutaway frame takes 6.9-14.5 s, but only 1.1-2.6 s of it is the worker's CPU. The rest is the GPU process compiling pipelines (D3D12). Schlieren takes 1.6-3.3 s, the four Data quantities 30-260 ms each, and Realistic with tracers 0.24-1.0 s.
+- The Schlieren and Cutaway shots now show the right views (looked at): the knife-edge grey with the engine as a silhouette, and the wedge fully open.
+
+RENDER TIME (D4-85; indicative, shared machine; `reports/ui/render-*.json`)
+- Chrome ran at DPR 1 this round, not round 2's 1.5x: the shots are 1920 x 1001 px. So 1920 x 1001 renders 1.92 MP, under the cap, and the cap is not exercised in Chrome. It is unit-tested.
+- Realistic over a full window: 10.1 ms at 1920 x 1001 and 9.9 ms at 1366 x 768, against P4's 8 ms at 1080p.
+- Per mode at 1920: Realistic 13.4, Cutaway 16.0, Exploded 8.6, Schlieren 12.4, Data 12.6 ms (the medians shortly after each switch).
+- Round 2 measured 27.9 ms at 4.33 MP.
+
+NEEDS AN ORCHESTRATOR DECISION
+1. **The warm-up's boot cost: 9-23 s on the shared machine (boot 10-26 s, against 2.4-4.7 s before).** About 80 % of it is the GPU process compiling Cutaway's pipelines, every internal mesh visible at once. Options:
+   - (a) keep it, as D4-88 says;
+   - (b) compile asynchronously: three's `compileAsync` with the scene and rotor passes' render target and MRT set on the renderer, so Dawn's `createRenderPipelineAsync` can compile in parallel. That is a deeper render edit into three internals;
+   - (c) fewer distinct pipelines in the cut view, the render owner's.
+2. The browser suite's lit-centre bar is skipped for Schlieren (a test change, in the commit). The true Schlieren draws the engine as a 0.22 silhouette, and round 2's shots passed the bar only because they showed the exploded engine.
+3. App-ui's own display levels, not in PHYSICS.md: the SM caution under 5 % and the warning at <= 0; the 250 ms first-switch bar; Realistic and Schlieren calling out only the fan and the exhaust.
+
+NEXT
+1. Decision 1. Also, the solver field's first bind (`bindSolver`) may compile new pipelines; it is not warmed.
+2. D4-84's held-step budget (the cycle round): the held step is still 534 ms (`reports/ui/frame-cost.json`). D4-86 (flowviz's Data-plane board).
+3. In Realistic the fan's anchor projects onto the nacelle skin. Anchor the closed views at the fan face. In the cut views the callouts still cluster on the core.
+4. Not done: the app-level fallback case in Chrome (a failed solver start inside `<App/>`, N5's last item) and worker-level tests of N2's fatal. Visual notes 5 (a quadrant lever) and 7 (the T-s burner along its isobar).
+5. Round 2's NEXT 2-5: colormaps, `selectedComponent`, the setBleed/setAmbient UI, a stall-margin trend.
+
+GOTCHAS
+- A browser run fetches the worker's modules again for each new Worker. Editing worker-imported `src/` files during a run changes what the later tests boot.
+- The first-switch stall is mostly in the GPU process: the worker's frame CPU missed it (91 ms against a 2.8 s gap). Measure snapshot gaps on the main thread.
+- Chrome's DPR was 1 this round. Check `diagnostics.backingStore` before reading render times.
+- A hook asks for facts before `Remove-Item`. The tests overwrite their outputs, so nothing needs deleting.
+- The gates ran as one detached script (`reports/scratch/app-ui/gates.ps1`, status per step, waiting for >= 2 GB free before test:browser). Dev port 5194 was not used, and no MCP page was opened.
+
+GATES (typecheck, lint, mesh, gpu and browser at ab2866d; since then only a unit test's runtime limit, d6fed99. Coverage at d6fed99)
+- npm run typecheck: clean, 16 s. npm run lint: clean, 66 s.
+- npm run coverage (own reportsDirectory): 120 files, 2166 passed + 11 expected fail, exit 0 (thresholds met), 876 s; statements / branches / functions / lines see the log %. The first run (at ab2866d) failed only on the 5 s timeout fixed in d6fed99.
+- npm run test:mesh: 2 files, 29 passed.
+- npm run test:gpu: 12 files, 68 passed, 65 s (vitest-pool teardown warnings only).
+- npm run test:browser (VITE_UI_LOOKDEV=1, the re-shoot): 13 files, 40 passed (flowviz's 34, app 4, first switch 2), 0 WebGPU errors, exit 0, 405 s, 3.8 GB free.
 # Round 2 (2026-10-30)
 
 DONE

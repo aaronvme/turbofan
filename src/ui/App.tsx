@@ -2,7 +2,7 @@
 // overlay on the main thread reads the worker's snapshots from the store and sends commands.
 // Keyboard: 1-5 switch the view mode, the focused view orbits with the arrow keys.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { startClient } from '../app/client';
 import type { CycleChoice } from '../shell/protocol';
 import { VIEW_MODES } from '../contracts/ui';
@@ -21,6 +21,9 @@ import { useApp } from './store';
 
 function Viewport({ cycle }: { readonly cycle: CycleChoice | undefined }) {
   const host = useRef<HTMLDivElement>(null);
+  // D4-88: the worker warms every mode's pipelines before `ready`; its frames stay hidden
+  // behind the boot spinner
+  const booting = useApp((s) => s.connection.state === 'booting');
   useEffect(() => {
     const el = host.current;
     if (el === null) return;
@@ -41,17 +44,43 @@ function Viewport({ cycle }: { readonly cycle: CycleChoice | undefined }) {
       canvas.remove();
     };
   }, [cycle]);
-  return <div className="viewport" ref={host} />;
+  return <div className={booting ? 'viewport booting' : 'viewport'} ref={host} />;
 }
+
+/**
+ * A boot longer than this, ms, says so (W2A-N11: the spinner had no end). The boot warms every
+ * mode's pipelines (D4-88), 10-23 s on the shared machine, so this is well past a normal one.
+ */
+export const BOOT_SLOW_MS = 60_000;
 
 export function Status() {
   const c = useApp((s) => s.connection);
+  const booting = c.state === 'booting';
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!booting) return;
+    const t = setTimeout(() => {
+      setSlow(true);
+    }, BOOT_SLOW_MS);
+    return () => {
+      clearTimeout(t);
+    };
+  }, [booting]);
   if (c.state === 'running') return null;
-  if (c.state === 'booting')
+  if (booting)
     return (
       <div className="boot" role="status">
         <span className="spinner" aria-hidden="true" />
-        Starting the GPU, the cycle model and the solver…
+        <span>
+          Starting the GPU, the cycle model and the solver, and compiling every view…
+          {slow && (
+            <>
+              <br />
+              This is taking longer than usual: the GPU or the worker may have stalled. Reload to
+              try again.
+            </>
+          )}
+        </span>
       </div>
     );
   const title =

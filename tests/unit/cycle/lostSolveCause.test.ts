@@ -94,4 +94,23 @@ describe('W2F-I1: the lost-solve cause', { timeout: 120_000 }, () => {
     expect(warn).toHaveBeenCalledTimes(2);
     warn.mockRestore();
   });
+
+  it('W2A-N6: a held episode, then sub-idle (a flameout) and a relight into a second held episode, logs it again', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { m, ctl } = model();
+    ctl.lose = 'typeError';
+    expect(m.step(0.1, inputs).gasPathSolve.status).toBe('held');
+    expect(warn).toHaveBeenCalledTimes(1);
+    // the fuel cut: the burner goes out and the model takes the sub-idle path (no matched solve)
+    let s = m.step(0.1, { ...inputs, fuelLever: 'cutoff' });
+    for (let k = 0; k < 20 && s.gasPathSolve.status !== 'subIdle'; k++)
+      s = m.step(0.1, { ...inputs, fuelLever: 'cutoff' });
+    expect(s.gasPathSolve.status).toBe('subIdle');
+    // a restart (starter, fuel at idle) brings it back above sub-idle, where the solve is lost again
+    const restart = { ...inputs, throttleLever: 0, starter: true };
+    for (let k = 0; k < 1500 && s.gasPathSolve.status === 'subIdle'; k++) s = m.step(0.1, restart);
+    expect(s.gasPathSolve.status).toBe('held');
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
 });

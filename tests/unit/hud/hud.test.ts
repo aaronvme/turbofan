@@ -3,18 +3,28 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  chartSpeedPercents,
+  FAN_LINES,
+  HPC_LINES,
   labelBox,
+  lowestMapPercent,
   mapGeometry,
   niceTicks,
   placeSpeedLabels,
+  plotPoint,
   pushTrail,
   scaleOf,
+  SM_CAUTION_FRACTION,
+  surgeMarginView,
 } from '../../../src/hud/compressorMap';
 import { tsDiagram } from '../../../src/hud/tsDiagram';
-import { layoutCallouts, leaderEnd, overlaps } from '../../../src/hud/callouts';
+import { layoutCallouts, leaderCrossings, leaderEnd, overlaps } from '../../../src/hud/callouts';
+import { calloutShownIn, componentAnchors, projectPoint } from '../../../src/hud/anchors';
+import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 import { ledgerKind, parseFidelityLedger, stripMarkdown } from '../../../src/hud/ledger';
 import * as f from '../../../src/hud/format';
 import {
+  faultAnnunciations,
   flagAnnunciations,
   fieldFallbackAnnunciation,
   flowAnnunciation,
@@ -23,7 +33,7 @@ import {
 } from '../../../src/hud/annunciators';
 import { referenceEngine } from '../../../src/cycle/engine';
 import { createCycleModel } from '../../../src/cycle/model';
-import { DEFAULT_CYCLE_INPUTS } from '../../../src/contracts/cycle';
+import { DEFAULT_CYCLE_INPUTS, FADEC_LIMITERS } from '../../../src/contracts/cycle';
 import { compressorPoint } from '../../../src/cycle/componentMaps';
 
 const engine = referenceEngine();
@@ -66,6 +76,72 @@ describe('compressor map geometry', { timeout: 120_000 }, () => {
     check();
   });
 
+  it("D4-87: the map's lowest speed line is the map's own (the fan's 30.6 %, the HPC's 44 %)", () => {
+    for (const which of ['fan', 'hpc'] as const) {
+      const f = frame(which);
+      const expected =
+        (100 * (f.map.map.nc[0] ?? NaN) * f.designCorrectedRpm) /
+        (f.map.map.design.nc * f.referenceRpm);
+      expect(lowestMapPercent(f), which).toBeCloseTo(expected, 9);
+      expect(mapGeometry(f).lowestPercent, which).toBeCloseTo(expected, 9);
+      // the chart draws the map down to its lowest line, then the round lines above it
+      const lines = chartSpeedPercents(f, [40, 50, 60, 100]);
+      expect(lines[0], which).toBeCloseTo(expected, 9);
+      expect(lines.slice(1).every((p) => p >= expected + 5)).toBe(true);
+    }
+    expect(lowestMapPercent(frame('fan'))).toBeCloseTo(30.6, 1);
+    expect(lowestMapPercent(frame('hpc'))).toBeCloseTo(44.0, 1);
+  });
+
+  it('D4-87: a surge margin below the map is dimmed and tagged "below map", never amber or red; on the map amber and red apply', () => {
+    const fan = mapGeometry(frame('fan'), chartSpeedPercents(frame('fan'), FAN_LINES));
+    const hpc = mapGeometry(frame('hpc'), chartSpeedPercents(frame('hpc'), HPC_LINES));
+    const idle = createCycleModel().reset('groundIdle');
+    // ground idle: the fan's corrected speed (about 20 %) is below its map's lowest line, and its
+    // 3.6 % margin is extrapolated there (amber before D4-87)
+    expect(100 * idle.fan.correctedSpeedFraction).toBeLessThan(fan.lowestPercent);
+    expect(idle.fan.surgeMarginFraction).toBeLessThan(SM_CAUTION_FRACTION);
+    expect(surgeMarginView(fan, idle.fan)).toEqual({ level: 'belowMap', tag: 'below map' });
+    // the HPC at idle is on its map, with a normal margin
+    expect(surgeMarginView(hpc, idle.hpc)).toEqual({ level: 'normal', tag: null });
+    const on = { ...idle.fan, correctedSpeedFraction: 0.8 };
+    expect(surgeMarginView(fan, { ...on, surgeMarginFraction: 0.2 }).level).toBe('normal');
+    expect(surgeMarginView(fan, { ...on, surgeMarginFraction: 0.03 }).level).toBe('caution');
+    expect(surgeMarginView(fan, { ...on, surgeMarginFraction: 0 }).level).toBe('warning');
+    expect(surgeMarginView(fan, { ...on, surgeMarginFraction: -0.02 }).level).toBe('warning');
+    // below the map neither applies, whatever the extrapolated number says
+    const below = { ...idle.fan, correctedSpeedFraction: 0.2 };
+    expect(surgeMarginView(fan, { ...below, surgeMarginFraction: -0.02 })).toEqual({
+      level: 'belowMap',
+      tag: 'below map',
+    });
+  });
+
+  it('W2A-I2: the idle and take-off operating points lie inside both charts, and a point off the chart is clamped to its edge', () => {
+    const fan = mapGeometry(frame('fan'), chartSpeedPercents(frame('fan'), FAN_LINES));
+    const hpc = mapGeometry(frame('hpc'), chartSpeedPercents(frame('hpc'), HPC_LINES));
+    const model = createCycleModel();
+    let s = model.reset('groundIdle');
+    const inside = (g: typeof fan, p: typeof s.fan, what: string) => {
+      expect(p.correctedFlowKgPerS, what).toBeGreaterThan(g.bounds.wc[0]);
+      expect(p.correctedFlowKgPerS, what).toBeLessThan(g.bounds.wc[1]);
+      expect(p.pressureRatio, what).toBeGreaterThanOrEqual(g.bounds.pr[0]);
+      expect(p.pressureRatio, what).toBeLessThan(g.bounds.pr[1]);
+    };
+    inside(fan, s.fan, 'fan at idle');
+    inside(hpc, s.hpc, 'hpc at idle');
+    for (let k = 0; k < 10; k++)
+      s = model.step(1, { ...DEFAULT_CYCLE_INPUTS, fuelLever: 'run', throttleLever: 1 });
+    inside(fan, s.fan, 'fan at take-off');
+    inside(hpc, s.hpc, 'hpc at take-off');
+    // the plot's rectangle, px: inside it a point is drawn where it is, outside on its edge
+    const plot = { x: 40, y: 10, w: 252, h: 128 };
+    expect(plotPoint(100, 50, plot, 3)).toEqual({ x: 100, y: 50, off: null });
+    expect(plotPoint(-20, 50, plot, 3)).toEqual({ x: 43, y: 50, off: { dx: -1, dy: 0 } });
+    expect(plotPoint(400, 200, plot, 3)).toEqual({ x: 289, y: 135, off: { dx: 1, dy: 1 } });
+    expect(plotPoint(100, Number.NaN, plot, 3).off).not.toBeNull();
+  });
+
   it('keeps a bounded trail without repeating a still point', () => {
     let t = pushTrail([], { correctedFlowKgPerS: 1, pressureRatio: 2 }, 3);
     t = pushTrail(t, { correctedFlowKgPerS: 1, pressureRatio: 2 }, 3);
@@ -91,11 +167,15 @@ describe('compressor map geometry', { timeout: 120_000 }, () => {
       );
     // the real maps at a 300 x 170 plot: no two labels overlap, and 100 % is always labelled
     for (const which of ['fan', 'hpc'] as const) {
-      const g = mapGeometry(frame(which));
+      // the lines the chart draws: from the map's own lowest line up (W2A-I2)
+      const g = mapGeometry(
+        frame(which),
+        chartSpeedPercents(frame(which), which === 'fan' ? FAN_LINES : HPC_LINES),
+      );
       const x0 = scaleOf(g.bounds.wc, 258, 0.04);
       const y0 = scaleOf(g.bounds.pr, 136, 0.04);
       const anchors = g.speedLines.map((l) => ({
-        percent: l.percent,
+        percent: Math.round(l.percent),
         x: 34 + x0(l.points[0]?.[0] ?? 0),
         y: 146 - y0(l.points[0]?.[1] ?? 0),
       }));
@@ -200,6 +280,107 @@ describe('callout layout', () => {
     expect(none).toEqual([]);
   });
 
+  it('W2A-I3: counts a leader crossing another leader or running through another label', () => {
+    const box = (x: number, y: number) => ({ x, y, w: 40, h: 10 });
+    // two leaders that cross: (0,0)->(100,100)'s box corner and (100,0)->(0,100)'s
+    const crossing = [
+      { id: 'a', anchor: { x: 0, y: 0 }, box: box(100, 100) },
+      { id: 'b', anchor: { x: 100, y: 0 }, box: box(-40, 100) },
+    ];
+    expect(leaderCrossings(crossing)).toBe(1);
+    // a leader through another label's box
+    const through = [
+      { id: 'a', anchor: { x: 0, y: 50 }, box: box(200, 45) },
+      { id: 'b', anchor: { x: 120, y: 0 }, box: box(80, 45) },
+    ];
+    expect(leaderCrossings(through)).toBe(1);
+    const apart = [
+      { id: 'a', anchor: { x: 0, y: 0 }, box: box(10, -20) },
+      { id: 'b', anchor: { x: 300, y: 0 }, box: box(310, -20) },
+    ];
+    expect(leaderCrossings(apart)).toBe(0);
+  });
+
+  it('W2A-I3: places every label with no leader crossing where a crossing-free place exists', () => {
+    // the components' anchors along the engine's axis, a few tens of px apart (as projected):
+    // the first free offset of each made 1-3 crossings in these rows before W2A-I3
+    const big = () => ({ w: 140, h: 36 });
+    for (const dy of [-25, -20, -10, 0]) {
+      const anchors = [9, 4, 7, 8, 6, 5].map((priority, k) => ({
+        id: `c${String(k)}`,
+        x: 300 + 20 * k,
+        y: 350 + dy * k + (k % 2) * 8,
+        visible: true,
+        priority,
+      }));
+      const placed = layoutCallouts(anchors, big, { w: 1000, h: 700 });
+      expect(placed, `dy ${String(dy)}`).toHaveLength(6);
+      expect(leaderCrossings(placed), `dy ${String(dy)}`).toBe(0);
+      for (const p of placed)
+        for (const q of placed) if (p !== q) expect(overlaps(p.box, q.box)).toBe(false);
+    }
+  });
+
+  it('W2A-I3: the closed modes (Realistic, Schlieren) call out only what the nacelle shows; none in Exploded', () => {
+    const ids = componentAnchors(ENGINE_DEFINITION).map((a) => a.id);
+    expect(ids).toEqual(expect.arrayContaining(['fan', 'hpc', 'combustor', 'exhaust']));
+    // Schlieren draws the closed engine as a silhouette (its look mode is Realistic's)
+    for (const mode of ['realistic', 'schlieren'] as const)
+      expect(
+        ids.filter((id) => calloutShownIn(mode, id)),
+        mode,
+      ).toEqual(ids.filter((id) => id === 'fan' || id === 'exhaust'));
+    for (const mode of ['cutaway', 'data'] as const)
+      expect(
+        ids.every((id) => calloutShownIn(mode, id)),
+        mode,
+      ).toBe(true);
+    expect(ids.some((id) => calloutShownIn('exploded', id))).toBe(false);
+  });
+
+  it('W2A-N10: projects a world point to CSS px, and hides one behind the camera or off screen', () => {
+    // a camera at z = 5 looking down -z with a 90 degree vertical field of view, aspect 2
+    const f = 1 / Math.tan(Math.PI / 4);
+    const near = 0.1;
+    const far = 100;
+    // column-major perspective (three's elements) times a view that moves the world by -5 in z
+    const proj = [
+      f / 2,
+      0,
+      0,
+      0,
+      0,
+      f,
+      0,
+      0,
+      0,
+      0,
+      -(far + near) / (far - near),
+      -1,
+      0,
+      0,
+      (-2 * far * near) / (far - near),
+      0,
+    ];
+    const vp = proj.slice();
+    // view translation (0, 0, -5): the last column picks up proj * t
+    vp[12] = 0;
+    vp[13] = 0;
+    vp[14] = (proj[10] ?? 0) * -5 + (proj[14] ?? 0);
+    vp[15] = (proj[11] ?? 0) * -5;
+    const centre = projectPoint(vp, [0, 0, 0], 800, 400);
+    expect(centre.visible).toBe(true);
+    expect(centre.x).toBeCloseTo(400, 9);
+    expect(centre.y).toBeCloseTo(200, 9);
+    // up is up the screen (CSS y down), right is right
+    const up = projectPoint(vp, [0, 1, 0], 800, 400);
+    expect(up.y).toBeCloseTo(200 - 200 / 5, 9);
+    expect(projectPoint(vp, [2, 0, 0], 800, 400).x).toBeCloseTo(400 + 400 * (2 / 5) * 0.5, 9);
+    // behind the camera, and outside the frustum
+    expect(projectPoint(vp, [0, 0, 10], 800, 400)).toMatchObject({ visible: false });
+    expect(projectPoint(vp, [50, 0, 0], 800, 400).visible).toBe(false);
+  });
+
   it('is deterministic and ends leaders on the box edge', () => {
     const anchors = [
       { id: 'a', x: 300, y: 300, visible: true, priority: 0 },
@@ -233,6 +414,23 @@ describe('fidelity ledger', () => {
     expect(() => parseFidelityLedger('# Other\n')).toThrow(/heading/);
     expect(() => parseFidelityLedger('## 1. Fidelity ledger\n\ntext\n')).toThrow(/no rows/);
   });
+
+  it('W2A-N4: splits a row on its unescaped pipes only, and unescapes the others', () => {
+    const doc = [
+      '## 1. Fidelity ledger',
+      '',
+      '| Thing | Status | Source |',
+      '|---|---|---|',
+      '| Flow visuals | **Derived** | the speed \\|u\\|, composited after the tone map (D4-76) |',
+      '',
+    ].join('\n');
+    const [row] = parseFidelityLedger(doc);
+    expect(row?.thing).toBe('Flow visuals');
+    expect(row?.source).toBe('the speed |u|, composited after the tone map (D4-76)');
+    // the document's own flow-visuals row keeps its |u| and what follows it
+    const real = parseFidelityLedger(md).find((r) => r.source.includes('|u|'));
+    expect(real?.source).toMatch(/\|u\|, composited after the tone map/);
+  });
 });
 
 describe('format', () => {
@@ -249,6 +447,20 @@ describe('format', () => {
     expect(f.tsfc(null, 'si').value).toBe(f.MISSING);
     expect(f.tsfc(1e-5, 'si').value).toBe('10.00');
     expect(f.tsfc(1e-5, 'imperial').value).toBe('0.353');
+  });
+
+  it('W2A-N8: names the FADEC limiter in words, not as a code identifier', () => {
+    expect(FADEC_LIMITERS.map((l) => f.limiterText(l))).toEqual([
+      'no limiter',
+      'N1 target',
+      'accel schedule',
+      'decel schedule',
+      'idle floor',
+      'N1 limit',
+      'N2 limit',
+      'EGT limit',
+      'start schedule',
+    ]);
   });
 
   it('shows missing values as a dash and never -0', () => {
@@ -316,9 +528,10 @@ describe('annunciators', () => {
       'CYCLE: MODEL',
       'FIELD: MOCK',
     ]);
+    // W2A-N3: a solver of unknown coupling is labelled the conservative way, uncoupled
     expect(provenanceBadges({ cycle: 'mock', flow: 'solver' }).map((b) => b.level)).toEqual([
       'caution',
-      'normal',
+      'advisory',
     ]);
     expect(provenanceBadges({ cycle: 'model', flow: 'none' })[1]?.text).toBe('FIELD: NONE');
   });
@@ -352,7 +565,7 @@ describe('annunciators', () => {
       )[1]?.text,
     ).toBe('FIELD: MOCK');
     expect(provenanceBadges({ cycle: 'model', flow: 'solver' }, null)[1]?.text).toBe(
-      'FIELD: SOLVER',
+      'FIELD: solver (uncoupled until W3)',
     );
     // the fallback is also annunciated (visible, never silent), with the reason in the text
     expect(fieldFallbackAnnunciation(uncoupled)).toBeNull();
@@ -361,5 +574,52 @@ describe('annunciators', () => {
     expect(a?.level).toBe('caution');
     expect(a?.text).toBe('MOCK FALLBACK: solver lost: GPU device lost');
     expect(a?.detail).toMatch(/^MOCK fallback/);
+  });
+
+  it('W2A-N8: a running solver that is not drawn reads idle, not running', () => {
+    const running = {
+      status: 'running',
+      error: null,
+      mode: 'tracking',
+      stats: null,
+      reduction: null,
+    } as const;
+    expect(flowAnnunciation(running, false)).toMatchObject({
+      level: 'normal',
+      text: 'SOLVER IDLE',
+    });
+    expect(flowAnnunciation(running, true).text).toBe('SOLVER RUNNING');
+    expect(flowAnnunciation({ ...running, status: 'lost', error: 'x' }, false).text).toBe(
+      'SOLVER LOST',
+    );
+  });
+
+  it('W2A-I1: the worker faults are annunciated: a stopped sim, GPU errors, the MOCK raster, refused commands', () => {
+    const none = { simStopped: null, gpuErrors: 0, raster: null, refused: 0 };
+    expect(faultAnnunciations(none)).toEqual([]);
+    expect(faultAnnunciations({ ...none, raster: { onFrame: false, lastError: null } })).toEqual(
+      [],
+    );
+    const all = faultAnnunciations({
+      simStopped: 'cycle step failed: TypeError: boom',
+      gpuErrors: 3,
+      raster: { onFrame: true, lastError: 'MOCK raster worker failed: rasterizing on the frame' },
+      refused: 2,
+    });
+    expect(all.map((f) => [f.id, f.level, f.text])).toEqual([
+      ['simStopped', 'warning', 'SIM STOPPED'],
+      ['gpuErrors', 'caution', 'GPU ERRORS (3)'],
+      ['raster', 'caution', 'MOCK RASTER ON FRAME'],
+      ['refused', 'advisory', 'REFUSED (2)'],
+    ]);
+    expect(all[0]?.detail).toMatch(/^cycle step failed: TypeError: boom/);
+    expect(all[2]?.detail).toBe('MOCK raster worker failed: rasterizing on the frame');
+    const failed = faultAnnunciations({
+      ...none,
+      raster: { onFrame: false, lastError: 'MOCK raster: NaN' },
+    });
+    expect(failed.map((f) => [f.text, f.detail])).toEqual([
+      ['MOCK RASTER FAILED', 'MOCK raster: NaN'],
+    ]);
   });
 });

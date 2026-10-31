@@ -8,6 +8,7 @@ import type { SimCommandMessage, SimSnapshot } from '../contracts/sim';
 import type { FlowFieldSource } from '../contracts/flow';
 import type { FlowLinkState } from '../flow/viz/fieldLink';
 import type { Anchor } from '../hud/callouts';
+import type { ViewMode } from '../contracts/ui';
 import type { OrbitInput } from './orbit';
 
 export type FieldChoice = FlowFieldSource;
@@ -76,6 +77,14 @@ export interface FrameBudget {
   readonly fps: number;
 }
 
+/** The MOCK raster's health (W2A-I1: a failure is annunciated, not only listed). */
+export interface RasterHealth {
+  /** Its worker failed, so the raster runs on the frame (slower frames, never a stale field). */
+  readonly onFrame: boolean;
+  /** Why the last raster (or its worker) failed; null: none failed. */
+  readonly lastError: string | null;
+}
+
 export interface AppDiagnostics {
   readonly budget: FrameBudget;
   /**
@@ -83,6 +92,21 @@ export interface AppDiagnostics {
    * the MOCK stands in for the solver asked for). null before the field is bound.
    */
   readonly field: FlowLinkState | null;
+  readonly raster: RasterHealth;
+  /**
+   * D4-88's settled-view signal: the mode the view was asked for and how many frames it has
+   * shown it settled (src/shell/settle.ts; the shots wait for SETTLED_FRAMES).
+   */
+  readonly view: { readonly mode: ViewMode; readonly settledFrames: number };
+  /** D4-85: the canvas's backing store, px, and the pixel ratio it renders at. */
+  readonly backingStore: { readonly width: number; readonly height: number; readonly dpr: number };
+  /** D4-88: what the boot's pipeline warm-up took, wall ms, and each configuration's share. */
+  readonly warmUpMs: number;
+  readonly warmUpSteps: readonly {
+    readonly name: string;
+    readonly ms: number;
+    readonly cpuMs: number;
+  }[];
   /** W2F-I1: why the last matched solve was lost (null: none lost since the reset). */
   readonly lostSolveCause: string | null;
   /** The worker's own errors so far (GPU errors, a throwing step), newest last, at most 8. */
@@ -93,7 +117,8 @@ export interface AppDiagnostics {
 }
 
 export type FromWorker =
-  | { readonly type: 'ready'; readonly adapter: string }
+  /** Posted after the boot's pipeline warm-up (D4-88), so the spinner covers it. */
+  | { readonly type: 'ready'; readonly adapter: string; readonly warmUpMs?: number }
   | {
       readonly type: 'snapshot';
       readonly snapshot: SimSnapshot;
@@ -104,4 +129,10 @@ export type FromWorker =
     }
   | { readonly type: 'gpu-error'; readonly message: string }
   | { readonly type: 'device-lost'; readonly message: string }
+  /**
+   * W2A-I1: the cycle step threw (a bug), so the sim stopped: the clock and the gas path are
+   * frozen while the worker keeps rendering (the view can still be orbited and read).
+   */
+  | { readonly type: 'sim-stopped'; readonly message: string }
+  /** The app cannot go on (init failed, the snapshots cannot be posted). */
   | { readonly type: 'fatal'; readonly message: string };

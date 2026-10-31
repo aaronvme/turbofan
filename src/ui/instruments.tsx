@@ -4,7 +4,7 @@
 // them), on the real cycle model's snapshot. Limits are the definition's (EASA TCDS figures in
 // src/engine/facts.ts).
 
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { ENGINE_DEFINITION } from '../engine/definition';
 import { kelvinToCelsius } from '../engine/units';
 import * as fmt from '../hud/format';
@@ -117,7 +117,7 @@ export function EngineDisplay({ snapshot }: { readonly snapshot: SimSnapshot }) 
       <header className="panel-head">
         <h2>Engine</h2>
         <span className="tag" title="The FADEC mode and the control loop that sets fuel flow">
-          {c.fadec.mode.toUpperCase()} · {c.fadec.limiter}
+          {c.fadec.mode.toUpperCase()} · {fmt.limiterText(c.fadec.limiter)}
         </span>
       </header>
       <div className="dials">
@@ -165,9 +165,10 @@ export function EngineDisplay({ snapshot }: { readonly snapshot: SimSnapshot }) 
             </dd>
           </div>
           <div>
-            <dt>Start</dt>
+            {/* no start in progress: the burner's state (W2A-N8: not "Start lit") */}
+            <dt>{c.startPhase === 'none' ? 'Burner' : 'Start'}</dt>
             <dd className="word">
-              {c.startPhase === 'none' ? (c.combustorLit ? 'lit' : 'off') : c.startPhase}
+              {c.startPhase === 'none' ? (c.combustorLit ? 'lit' : 'out') : c.startPhase}
             </dd>
           </div>
         </dl>
@@ -182,16 +183,37 @@ const DETENTS = [
   { at: 1, label: 'TO' },
 ] as const;
 
+/**
+ * W2A-I5: the lever the viewer moved, shown until the sim has applied it. The snapshot comes at
+ * 20 Hz, so a lever controlled by it alone snapped back to the last echo between presses (five
+ * quick ArrowUps ended at 0.01). The local value holds until the snapshot's lastCommandSeq
+ * reaches the seq it was sent with; from then on the sim's own value shows (a reset moves it).
+ */
+export function leverShown(
+  sim: { readonly lastCommandSeq: number; readonly throttleLever: number },
+  pending: { readonly value: number; readonly seq: number } | null,
+): number {
+  return pending !== null && sim.lastCommandSeq < pending.seq ? pending.value : sim.throttleLever;
+}
+
 export function ThrottleQuadrant({ snapshot }: { readonly snapshot: SimSnapshot }) {
   const send = useApp((s) => s.send);
   const id = useId();
+  const [pending, setPending] = useState<{ value: number; seq: number } | null>(null);
   const inp = snapshot.inputs;
   const c = snapshot.cycle;
+  const lever = leverShown(
+    { lastCommandSeq: snapshot.lastCommandSeq, throttleLever: inp.throttleLever },
+    pending,
+  );
+  const setLever = (value: number) => {
+    setPending({ value, seq: send({ type: 'setThrottle', lever: value }) });
+  };
   return (
     <section className="panel quadrant" aria-label="Throttle quadrant" data-reserve>
       <header className="panel-head">
         <h2>Controls</h2>
-        <span className="tag">lever {Math.round(inp.throttleLever * 100)} %</span>
+        <span className="tag">lever {Math.round(lever * 100)} %</span>
       </header>
       <div className="quadrant-top">
         <div className="lever">
@@ -203,10 +225,10 @@ export function ThrottleQuadrant({ snapshot }: { readonly snapshot: SimSnapshot 
               min={0}
               max={1}
               step={0.01}
-              value={inp.throttleLever}
-              aria-valuetext={`${Math.round(inp.throttleLever * 100)} % of travel`}
+              value={lever}
+              aria-valuetext={`${Math.round(lever * 100)} % of travel`}
               onChange={(e) => {
-                send({ type: 'setThrottle', lever: Number(e.currentTarget.value) });
+                setLever(Number(e.currentTarget.value));
               }}
             />
             <div className="detents" aria-hidden="true">
@@ -217,7 +239,7 @@ export function ThrottleQuadrant({ snapshot }: { readonly snapshot: SimSnapshot 
                   tabIndex={-1}
                   style={{ bottom: `${d.at * 100}%` }}
                   onClick={() => {
-                    send({ type: 'setThrottle', lever: d.at });
+                    setLever(d.at);
                   }}
                 >
                   {d.label}
