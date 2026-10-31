@@ -4085,6 +4085,7 @@ B has no blocking finding so far, and one important finding (W2H-I2, test-only).
 - Two short Node probes (the callout search, and the W2H traces with the fine sweep) overlapped the held sweep and my own C unit mutants, never a gate. The CB2 browser mutant started at 1.77 GB.
 - The builders' worktrees were only read. The probes imported main's and cycle-hold's `src` in place.
 - No dev server or MCP page was opened: the browser suite drives its own Chrome.
+- `critic` is checked out again and clean. The local branch `trial15` (a0e44b8, unpushed) is left in place, because the PreToolUse hook blocked the branch delete: the orchestrator can delete it. No detached run is left going.
 - Probes and mutants: `docs/reviews/probes/pass15-mutants.sh.txt`, `w2h-reach.probe.ts.txt`, `w2a-callout-search.probe.ts.txt`, `w2h-trace.probe.ts.txt` (two traces), plus pass 14's `w2h-held.probe.ts.txt` mode 1 with dt 0.05 added.
 
 ### A. w2/reference-9 @d05e16d (finishing pass 14)
