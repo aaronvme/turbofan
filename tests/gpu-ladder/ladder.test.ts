@@ -35,7 +35,12 @@ import { GPU_CONVERGENCE_FLOOR } from '../ladder/oracle';
 import { radialSod } from '../ladder/radial1d';
 import { chokedMassFlow, exactRiemann, machFromArea, pOverP0, tOverT0 } from '../ladder/theory';
 import { BC, rectangle, singleBlock, solverMesh } from '../unit/flow/helpers';
-import { GpuErrorLog, shippedMesh, solverDevice } from '../gpu/helpers/solver';
+import {
+  FLUX_SCALE_TOLERANCE,
+  GpuErrorLog,
+  shippedMesh,
+  solverDevice,
+} from '../gpu/helpers/solver';
 
 const GAMMA = 1.4;
 const RGAS = 287.05287;
@@ -202,7 +207,8 @@ describe('GPU ladder', () => {
     const oracle = spurious(s.primitives(), mesh, s.ref.u);
     // D4-48 (SOLVER.md 12.2): B's residual is the f32 metric defect F_inf sum S_x, a small
     // difference of large face fluxes, so the row divides by the flux scale r_flux (the oracle's,
-    // f64, at its state after the 100 iterations), not by the residual itself
+    // f64, at its state after the 100 iterations), not by the residual itself; at D4-62's 2e-10
+    // (W2R-I19: D4-48's 1e-3 could not fail, r_flux / r_ref is ~1e10 here)
     const rRef = s.stats.residualDensityL2;
     const rFlux = s.residualFluxScale();
     const overFlux = Math.abs(rGpu - rRef) / rFlux;
@@ -219,9 +225,9 @@ describe('GPU ladder', () => {
         {
           id: '12.2 B',
           metric: `residual: |r_GPU - r_ref| / r_flux (r_GPU ${rGpu.toExponential(3)}, r_ref ${rRef.toExponential(3)}, r_flux / r_ref ${(rFlux / rRef).toExponential(2)}; over r_ref ${(Math.abs(rGpu - rRef) / rRef).toExponential(2)})`,
-          threshold: '<= 1e-3',
+          threshold: `<= ${String(FLUX_SCALE_TOLERANCE.B)}`,
           value: overFlux,
-          pass: overFlux <= 1e-3,
+          pass: overFlux <= FLUX_SCALE_TOLERANCE.B,
         },
       ],
       { rGpu, rRef, rFlux },

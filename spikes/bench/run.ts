@@ -35,6 +35,7 @@ import { createServer, type InlineConfig, type ViteDevServer } from 'vite';
 import type { ThroughputResult } from '../throughput/main.ts';
 import type { WorkerBenchResult } from '../worker/main.ts';
 import { aggregateRuns, type RunResult } from '../lib/benchRun.ts';
+import { focusValidity, pageHasFocus, realFocus } from '../lib/focus.ts';
 import { orderEffect, sweepOrder } from '../lib/order.ts';
 import {
   P1_PAGES,
@@ -468,10 +469,13 @@ async function main(): Promise<void> {
     const page = await context.newPage();
     // Playwright's page.bringToFront() sends this same CDP command; sent directly so the
     // harness says what it does. Before every run: an occluded or unfocused window is
-    // throttled to ~1 Hz without becoming "hidden" (W0G-I1).
+    // throttled to ~1 Hz without becoming "hidden" (W0G-I1). D4-73 (W2L-I7): then Playwright's
+    // focus emulation is switched off and checked, so D3-6's blur rule sees the OS focus; it does
+    // not survive a navigation (GPU_FACTS M56), and every navigation here is followed by this.
     const cdp: CDPSession = await context.newCDPSession(page);
     const refocus = async () => {
       await cdp.send('Page.bringToFront');
+      await realFocus(page, cdp, () => context.newPage());
     };
     const consoleErrors: string[] = [];
     page.on('console', (m) => {
@@ -502,17 +506,20 @@ async function main(): Promise<void> {
     let workerProbe: unknown = null;
 
     const runThroughput: PageRun = async (config) => {
+      const focusStart = await pageHasFocus(page);
       const before = cpus();
       const r = (await page.evaluate(
         (c) => window.__bench?.run(c as never),
         config,
       )) as ThroughputResult;
+      const focusEnd = await pageHasFocus(page);
       const cpuLoadDuring = cpuBusyFraction(before, cpus());
       const run = onlyRun(r.runs);
       return {
         validity: combineValidity([
           runValidity(run, r.pageHiddenMs, r.pageBlurs),
           solverValidity(r),
+          focusValidity(focusStart, focusEnd),
         ]),
         cpuLoadDuring,
         run,
@@ -531,12 +538,14 @@ async function main(): Promise<void> {
         ? await page.evaluate(() => window.__p1?.ready)
         : await page.evaluate(() => window.__bench?.ready);
       p1Pages[scene] ??= info;
+      const focusStart = await pageHasFocus(page);
       const before = cpus();
       const r = (
         app
           ? await page.evaluate((c) => window.__p1?.run(c as never), config)
           : await page.evaluate((c) => window.__bench?.run(c as never), config)
       ) as ThroughputResult;
+      const focusEnd = await pageHasFocus(page);
       const cpuLoadDuring = cpuBusyFraction(before, cpus());
       if (app) await page.evaluate(() => window.__p1?.dispose());
       else await page.evaluate(() => window.__bench?.dispose());
@@ -546,6 +555,7 @@ async function main(): Promise<void> {
         validity: combineValidity([
           runValidity(run, r.pageHiddenMs, r.pageBlurs),
           solverValidity(r),
+          focusValidity(focusStart, focusEnd),
         ]),
         cpuLoadDuring,
         run,
@@ -559,11 +569,13 @@ async function main(): Promise<void> {
       await refocus();
       const info = await page.evaluate(() => window.__workerBench?.ready);
       pageInfo ??= info;
+      const focusStart = await pageHasFocus(page);
       const before = cpus();
       const w = (await page.evaluate(
         (c) => window.__workerBench?.run(c as never),
         config,
       )) as WorkerBenchResult;
+      const focusEnd = await pageHasFocus(page);
       const cpuLoadDuring = cpuBusyFraction(before, cpus());
       workerProbe ??= await page.evaluate(() => window.__workerBench?.probe());
       await page.evaluate(() => window.__workerBench?.dispose());
@@ -572,6 +584,7 @@ async function main(): Promise<void> {
         validity: combineValidity([
           runValidity(run, w.pageHiddenMs, w.pageBlurs),
           solverValidity(w.frame),
+          focusValidity(focusStart, focusEnd),
         ]),
         cpuLoadDuring,
         run,

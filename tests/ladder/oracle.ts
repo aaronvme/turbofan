@@ -54,7 +54,8 @@ export const ENGINE_PRECONDITIONING = { minMach: 0.003 } as const;
 /**
  * D4-81: the global M_cut (SOLVER.md 10, lowMachPreconditioning.globalMachCut) that every
  * preconditioned CPU ladder run takes: L7's M 0.01 sphere, L8, 12.2's C-pre and S, and the d463
- * cases. The GPU tests keep ENGINE_PRECONDITIONING (0.003) until the kernel round mirrors the cut.
+ * cases. The kernel round mirrors it on the GPU (src/flow/gpu/params.ts ENGINE_MACH_CUT, the GPU
+ * tests at the cut; D4-89), and tests/unit/flow/gpu/machCut.test.ts pins the two equal (D4-93).
  */
 export const GLOBAL_MACH_CUT = 0.02;
 

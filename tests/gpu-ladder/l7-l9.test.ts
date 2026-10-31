@@ -7,15 +7,15 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { THRESHOLDS } from '../../src/contracts/thresholds';
 import type { SimDevice } from '../../src/gpu/device';
-import { DEFAULT_CFL_PRECONDITIONED } from '../../src/flow/gpu/params';
+import { DEFAULT_CFL_PRECONDITIONED, ENGINE_MACH_CUT } from '../../src/flow/gpu/params';
 import { THERMALLY_PERFECT, caloricallyPerfectGas } from '../../src/flow/reference/gas';
 import { ReferenceSolver, type SolverOptions } from '../../src/flow/reference/solver';
 import { NP } from '../../src/flow/reference/state';
 import { geometricGrowth, graded, type LadderRow, type Steadiness } from '../ladder/common';
-import { ENGINE_PRECONDITIONING, SINK, sinkCase } from '../ladder/oracle';
+import { SINK, sinkCase } from '../ladder/oracle';
 import { pOverP0, tOverT0 } from '../ladder/theory';
 import { BC, gridBlock, polarMesh, rectangle, singleBlock, solverMesh } from '../unit/flow/helpers';
-import { GpuErrorLog, solverDevice } from '../gpu/helpers/solver';
+import { ENGINE_PRECONDITIONING_CUT, GpuErrorLog, solverDevice } from '../gpu/helpers/solver';
 import {
   back,
   convergeGpu,
@@ -66,7 +66,10 @@ describe('GPU ladder L7-L9', () => {
     sim.destroy();
   });
 
-  /** One L7 sphere on the GPU (l7.ts sphere(): preconditioned, minMach = M_cut = M). */
+  /**
+   * One L7 sphere on the GPU (l7.ts sphere(): preconditioned, minMach = M_cut = M, with D4-81's
+   * global M_cut: max(M, 0.02) in force, as the CPU ladder runs it on w2/reference-9, D4-89).
+   */
   async function sphere(mach: number, n: number) {
     const RS = 0.5;
     const g0 = geometricGrowth((RS * Math.PI) / n, 10 - RS, n);
@@ -76,10 +79,11 @@ describe('GPU ladder L7-L9', () => {
       freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
     });
     const u = mach * probe.ref.c;
+    const cut = Math.max(mach, ENGINE_MACH_CUT);
     const options: SolverOptions = {
       gas: THERMALLY_PERFECT,
       freeStream: { pressure: 101325, temperature: 288.15, velocity: u },
-      lowMachPreconditioning: { minMach: mach, machCut: mach },
+      lowMachPreconditioning: { minMach: cut, machCut: cut },
       cfl: DEFAULT_CFL_PRECONDITIONED,
     };
     const s = new ReferenceSolver(mesh, options);
@@ -163,9 +167,9 @@ describe('GPU ladder L7-L9', () => {
     report('L7', rows, { seq, ref });
   });
 
-  it('L8: the static point sink (minMach = M_cut = 0.003, CFL 0.8): velocity row', async () => {
+  it('L8: the static point sink (D4-89: minMach = M_cut = 0.02, CFL 0.8): velocity row', async () => {
     const L8 = THRESHOLDS.L8.values;
-    const sc = sinkCase(ENGINE_PRECONDITIONING);
+    const sc = sinkCase(ENGINE_PRECONDITIONING_CUT);
     const { mesh, sinkCells } = sc;
     const options = { ...sc.options, cfl: DEFAULT_CFL_PRECONDITIONED };
     const s = new ReferenceSolver(mesh, options);

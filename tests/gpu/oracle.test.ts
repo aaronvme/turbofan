@@ -17,7 +17,6 @@ import type { SolverMesh } from '../../src/flow/reference/solverMesh';
 import type { SourceModel } from '../../src/flow/reference/sources';
 import { NP, type PhysicalState } from '../../src/flow/reference/state';
 import {
-  ENGINE_PRECONDITIONING,
   SINK,
   closedBoxMesh,
   closedBoxOptions,
@@ -27,7 +26,13 @@ import {
 } from '../ladder/oracle';
 import { machFromArea, pOverP0, tOverT0 } from '../ladder/theory';
 import { BC, rectangle, singleBlock, solverMesh } from '../unit/flow/helpers';
-import { GpuErrorLog, shippedMesh, solverDevice } from './helpers/solver';
+import {
+  ENGINE_PRECONDITIONING_CUT,
+  FLUX_SCALE_TOLERANCE,
+  GpuErrorLog,
+  shippedMesh,
+  solverDevice,
+} from './helpers/solver';
 
 /** SOLVER.md 12.2 tolerances after 1 / 10 / 100 iterations (rows C, C-pre, C physical, S). */
 const TOL = { 1: 1e-5, 10: 1e-4, 100: 1e-3 } as const;
@@ -37,6 +42,12 @@ const TOL_SOD = 1e-3;
 const TOL_E = 1e-4;
 /** Any row: the density residual L2 within this relative difference of the oracle's. */
 const TOL_RESIDUAL = 1e-3;
+/**
+ * Rows E-L5 and E-L9a: the residual difference over the flux scale (D4-48), at D4-62's tolerances
+ * (ten times the GPU's measured error, SOLVER.md 12.2) with D4-71's E-L9a (W2R-I19: they replace
+ * TOL_RESIDUAL and round 2's 1e-6 on these rows).
+ */
+const TOL_FLUX = FLUX_SCALE_TOLERANCE;
 
 const CHECKPOINTS = [1, 10, 100] as const;
 
@@ -141,9 +152,7 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     const gpu = await GpuSolver.create(sim.device, mesh, {
       gas: o.gas,
       freeStream: o.freeStream,
-      ...(o.lowMachPreconditioning === undefined
-        ? {}
-        : { lowMachPreconditioning: o.lowMachPreconditioning }),
+      lowMachPreconditioning: ENGINE_PRECONDITIONING_CUT,
     });
     for (const n of [1, 99]) {
       gpu.iterate(n);
@@ -161,8 +170,12 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     await trackingRows(p, 'C tracking');
   });
 
-  it('C-pre: preconditioned tracking at the engine settings (minMach = M_cut = 0.003)', async () => {
-    const options = { ...closedBoxOptions('preconditioned'), cfl: DEFAULT_CFL_PRECONDITIONED };
+  it('C-pre: preconditioned tracking at the engine settings (D4-89: minMach = M_cut = 0.02)', async () => {
+    const options = {
+      ...closedBoxOptions('preconditioned'),
+      lowMachPreconditioning: ENGINE_PRECONDITIONING_CUT,
+      cfl: DEFAULT_CFL_PRECONDITIONED,
+    };
     const p = await pair(closedBoxMesh('f32'), options, {}, (s) => {
       s.setState(smoothPerturbation);
     });
@@ -323,10 +336,10 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
       `[12.2] E L5 residual: / residual ${own.toExponential(2)} (the f64 residual of the two states ${ofStates.toExponential(2)}); / flux scale ${scaled.toExponential(2)}
 `,
     );
-    // the row of record (12.2's 1e-3), and round 2's tighter check: r_flux / r_ref is ~4e4 here,
-    // so at 1e-3 the row could not see a residual off by its own size (W2R-I11; question ee)
-    expect(scaled).toBeLessThanOrEqual(TOL_RESIDUAL);
-    expect(scaled).toBeLessThanOrEqual(1e-6);
+    // the row of record at D4-62's 3e-7 (W2R-I19): r_flux / r_ref is ~4e4 here, so at D4-48's
+    // 1e-3 the row could not see a residual off by its own size (W2R-I11), and round 2's 1e-6 is
+    // subsumed (SOLVER.md 12.2)
+    expect(scaled).toBeLessThanOrEqual(TOL_FLUX.E_L5);
     p.gpu.destroy();
   });
 
@@ -384,14 +397,15 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
       `[12.2] E L9a source: ${e.toExponential(2)}; residual / residual ${own.toExponential(2)}, / flux scale ${scaled.toExponential(2)}\n`,
     );
     expect(e).toBeLessThanOrEqual(TOL_E);
-    // D4-48's row of record over the flux scale, and the residual form, which this case meets too
-    expect(scaled).toBeLessThanOrEqual(TOL_RESIDUAL);
+    // the row of record over the flux scale at D4-71's 1e-10 (W2R-I19; D4-62's 3e-11 sat inside
+    // the f32 rounding of the norm, W2R-I17), and the residual form, which this case meets too
+    expect(scaled).toBeLessThanOrEqual(TOL_FLUX.E_L9a);
     expect(own).toBeLessThanOrEqual(TOL_RESIDUAL);
     p.gpu.destroy();
   });
 
-  it('S: ladder L8 sink, preconditioned tracking from rest (minMach = M_cut = 0.003)', async () => {
-    const sc = sinkCase(ENGINE_PRECONDITIONING, 'f32');
+  it('S: ladder L8 sink, preconditioned tracking from rest (D4-89: minMach = M_cut = 0.02)', async () => {
+    const sc = sinkCase(ENGINE_PRECONDITIONING_CUT, 'f32');
     const options = { ...sc.options, cfl: DEFAULT_CFL_PRECONDITIONED };
     const p = await pair(sc.mesh, options, { cellSource: true });
     const n = sc.mesh.nCells;

@@ -16,6 +16,68 @@ type FieldType = 'f32' | 'u32';
  */
 export const DEFAULT_CFL_PRECONDITIONED = 0.8;
 
+/**
+ * D4-89: the global M_cut of the engine's preconditioning (D4-81's Weiss-Smith/Turkel floor, tied
+ * to the domain's peak velocity: the inlet Mach is about 0.5, so 0.02 is about 4 % of it, D4-59).
+ * It mirrors the CPU reference ladder's GLOBAL_MACH_CUT (tests/ladder/oracle.ts; pinned equal in
+ * tests/unit/flow/gpu/machCut.test.ts, D4-93), where it closed D4-63 (SOLVER.md 10). D4-40's
+ * 0.003 grew from rest on the engine mesh.
+ */
+export const ENGINE_MACH_CUT = 0.02;
+
+/** The tracking mode's low-Mach preconditioning options (section 10; D4-10, D4-20, D4-22, D4-81). */
+export interface LowMachPreconditioning {
+  readonly minMach: number;
+  /** M_cut of SLAU2's dissipation scaling (default minMach; >= 1 turns the scaling off). */
+  readonly machCut?: number;
+  /**
+   * D4-81's global cutoff, the oracle's option of the same name (w2/reference-9): raises minMach
+   * and M_cut to it, so beta >= globalMachCut everywhere (the far field included) and the flux's
+   * M_cut >= globalMachCut. An M_cut >= 1 (the scaling off) and a minMach >= 1 (the plain scheme)
+   * stay as they are. Absent: minMach and M_cut as given.
+   */
+  readonly globalMachCut?: number;
+}
+
+/**
+ * The engine adapter's default (D4-40 as amended by D4-89): minMach = M_cut = the cut, a parameter
+ * (default ENGINE_MACH_CUT). The kernel takes minMach^2 and M_cut as uniforms: no WGSL changes.
+ */
+export function enginePreconditioning(machCut: number = ENGINE_MACH_CUT): {
+  readonly minMach: number;
+  readonly machCut: number;
+} {
+  if (!(machCut > 0 && machCut < 1))
+    throw new RangeError(`the engine's M_cut must be in (0, 1), not ${machCut}`);
+  return { minMach: machCut, machCut };
+}
+
+/**
+ * The adapter's preconditioning from its options (GpuFlowSolver): absent, the engine default at
+ * `machCut` (default ENGINE_MACH_CUT); null, the plain scheme; otherwise as given. A `machCut`
+ * beside explicit options would be ignored, so it is refused.
+ */
+export function adapterPreconditioning(
+  given: LowMachPreconditioning | null | undefined,
+  machCut?: number,
+): LowMachPreconditioning | null {
+  if (given !== undefined && machCut !== undefined)
+    throw new Error(
+      'machCut applies to the engine default only, not beside lowMachPreconditioning',
+    );
+  return given === undefined ? enginePreconditioning(machCut) : given;
+}
+
+/** minMach and M_cut in force: D4-81's global cut applied (the oracle's withGlobalCut). */
+function inForce(pre: LowMachPreconditioning): { minMach: number; machCut: number } {
+  const machCut = pre.machCut ?? pre.minMach;
+  const cut = pre.globalMachCut;
+  if (cut === undefined) return { minMach: pre.minMach, machCut };
+  if (!(Number.isFinite(cut) && cut >= 0))
+    throw new RangeError(`globalMachCut must be finite and >= 0, not ${cut}`);
+  return { minMach: Math.max(pre.minMach, cut), machCut: Math.max(machCut, cut) };
+}
+
 /** Field order of the WGSL struct `Params`. Every field is 4 bytes. */
 export const PARAM_FIELDS = [
   // the reference state the gauges are measured from (section 4)
@@ -118,9 +180,9 @@ export interface GpuSchemeOptions {
   /**
    * Low-Mach preconditioning of the tracking mode (section 10, D4-10, D4-20, D4-22). Implemented
    * as SOLVER.md states it; its CFL, minMach and dissipation are not final (critic pass 7, D4-30,
-   * D4-32): the caller chooses them.
+   * D4-32): the caller chooses them (the engine's: enginePreconditioning, D4-89).
    */
-  readonly lowMachPreconditioning?: { readonly minMach: number; readonly machCut?: number };
+  readonly lowMachPreconditioning?: LowMachPreconditioning;
 }
 
 export interface StageParamSet {
@@ -165,7 +227,8 @@ export function stageParams(
     ...(opts.outflowPressure === undefined ? {} : { outflowPressure: opts.outflowPressure }),
   };
   const bcPhysical = boundaryParams(ref, bcOpts);
-  const pre = opts.lowMachPreconditioning;
+  const pre =
+    opts.lowMachPreconditioning === undefined ? undefined : inForce(opts.lowMachPreconditioning);
   const mInf2 = (ref.u * ref.u) / (ref.c * ref.c);
   const bcTracking =
     pre === undefined
@@ -203,7 +266,7 @@ export function stageParams(
   });
   const tracking = RK3_ALPHA.map((alpha, stage) => ({
     ...base(bcTracking),
-    machCut: pre === undefined ? 1 : Math.min(1, pre.machCut ?? pre.minMach),
+    machCut: pre === undefined ? 1 : Math.min(1, pre.machCut),
     precondition: pre === undefined ? 0 : 1,
     mode: 0,
     stage,

@@ -10,6 +10,7 @@ import { ENGINE_DEFINITION } from '../engine/definition';
 import type { FieldQuantityId } from '../flow/viz/fields';
 import type { FlowVizModeId } from '../flow/viz/modes';
 import { FLOW_SOLVER_LIMITS } from '../gpu/device';
+import type { FlowLinkState } from '../flow/viz/fieldLink';
 import { createFlowPanel } from './flowPanel';
 import { PASS_GROUPS, type FrameSample, type PassMedians } from '../gpu/passTimings';
 import type { RenderProfileId } from '../gpu/renderScale';
@@ -33,6 +34,10 @@ interface LookdevApi {
   setProfile(id: RenderProfileId): void;
   /** The flow visuals (w2/flowviz): mode, slow motion (simulated s per wall s), quantity. */
   setFlowMode(id: FlowVizModeId | null): void;
+  /** D4-83: tracers on or off (null: the mode's default). */
+  setFlowTracers(on: boolean | null): void;
+  /** Which field the flow visuals draw (D4-82: the solver uncoupled, the MOCK, a fallback). */
+  flowField(): FlowLinkState;
   setFlowTimeScale(dilation: number): void;
   setFlowQuantity(id: FieldQuantityId | null): void;
   /** The GPU particle records (12 floats each, src/flow/viz/particleKernel.ts). */
@@ -72,6 +77,13 @@ export interface TimingRun {
    * open when the run stopped included (W2L-I3).
    */
   readonly vsyncDeltas: number[];
+  /**
+   * With a flow mode on (the capture's --flow): after each frame, the live solver's latest
+   * resolved GPU ms (iterations plus the resample; NaN before one resolves) and the iterations the
+   * frame ran; and the field drawn at the start and the end of the run.
+   */
+  readonly solver?: { readonly gpuMs: number[]; readonly iterations: number[] };
+  readonly field?: { readonly start: FlowLinkState; readonly end: FlowLinkState };
 }
 
 const params = new URLSearchParams(location.search);
@@ -203,6 +215,14 @@ async function main(): Promise<void> {
       view.setProfile(view.stats().profile === 'quality' ? 'performance' : 'quality');
   });
 
+  // the timed loops below step the live solver before a frame only while a flow mode draws it
+  // (the --flow capture: the solver and the flow visuals share the frame, as in the app, at D4-2's
+  // budget); with the flow off they render exactly as before
+  const frame = (dt: number): void => {
+    if (flow.mode() !== null) flow.beforeFrame();
+    view.frame(dt);
+  };
+
   window.lookdev = {
     ready: true,
     setPreset: applyPreset,
@@ -222,6 +242,10 @@ async function main(): Promise<void> {
     setFlowQuantity: (id) => {
       flow.setQuantity(id);
     },
+    setFlowTracers: (on) => {
+      flow.setTracers(on);
+    },
+    flowField: () => flow.linkState(),
     readFlowParticles: async () => Array.from(await view.readFlowParticles()),
     setShutter: (d) => {
       view.setShutter(d);
@@ -235,7 +259,7 @@ async function main(): Promise<void> {
     async renderFrames(n) {
       paused = true;
       for (let i = 0; i < n; i++) {
-        view.frame(1 / 60);
+        frame(1 / 60);
         await nextFrame();
       }
       await view.device.device.queue.onSubmittedWorkDone();
@@ -245,7 +269,7 @@ async function main(): Promise<void> {
       const end = performance.now() + ms;
       const pace = backToBack(view.device.device.queue);
       while (performance.now() < end) {
-        view.frame(1 / 60);
+        frame(1 / 60);
         if (saturate) await pace();
         else await nextFrame();
       }
@@ -290,12 +314,21 @@ async function main(): Promise<void> {
         };
         requestAnimationFrame(tick);
       }
+      const flowOn = flow.mode() !== null;
+      const fieldStart = flow.linkState();
+      const solverMs: number[] = [];
+      const iterations: number[] = [];
       view.beginTimingRun();
       let last = performance.now();
       const end = last + ms;
       const pace = backToBack(view.device.device.queue);
       while (last < end) {
-        view.frame(1 / 60);
+        frame(1 / 60);
+        if (flowOn) {
+          const st = flow.solverStats();
+          solverMs.push(st?.gpuTimeMs ?? Number.NaN);
+          iterations.push(st?.iterationsThisStep ?? Number.NaN);
+        }
         if (saturate) await pace();
         else await nextFrame();
         const t = performance.now();
@@ -304,7 +337,7 @@ async function main(): Promise<void> {
       }
       // the last frames' timestamp read-backs land during the next few frames
       for (let i = 0; i < 4; i++) {
-        view.frame(1 / 60);
+        frame(1 / 60);
         await nextFrame();
       }
       watching = false;
@@ -316,7 +349,13 @@ async function main(): Promise<void> {
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('focus', onFocus);
       if (hiddenSince >= 0) hiddenMs += performance.now() - hiddenSince;
-      return { frames, rafDeltas, hiddenMs, blurs, events, vsyncDeltas };
+      const flowRecord = flowOn
+        ? {
+            solver: { gpuMs: solverMs, iterations },
+            field: { start: fieldStart, end: flow.linkState() },
+          }
+        : {};
+      return { frames, rafDeltas, hiddenMs, blurs, events, vsyncDeltas, ...flowRecord };
     },
     async conditions() {
       const nav = navigator as Navigator & {
@@ -342,7 +381,7 @@ async function main(): Promise<void> {
     async timeFrames(n) {
       paused = true;
       for (let i = 0; i < n; i++) {
-        view.frame(1 / 60);
+        frame(1 / 60);
         await nextFrame();
       }
       await view.device.device.queue.onSubmittedWorkDone();
