@@ -202,15 +202,25 @@ describe('W1V-I1 (b): TRAA reprojects the turning rotors', () => {
     await v.dispose();
     view = await open(true);
     v = view;
-    const control = await measure('control-cutawayFanClose', CUTAWAY_FAN_CLOSE, {});
-    rows.push(
-      `control (legacyTraa: three's resolve, zero rotor velocity) cutawayFanClose: ${line(control)}`,
-    );
+    // D4-96 (W2L-I9): every banded pose gets its own control, which must fail there, so a band
+    // that held every tile telling the two pipelines apart (the default cutaway pose under D4-93's
+    // band: legacyTraa 0.63 tiles against 6, critic pass 16) cannot pass unseen
+    const controlPasses: string[] = [];
+    for (const [name, pose] of Object.entries(POSES)) {
+      if (pose.preset !== 'cutaway') continue;
+      const control = await measure(`control-${name}`, pose, {});
+      rows.push(
+        `control (legacyTraa: three's resolve, zero rotor velocity) ${name}: ${line(control)}`,
+      );
+      if (!(control.moving > control.floor + MARGIN)) controlPasses.push(name);
+    }
     await commands.writeFile('test-results/rotorMotion.txt', `${rows.join('\n')}\n`);
     console.warn(`W1V-I1 rotor motion (means of ${String(SAMPLES)} frames)\n${rows.join('\n')}`);
     expect(v.stats().errors).toEqual([]);
     expect(failures, rows.join('\n')).toEqual([]);
-    expect(control.moving, rows.join('\n')).toBeGreaterThan(control.floor + MARGIN);
+    expect(controlPasses, `the control must fail in every banded pose\n${rows.join('\n')}`).toEqual(
+      [],
+    );
   });
 });
 
