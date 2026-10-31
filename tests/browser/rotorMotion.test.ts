@@ -47,6 +47,13 @@
 // and must fail in each. If no band lets the default pose's control fail while the shipped
 // pipeline passes there, that pose leaves the moving bound, with the reason stated here and in
 // LOOKDEV.md. Each banded row also reports its counts without the band. MARGIN is unchanged.
+// Measured at dc825f4 (means of 8, rotorMotion alone; the cap pixels are 3.4 % of the frame in
+// the default pose, 6.5 % in the close-up): the default pose shipped 9.75 at rest / 12.13 moving
+// (excess 2.38, bound 6), its control 9.88 / 16.88 (excess 7.00: fails); the close-up shipped
+// 1.75 / 4.63 (2.88), its control 1.38 / 22.75 (21.38: fails). So the band lets both controls
+// fail with the shipped pipeline passing, and the default pose stays in the moving bound. The
+// default pose's control fails by 1.00 tile, which holds because the measurement is deterministic
+// (the same frames every run; the D4-93 rows repeat to the digit).
 
 import { afterAll, describe, expect, it } from 'vitest';
 import { commands } from 'vitest/browser';
