@@ -8,6 +8,8 @@
 //   or a misbound texture would not; the provenance says "solver, uncoupled" (D4-82);
 // - W2V-I3: the schlieren and haze targets equal their TS model (schlieren.ts on the gradient
 //   kernel's mirror) ray for ray;
+// - W2V-I7 (D4-86): at ground idle the Data plane leaves the ambient air undrawn, on the MOCK and
+//   the uncoupled solver, and keeps the take-off flow beyond its floor;
 // - W2V-I5: the overlay is drawn unjittered, so a still frame repeats exactly (TRAA's jitter,
 //   the negative control, makes it crawl);
 // - [timing] the flow visuals at the default preset, 1080p, back to back (D4-42 style, but
@@ -22,7 +24,7 @@ import { FIELD_EXTENTS } from '../../src/contracts/flow';
 import { ENGINE_DEFINITION } from '../../src/engine/definition';
 import { GpuFlowSolver } from '../../src/flow/gpu/device/flowSolver';
 import { loadMeshAsset, parseMeshManifest } from '../../src/flow/mesh/loader';
-import { bakeLut } from '../../src/flow/viz/colormaps';
+import { bakeLut, lightnessL } from '../../src/flow/viz/colormaps';
 import { airGammaR, FIELD_QUANTITIES } from '../../src/flow/viz/fields';
 import { gladstoneDaleK } from '../../src/flow/viz/optics';
 import { densityGradientRaster, sampleGradientRaster } from '../../src/flow/viz/particleKernel';
@@ -359,6 +361,155 @@ describe('flow visuals', () => {
     // D4-82: no blade or combustor forces until W3
     expect(v.stats().flow.coupling).toBe('uncoupled');
     expect(s.fields().coupling).toBe('uncoupled');
+  });
+
+  // W2V-I7 (D4-86): at ground idle the Data plane painted the ambient air as viridis' darkest end
+  // over most of its area (a heavy purple board). The bar, stated before the fix: at ground idle,
+  // on the MOCK and the uncoupled solver's field, at most 10 % of the plane's footprint is drawn
+  // (alpha >= 0.5) at or below the lightness of viridis' darkest 5 % (contour lines included).
+  // The footprint and the negative control are the same frame with the floor off
+  // (`noFlowFloor`, the old look). At take-off the floor must keep the flow: of the pixels the
+  // old look drew lighter than viridis at 10 % of the scale (well beyond the floor), at least
+  // 98 % are unchanged. The plane alone (everything else hidden, no tracers), read back from the
+  // overlay target (premultiplied display-space colour)
+  it('W2V-I7: at ground idle the Data plane leaves the ambient air undrawn (MOCK and uncoupled solver); take-off keeps its flow', async ({
+    annotate,
+  }) => {
+    const c = canvas();
+    const v = await createEngineView({
+      gpu: navigator.gpu,
+      canvas: c,
+      definition: ENGINE_DEFINITION,
+      width: W,
+      height: H,
+      dpr: 1,
+      preferredLimits: FLOW_SOLVER_LIMITS,
+    });
+    views.push(v);
+    const lut = bakeLut('viridis');
+    const lOf = (k: number) =>
+      lightnessL(
+        [lut[4 * k] ?? 0, lut[4 * k + 1] ?? 0, lut[4 * k + 2] ?? 0].map((b) => b / 255) as [
+          number,
+          number,
+          number,
+        ],
+      );
+    const darkL = lOf(Math.round(0.05 * 255));
+    const flowL = lOf(Math.round(0.1 * 255));
+    const settle = (n: number, step?: () => void) => {
+      for (let k = 0; k < n; k++) {
+        step?.();
+        v.frame(1 / 60);
+      }
+    };
+    v.setPreset('cutaway');
+    v.setMode('cutaway', true);
+    v.setFlowMode('data');
+    const read = async (floorOff: boolean, step?: () => void) => {
+      v.setDebugFlags({
+        hide: '.',
+        noFlowParticles: true,
+        ...(floorOff ? { noFlowFloor: true } : {}),
+      });
+      settle(30, step);
+      return (await v.readFlowTarget('overlay')).rgba;
+    };
+    const lightness = (o: Float32Array, k: number) => {
+      const a = o[k + 3] ?? 0;
+      return lightnessL(
+        [0, 1, 2].map((ch) => Math.min(1, (o[k + ch] ?? 0) / a)) as [number, number, number],
+      );
+    };
+    const bar = (old: Float32Array, now: Float32Array) => {
+      let footprint = 0;
+      let darkOld = 0;
+      let darkNow = 0;
+      for (let k = 0; k < old.length; k += 4) {
+        if ((old[k + 3] ?? 0) < 0.5) continue;
+        footprint++;
+        if (lightness(old, k) <= darkL) darkOld++;
+        if ((now[k + 3] ?? 0) >= 0.5 && lightness(now, k) <= darkL) darkNow++;
+      }
+      return { footprint, before: darkOld / footprint, after: darkNow / footprint };
+    };
+    const notes: string[] = [];
+    // the MOCK at ground idle (lever 0)
+    v.setThrottle(0, true);
+    v.setFlowField(
+      createMockFlowField(ENGINE_DEFINITION, mockSteadyState(ENGINE_DEFINITION, 0), ISA_SLS),
+    );
+    const mock = bar(await read(true), await read(false));
+    notes.push(
+      `MOCK idle: ${(100 * mock.before).toFixed(1)} % of ${String(mock.footprint)} px dark before, ${(100 * mock.after).toFixed(1)} % after`,
+    );
+    // the uncoupled solver at ground idle: nothing drives it, so its air stays the ambient at rest
+    const s = await loadSolver(v);
+    try {
+      const step = () => s.step({ gpuTimeBudgetMs: 4, maxIterations: 4 });
+      v.setFlowSolverField(s.fields());
+      const sol = bar(await read(true, step), await read(false, step));
+      notes.push(
+        `solver idle: ${(100 * sol.before).toFixed(1)} % of ${String(sol.footprint)} px dark before, ${(100 * sol.after).toFixed(1)} % after`,
+      );
+      expect(v.stats().flow.coupling).toBe('uncoupled');
+      expect(s.status().status).toBe('running');
+      // take-off on the MOCK: the flow beyond the floor is untouched
+      v.setThrottle(1, true);
+      v.setFlowField(
+        createMockFlowField(ENGINE_DEFINITION, mockSteadyState(ENGINE_DEFINITION, 1), ISA_SLS),
+      );
+      const old = await read(true);
+      const now = await read(false);
+      let flow = 0;
+      let kept = 0;
+      for (let k = 0; k < old.length; k += 4) {
+        if ((old[k + 3] ?? 0) < 0.99 || lightness(old, k) < flowL) continue;
+        flow++;
+        if (
+          [0, 1, 2, 3].every((ch) => Math.abs((now[k + ch] ?? 0) - (old[k + ch] ?? 0)) <= 3 / 255)
+        )
+          kept++;
+      }
+      notes.push(
+        `take-off: ${String(kept)} of ${String(flow)} flow px unchanged (${((100 * kept) / flow).toFixed(2)} %)`,
+      );
+      // the look, as the viewer sees it (tracers on), before (the old look) and after
+      for (const [lever, name] of [
+        [0, 'idle'],
+        [1, 'takeoff'],
+      ] as const) {
+        v.setThrottle(lever, true);
+        v.setFlowField(
+          createMockFlowField(
+            ENGINE_DEFINITION,
+            mockSteadyState(ENGINE_DEFINITION, lever),
+            ISA_SLS,
+          ),
+        );
+        for (const [off, when] of [
+          [true, 'before'],
+          [false, 'after'],
+        ] as const) {
+          v.setDebugFlags(off ? { noFlowFloor: true } : {});
+          settle(150);
+          await commands.writeFile(`${OUT}/data-${name}-${when}.png`, pixels(c).png, 'base64');
+        }
+      }
+      v.setDebugFlags({});
+      await annotate(`[look] W2V-I7: ${notes.join('; ')}`);
+      expect(mock.footprint).toBeGreaterThan(20_000);
+      expect(mock.before).toBeGreaterThan(0.3);
+      expect(mock.after).toBeLessThanOrEqual(0.1);
+      expect(sol.before).toBeGreaterThan(0.3);
+      expect(sol.after).toBeLessThanOrEqual(0.1);
+      expect(flow).toBeGreaterThan(5000);
+      expect(kept / flow).toBeGreaterThanOrEqual(0.98);
+      await v.device.device.queue.onSubmittedWorkDone();
+      expect(v.stats().errors).toEqual([]);
+    } finally {
+      s.dispose();
+    }
   });
 
   // W2V-I3: the TSL march (flowViz.ts) against its TS model (schlieren.ts) on the same rays: the
