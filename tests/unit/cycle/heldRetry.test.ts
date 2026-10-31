@@ -468,3 +468,33 @@ describe('D4-84: the held retry policy (retryMatched)', () => {
     expect(matched?.x).toEqual(whole?.x);
   });
 });
+
+describe('W2H-I2: a resumed solve gets only the iterations it has left', () => {
+  it("sliced every 3 iterations, each never-converging solve still ends after C7's 25 in all", () => {
+    const { fake, solve } = fakeNewton(() => Infinity);
+    const perSolve: number[] = [];
+    let used = 0;
+    const counting: GasPathSolver = (...a) => {
+      const s = solve(...a);
+      used += s.iterations;
+      if (s.stopped !== true) {
+        perSolve.push(used);
+        used = 0;
+      }
+      return s;
+    };
+    let walk = startWalk(anchorAt(1000), targetAt(1100));
+    let end: string | null = null;
+    for (let k = 0; k < 500 && end === null; k++) {
+      const m0 = fake.meter;
+      const stop = () => fake.meter - m0 >= 3 * PER_ITERATION;
+      const r = advanceWalk(counting, REF, C, walk, { cause: null }, stop);
+      if (r.kind === 'paused') walk = r.walk;
+      else end = r.kind;
+    }
+    // a resumed solve given more than it has left never runs out, so the walk would never end
+    expect(end).toBe('lost');
+    // the halving from 1/2 to 1/256: 8 solves, each refused after exactly C7's 25 iterations
+    expect(perSolve).toEqual(Array<number>(8).fill(MAX_NEWTON_ITERATIONS));
+  });
+});

@@ -1,4 +1,4 @@
-w2/cycle-hold ROUND 2 (D4-92, critic pass 15 FIX FIRST): W2H-B1 and W2H-I3 fixed and tested; W2H-I2, N6 and B2's tests NOT written (usage brake). Merged main ca0a3aa first (32654d2). HEAD = the commit that adds this section.
+w2/cycle-hold ROUND 2 (D4-92, critic pass 15 FIX FIRST): W2H-B1 and W2H-I3 fixed and tested; W2H-I2's test written (kills hand mutant B1); N6 and B2's tests NOT written (usage brake). Merged main ca0a3aa first (32654d2). HEAD = the commit that adds this section.
 
 DONE
 - 32654d2: `git merge main`; the W2A-N6 conflict resolved as critic pass 15 did (our `model.ts` lines, both tests). Lockfile unchanged.
@@ -8,6 +8,7 @@ DONE
   - **(c) escalation, needed:** a held episode that has lasted `ESCALATE_AFTER_S` = 0.25 s runs D4-13's whole walk (`solveMatched`) once, unbudgeted, in one snapshot; it counts as a walk start. **0.25 s, not D4-92's "past 0.5 s":** escalating at 0.5 s cannot meet a <= 0.5 s bound counted in whole steps. 0.25 s is half the bound. `heldRetryEscalations()` (CycleDiagnostics) counts them. `heldFrame.test.ts`'s P5 rows exempt the escalated step (the exception beside P5, like the sub-idle entry) and pin at most one per episode. Cost: 3100-4400 gas-path evaluations, 50-240 ms in Node, once per episode (fit ramp: 4355 evaluations, 60 ms).
   - **W2H-I3:** a surge starts only from a solved gas path. The detected start skips a held snapshot; an injected surge on a held snapshot stays pending until the solve recovers (bounded by (b)).
 - 80fbcae: heldFrame P5 exemption + the escalation pin.
+- W2H-I2 (heldRetry.test.ts, last describe): a fakeNewton walk sliced every 3 iterations whose solves never converge ends lost, each solve refused after exactly 25 iterations in all. Hand mutant B1 (a resumed solve gets the full 25) fails it: the walk never ends.
 
 SCENARIO TABLE (tools/cycle/held-reach.ts; longest hold / max N1 while held; before = f2c0779 policy, after = 0f9af06)
 | dt | 1/120 | 1/60 | 0.020 | 0.0205 | 0.021 | 0.025 | 1/30 |
@@ -26,11 +27,10 @@ FINDINGS (need a decision)
 4. The (b) bound lives in the test (D4-92), not in P5 / PHYSICS.md. Say if it should be a P5 row.
 
 NEXT
-1. W2H-I2 (test only): a fakeNewton walk sliced every 3 iterations whose solves never converge: each solve totals exactly 25 iterations and the walk ends lost (B1 makes it never end). Plan in this round's notes; not written.
-2. B2 (W2H-N4 143:7): a walk in flight past 0.5 s keeps its walkStartedS (small budget so it spans > 25 steps).
-3. N6/B4: assert in heldFrame that a held episode's held P3 changes mid-episode (a walk reached its old target).
-4. A fast test of the I3 start condition (an injected surge on a held snapshot waits; the clamp at the redline with a double that always loses mid-acceleration). Today only the slow ISA+30 sweep and heldRecovery exercise them.
-5. N1-N5: not touched. Fingerprint probe and Stryker not rerun.
+1. B2 (W2H-N4 143:7): a walk in flight past 0.5 s keeps its walkStartedS (small budget so it spans > 25 steps).
+2. N6/B4: assert in heldFrame that a held episode's held P3 changes mid-episode (a walk reached its old target).
+3. A fast test of the I3 start condition (an injected surge on a held snapshot waits; the clamp at the redline with a double that always loses mid-acceleration). Today only the slow ISA+30 sweep and heldRecovery exercise them.
+4. N1-N5: not touched. Fingerprint probe and Stryker not rerun.
 
 GOTCHAS
 - The escalation is per held episode and only in `retried()` (not the sub-idle entry, which already walks whole). `UNBOUNDED_RETRY` stays call-for-call D4-13 (an escalation is the same solveMatched).
