@@ -19,10 +19,10 @@ import { THERMALLY_PERFECT, caloricallyPerfectGas } from '../../src/flow/referen
 import { ReferenceSolver, type SolverOptions } from '../../src/flow/reference/solver';
 import type { SolverMesh } from '../../src/flow/reference/solverMesh';
 import { NP, type PhysicalState } from '../../src/flow/reference/state';
-import { ENGINE_PRECONDITIONING, SINK, relativeError, sinkCase } from '../ladder/oracle';
+import { SINK, relativeError, sinkCase } from '../ladder/oracle';
 import { machFromArea, pOverP0, tOverT0 } from '../ladder/theory';
 import { BC, rectangle, singleBlock, solverMesh } from '../unit/flow/helpers';
-import { GpuErrorLog, solverDevice } from './helpers/solver';
+import { ENGINE_PRECONDITIONING_CUT, GpuErrorLog, solverDevice } from './helpers/solver';
 
 /** SOLVER.md 12.2 tolerances after 1 / 10 / 100 iterations. */
 const TOL = { 1: 1e-5, 10: 1e-4, 100: 1e-3 } as const;
@@ -125,7 +125,7 @@ describe('GPU kernel against the oracle with u_inf != 0 (W2S-A-I2, W2S-B-I1)', (
       name: 'preconditioned: far field (beta_inf^2 = M_inf^2), outflow, axis',
       bcs: { imin: BC.FARFIELD, imax: BC.OUTFLOW, jmin: BC.AXIS, jmax: BC.FARFIELD },
       r0: 0,
-      pre: ENGINE_PRECONDITIONING,
+      pre: ENGINE_PRECONDITIONING_CUT,
     },
   ]) {
     it(`fills every ghost as the oracle does at u_inf = ${U_INF} m/s (${cfg.name})`, async () => {
@@ -245,7 +245,7 @@ describe('GPU kernel against the oracle with u_inf != 0 (W2S-A-I2, W2S-B-I1)', (
     const options: SolverOptions = {
       gas: THERMALLY_PERFECT,
       freeStream: FREE,
-      lowMachPreconditioning: ENGINE_PRECONDITIONING,
+      lowMachPreconditioning: ENGINE_PRECONDITIONING_CUT,
       cfl: DEFAULT_CFL_PRECONDITIONED,
     };
     const p = await pair(mesh, options, (s) => {
@@ -315,7 +315,7 @@ describe('GPU kernel against the oracle with u_inf != 0 (W2S-A-I2, W2S-B-I1)', (
   });
 
   it('S at u_inf = 20 m/s: the preconditioned far field with vn_inf != 0, and the sink', async () => {
-    const sc = sinkCase(ENGINE_PRECONDITIONING, 'f32');
+    const sc = sinkCase(ENGINE_PRECONDITIONING_CUT, 'f32');
     const options: SolverOptions = {
       ...sc.options,
       freeStream: { ...sc.options.freeStream, velocity: 20 },

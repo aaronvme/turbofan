@@ -17,7 +17,6 @@ import type { SolverMesh } from '../../src/flow/reference/solverMesh';
 import type { SourceModel } from '../../src/flow/reference/sources';
 import { NP, type PhysicalState } from '../../src/flow/reference/state';
 import {
-  ENGINE_PRECONDITIONING,
   SINK,
   closedBoxMesh,
   closedBoxOptions,
@@ -27,7 +26,12 @@ import {
 } from '../ladder/oracle';
 import { machFromArea, pOverP0, tOverT0 } from '../ladder/theory';
 import { BC, rectangle, singleBlock, solverMesh } from '../unit/flow/helpers';
-import { GpuErrorLog, shippedMesh, solverDevice } from './helpers/solver';
+import {
+  ENGINE_PRECONDITIONING_CUT,
+  GpuErrorLog,
+  shippedMesh,
+  solverDevice,
+} from './helpers/solver';
 
 /** SOLVER.md 12.2 tolerances after 1 / 10 / 100 iterations (rows C, C-pre, C physical, S). */
 const TOL = { 1: 1e-5, 10: 1e-4, 100: 1e-3 } as const;
@@ -141,9 +145,7 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     const gpu = await GpuSolver.create(sim.device, mesh, {
       gas: o.gas,
       freeStream: o.freeStream,
-      ...(o.lowMachPreconditioning === undefined
-        ? {}
-        : { lowMachPreconditioning: o.lowMachPreconditioning }),
+      lowMachPreconditioning: ENGINE_PRECONDITIONING_CUT,
     });
     for (const n of [1, 99]) {
       gpu.iterate(n);
@@ -161,8 +163,12 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     await trackingRows(p, 'C tracking');
   });
 
-  it('C-pre: preconditioned tracking at the engine settings (minMach = M_cut = 0.003)', async () => {
-    const options = { ...closedBoxOptions('preconditioned'), cfl: DEFAULT_CFL_PRECONDITIONED };
+  it('C-pre: preconditioned tracking at the engine settings (D4-89: minMach = M_cut = 0.02)', async () => {
+    const options = {
+      ...closedBoxOptions('preconditioned'),
+      lowMachPreconditioning: ENGINE_PRECONDITIONING_CUT,
+      cfl: DEFAULT_CFL_PRECONDITIONED,
+    };
     const p = await pair(closedBoxMesh('f32'), options, {}, (s) => {
       s.setState(smoothPerturbation);
     });
@@ -390,8 +396,8 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     p.gpu.destroy();
   });
 
-  it('S: ladder L8 sink, preconditioned tracking from rest (minMach = M_cut = 0.003)', async () => {
-    const sc = sinkCase(ENGINE_PRECONDITIONING, 'f32');
+  it('S: ladder L8 sink, preconditioned tracking from rest (D4-89: minMach = M_cut = 0.02)', async () => {
+    const sc = sinkCase(ENGINE_PRECONDITIONING_CUT, 'f32');
     const options = { ...sc.options, cfl: DEFAULT_CFL_PRECONDITIONED };
     const p = await pair(sc.mesh, options, { cellSource: true });
     const n = sc.mesh.nCells;

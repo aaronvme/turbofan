@@ -1,7 +1,9 @@
 // The engine's default scheme on the shipped 130k mesh, started from a small disturbance at rest:
 // the w2/solver-perf NaN (docs/handoffs/w2-solver-perf.md, FINDINGS 1; the repro was
 // `tools/perf/dawn.ts soak --amp 0,0,0,0,0.001,0`). GpuFlowSolver's default is preconditioned
-// tracking at minMach = M_cut = 0.003 and the preconditioned CFL 0.8 (SOLVER.md 10). Before the
+// tracking at minMach = M_cut and the preconditioned CFL 0.8 (SOLVER.md 10): 0.003 when this was
+// written (D4-40), the global M_cut 0.02 since D4-89 (the trajectory below is 0.003's; the
+// 20000-iteration case at the cut is tests/gpu-ladder/d463.test.ts). Before the
 // kernel took M_ref from the face's beta (D4-44, SOLVER.md 7), a 0.1 % pressure wave went NaN
 // within 10 iterations, first at cell 0, the inflow-axis corner: there the wave's jump to the
 // inflow ghost lifts beta^2 by its dp term while the flow is at rest, so beta / M_ref was 8.9
@@ -16,6 +18,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { SimDevice } from '../../src/gpu/device';
 import { GpuFlowSolver } from '../../src/flow/gpu/device/flowSolver';
 import type { GpuSolver } from '../../src/flow/gpu/device/gpuSolver';
+import { DEFAULT_CFL_PRECONDITIONED, ENGINE_MACH_CUT } from '../../src/flow/gpu/params';
 import type { SolverMesh } from '../../src/flow/reference/solverMesh';
 import { ENGINE_DEFINITION } from '../../src/engine/definition';
 import { GpuErrorLog, shippedAsset, shippedMesh, solverDevice } from './helpers/solver';
@@ -99,5 +102,16 @@ describe('the engine default on the 130k mesh (the w2/solver-perf NaN)', () => {
       expect(now.maxRho, `max |rho'| after ${done} iterations`).toBeLessThan(GROWTH * first.maxRho);
     }
     process.stdout.write(`[engine-stability] max |rho'| / first: ${trace.join(', ')}\n`);
+  });
+
+  it("D4-89: the adapter's default runs the kernel at minMach = M_cut = the global M_cut 0.02", () => {
+    const t = flow.kernel?.params.tracking[0];
+    expect(ENGINE_MACH_CUT).toBe(0.02);
+    expect(t?.precondition).toBe(1);
+    expect(t?.minMach2).toBe(ENGINE_MACH_CUT * ENGINE_MACH_CUT);
+    expect(t?.machCut).toBe(ENGINE_MACH_CUT);
+    expect(t?.cfl).toBe(DEFAULT_CFL_PRECONDITIONED);
+    // at rest the preconditioned far field sits at beta = M_cut (SOLVER.md 5)
+    expect(flow.kernel?.params.bcTracking.farFieldBeta2).toBe(ENGINE_MACH_CUT * ENGINE_MACH_CUT);
   });
 });

@@ -24,7 +24,7 @@ import { decodeMeshFile } from '../../mesh/meshFile';
 import { THERMALLY_PERFECT, type GasModel } from '../../reference/gas';
 import { solverMeshFromFile } from '../../reference/solverMesh';
 import type { Tile } from '../layout';
-import { PARAMS_BYTES } from '../params';
+import { PARAMS_BYTES, adapterPreconditioning, type LowMachPreconditioning } from '../params';
 import { buildResampleMap } from '../resampleMap';
 import { IterationScheduler } from '../scheduler';
 import { solverFlowStatus } from '../status';
@@ -36,10 +36,16 @@ export interface GpuFlowSolverOptions {
   readonly tile?: Tile;
   readonly gas?: GasModel;
   /**
-   * Tracking mode's low-Mach preconditioning. Default: the engine's minMach = M_cut = 0.003
-   * (SOLVER.md 7) at DEFAULT_CFL_PRECONDITIONED; null: the plain scheme. Not final (D4-30, D4-32).
+   * Tracking mode's low-Mach preconditioning. Default: the engine's minMach = M_cut = `machCut`
+   * (D4-40 as amended by D4-89: the global M_cut 0.02, SOLVER.md 10) at DEFAULT_CFL_PRECONDITIONED;
+   * null: the plain scheme. Not final (D4-30, D4-32).
    */
-  readonly lowMachPreconditioning?: { readonly minMach: number; readonly machCut?: number } | null;
+  readonly lowMachPreconditioning?: LowMachPreconditioning | null;
+  /**
+   * The engine default's global M_cut (D4-89), default ENGINE_MACH_CUT. Only with the default
+   * preconditioning: beside `lowMachPreconditioning` it is refused.
+   */
+  readonly machCut?: number;
   readonly cfl?: number;
   /**
    * The free stream's axial velocity, m/s (default 0: SLS). Flight conditions are W3's; this lets
@@ -119,10 +125,7 @@ export class GpuFlowSolver implements FlowSolver {
     }
     const file = decodeMeshFile(new Uint8Array(mesh.bytes));
     const solverMesh = solverMeshFromFile(file);
-    const pre =
-      this.opts.lowMachPreconditioning === undefined
-        ? { minMach: 0.003 }
-        : this.opts.lowMachPreconditioning;
+    const pre = adapterPreconditioning(this.opts.lowMachPreconditioning, this.opts.machCut);
     const solver = await GpuSolver.create(device, solverMesh, {
       gas: this.opts.gas ?? THERMALLY_PERFECT,
       freeStream: {

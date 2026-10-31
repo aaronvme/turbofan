@@ -4,10 +4,10 @@
 // kernels call, so a change to one of them is seen here; tests/unit/flow/f32forms.test.ts checks
 // the same algebra in f64 (the identity to f64 rounding), this file checks the WGSL text.
 //
-// - SLAU2 (14.3-14.5: the gauge flux difference G = F - F_inf(S)) against slau2Flux on 1200
-//   random faces: subsonic, expansions (the g term), |M| > 1, machCut 1 and 0.003. Every
-//   dissipation term vanishes for equal states, so functions.test.ts's antisymmetry and
-//   consistency checks cannot see them.
+// - SLAU2 (14.3-14.5: the gauge flux difference G = F - F_inf(S)) against slau2Flux on 600
+//   random faces per machCut: subsonic, expansions (the g term), |M| > 1, machCut 1, 0.003 and
+//   the engine's 0.02 (D4-89). Every dissipation term vanishes for equal states, so
+//   functions.test.ts's antisymmetry and consistency checks cannot see them.
 // - consToPrim (14.3), deltaE (14.1: R - R_inf = phi dR), deltaH, cp, entropy and enthalpy
 //   deltas against the oracle.
 // - The limited slopes, including the pressure branch of the positivity fallback.
@@ -21,7 +21,7 @@
 // santa-b), moved into the suite as B-I1 asks.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { SimDevice } from '../../src/gpu/device';
-import type { GpuSchemeOptions } from '../../src/flow/gpu/params';
+import { ENGINE_MACH_CUT, type GpuSchemeOptions } from '../../src/flow/gpu/params';
 import {
   THERMALLY_PERFECT,
   cpMix,
@@ -115,9 +115,9 @@ describe('the kernel WGSL against the f64 oracle on unequal states (SOLVER.md 14
     sim.destroy();
   });
 
-  for (const machCut of [1, 0.003]) {
+  for (const machCut of [1, 0.003, ENGINE_MACH_CUT]) {
     it(`14.3-14.5 SLAU2 values (machCut ${machCut}): subsonic, expansions, |M| > 1`, async () => {
-      const next = rng(machCut === 1 ? 101 : 202);
+      const next = rng(machCut === 1 ? 101 : machCut === 0.003 ? 202 : 404);
       const N = 600;
       const faces: {
         L: Float64Array;
@@ -128,7 +128,7 @@ describe('the kernel WGSL against the f64 oracle on unequal states (SOLVER.md 14
         rf: number;
       }[] = [];
       const input = new Float32Array(20 * N);
-      // the face's beta (D4-44), log-uniform over 1e-3..1 (below machCut 0.003, between, and 1)
+      // the face's beta (D4-44), log-uniform over 1e-3..1 (below machCut, between, and 1)
       const betas: number[] = [];
       for (let k = 0; k < N; k++) {
         const rf = f(0.2 + next());

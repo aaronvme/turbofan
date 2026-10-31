@@ -15,10 +15,15 @@ import type { SolverMesh } from '../../src/flow/reference/solverMesh';
 import { BC, rectangle, singleBlock, solverMesh, threeBlockRow } from '../unit/flow/helpers';
 import { connect } from '../../tools/mesh/topology';
 import type { MultiBlockMesh, Patch } from '../../tools/mesh/types';
-import { GpuErrorLog, shippedMesh, solverDevice } from './helpers/solver';
+import {
+  ENGINE_PRECONDITIONING_CUT,
+  GpuErrorLog,
+  shippedMesh,
+  solverDevice,
+} from './helpers/solver';
 import { createDawnGpu } from './helpers/dawn';
 import { requestSimDevice } from '../../src/gpu/device';
-import { ENGINE_PRECONDITIONING, closedBoxMesh } from '../ladder/oracle';
+import { closedBoxMesh } from '../ladder/oracle';
 import { DEFAULT_CFL_PRECONDITIONED } from '../../src/flow/gpu/params';
 
 const ISA = { pressure: 101325, temperature: 288.15, velocity: 0 };
@@ -31,7 +36,7 @@ const MODES = [
   ['plain', {}],
   [
     'preconditioned (D4-44)',
-    { lowMachPreconditioning: ENGINE_PRECONDITIONING, cfl: DEFAULT_CFL_PRECONDITIONED },
+    { lowMachPreconditioning: ENGINE_PRECONDITIONING_CUT, cfl: DEFAULT_CFL_PRECONDITIONED },
   ],
 ] as const satisfies readonly (readonly [string, Partial<GpuSolverOptions>])[];
 
