@@ -32,6 +32,12 @@ const DT = 1 / P5.stepRateHz.value;
 /** The browser row boots at idle and waits 3 s before the ramp. */
 const RAMP_FROM_S = 3;
 /**
+ * W2H-N3: the gated run lasts 20 s from the ramp's start, the length tools/cycle/held-cost.ts and
+ * the handoffs measure (it was 10 s, which left the fit's second held episode, then at 13.05 s,
+ * outside). P5's row does not state a length; the handoff asks for one.
+ */
+const GATED_S = 20;
+/**
  * The largest converged direct solve in the whole cycle suite: 77 gas-path evaluations (10 Newton
  * iterations; an instrumented run of tests/unit/cycle, 2026-10-30). A 60 Hz step has two
  * snapshots, so a step that starts matched carries at most one converged solve before its retry.
@@ -79,7 +85,7 @@ function ramp(seconds: number, opts: CycleModelOptions = {}) {
 const held = (s: Step | undefined) => s?.s.gasPathSolve.status === 'held';
 
 describe('D4-84: the held frame on the part-power fit ramp', { timeout: TIMEOUT_MS }, () => {
-  const run = lazy(() => ramp(10));
+  const run = lazy(() => ramp(GATED_S));
 
   it('the case holds the gas path (or it would not test the bar)', () => {
     const { steps } = run();
