@@ -43,11 +43,10 @@ export async function shippedMesh(): Promise<SolverMesh> {
 /**
  * D4-89: the engine's preconditioning in the GPU tests, on the GPU and on the oracle alike: minMach
  * = M_cut = the global M_cut 0.02 (ENGINE_MACH_CUT, the adapter's default; D4-40's 0.003 before).
- * It mirrors tests/ladder/oracle.ts's ENGINE_PRECONDITIONING_CUT on w2/reference-9 (d05e16d:
- * minMach 0.003 with globalMachCut 0.02, in force minMach = M_cut = 0.02). Main's oracle has no
- * globalMachCut option yet, so the tests pass the values in force. Once that branch is merged, the
- * oracle's constant can replace this one (the GPU's scheme options take globalMachCut with the
- * oracle's meaning) and GLOBAL_MACH_CUT === ENGINE_MACH_CUT can be pinned.
+ * It mirrors tests/ladder/oracle.ts's ENGINE_PRECONDITIONING_CUT (minMach 0.003 with
+ * globalMachCut 0.02, in force minMach = M_cut = 0.02), passing the values in force.
+ * tests/unit/flow/gpu/machCut.test.ts pins the two together (D4-93): ENGINE_MACH_CUT ===
+ * GLOBAL_MACH_CUT, and the oracle's constant gives this one's stageParams uniforms.
  */
 export const ENGINE_PRECONDITIONING_CUT = enginePreconditioning();
 

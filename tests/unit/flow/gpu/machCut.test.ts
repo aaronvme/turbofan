@@ -4,7 +4,7 @@
 // already takes minMach^2 and M_cut as uniforms, so the mirror is host-side only. The oracle's
 // option there is `globalMachCut` (max(minMach, cut), max(M_cut, cut); an M_cut >= 1 and a
 // minMach >= 1 stay): the GPU's scheme options take it with the same meaning, so one options
-// object means the same scheme on both sides once that branch is merged.
+// object means the same scheme on both sides (pinned at the end, now that it is merged: D4-93).
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_CFL_PRECONDITIONED,

@@ -19,8 +19,9 @@ export const DEFAULT_CFL_PRECONDITIONED = 0.8;
 /**
  * D4-89: the global M_cut of the engine's preconditioning (D4-81's Weiss-Smith/Turkel floor, tied
  * to the domain's peak velocity: the inlet Mach is about 0.5, so 0.02 is about 4 % of it, D4-59).
- * It mirrors the CPU reference ladder's GLOBAL_MACH_CUT (tests/ladder/oracle.ts on w2/reference-9
- * d05e16d), where it closed D4-63 (SOLVER.md 10). D4-40's 0.003 grew from rest on the engine mesh.
+ * It mirrors the CPU reference ladder's GLOBAL_MACH_CUT (tests/ladder/oracle.ts; pinned equal in
+ * tests/unit/flow/gpu/machCut.test.ts, D4-93), where it closed D4-63 (SOLVER.md 10). D4-40's
+ * 0.003 grew from rest on the engine mesh.
  */
 export const ENGINE_MACH_CUT = 0.02;
 
