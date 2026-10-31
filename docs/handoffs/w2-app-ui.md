@@ -1,4 +1,77 @@
-w2/app-ui: round 4 (D4-91, D4-92 zz, W2A-I6, N13-N20). Main @cf87af0 merged (a fast-forward; the lockfile did not change). STOP-CLEAN (usage brake): code at 2082e56; test:gpu and test:browser still running detached (see GATES); the re-shoot not yet looked at.
+w2/app-ui: round 5 (D4-95 items 1-4, the re-shoot, N14, N20). Main @10b78ad merged (602f9bb, docs only). Code and shots at 3612355; gates at 3612355 (see GATES); this handoff on top.
+
+# Round 5 (2026-10-31)
+
+DONE (TDD: each failing test committed first)
+- **D4-95 item 1: the background warm-up is suspended around input and switches** (5800e4d TDD; fe31b1a; the Chrome case 63ed6d4).
+  - `src/shell/warmUp.ts`: `next(frame, cpuMs, asked, { nowMs, switchPending })`, `input(nowMs)`, `suspended(nowMs)`, `QUIET_AFTER_INPUT_MS` = 1000. No background slot while a switch is pending, nor for 1 s after any input or after the switch is done. A cold switch still prepares its own view, with the slot rule kept, since the viewer waits for that one.
+  - The worker: a switch is pending while `preparing` is set or the view is not yet settled in the asked mode (`settledFrames` 0, which covers the 1.4 s transition into Cutaway). The inputs are every message except `init` and `viewArea`; `viewArea` is the overlay's own layout report and follows the panels and the window, not the viewer. `diagnostics.warm.suspended` says whether the frame waited.
+  - Unit tests: 6 cases. One starts a switch while the queue is warming Schlieren: no slot from the click until 1 s after the switch's last pending frame, then Schlieren again.
+  - Chrome (`firstSwitch.test.tsx`, a new case): a switch into Cutaway as soon as Cutaway is warm, with the rest of the queue still warming (6 configurations queued at the echo). Checked every run: suspended from the echo until settled, 0 warm frames while suspended, then resumed. U2 is gated in a quiet run, FREEZE_MS every run.
+  - The quiet run (10:20-10:29, `VITE_UI_QUIET=1`, after the critic's browser run had finished; `quiet.log`): `firstSwitch` and `warmStall`, 5 of 5 passed with every wall-time bar gated (U2, U3, the longest gap while warming).
+- **D4-95 item 2: Schlieren's warm stall, found and fixed** (665ad81 TDD; 7d17994; GPU_FACTS M56 and M57 in 57ab2bc). **FLAGGED RENDER EDITS** in `post.ts` and `engineView.ts`. Path taken: found and fixed; Schlieren is not warmed at boot.
+  - The cause was not the GPU process. Schlieren's first warm frame spent 645-706 ms of the calling thread's CPU, while a GPU ping each frame peaked at 73-161 ms. That frame built 44 pipelines, 42 of them for engine objects the boot had already drawn.
+  - Why: three r186 keys its render contexts by the renderer's call depth, and its render objects by the render context (M56). Schlieren's composite read the scene depth before TRAA's chain, so its scene passes rendered a call level up. Every engine object got a second render object, a node build (~15 ms each) and a second pipeline.
+  - Round 4's warm budget keyed objects by their render target, so it counted none of these as new. Its "slowest new object 3 ms" figure covered only the new objects (M57).
+  - Fix 1 (`post.ts`): Schlieren's composite builds the beauty first, as a statement, as the other composites do. It now shares the boot's render objects. The image is the same, since the passes render once a frame (shots below).
+  - Fix 2 (`engineView.ts`): the warm key is three's own render object key (the object, the material, the render context, the lights node and the pass), so a render context the budget has not seen is budgeted. A warm frame also reports `unbudgeted`, the pipelines built while drawing an object the budget did not count as new.
+  - `tests/browser/warmStall.test.ts` warms every background configuration after the boot's, on the main thread, as the worker warms them. It records each one's frame CPU, frame gaps, a GPU ping, and every pipeline's object, material and render context (`reports/ui/warm-stall.json`). Checked every run: no warm frame builds an unbudgeted pipeline, and no configuration recompiles an object the boot drew.
+- **D4-95 item 4 (the guard on the three internals)** (a90317a TDD; 1798fda). `src/render/threeInternals.ts` lists them, with the startup checks that throw if one moved; `post.ts` and `engineView.ts` call those checks. `tests/unit/render/threeInternals.test.ts` (Node, part of `npm test`) pins each against the installed three:
+  - the revision (186) and the 0.186.1 pin;
+  - `renderObject`'s parameters, and that `_renderScene` calls the instance's `renderObject` with `_currentRenderContext` set;
+  - three's render object key (`RenderObjects.get`'s chain: object, material, render context, lights node) and its render context key (attachments, MRT, call depth);
+  - `createRenderPipeline(renderObject, promises)`, whose promises path is `createRenderPipelineAsync`, and the draw that waits for `isReady`;
+  - TRAANode's history target, previous depth node, jitter index and the six camera uniforms its updateBefore rolls;
+  - the inspector's node frame.
+- **D4-95 item 3 (the background warm-up under load)**: the slot rule is unchanged. It is measured below.
+- **The re-shoot** (`docs/look-dev/ui/`, both sizes, every mode, the drawer, the solver; committed with the gate run at 3612355). I looked at every shot (notes below).
+  - One shot missed the bar: in 1920's drawer shot, Core exhaust's leader ran under the open drawer to a part the drawer covers. Fixed in d1304f8 TDD and 3612355: a part whose anchor is under a reserved panel is not called out, in either layout.
+- **W2A-N14** (7831ec1 TDD; 1d8dbed): the worker's fault paths are pure functions in `src/shell/faults.ts`. `stepFault` covers the throwing cycle step (SIM STOPPED, with its name and message). `createPostFaults` covers snapshot posts: fatal on the 3rd failure in a row, said once, with a good post restarting the count. The worker uses both; the messages are unchanged.
+- **W2A-N20** (63ed6d4): measured in Chrome; nothing to warm. The solver field's first bind (Cutaway, then Data) and a quality change (the performance profile's 0.85 render scale, and back) compile no pipeline: frame CPU <= 7 ms, no frame gap over 17 ms. warmStall checks it every run.
+- Not adopted, per D4-95: flowviz's dock and legend edits (flowviz round 4 is under review).
+
+MEASURED (1366 x 768; `reports/ui/first-switch-*.json`, `reports/ui/warm-stall.json`; indicative, shared machine. "Before" is the round-4 source, 602f9bb, run today with the same tests.)
+
+| | Before | After |
+|---|---|---|
+| Schlieren's warm, main-thread probe (warm frames / pipelines / max warm-frame CPU / longest frame gap / GPU ping) | 13 / 44 / 645-706 ms / 633-700 ms / 73-161 ms | 3-5 / 2 / 6-13 ms / 17 ms / <= 48 ms (5 runs) |
+| U2, a switch while the queue warms (longest gap in the 3 s after the click) | 786 ms (a Schlieren warm frame in the window) | 95 ms; 84 ms in the gate run; **100 ms in the quiet run (gated)** |
+| U2, Schlieren warmed first / Cutaway warmed first | 211 ms / (round 4: 89-706 ms) | 70 / 78 ms; gate run 115 / 88 ms; **74 / 105 ms in the quiet run (gated)** |
+| Longest gap while the background warms to Schlieren | 667 ms (round 4: 593-1068 ms) | 166 ms; 357 ms in the loaded gate run; 189 ms quiet (Cutaway: 108 ms quiet) |
+| Boot-to-ready (U3 <= 5 s) | 3.7-4.1 s | 3.4-4.8 s; 4.8-7.7 s in the loaded gate run; **3.6-4.8 s in the quiet run (gated)** |
+
+- Item 3, the background warm-up (unchanged rule): all 9 configurations warm 8.5-10.1 s after ready. Cutaway is warm 3.0-4.8 s after ready on the quieter runs, but 45-48 s in the loaded gate run, because a slot needs the last frame under 8.3 ms of CPU. On the main-thread probe, Cutaway's own warm takes 45-52 warm frames (1.7-2.4 s) and builds 42 pipelines for its new objects, with at most 29-51 ms of warm-frame CPU. That is one large material let through ("one always let through"). In the quiet run, Cutaway was warm 3.2-4.2 s after ready, and the whole queue 20.9 s after ready in the switch case (the switch held it 2.5 s).
+- A cold switch into Data: "preparing" after 161-225 ms, shown 3.8-4.4 s later, longest gap 111-119 ms.
+
+NEEDS AN ORCHESTRATOR DECISION
+1. **The quiet rule as read here:** a cold switch's own view still warms while suspended (otherwise it could never be shown), and `viewArea` is not an input. Both are in the unit tests.
+2. **Cutaway's own warm frames** let one large material through each, up to ~30-50 ms of CPU, which is about two dropped frames at 60 fps, 45-52 times over ~2 s. Each is within U2 (the longest gap while warming to Cutaway is 114-280 ms), but under load the whole queue waits on the 8.3 ms slot rule (45-48 s to Cutaway in the gate run). D4-95 keeps the rule; both trade-offs stay as measured.
+3. **The callouts' new rule** (3612355) hides a part whose anchor a panel covers. It is a UI display rule, like round 3's "Realistic and Schlieren call out only the fan and the exhaust".
+
+NOT DONE
+- Visual notes 5 and 7; flowviz's purple board (W2V-I7, D4-86); adopting flowviz's dock and legend edits (after flowviz merges, D4-95).
+
+SHOTS (looked at, each against the bar: nothing clipped or overlapping, the labels on their parts, Schlieren framed in the free area)
+- `1366-1-realistic.jpg`, `1920-1-realistic.jpg`: Fan at the fan face through the intake, Core exhaust at the nozzle.
+- `*-2-cutaway.jpg`, `*-5-data.jpg`: eight labels, each on its part. At 1920 the axial row sits above the engine with four labels, the rest beside their anchors. At 1366 there is no room for the rows, so the general search puts them beside their anchors, clear of one another.
+- `*-3-exploded.jpg`: no callouts (as before); the parts are clear of the panels.
+- `*-4-schlieren.jpg`: the knife-edge grey, the engine a dim silhouette, the banded jet fading out before the right column at both sizes. The same framing and image as round 4.
+- `*-6-drawer.jpg`: Data with Diagnostics open. Labels only for parts left of the drawer.
+- `1920-data-solver.jpg`: the solver's field, badge and legend.
+
+GOTCHAS
+- three's render objects are per render context, and the context includes the renderer's call depth. A composite that reads a pass's texture before the node that renders it nested changes the depth that pass renders at, and every object in it is built again (M56). Build the beauty (TRAA's chain) first. warmStall's "recompiled" check catches it.
+- `git checkout <rev> -- src/` for a before measure also stages the files; `git checkout HEAD -- src/` restores both.
+- Detached runs: `reports/scratch/app-ui/r5/run.ps1` (waits for >= 2 GB free and for no other vitest browser run or playwright Chrome) and `gates.ps1`. A `-t` filter with quotes goes in a `.cmd` file (`u2case.cmd`). Dev port 5194 unused; no MCP page opened.
+
+GATES @3612355 (detached, `reports/scratch/app-ui/r5/gates.ps1`; logs `gate-*.log` there)
+- npm run typecheck: clean, 13 s. npm run lint: clean, 59 s.
+- coverage (`--coverage.reportsDirectory=reports/scratch/app-ui/r5/coverage`): 127 files, 2223 passed + 11 expected fail, exit 0 (thresholds met); lines 99.47 %, statements 98.49 %, branches 87.53 %, functions 99.54 %; 838 s.
+- npm run test:mesh: 2 files, 29 passed.
+- npm run test:gpu: 12 files, 68 passed, 57 s (vitest-pool teardown warnings only).
+- npm run test:browser (`VITE_UI_LOOKDEV=1`, the re-shoot): 14 files, 43 passed, 0 failed, 443 s, 3.8 GB free. This includes flowviz's indicative flow-visuals timing row, which failed in round 4 under load.
+- The same gates also passed at 57ab2bc (before the callout rule): 127 files / 2222 + 11 expected fail; browser 14 files / 43 passed.
+- Quiet run (`VITE_UI_QUIET=1`) at 3612355: firstSwitch and warmStall, 5 of 5 passed.
 
 # Round 4 (2026-10-31)
 
