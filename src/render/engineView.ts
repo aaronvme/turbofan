@@ -90,6 +90,7 @@ import { LOOK_PRESETS, SHUTTER_1000, type LookMode, type LookPresetId } from './
 import { createRendererOnDevice } from './rendererOnDevice';
 import { createStandMesh, createStudio, FLOOR_Y, type Studio } from './studio';
 import { standLayout } from '../geometry/stand';
+import type { WarmConfig } from '../shell/warmUp';
 import { X as STATIONS } from '../geometry/parts';
 
 export interface EngineViewOptions {
@@ -196,15 +197,21 @@ export interface EngineView {
    */
   setCycleState(state: CycleState | null, source: CycleSource): void;
   /**
-   * w2/app-ui round 3 (flagged edit, D4-88): compiles every mode's pipelines before first use,
-   * the flow layers included: one frame of each look mode and flow mode (Cutaway and Data with
-   * their tracers and every cut-plane quantity, Schlieren, Exploded, Realistic with and without
-   * tracers), each waited on until the GPU has run it, so the GPU process's pipeline compiles
-   * are done too. The first switch into a mode stalled the worker for 0.4-2.8 s before (W2A-I4).
-   * The view's state is put back afterwards (the last frames are Realistic, the app's first
-   * view, so TRAA's history is that view's). The app calls it behind the boot spinner.
+   * w2/app-ui round 4 (flagged edit, D4-91; D4-88's boot warm-up made progressive): compiles the
+   * given configurations before first use and waits until they are (the app's boot view, behind
+   * the boot spinner), by warm frames (warmFrame) with no budget. The view's state is put back.
    */
-  warmUp(): Promise<WarmUpReport>;
+  warmUp(configs: readonly WarmConfig[]): Promise<WarmUpReport>;
+  /**
+   * D4-91: one warm frame of a configuration, in the background, before the caller's real frame
+   * of the same tick (which overwrites the canvas). Its pipelines are created asynchronously
+   * (createRenderPipelineAsync: the GPU process compiles them off its main thread, so the shown
+   * frames do not wait on them) and are drawn once ready; at most `budget.cpuMs` of the frame's CPU
+   * goes to objects not drawn before (three's node builds), the rest wait for the next warm
+   * frame. TRAA's history, the pass timer and the view's state are untouched. `done`: the frame
+   * drew the whole configuration with nothing new and nothing compiling.
+   */
+  warmFrame(config: WarmConfig, budget: WarmBudget): WarmFrameReport;
   /**
    * D4-88: whether the view shows its mode: the cutaway wedge and the explode offsets at the
    * mode's end, the spools at speed (or stopped in Exploded). False during a transition.
@@ -248,13 +255,32 @@ export interface EngineView {
   dispose(): Promise<void>;
 }
 
+/** The CPU a warm frame may spend on objects it has not drawn before (EngineView.warmFrame). */
+export interface WarmBudget {
+  readonly cpuMs: number;
+}
+
+/** What one warm frame did. */
+export interface WarmFrameReport {
+  /** CPU ms of the warm frame. */
+  readonly cpuMs: number;
+  /** Objects drawn for the first time (and their ms), and those left for the next warm frame. */
+  readonly newObjects: number;
+  readonly newMs: number;
+  readonly deferred: number;
+  /** Render pipelines created (asynchronously) in this frame, and all still compiling. */
+  readonly created: number;
+  readonly pending: number;
+  readonly done: boolean;
+}
+
 /** What EngineView.warmUp() did. */
 export interface WarmUpReport {
   /** Wall ms of the whole warm-up (the frames and the GPU waits). */
   readonly ms: number;
   /**
-   * The configurations rendered, in order (e.g. "data:mach+tracers"): each one's wall ms, and of
-   * it the CPU ms of the frame call (three's node builds; the rest is the GPU's compile and run).
+   * The configurations warmed, in order (e.g. "data:mach+tracers"): each one's wall ms, and of
+   * it the CPU ms of its warm frames (three's node builds; the rest is the GPU's compiles).
    */
   readonly configurations: readonly {
     readonly name: string;
@@ -313,11 +339,6 @@ export interface DebugFlags {
 }
 
 const FPS = 60;
-/**
- * The cut-plane quantities warmUp() compiles (each rebuilds the plane's material): the Data
- * view's contract fields as the app maps them (src/shell/viewState.ts: p, rho, T, Mach).
- */
-const WARM_PLANE_QUANTITIES: readonly FieldQuantityId[] = ['p', 'rho', 't', 'mach'];
 const CUT_WIDTH = (100 * Math.PI) / 180;
 const EXPLODE_GAP = 0.22;
 const TRANSITION_S = 1.4;
@@ -555,6 +576,202 @@ async function assemble(
     };
   };
 
+  // D4-91's warm frames: the live warm frame's counts (null outside one), the objects drawn
+  // before (by object, material, camera, pass and target: three's render object), and every
+  // pipeline still compiling asynchronously
+  type RenderObjectArgs = [
+    Object3D,
+    unknown,
+    { id: number },
+    unknown,
+    { id: number },
+    ...unknown[],
+  ];
+  let warm: {
+    created: number;
+    newObjects: number;
+    newMs: number;
+    deferred: number;
+    budget: number;
+  } | null = null;
+  const seen = new Set<string>();
+  const targetIds = new WeakMap<object, number>();
+  let nextTargetId = 1;
+  const renderKey = (args: RenderObjectArgs): string => {
+    const rt = renderer.getRenderTarget();
+    let rtId = 0;
+    if (rt !== null) {
+      rtId = targetIds.get(rt) ?? nextTargetId++;
+      targetIds.set(rt, rtId);
+    }
+    const [object, scene, camera, , material] = args;
+    return `${String(object.id)}:${String((scene as { id?: number }).id)}:${String(camera.id)}:${String(material.id)}:${String(args[8])}:${String(rtId)}`;
+  };
+  // three's own renderObject (the prototype's), called with the renderer as `this`
+  const baseRenderObject = (
+    Object.getPrototypeOf(renderer) as { renderObject: (...args: RenderObjectArgs) => void }
+  ).renderObject;
+  const pendingPipelines = new Set<Promise<unknown>>();
+  // in a warm frame every new render pipeline is created asynchronously (three's compileAsync
+  // path, createRenderPipelineAsync), and its object is drawn once it is ready
+  const backend = renderer.backend as unknown as {
+    createRenderPipeline(renderObject: unknown, promises: Promise<unknown>[] | null): void;
+  };
+  const baseCreatePipeline = backend.createRenderPipeline.bind(backend);
+  backend.createRenderPipeline = (renderObject, promises) => {
+    if (warm === null || promises !== null) {
+      baseCreatePipeline(renderObject, promises);
+      return;
+    }
+    const list: Promise<unknown>[] = [];
+    baseCreatePipeline(renderObject, list);
+    warm.created++;
+    for (const p of list) {
+      pendingPipelines.add(p);
+      void p.finally(() => pendingPipelines.delete(p));
+    }
+  };
+  const warmName = (c: WarmConfig) =>
+    `${c.flow ?? c.look}${c.quantity === undefined ? '' : `:${c.quantity}`}${c.tracers === true ? '+tracers' : ''}`;
+
+  /** One frame: the real one, or (warmFrame) a warm one, which keeps the timer and TRAA apart. */
+  const drawFrame = (dtS: number, warmFrame: boolean) => {
+    const t0 = performance.now();
+    timer.beginFrame(warmFrame);
+    if (!warmFrame && !settle && external === null) cycle.step(Math.min(dtS, 0.1), inputs());
+    const cycleSpeeds = speeds();
+    spoolFactor = spoolDisplayFactor(spoolFactor, mode === 'exploded', dtS);
+    const st = {
+      n1Rpm: cycleSpeeds.n1Rpm * spoolFactor,
+      n2Rpm: cycleSpeeds.n2Rpm * spoolFactor,
+    };
+    const lpWas = lp;
+    const hpWas = hp;
+    lp = advanceAngle(lp, st.n1Rpm, def.rotation.lp, dtS);
+    hp = advanceAngle(hp, st.n2Rpm, def.rotation.hp, dtS);
+    // what each spool turned since the last frame (TRAA's rotor motion vectors); a phase
+    // set by a debug flag is a jump, not motion
+    const motionK = flags.noRotorMotion === true ? 0 : (flags.rotorMotionScale ?? 1);
+    uniforms.lpStep.value = motionK * wrapAngle(lp - lpWas);
+    uniforms.hpStep.value = motionK * wrapAngle(hp - hpWas);
+    const lpShown = lp + (flags.lpPhase ?? 0);
+    for (const g of scene.spoolGroups.lp) g.rotation.x = lpShown;
+    for (const g of scene.spoolGroups.hp) g.rotation.x = hp;
+    uniforms.lpBlur.value = shutterBlurAngle(st.n1Rpm, shutterDeg, FPS);
+    uniforms.hpBlur.value = shutterBlurAngle(st.n2Rpm, shutterDeg, FPS);
+    // the fan's time copies spread over the exposure, re-jittered every frame, and the copy
+    // each pixel picks offset every frame: the two offsets are the 2-D R2 sequence (plastic
+    // number), so they are jointly well spread and every pixel's instants cover the shutter
+    // interval (W1L-I3). Up to two
+    // pitches the exposure is exact; beyond, one pitch (the image is periodic in it, so
+    // only the per-blade jitter differs) keeps the copies at distinct phases
+    const fanSpan = uniforms.lpBlur.value <= 2 * fanPitch ? uniforms.lpBlur.value : fanPitch;
+    const fanLive = fanSpan > 1e-5;
+    fanFrame = (fanFrame + 1) % 1_000_000;
+    const j = (fanFrame * 0.5698402909980532) % 1;
+    uniforms.fanSeed.value = (fanFrame * 0.7548776662466927) % 1;
+    const nCopies = Math.max(
+      1,
+      Math.min(
+        scene.fanTimeCopies.length,
+        flags.fanCopies ?? fanTimeCopies(fanSpan, fanPitch, scene.fanTimeCopies.length),
+      ),
+    );
+    uniforms.fanCopies.value = fanLive ? nCopies : 1;
+    scene.fanTimeCopies.forEach((c, k) => {
+      c.depth.visible = c.shaded.visible =
+        flags.noFan !== true && (fanLive ? k < nCopies : k === 0);
+      if (flags.plainFanDepth === true) c.depth.visible = false;
+      c.depth.rotation.x = c.shaded.rotation.x = fanLive ? ((k + j) / nCopies - 0.5) * fanSpan : 0;
+      c.depth.rotation.x += flags.fanDepthNudge ?? 0;
+    });
+
+    const step = dtS / TRANSITION_S;
+    cut = Math.max(0, Math.min(1, cut + (mode === 'cutaway' ? step : -step)));
+    explode = Math.max(0, Math.min(1, explode + (mode === 'exploded' ? step : -step)));
+    // the wedge opens toward the camera
+    const center = Math.atan2(camera.position.z, camera.position.y);
+    const wedge = cutawayWedge(easeInOut(cut), center, CUT_WIDTH);
+    uniforms.cutCenter.value = wedge.center;
+    uniforms.cutHalf.value = wedge.halfWidth;
+    const showCaps = wedge.halfWidth > 1e-3 && flags.noCaps !== true;
+    for (const [a, b] of scene.caps) {
+      a.visible = b.visible = showCaps;
+      a.rotation.x = wedge.center - wedge.halfWidth;
+      b.rotation.x = wedge.center + wedge.halfWidth;
+    }
+    // the hot parts' blackbody glow from the cycle's temperatures (src/flow/viz/glow.ts)
+    const metal = hotPartTemperatures(cycleSpeeds.stations);
+    for (const part of GLOW_PARTS) {
+      const [r, g, b] =
+        flags.noGlow === true ? [0, 0, 0] : glowRadiance(part, metal[part], GLOW_EMISSIVITY[part]);
+      uniforms.glow[part].value.set(r, g, b);
+    }
+    flowViz.update(wedge.center, wedge.halfWidth, wedge.halfWidth > 1e-3, {
+      tanFovY2: 2 * Math.tan((camera.fov * Math.PI) / 360),
+      aspect: camera.aspect,
+    });
+    // a warm frame draws the field as it is (its compute pipelines are built at creation)
+    if (!warmFrame && flowMode !== null && flowCompute.binding !== null) {
+      const m = FLOW_VIZ_MODES[flowMode];
+      flowCompute.run({
+        dtSimS: visualDtS(dtS, dilation),
+        dtWallS: Math.min(dtS, 0.1),
+        particles: tracersShown(m, flowTracers) && flags.noFlowParticles !== true,
+        gradient: m.haze > 0 || m.schlieren,
+      });
+    }
+    // the static shadow map follows the engine only while it moves (mode transitions)
+    if (cut !== lastCut || explode !== lastExplode)
+      for (const l of studio.shadowLights) l.shadow.needsUpdate = true;
+    lastCut = cut;
+    lastExplode = explode;
+    const offsets = explodeOffsets(def, explode, EXPLODE_GAP);
+    for (const m of scene.modules) {
+      const dx = m.id === null ? 0 : offsets[m.id];
+      for (const g of m.groups) g.position.x = dx;
+    }
+    // closed engine (LD-6): draw only what the cowls can show
+    const closed = cut === 0 && explode === 0 && flags.noCull !== true;
+    for (const obj of scene.closedHidden) obj.visible = !closed;
+    // and what shows only through one opening, only for an eye on that side
+    const eyeX = camera.position.x;
+    for (const obj of scene.frontOnly) obj.visible = !closed || eyeX < closedSet.eye.front;
+    for (const obj of scene.rearOnly) obj.visible = !closed || eyeX > closedSet.eye.rear;
+    const skinsVisible = explode < 0.02;
+    stand.group.visible = skinsVisible;
+    for (const s of scene.skins) if (!s.name.startsWith('cap:')) s.visible = skinsVisible;
+    if (!skinsVisible)
+      for (const s of scene.skins) if (s.name.startsWith('cap:')) s.visible = false;
+    studio.contact.value = 1 - easeInOut(explode);
+    for (const o of hidden) o.visible = false;
+    // the composite's fan region: the fan's box where the exploded view has moved it, 3 px
+    // of margin for the 3 x 3 neighbourhood and TRAA's jitter
+    camera.updateMatrixWorld();
+    viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    const fdx = offsets.fan;
+    const rect = screenRectOfBox(
+      viewProj.elements,
+      {
+        min: [fanBox.min[0] + fdx, fanBox.min[1], fanBox.min[2]],
+        max: [fanBox.max[0] + fdx, fanBox.max[1], fanBox.max[2]],
+      },
+      3 / Math.max(1, heightPx),
+    );
+    post.fanRect.value.set(rect.min[0], rect.min[1], rect.max[0], rect.max[1]);
+
+    // dynamic resolution (D3-7): the median GPU time of the timer's rolling window, at the
+    // current scale (the controller holds for a full window after every change)
+    if (!warmFrame) {
+      scaleState = nextRenderScale(scaleState, timer.medians().gpuTotal, RENDER_PROFILES[profile]);
+      post.setRenderScale(scaleState.scale);
+    }
+    post.focusDistance.value = camera.position.distanceTo(target);
+    if (flags.noPost === true) renderer.render(scene.main, camera);
+    else post.render(flags.noTraa !== true, flags.linear === true, warmFrame);
+    timer.endFrame(performance.now() - t0, warmFrame);
+  };
+
   const view: EngineView = {
     renderer,
     camera,
@@ -594,56 +811,89 @@ async function assemble(
     setCycleState(state, source) {
       external = state === null ? null : { state, source };
     },
-    async warmUp() {
+    async warmUp(configs) {
       const t0 = performance.now();
-      const saved = { mode, cut, explode, spoolFactor, flowMode, flowQuantity, flowTracers };
-      const steps: readonly {
-        flow: FlowVizModeId | null;
-        look: LookMode;
-        quantity?: FieldQuantityId;
-        tracers?: boolean;
-      }[] = [
-        { flow: 'cutaway', look: 'cutaway', tracers: true },
-        ...WARM_PLANE_QUANTITIES.map((q) => ({
-          flow: 'data' as const,
-          look: 'cutaway' as const,
-          quantity: q,
-          tracers: true,
-        })),
-        { flow: 'schlieren', look: 'realistic' },
-        { flow: null, look: 'exploded' },
-        { flow: 'realistic', look: 'realistic', tracers: true },
-        // the app's first view last: TRAA's history is its own
-        { flow: saved.flowMode, look: saved.mode },
-      ];
       const configurations: { name: string; ms: number; cpuMs: number }[] = [];
-      for (const s of steps) {
+      for (const c of configs) {
         const s0 = performance.now();
-        flowMode = s.flow;
-        flowQuantity = s.quantity ?? null;
-        flowTracers = s.tracers ?? null;
-        flowViz.setTracers(flowTracers);
-        applyFlowMode();
-        view.setMode(s.look, true);
-        view.frame(0);
-        const cpuMs = performance.now() - s0;
-        await device.device.queue.onSubmittedWorkDone();
-        configurations.push({
-          name: `${s.flow ?? s.look}${s.quantity === undefined ? '' : `:${s.quantity}`}${s.tracers === true ? '+tracers' : ''}`,
-          ms: performance.now() - s0,
-          cpuMs,
-        });
+        let cpuMs = 0;
+        // every pipeline of the configuration created at once, compiled in parallel, waited on
+        for (let k = 0; k < 8; k++) {
+          const r = view.warmFrame(c, { cpuMs: Infinity });
+          cpuMs += r.cpuMs;
+          if (r.done) break;
+          await Promise.all([...pendingPipelines]);
+          await device.device.queue.onSubmittedWorkDone();
+        }
+        configurations.push({ name: warmName(c), ms: performance.now() - s0, cpuMs });
       }
-      flowMode = saved.flowMode;
-      flowQuantity = saved.flowQuantity;
-      flowTracers = saved.flowTracers;
+      return { ms: performance.now() - t0, configurations };
+    },
+    warmFrame(c, budget) {
+      const t0 = performance.now();
+      const saved = {
+        mode,
+        cut,
+        explode,
+        spoolFactor,
+        flowMode,
+        flowQuantity,
+        flowTracers,
+        fanFrame,
+      };
+      flowMode = c.flow;
+      flowQuantity = c.quantity ?? null;
+      flowTracers = c.tracers ?? null;
       flowViz.setTracers(flowTracers);
       applyFlowMode();
-      mode = saved.mode;
-      cut = saved.cut;
-      explode = saved.explode;
-      spoolFactor = saved.spoolFactor;
-      return { ms: performance.now() - t0, configurations };
+      view.setMode(c.look, true);
+      const w = { created: 0, newObjects: 0, newMs: 0, deferred: 0, budget: budget.cpuMs };
+      warm = w;
+      // three calls renderer.renderObject for every object of every pass (shadows included):
+      // an object not drawn before is let through while the budget lasts (at least one a frame)
+      const own = renderer as unknown as { renderObject?: unknown };
+      own.renderObject = function (this: WebGPURenderer, ...args: RenderObjectArgs) {
+        const key = renderKey(args);
+        if (seen.has(key)) {
+          baseRenderObject.apply(this, args);
+          return;
+        }
+        if (w.newObjects > 0 && w.newMs >= w.budget) {
+          w.deferred++;
+          return;
+        }
+        const s0 = performance.now();
+        baseRenderObject.apply(this, args);
+        w.newMs += performance.now() - s0;
+        w.newObjects++;
+        seen.add(key);
+      };
+      try {
+        drawFrame(0, true);
+      } finally {
+        delete own.renderObject;
+        warm = null;
+        flowMode = saved.flowMode;
+        flowQuantity = saved.flowQuantity;
+        flowTracers = saved.flowTracers;
+        flowViz.setTracers(flowTracers);
+        applyFlowMode();
+        mode = saved.mode;
+        cut = saved.cut;
+        explode = saved.explode;
+        spoolFactor = saved.spoolFactor;
+        fanFrame = saved.fanFrame;
+      }
+      return {
+        cpuMs: performance.now() - t0,
+        newObjects: w.newObjects,
+        newMs: w.newMs,
+        deferred: w.deferred,
+        created: w.created,
+        pending: pendingPipelines.size,
+        done:
+          w.newObjects === 0 && w.deferred === 0 && w.created === 0 && pendingPipelines.size === 0,
+      };
     },
     viewSettled() {
       return (
@@ -753,141 +1003,7 @@ async function assemble(
       for (const l of studio.shadowLights) l.shadow.needsUpdate = true;
     },
     frame(dtS) {
-      const t0 = performance.now();
-      timer.beginFrame();
-      if (!settle && external === null) cycle.step(Math.min(dtS, 0.1), inputs());
-      const cycleSpeeds = speeds();
-      spoolFactor = spoolDisplayFactor(spoolFactor, mode === 'exploded', dtS);
-      const st = {
-        n1Rpm: cycleSpeeds.n1Rpm * spoolFactor,
-        n2Rpm: cycleSpeeds.n2Rpm * spoolFactor,
-      };
-      const lpWas = lp;
-      const hpWas = hp;
-      lp = advanceAngle(lp, st.n1Rpm, def.rotation.lp, dtS);
-      hp = advanceAngle(hp, st.n2Rpm, def.rotation.hp, dtS);
-      // what each spool turned since the last frame (TRAA's rotor motion vectors); a phase
-      // set by a debug flag is a jump, not motion
-      const motionK = flags.noRotorMotion === true ? 0 : (flags.rotorMotionScale ?? 1);
-      uniforms.lpStep.value = motionK * wrapAngle(lp - lpWas);
-      uniforms.hpStep.value = motionK * wrapAngle(hp - hpWas);
-      const lpShown = lp + (flags.lpPhase ?? 0);
-      for (const g of scene.spoolGroups.lp) g.rotation.x = lpShown;
-      for (const g of scene.spoolGroups.hp) g.rotation.x = hp;
-      uniforms.lpBlur.value = shutterBlurAngle(st.n1Rpm, shutterDeg, FPS);
-      uniforms.hpBlur.value = shutterBlurAngle(st.n2Rpm, shutterDeg, FPS);
-      // the fan's time copies spread over the exposure, re-jittered every frame, and the copy
-      // each pixel picks offset every frame: the two offsets are the 2-D R2 sequence (plastic
-      // number), so they are jointly well spread and every pixel's instants cover the shutter
-      // interval (W1L-I3). Up to two
-      // pitches the exposure is exact; beyond, one pitch (the image is periodic in it, so
-      // only the per-blade jitter differs) keeps the copies at distinct phases
-      const fanSpan = uniforms.lpBlur.value <= 2 * fanPitch ? uniforms.lpBlur.value : fanPitch;
-      const fanLive = fanSpan > 1e-5;
-      fanFrame = (fanFrame + 1) % 1_000_000;
-      const j = (fanFrame * 0.5698402909980532) % 1;
-      uniforms.fanSeed.value = (fanFrame * 0.7548776662466927) % 1;
-      const nCopies = Math.max(
-        1,
-        Math.min(
-          scene.fanTimeCopies.length,
-          flags.fanCopies ?? fanTimeCopies(fanSpan, fanPitch, scene.fanTimeCopies.length),
-        ),
-      );
-      uniforms.fanCopies.value = fanLive ? nCopies : 1;
-      scene.fanTimeCopies.forEach((c, k) => {
-        c.depth.visible = c.shaded.visible =
-          flags.noFan !== true && (fanLive ? k < nCopies : k === 0);
-        if (flags.plainFanDepth === true) c.depth.visible = false;
-        c.depth.rotation.x = c.shaded.rotation.x = fanLive
-          ? ((k + j) / nCopies - 0.5) * fanSpan
-          : 0;
-        c.depth.rotation.x += flags.fanDepthNudge ?? 0;
-      });
-
-      const step = dtS / TRANSITION_S;
-      cut = Math.max(0, Math.min(1, cut + (mode === 'cutaway' ? step : -step)));
-      explode = Math.max(0, Math.min(1, explode + (mode === 'exploded' ? step : -step)));
-      // the wedge opens toward the camera
-      const center = Math.atan2(camera.position.z, camera.position.y);
-      const wedge = cutawayWedge(easeInOut(cut), center, CUT_WIDTH);
-      uniforms.cutCenter.value = wedge.center;
-      uniforms.cutHalf.value = wedge.halfWidth;
-      const showCaps = wedge.halfWidth > 1e-3 && flags.noCaps !== true;
-      for (const [a, b] of scene.caps) {
-        a.visible = b.visible = showCaps;
-        a.rotation.x = wedge.center - wedge.halfWidth;
-        b.rotation.x = wedge.center + wedge.halfWidth;
-      }
-      // the hot parts' blackbody glow from the cycle's temperatures (src/flow/viz/glow.ts)
-      const metal = hotPartTemperatures(cycleSpeeds.stations);
-      for (const part of GLOW_PARTS) {
-        const [r, g, b] =
-          flags.noGlow === true
-            ? [0, 0, 0]
-            : glowRadiance(part, metal[part], GLOW_EMISSIVITY[part]);
-        uniforms.glow[part].value.set(r, g, b);
-      }
-      flowViz.update(wedge.center, wedge.halfWidth, wedge.halfWidth > 1e-3, {
-        tanFovY2: 2 * Math.tan((camera.fov * Math.PI) / 360),
-        aspect: camera.aspect,
-      });
-      if (flowMode !== null && flowCompute.binding !== null) {
-        const m = FLOW_VIZ_MODES[flowMode];
-        flowCompute.run({
-          dtSimS: visualDtS(dtS, dilation),
-          dtWallS: Math.min(dtS, 0.1),
-          particles: tracersShown(m, flowTracers) && flags.noFlowParticles !== true,
-          gradient: m.haze > 0 || m.schlieren,
-        });
-      }
-      // the static shadow map follows the engine only while it moves (mode transitions)
-      if (cut !== lastCut || explode !== lastExplode)
-        for (const l of studio.shadowLights) l.shadow.needsUpdate = true;
-      lastCut = cut;
-      lastExplode = explode;
-      const offsets = explodeOffsets(def, explode, EXPLODE_GAP);
-      for (const m of scene.modules) {
-        const dx = m.id === null ? 0 : offsets[m.id];
-        for (const g of m.groups) g.position.x = dx;
-      }
-      // closed engine (LD-6): draw only what the cowls can show
-      const closed = cut === 0 && explode === 0 && flags.noCull !== true;
-      for (const obj of scene.closedHidden) obj.visible = !closed;
-      // and what shows only through one opening, only for an eye on that side
-      const eyeX = camera.position.x;
-      for (const obj of scene.frontOnly) obj.visible = !closed || eyeX < closedSet.eye.front;
-      for (const obj of scene.rearOnly) obj.visible = !closed || eyeX > closedSet.eye.rear;
-      const skinsVisible = explode < 0.02;
-      stand.group.visible = skinsVisible;
-      for (const s of scene.skins) if (!s.name.startsWith('cap:')) s.visible = skinsVisible;
-      if (!skinsVisible)
-        for (const s of scene.skins) if (s.name.startsWith('cap:')) s.visible = false;
-      studio.contact.value = 1 - easeInOut(explode);
-      for (const o of hidden) o.visible = false;
-      // the composite's fan region: the fan's box where the exploded view has moved it, 3 px
-      // of margin for the 3 x 3 neighbourhood and TRAA's jitter
-      camera.updateMatrixWorld();
-      viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-      const fdx = offsets.fan;
-      const rect = screenRectOfBox(
-        viewProj.elements,
-        {
-          min: [fanBox.min[0] + fdx, fanBox.min[1], fanBox.min[2]],
-          max: [fanBox.max[0] + fdx, fanBox.max[1], fanBox.max[2]],
-        },
-        3 / Math.max(1, heightPx),
-      );
-      post.fanRect.value.set(rect.min[0], rect.min[1], rect.max[0], rect.max[1]);
-
-      // dynamic resolution (D3-7): the median GPU time of the timer's rolling window, at the
-      // current scale (the controller holds for a full window after every change)
-      scaleState = nextRenderScale(scaleState, timer.medians().gpuTotal, RENDER_PROFILES[profile]);
-      post.setRenderScale(scaleState.scale);
-      post.focusDistance.value = camera.position.distanceTo(target);
-      if (flags.noPost === true) renderer.render(scene.main, camera);
-      else post.render(flags.noTraa !== true, flags.linear === true);
-      timer.endFrame(performance.now() - t0);
+      drawFrame(dtS, false);
     },
     stats() {
       const st = speeds();

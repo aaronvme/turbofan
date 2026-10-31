@@ -308,10 +308,20 @@ export function createFlowViz(o: {
     }
   };
 
-  const planeMaterial = new MeshBasicNodeMaterial({ side: DoubleSide });
-  planeMaterial.transparent = true;
-  planeMaterial.depthWrite = true;
-  premultiplied(planeMaterial);
+  // w2/app-ui round 4 (flagged edit, D4-91): one material per quantity, kept, so a switch between
+  // quantities (the Data view's field, the background warm-up's frames) swaps the material
+  // instead of rebuilding one material's nodes every time
+  const planeMaterials = new Map<FieldQuantityId, MeshBasicNodeMaterial>();
+  const newPlaneMaterial = () => {
+    const m = new MeshBasicNodeMaterial({ side: DoubleSide });
+    m.transparent = true;
+    m.depthWrite = true;
+    premultiplied(m);
+    return m;
+  };
+  // the faces' material until the first quantity is built
+  const unbuiltPlane = newPlaneMaterial();
+  let planeMaterial = unbuiltPlane;
   let quantity: FieldQuantityId | null = null;
   let built: FieldQuantityId | null = null;
   let mode: FlowVizMode | null = null;
@@ -332,6 +342,15 @@ export function createFlowViz(o: {
   };
   const buildPlane = (id: FieldQuantityId) => {
     built = id;
+    const kept = planeMaterials.get(id);
+    if (kept !== undefined) {
+      planeMaterial = kept;
+      for (const f of faces) f.material = kept;
+      return;
+    }
+    planeMaterial = newPlaneMaterial();
+    planeMaterials.set(id, planeMaterial);
+    for (const f of faces) f.material = planeMaterial;
     const spec = FIELD_QUANTITIES[id];
     const lut = luts.get(spec.colormap);
     if (lut === undefined) throw new Error(`flowViz: no LUT ${spec.colormap}`);
@@ -643,7 +662,8 @@ export function createFlowViz(o: {
     },
     dispose() {
       planeGeo.dispose();
-      planeMaterial.dispose();
+      unbuiltPlane.dispose();
+      for (const m of planeMaterials.values()) m.dispose();
       streakGeo.dispose();
       streakMaterial.dispose();
       gammaR.dispose();

@@ -95,12 +95,28 @@ export interface AppDiagnostics {
   readonly raster: RasterHealth;
   /**
    * D4-88's settled-view signal: the mode the view was asked for and how many frames it has
-   * shown it settled (src/shell/settle.ts; the shots wait for SETTLED_FRAMES).
+   * shown it settled (src/shell/settle.ts; the shots wait for SETTLED_FRAMES). D4-91: the mode
+   * still being prepared (its pipelines compiling; the view shown is the previous one), or null.
    */
-  readonly view: { readonly mode: ViewMode; readonly settledFrames: number };
+  readonly view: {
+    readonly mode: ViewMode;
+    readonly settledFrames: number;
+    readonly preparing: ViewMode | null;
+  };
+  /**
+   * D4-91's background warm-up (src/shell/warmUp.ts): the configurations compiled and still
+   * queued, the warm frames so far, the slowest warm frame's CPU ms, those given up on.
+   */
+  readonly warm: {
+    readonly warm: readonly string[];
+    readonly queue: readonly string[];
+    readonly frames: number;
+    readonly cpuMaxMs: number;
+    readonly gaveUp: readonly string[];
+  };
   /** D4-85: the canvas's backing store, px, and the pixel ratio it renders at. */
   readonly backingStore: { readonly width: number; readonly height: number; readonly dpr: number };
-  /** D4-88: what the boot's pipeline warm-up took, wall ms, and each configuration's share. */
+  /** D4-91: what the boot's warm-up (the boot configurations) took, wall ms, and each one's. */
   readonly warmUpMs: number;
   readonly warmUpSteps: readonly {
     readonly name: string;

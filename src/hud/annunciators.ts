@@ -191,7 +191,7 @@ export function faultAnnunciations(f: FaultInputs): Annunciation[] {
       id: 'simStopped',
       level: 'warning',
       text: 'SIM STOPPED',
-      detail: `${f.simStopped}: the clock and the gas path are frozen (reset or reload)`,
+      detail: `${f.simStopped}: the clock and the gas path are frozen until a reload`,
     });
   if (f.gpuErrors > 0)
     out.push({

@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { startClient } from '../app/client';
 import type { CycleChoice } from '../shell/protocol';
-import { VIEW_MODES } from '../contracts/ui';
+import { VIEW_MODES, type ViewMode } from '../contracts/ui';
 import { EngineDisplay, ThrottleQuadrant } from './instruments';
 import { MapsPanel, StationStrip, TsPanel } from './charts';
 import {
@@ -48,8 +48,9 @@ function Viewport({ cycle }: { readonly cycle: CycleChoice | undefined }) {
 }
 
 /**
- * A boot longer than this, ms, says so (W2A-N11: the spinner had no end). The boot warms every
- * mode's pipelines (D4-88), 10-23 s on the shared machine, so this is well past a normal one.
+ * A boot longer than this, ms, says so (W2A-N11: the spinner had no end). The boot compiles the
+ * default view's pipelines (D4-91; the other views warm in the background), so this is well past
+ * a normal one.
  */
 export const BOOT_SLOW_MS = 60_000;
 
@@ -58,6 +59,8 @@ export function Status() {
   const booting = c.state === 'booting';
   const [slow, setSlow] = useState(false);
   useEffect(() => {
+    // W2A-N17: each boot starts without the last one's slow message
+    setSlow(false);
     if (!booting) return;
     const t = setTimeout(() => {
       setSlow(true);
@@ -72,7 +75,7 @@ export function Status() {
       <div className="boot" role="status">
         <span className="spinner" aria-hidden="true" />
         <span>
-          Starting the GPU, the cycle model and the solver, and compiling every view…
+          Starting the GPU, the cycle model and the solver, and compiling the view…
           {slow && (
             <>
               <br />
@@ -101,6 +104,29 @@ export function Status() {
       >
         Reload
       </button>
+    </div>
+  );
+}
+
+const MODE_NAMES: Readonly<Record<ViewMode, string>> = {
+  realistic: 'Realistic',
+  cutaway: 'Cutaway',
+  exploded: 'Exploded',
+  schlieren: 'Schlieren',
+  data: 'Data',
+};
+
+/**
+ * D4-91: the asked view's pipelines are still compiling in the background; the previous view
+ * keeps running under this (never a freeze) and the switch happens as soon as they are done.
+ */
+function Preparing({ mode }: { readonly mode: ViewMode | null }) {
+  if (mode === null) return null;
+  const label = `Preparing the ${MODE_NAMES[mode]} view`;
+  return (
+    <div className="preparing" role="status" aria-label={label}>
+      <span className="spinner" aria-hidden="true" />
+      <span>{label}…</span>
     </div>
   );
 }
@@ -136,6 +162,7 @@ export function Overlay() {
       {/* the view: the annunciators over it, the drawer at its right edge, the dock under it */}
       <div className="center">
         <Annunciators snapshot={snapshot} diagnostics={diagnostics} />
+        <Preparing mode={diagnostics?.view.preparing ?? null} />
         {drawer && (
           <div className="drawer">
             {panels.diagnostics && (

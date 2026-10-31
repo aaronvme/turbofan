@@ -171,17 +171,30 @@ export interface LookPipeline {
   /**
    * Renders a frame. Tests and debugging: `traa` false skips TRAA (and depth of field);
    * `linear` writes half the linear radiance, with no tone map or sRGB encoding (and no DoF).
+   * `warm` (D4-91, a warm frame the caller's real frame overwrites): TRAA's history and the
+   * rotor motion's previous view-projection are left as they were.
    */
-  render(traa?: boolean, linear?: boolean): void;
+  render(traa?: boolean, linear?: boolean, warm?: boolean): void;
   dispose(): void;
 }
 
 /** The TRAANode internals the render-scale fix touches (three r186, not in @types/three). */
 interface TraaInternals {
   updateBefore(frame: { renderer: WebGPURenderer }): void;
-  readonly _historyRenderTarget: RenderTarget & { depthTexture: Texture };
+  _historyRenderTarget: RenderTarget & { depthTexture: Texture };
   readonly _previousDepthNode: { value: Texture };
+  _jitterIndex: number;
 }
+
+/** TRAA's camera uniforms (three r186 TRAANode), which its updateBefore rolls each frame. */
+const TRAA_MATRICES = [
+  '_cameraNearFar',
+  '_cameraWorldMatrix',
+  '_cameraWorldMatrixInverse',
+  '_cameraProjectionMatrixInverse',
+  '_previousCameraWorldMatrix',
+  '_previousCameraProjectionMatrixInverse',
+] as const;
 
 export function createPipeline(
   renderer: WebGPURenderer,
@@ -436,12 +449,46 @@ export function createPipeline(
   const traaState = traaNode as unknown as TraaInternals;
   // W1V-N3: the patch below reaches into three's TRAA internals; a renamed field would make it
   // create a new property and leave TRAA's disocclusion test on a stale depth, silently
-  for (const field of ['_historyRenderTarget', '_previousDepthNode', 'updateBefore'] as const)
+  for (const field of [
+    '_historyRenderTarget',
+    '_previousDepthNode',
+    'updateBefore',
+    '_jitterIndex',
+    ...TRAA_MATRICES,
+  ] as const)
     if (!(field in traaState))
-      throw new Error(`three's TRAANode has no ${field} (render-scale patch, post.ts)`);
+      throw new Error(`three's TRAANode has no ${field} (render-scale and warm patches, post.ts)`);
   const traaUpdate = traaState.updateBefore.bind(traaNode);
   const drawing = new Vector2();
+  // D4-91: a warm frame resolves into a throwaway history, then puts TRAA's state back, so the
+  // real frame after it blends with the last real frame, not the warm configuration
+  let warming = false;
+  let warmHistory: (RenderTarget & { depthTexture: Texture }) | null = null;
+  const traaUniforms = traaState as unknown as Record<
+    (typeof TRAA_MATRICES)[number],
+    { value: { clone(): unknown; copy(v: unknown): unknown } }
+  >;
+  const warmUpdate = (frame: { renderer: WebGPURenderer }) => {
+    const history = traaState._historyRenderTarget;
+    const previousDepth = traaState._previousDepthNode.value;
+    const jitter = traaState._jitterIndex;
+    const mats = TRAA_MATRICES.map((k) => traaUniforms[k].value.clone());
+    warmHistory ??= history.clone();
+    traaState._historyRenderTarget = warmHistory;
+    try {
+      traaUpdate(frame);
+    } finally {
+      traaState._historyRenderTarget = history;
+      traaState._previousDepthNode.value = previousDepth;
+      traaState._jitterIndex = jitter;
+      TRAA_MATRICES.forEach((k, i) => traaUniforms[k].value.copy(mats[i]));
+    }
+  };
   traaState.updateBefore = (frame) => {
+    if (warming) {
+      warmUpdate(frame);
+      return;
+    }
     traaUpdate(frame);
     const h = traaState._historyRenderTarget;
     const d = sceneDepth.value;
@@ -598,6 +645,41 @@ export function createPipeline(
     flow.schlieren.setResolutionScale(0.5 * renderScale);
   };
 
+  const renderFrame = (withTraa: boolean, linear: boolean) => {
+    // the rotor motion vectors' view-projections, unjittered (TRAA jitters the camera only
+    // inside the pipeline's render)
+    camera.updateMatrixWorld();
+    if (havePrev) prevViewProj.value.copy(currViewProj.value);
+    currViewProj.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    currViewProjInv.value.copy(currViewProj.value).invert();
+    if (!havePrev) prevViewProj.value.copy(currViewProj.value);
+    havePrev = true;
+    if (!withTraa || linear) {
+      debugPipeline(withTraa, linear).render();
+      return;
+    }
+    const flowPipe =
+      flow !== null && flowComposite !== 'off' ? flow.pipelines[flowComposite] : null;
+    if (flow !== null) {
+      // the camera is unjittered here: TRAA jitters it only inside the pipeline's render
+      flowCamera.copy(camera, false);
+      flow.pass.camera = flowJitter ? camera : flowCamera;
+    }
+    (cinematic ? cinePipeline : (flowPipe ?? pipeline)).render();
+  };
+  const disposeAll = () => {
+    pipeline.dispose();
+    cinePipeline.dispose();
+    for (const p of debugPipelines.values()) p.dispose();
+    if (flow !== null) {
+      for (const p of Object.values(flow.pipelines)) p.dispose();
+      flow.pass.dispose();
+      flow.haze.dispose();
+      flow.schlieren.dispose();
+    }
+    compositeTex.dispose();
+  };
+
   return {
     pipeline,
     fanRect,
@@ -652,39 +734,22 @@ export function createPipeline(
       aoPass.resolutionScale = 0.5 * scale;
       applyFlowScale();
     },
-    render: (withTraa = true, linear = false) => {
-      // the rotor motion vectors' view-projections, unjittered (TRAA jitters the camera only
-      // inside the pipeline's render)
-      camera.updateMatrixWorld();
-      if (havePrev) prevViewProj.value.copy(currViewProj.value);
-      currViewProj.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-      currViewProjInv.value.copy(currViewProj.value).invert();
-      if (!havePrev) prevViewProj.value.copy(currViewProj.value);
-      havePrev = true;
-      if (!withTraa || linear) {
-        debugPipeline(withTraa, linear).render();
-        return;
+    render: (withTraa = true, linear = false, warm = false) => {
+      const prev = warm ? { p: prevViewProj.value.clone(), had: havePrev } : null;
+      warming = warm;
+      try {
+        renderFrame(withTraa, linear);
+      } finally {
+        warming = false;
+        if (prev !== null) {
+          prevViewProj.value.copy(prev.p);
+          havePrev = prev.had;
+        }
       }
-      const flowPipe =
-        flow !== null && flowComposite !== 'off' ? flow.pipelines[flowComposite] : null;
-      if (flow !== null) {
-        // the camera is unjittered here: TRAA jitters it only inside the pipeline's render
-        flowCamera.copy(camera, false);
-        flow.pass.camera = flowJitter ? camera : flowCamera;
-      }
-      (cinematic ? cinePipeline : (flowPipe ?? pipeline)).render();
     },
     dispose: () => {
-      pipeline.dispose();
-      cinePipeline.dispose();
-      for (const p of debugPipelines.values()) p.dispose();
-      if (flow !== null) {
-        for (const p of Object.values(flow.pipelines)) p.dispose();
-        flow.pass.dispose();
-        flow.haze.dispose();
-        flow.schlieren.dispose();
-      }
-      compositeTex.dispose();
+      warmHistory?.dispose();
+      disposeAll();
     },
   };
 }

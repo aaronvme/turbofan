@@ -37,9 +37,18 @@ import { cutPlaneQuantity, flowModeFor } from '../shell/viewState';
 import { createRasterScheduler, type RasterScheduler } from '../shell/mockRaster';
 import { backingDpr, backingSize } from '../shell/pixelCap';
 import { createSettleTracker, type SettleTracker } from '../shell/settle';
+import {
+  BOOT_CONFIGS,
+  WARM_CONFIGS,
+  configFor,
+  createWarmScheduler,
+  shownView,
+  type WarmScheduler,
+} from '../shell/warmUp';
 import type { RasterReply, RasterRequest } from './mockRasterWorker';
 import { applyOrbit, orbitFromPose, orbitPose, type OrbitState } from '../shell/orbit';
 import type { AppDiagnostics, CycleChoice, FromWorker, ToWorker } from '../shell/protocol';
+import type { ViewMode } from '../contracts/ui';
 import type { Anchor } from '../hud/callouts';
 
 interface Scope {
@@ -61,6 +70,12 @@ const COST_WINDOW = 120;
 const MAX_ERRORS = 8;
 /** Snapshot posts that may fail in a row before the overlay is told the app cannot go on. */
 const MAX_FAILED_POSTS = 3;
+/**
+ * D4-91: the CPU a warm frame may spend on objects not drawn before (three's node builds), ms.
+ * With the warm frame's draws and the real frame it stays inside a 16.7 ms frame; one object is
+ * always let through, so a single slow build (a large material) can exceed it once.
+ */
+const WARM_BUDGET_MS = 4;
 
 const anchors = componentAnchors(ENGINE_DEFINITION);
 
@@ -115,6 +130,11 @@ interface App {
   settledFrames: number;
   warmUpMs: number;
   warmUpSteps: readonly { readonly name: string; readonly ms: number; readonly cpuMs: number }[];
+  /** D4-91: the background warm-up, the mode being prepared (null: the asked view is shown). */
+  warm: WarmScheduler;
+  preparing: ViewMode | null;
+  warmFrames: number;
+  warmCpuMaxMs: number;
   appliedView: RenderState | null;
   errors: string[];
   refused: string[];
@@ -137,9 +157,14 @@ function applySize(a: App) {
   a.view.setSize(width, height, a.renderDpr);
 }
 
-/** Applies the render state the core holds to the view (only what changed). */
+/**
+ * Applies the render state the core holds to the view (only what changed). D4-91: a view whose
+ * configuration is not compiled yet waits (the shown view stays, `preparing` says so).
+ */
 function applyView(a: App) {
-  const v = a.core.view;
+  const shown = shownView(a.core.view, a.appliedView, (id) => a.warm.isWarm(id));
+  a.preparing = shown.preparing;
+  const v = shown.view;
   const was = a.appliedView;
   if (was === v) return;
   a.appliedView = v;
@@ -275,6 +300,27 @@ async function startSolver(a: App): Promise<GpuFlowSolver> {
   }
 }
 
+/**
+ * D4-91: one warm frame in this frame's slot, if it has one (src/shell/warmUp.ts): the asked
+ * view's configuration first, then the background order. A warm frame that throws is an error,
+ * said, and its configuration is given up on (shown anyway), never a stuck "preparing".
+ */
+function warmSlot(a: App, frame: number, lastFrameMs: number) {
+  const id = a.warm.next(frame, lastFrameMs, configFor(a.core.view));
+  if (id === null) return;
+  try {
+    const r = a.view.warmFrame(WARM_CONFIGS[id], { cpuMs: WARM_BUDGET_MS });
+    a.warmFrames++;
+    a.warmCpuMaxMs = Math.max(a.warmCpuMaxMs, r.cpuMs);
+    if (r.done) a.warm.done(id);
+  } catch (e) {
+    a.warm.done(id);
+    const msg = `warm-up ${id}: ${e instanceof Error ? e.message : String(e)}`;
+    pushError(a, msg);
+    console.warn(msg);
+  }
+}
+
 function loop(a: App) {
   let last: number | null = null;
   let frame = 0;
@@ -285,6 +331,7 @@ function loop(a: App) {
   const frameMs = new Rolling(COST_WINDOW);
   const stamps: number[] = [];
   let failedPosts = 0;
+  let lastFrameMs = 0;
   let stats = a.view.stats();
   const tick = (t: number) => {
     if (a.lost) return;
@@ -319,15 +366,20 @@ function loop(a: App) {
     a.fields?.beforeFrame(stepping ? { gpuTimeBudgetMs: budget, maxIterations: 1000 } : null);
     const pose = orbitPose(a.orbit);
     a.view.setCameraPose(pose.position, pose.target);
+    warmSlot(a, frame, lastFrameMs);
     a.view.frame(Math.min(dt, 0.1));
-    a.settledFrames = a.settle.frame(a.core.view.viewMode, a.view.viewSettled());
+    a.settledFrames = a.settle.frame(
+      a.core.view.viewMode,
+      a.view.viewSettled() && a.preparing === null,
+    );
     if (frame % TIMINGS_EVERY === 0) {
       stats = a.view.stats();
       const m = stats.timings;
       renderMs = m.frames > 0 && Number.isFinite(m.gpuTotal) ? m.gpuTotal : null;
       flowVisualsMs = stats.flow.mode === null ? null : stats.flow.visualsMs;
     }
-    frameMs.push(performance.now() - t0, held);
+    lastFrameMs = performance.now() - t0;
+    frameMs.push(lastFrameMs, held);
     if (frame % PUBLISH_EVERY === 0) {
       const flow = flowStatus(a);
       const drawn = a.fields?.drawn() ?? 'none';
@@ -351,7 +403,17 @@ function loop(a: App) {
         },
         field: a.fields?.state() ?? null,
         raster: { onFrame: a.raster === null, lastError: a.rasterError },
-        view: { mode: a.core.view.viewMode, settledFrames: a.settledFrames },
+        view: {
+          mode: a.core.view.viewMode,
+          settledFrames: a.settledFrames,
+          preparing: a.preparing,
+        },
+        warm: {
+          ...a.warm.state(),
+          frames: a.warmFrames,
+          cpuMaxMs: a.warmCpuMaxMs,
+          gaveUp: a.warm.gaveUp(),
+        },
         backingStore: {
           ...backingSize(a.size.width, a.size.height, a.renderDpr),
           dpr: a.renderDpr,
@@ -483,6 +545,10 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     settledFrames: 0,
     warmUpMs: 0,
     warmUpSteps: [],
+    warm: createWarmScheduler(),
+    preparing: null,
+    warmFrames: 0,
+    warmCpuMaxMs: 0,
     appliedView: null,
     errors: [],
     refused: [],
@@ -510,9 +576,10 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
       pushError(a, message);
     },
   });
-  // D4-88: every mode's pipelines compiled behind the boot spinner (the MOCK is bound, so the
-  // flow layers draw), so the viewer's first switch into a mode does not stall the worker
-  const warm = await view.warmUp();
+  // D4-91: the boot view's pipelines compiled behind the boot spinner (the MOCK is bound, so the
+  // flow layers draw); the other modes warm in the background once the app runs
+  const warm = await view.warmUp(BOOT_CONFIGS.map((id) => WARM_CONFIGS[id]));
+  for (const id of BOOT_CONFIGS) a.warm.done(id);
   a.warmUpMs = warm.ms;
   a.warmUpSteps = warm.configurations;
   // messages wait in `pending` until the field is bound (a 'field' choice needs the switch)
