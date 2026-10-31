@@ -311,6 +311,42 @@ function layoutProblems(): string[] {
   return out;
 }
 
+/**
+ * D4-97 item 2 (W2A-I8): in the cut views (Cutaway, Data) the axial rows hold, at both sizes:
+ * every label shown sits in a row above or below the engine's screen box, clear of it, and each
+ * row keeps the parts' axial order left to right (D4-92 zz). The camera is framed for the rows,
+ * and a label with no room in its row is hidden by priority, never placed on the section.
+ */
+function axialRowProblems(): string[] {
+  const out: string[] = [];
+  const host = document.querySelector('.overlay .callouts');
+  const box = useApp.getState().engineBox;
+  if (host === null || box === null) return ['no callouts or no engine box'];
+  const h = host.getBoundingClientRect();
+  const axial = new Map(useApp.getState().anchors.map((a) => [a.id, a.axial]));
+  const labels = [...host.querySelectorAll<HTMLElement>('.callout[data-id]')]
+    .filter(visible)
+    .map((el) => {
+      const r = el.getBoundingClientRect();
+      return { id: el.dataset.id ?? '', x: r.left - h.left, y: r.top - h.top, b: r.bottom - h.top };
+    });
+  if (labels.length === 0) out.push('no label shown');
+  for (const above of [true, false]) {
+    const row = labels.filter((l) => (above ? l.b <= box.y + 0.5 : l.y >= box.y + box.h - 0.5));
+    const order = [...row].sort((p, q) => p.x - q.x).map((l) => axial.get(l.id) ?? NaN);
+    if (order.some((v, k) => k > 0 && v < (order[k - 1] ?? -Infinity)))
+      out.push(
+        `the ${above ? 'top' : 'bottom'} row is out of axial order: ${row.map((l) => l.id).join(', ')}`,
+      );
+  }
+  for (const l of labels)
+    if (!(l.b <= box.y + 0.5 || l.y >= box.y + box.h - 0.5))
+      out.push(
+        `callout ${l.id} is on the engine (${l.y.toFixed(0)}-${l.b.toFixed(0)} in ${box.y.toFixed(0)}-${(box.y + box.h).toFixed(0)}), not in a row`,
+      );
+  return out;
+}
+
 /** D4-88: the worker says the view has settled in `mode` (its transition done, TRAA converged). */
 function settledIn(mode: ViewMode): boolean {
   const s = useApp.getState();
@@ -345,6 +381,15 @@ describe('the app in Chrome', () => {
       for (const [i, mode] of VIEW_MODES.entries()) {
         await toMode(mode);
         layout.push(...layoutProblems().map((p) => `${mode}: ${p}`));
+        if (mode === 'cutaway' || mode === 'data') {
+          layout.push(...axialRowProblems().map((p) => `${mode}: ${p}`));
+          const shownIds = [...document.querySelectorAll<HTMLElement>('.overlay .callout[data-id]')]
+            .filter(visible)
+            .map((el) => el.dataset.id);
+          rows.push(
+            `  ${mode} callouts shown (${String(shownIds.length)}): ${shownIds.join(', ')}`,
+          );
+        }
         const shot = await shoot();
         await commands.writeFile(
           `${OUT}/${size.id}-${String(i + 1)}-${mode}.jpg`,

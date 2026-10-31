@@ -26,7 +26,17 @@ import {
   overlaps,
   type Rect,
 } from '../../../src/hud/callouts';
-import { framedOrbit } from '../../../src/shell/orbit';
+import { Matrix4, PerspectiveCamera, Vector3 } from 'three/webgpu';
+import { UI_LEVELS } from '../../../src/hud/uiLevels';
+import { LOOK_PRESETS } from '../../../src/render/presets';
+import {
+  cutViewOrbit,
+  framedOrbit,
+  orbitFromPose,
+  orbitPose,
+  rowsInset,
+  type OrbitState,
+} from '../../../src/shell/orbit';
 
 const OFFSETS = [
   [18, -34],
@@ -194,12 +204,40 @@ describe('the cut views: labels outward in axial order (D4-92 zz)', () => {
     }
   });
 
-  it('a label with no room in its row is placed by the general search, or hidden, never on a panel', () => {
+  it('D4-97 item 2: a label with no room in its row is hidden, by priority (fan, combustor, HPT, LPT, exhaust first), never placed off its row', () => {
+    // the top row's room taken by a panel: only the bottom row is left
     const tight: Rect[] = [...reserved, { x: 290, y: 46, w: 776, h: 120 }];
-    const placed = layoutAxial(cut, size, vp, tight, band);
-    for (const p of placed) for (const r of tight) expect(overlaps(p.box, r)).toBe(false);
+    const prio = componentAnchors(def);
+    const ranked = cut.map((c) => ({
+      ...c,
+      priority: prio.find((a) => a.id === c.id)?.priority ?? 0,
+    }));
+    const placed = layoutAxial(ranked, size, vp, tight, band);
+    expect(placed.length).toBeGreaterThan(0);
+    expect(placed.length).toBeLessThan(cut.length);
+    for (const p of placed) {
+      for (const r of tight) expect(overlaps(p.box, r)).toBe(false);
+      // in a row: clear of the engine's box, above or below it
+      expect(p.box.y + p.box.h <= band.y || p.box.y >= band.y + band.h, p.id).toBe(true);
+    }
     for (const p of placed)
       for (const q of placed) if (q !== p) expect(overlaps(p.box, q.box, 4)).toBe(false);
+  });
+
+  it('D4-97 item 2: the stated priority is fan, combustor, HPT, LPT, exhaust, then HPC, booster, bypass duct', () => {
+    const byPriority = [...componentAnchors(def)]
+      .sort((a, b) => b.priority - a.priority)
+      .map((a) => a.id);
+    expect(byPriority).toEqual([
+      'fan',
+      'combustor',
+      'hpt',
+      'lpt',
+      'exhaust',
+      'hpc',
+      'booster',
+      'bypassDuct',
+    ]);
   });
 
   it('round 5: a part under a panel (the open drawer) is not called out, in either layout', () => {
@@ -216,6 +254,61 @@ describe('the cut views: labels outward in axial order (D4-92 zz)', () => {
       for (const id of covered) expect(ids, id).not.toContain(id);
       expect(ids.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('D4-97 item 2 (W2A-I8) and W2A-N25: the framings, checked by projecting the engine after the orbit', () => {
+  // the app's default view (the ¾ front preset), its camera as the worker poses it
+  const preset = LOOK_PRESETS.threeQuarterFront;
+  const boxAt = (o: OrbitState, canvas: { w: number; h: number }, xEnd: number) => {
+    const cam = new PerspectiveCamera(preset.fovDeg, canvas.w / canvas.h, 0.05, 200);
+    const pose = orbitPose(o);
+    cam.position.set(...pose.position);
+    cam.lookAt(new Vector3(...pose.target));
+    cam.updateMatrixWorld();
+    const m = new Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    return screenBox(m.elements, engineRings(def, xEnd), canvas.w, canvas.h);
+  };
+  // the free area above the dock, as the app's overlay posts it (its centre column at both sizes)
+  const sizes = [
+    { canvas: { w: 1366, h: 768 }, rows: { x: 288, y: 60, w: 766, h: 470 } },
+    { canvas: { w: 1920, h: 1001 }, rows: { x: 333, y: 60, w: 1234, h: 690 } },
+  ];
+  const start = orbitFromPose(preset.camera, preset.target);
+
+  for (const { canvas, rows } of sizes)
+    it(`at ${String(canvas.w)} x ${String(canvas.h)} the cut views leave a label row above and below the engine (or stop at the minimum scale)`, () => {
+      const o = cutViewOrbit(start, (q) => boxAt(q, canvas, 2.75), canvas, rows, preset.fovDeg);
+      const box = boxAt(o, canvas, 2.75);
+      if (box === null) throw new Error('the engine is off screen');
+      const scale = start.distance / o.distance;
+      expect(scale).toBeLessThanOrEqual(1);
+      expect(scale).toBeGreaterThanOrEqual(UI_LEVELS.cutViewMinScale - 1e-9);
+      const inset = rowsInset(rows, UI_LEVELS.calloutRowPx);
+      // inside the area less a row above and below (2 px for the re-projection's residual)
+      const fits =
+        box.y >= inset.y - 2 &&
+        box.y + box.h <= inset.y + inset.h + 2 &&
+        box.x >= inset.x - 2 &&
+        box.x + box.w <= inset.x + inset.w + 2;
+      expect(
+        fits || scale <= UI_LEVELS.cutViewMinScale + 1e-9,
+        JSON.stringify({ box, inset, scale }),
+      ).toBe(true);
+    });
+
+  it('Schlieren: framedOrbit brings the engine and its jet into the free area (W2A-N25)', () => {
+    const canvas = { w: 1366, h: 768 };
+    const free = { x: 288, y: 60, w: 766, h: 590 };
+    const box0 = boxAt(start, canvas, 6);
+    if (box0 === null) throw new Error('the engine is off screen');
+    const o = framedOrbit(start, box0, canvas, free, preset.fovDeg, 0.6);
+    const box = boxAt(o, canvas, 6);
+    if (box === null) throw new Error('the engine is off screen');
+    // centred in the free area to within a tenth of its size (one pass, perspective's residual)
+    expect(Math.abs(box.x + box.w / 2 - (free.x + free.w / 2))).toBeLessThan(0.1 * free.w);
+    expect(Math.abs(box.y + box.h / 2 - (free.y + free.h / 2))).toBeLessThan(0.1 * free.h);
+    expect(box.w).toBeLessThan(box0.w);
   });
 });
 

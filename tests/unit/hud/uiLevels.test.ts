@@ -24,8 +24,8 @@ function physicsUiRows(): { id: string; check: string; pass: string }[] {
 describe('the UI levels mirror docs/PHYSICS.md 3.5 (D4-91)', () => {
   const rows = physicsUiRows();
 
-  it('has U1-U4, verbatim', () => {
-    expect(rows.map((r) => r.id).slice(0, 4)).toEqual(['U1', 'U2', 'U3', 'U4']);
+  it('has U1-U5, verbatim (and any recorded rows after them)', () => {
+    expect(rows.map((r) => r.id).slice(0, 5)).toEqual(['U1', 'U2', 'U3', 'U4', 'U5']);
     expect(rows.map((r) => r.id).sort()).toEqual(Object.keys(UI_ROWS).sort());
     for (const r of rows) {
       const m = UI_ROWS[r.id as keyof typeof UI_ROWS];
@@ -47,6 +47,12 @@ describe('the UI levels mirror docs/PHYSICS.md 3.5 (D4-91)', () => {
     expect(UI_LEVELS.coldSwitchMaxMs).toBe(2000);
     expect(rows[3]?.pass).toContain('≤ 2 s');
     expect(rows[3]?.check).toContain('60 frames');
+    // D4-97 item 2 (W2A-I8): the cut views' framing, its minimum engine scale and the row
+    expect(UI_LEVELS.cutViewMinScale).toBe(0.6);
+    expect(rows[4]?.check).toContain('0.6 of');
+    expect(UI_LEVELS.calloutRowPx).toBe(52);
+    expect(rows[4]?.check).toContain('52 px');
+    expect(rows[4]?.check).toContain('fan, combustor, HPT, LPT, exhaust');
   });
 
   it('the map annunciates at U1: amber below 5 %, normal at exactly 5 % (W2A-N19), red at 0', () => {
