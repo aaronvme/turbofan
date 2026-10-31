@@ -30,6 +30,7 @@ import {
   MAX_CONTINUATION_SOLVES,
   MIN_CONTINUATION_STEP,
   advanceWalk,
+  solveDirect,
   solveMatched,
   startWalk,
   type GasPathAnchor,
@@ -592,5 +593,57 @@ describe('W2H-N4: the policy branches only the slow suites reached (Stryker and 
       expect(r.walk.paused).toBeNull();
       expect(r.walk.solves).toBe(0);
     }
+  });
+});
+
+describe('W2H-N2: a direct solve its budget stopped, already below the acceptance, is used', () => {
+  /**
+   * A solve the stop interrupts one iteration short of Newton's own tolerance (the fit ramp's 4.98e-10
+   * after 9 iterations, against ACCEPTED_RESIDUAL 1e-6), or not at all.
+   */
+  const shortOf =
+    (residual: number): GasPathSolver =>
+    (_e, _c, _n1, n2, _wf, _guess, _lit, control) => {
+      const stopped = control?.stop?.() === true;
+      return {
+        point: idle().point,
+        x: [n2, 6, 0.5, 0.5, 0.5, 0.5],
+        iterations: 9,
+        converged: !stopped,
+        maxResidual: stopped ? residual : 1e-12,
+        stopped,
+      };
+    };
+
+  it('the direct: a stopped solution that passes every check is the matched solve', () => {
+    const why = { cause: null as string | null };
+    const s = solveDirect(
+      shortOf(4.98e-10),
+      REF,
+      C,
+      anchorAt(1000),
+      targetAt(1001),
+      why,
+      () => true,
+    );
+    expect(s?.x).toEqual([1001, 6, 0.5, 0.5, 0.5, 0.5]);
+    expect(why.cause).toBeNull();
+  });
+
+  it('the direct: a stopped solution at or above the acceptance is still cut by the budget', () => {
+    const why = { cause: null as string | null };
+    const s = solveDirect(shortOf(1e-6), REF, C, anchorAt(1000), targetAt(1001), why, () => true);
+    expect(s).toBeNull();
+    expect(why.cause).toMatch(/held-retry budget \(residual 0\.000001 after 9 iterations\)/);
+  });
+
+  it('the walk keeps pausing on a stopped solve, so a sliced walk stays the unsliced walk', () => {
+    let asked = 0;
+    // the walk's own check before the solve says go on; the solve's first check stops it
+    const stop = () => ++asked > 1;
+    const walk = startWalk(anchorAt(1000), targetAt(1100));
+    const r = advanceWalk(shortOf(4.98e-10), REF, C, walk, { cause: null }, stop);
+    expect(r.kind).toBe('paused');
+    if (r.kind === 'paused') expect(r.walk.paused?.iterations).toBe(9);
   });
 });
