@@ -3441,6 +3441,28 @@ None.
   3. **UI levels, pre-registered in PHYSICS.md's UI rows:** surge margin amber below 5 % and red at or below 0, on the map only (D4-87); the first switch into a warmed mode ≤ 250 ms; boot-to-ready ≤ 5 s (both indicative; official only in a quiet run).
   4. **(vv):** a non-holding direct solve keeps being charged against the step's budget. P5 bounds a step's total work, which is what the frame budget needs, and on the fit ramp those cuts were genuine losses. P5's limits stand.
   5. **(ww):** yes. Critic pass 15 finishes pass 14 (A's remaining gates and mutants; B's verdict, its mutants and the default-model sweep for W2H-I1), and reviews app-ui round 3 in the same combined trial merge.
+- **D4-92 (critic pass 15's questions; w2/reference-9 and w2/app-ui round 3 merged on main ca0a3aa): W2H-B1 is fixed by bringing W2H-I1 forward, under a pre-registered recovery bound.**
+  - **(xx):** in critic 15's scenario, the bounded retry holds 4.1-7.9 s on the **default** model, with N1 reaching 168-218 %. The scenario is ISA SLS, take-off, Surge at 10 s, Flameout at 20 s, the auto relight, at dt 0.020-0.025 s. Main and `UNBOUNDED_RETRY` hold ≤ 0.15 s. So D4-90's condition for deferring W2H-I1 is false. Cycle-hold round 2 does three things:
+    - (a) While held, the spools don't integrate on the stale held power balance. The honest held state invents no shaft acceleration from an unsolved gas path.
+    - (b) A recovery bound, pre-registered as a test row before the fix: in that scenario on the default model, every held episode recovers within 0.5 s of sim time at every frame step from 1/120 to 1/30 s, and N1 never passes its redline while held.
+    - (c) Only if (a) alone can't meet (b): a hold past 0.5 s escalates once per episode to D4-13's full walk. That's a bounded one-time cost, recorded beside P5 as an exception the way the sub-idle entry is.
+  - W2H-I3 (a surge started from a held point, P3 NaN at ISA+30), W2H-I2 (a resumed solve's remaining iterations), mutants B1, B2 and B4, and N1-N6 go in the same round.
+  - D4-90's acceptance of a later recovery covered the part-power fit, not 4-57× longer holds on the default model.
+  - **(yy):** app-ui merged first (done). Cycle-hold round 2 merged main and kept its own `model.ts` lines (a superset of app-ui's W2A-N6 fix) and both tests.
+  - **(zz):** yes. App-ui round 4 takes:
+    - D4-91's progressive warm-up;
+    - W2A-I6, a Schlieren-specific content check;
+    - callouts re-anchored, so the Fan label points at the fan face, with the cut views' labels placed outward in axial order so they label their parts instead of reading as a list;
+    - N13, the callout search's pruning;
+    - Schlieren's plume clear of the right-hand panel column.
+- **D4-93 (w2/kernel @b777653..c1a4d97): D4-89's mirror holds on the GPU, and two test-measurement fixes follow D4-74's rule.**
+  - **GPU at the 0.02 cut, D4-63's contract case:** (a) 0.778 / 0.486, (b) 0.491 / 0.211. It keeps decaying past 20k: the weighted residual is 0.382 at 20k, then 0.288 / 0.184 / 0.159 / 0.150 at 25k / 30k / 35k / 40k. **D4-63 stays closed on the GPU.**
+  - W2R-I19's tightened rows pass: E-L5 2.67e-8 ≤ 3e-7 and E-L9a 2.46e-12 ≤ 1e-10. B ≤ 2e-10 is pending in the gpu-ladder log.
+  - **W2L-I6:** the warp test missed 0.6 by 0.001 (0.601), limited by disocclusions at the blade edges, which no vector can predict. The measurement is fixed, not the bar: disoccluded pixels are excluded by a forward-backward consistency check, and 0.6 is kept against zero, flipped, half and 1.5×.
+  - **W2L-I8 / D4-74:** the cutaway preset sat at its bound in expectation (35.75 against 36) at any N. The band at the cut faces (caps plus one tile) is excluded from the floor and moving counts, with MARGIN unchanged and the rationale stated.
+  - **D0-1 amended:** official P-runs also need Chrome holding the OS focus, so that D3-6's blur rule can fire (W2L-I7 / D4-73). The rest is unchanged: AC, no agents, nothing else on the GPU, display awake.
+  - The `--flow` capture is the tool for the official P4 with the flow on. Indicative so far: Cutaway with tracers 9.53 / 10.34 ms and Realistic 8.07 / 7.82 ms (vsync / back to back).
+  - **Next:** a fresh kernel round 3 runs the two fixed tests in the browser, writes SOLVER.md 15.3, merges main with an `ENGINE_MACH_CUT === GLOBAL_MACH_CUT` test, and runs the six gates. Then the critic reviews it.
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
