@@ -172,7 +172,10 @@ describe('the progressive warm-up (D4-91)', () => {
     expect(isWarm(mode)).toBe(false);
     const click = performance.now();
     await page.getByRole('radio', { name: /^data/i }).click();
-    await until('the preparing state', () => useApp.getState().diagnostics?.view.preparing === mode);
+    await until(
+      'the preparing state',
+      () => useApp.getState().diagnostics?.view.preparing === mode,
+    );
     const preparingMs = Math.round(performance.now() - click);
     const chip = page.getByRole('status', { name: /preparing the data view/i });
     await expect.element(chip).toBeVisible();

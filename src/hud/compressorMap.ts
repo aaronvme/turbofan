@@ -9,6 +9,7 @@
 
 import { compressorPoint, type ScaledCompressorMap } from '../cycle/componentMaps';
 import type { MapOperatingPoint } from '../contracts/cycle';
+import { UI_LEVELS } from './uiLevels';
 
 export type MapPoint = readonly [correctedFlowKgPerS: number, pressureRatio: number];
 
@@ -106,8 +107,8 @@ export function mapGeometry(
   };
 }
 
-/** A surge margin under this fraction is a caution on the map (the chart's amber, app-ui's). */
-export const SM_CAUTION_FRACTION = 0.05;
+/** A surge margin under this fraction is a caution on the map (U1, docs/PHYSICS.md 3.5). */
+export const SM_CAUTION_FRACTION = UI_LEVELS.surgeMarginCautionFraction;
 
 export interface SurgeMarginView {
   /**
@@ -127,7 +128,11 @@ export function surgeMarginView(
     return { level: 'belowMap', tag: 'below map' };
   const m = p.surgeMarginFraction;
   return {
-    level: !(m > 0) ? 'warning' : m < SM_CAUTION_FRACTION ? 'caution' : 'normal',
+    level: !(m > UI_LEVELS.surgeMarginWarningFraction)
+      ? 'warning'
+      : m < SM_CAUTION_FRACTION
+        ? 'caution'
+        : 'normal',
     tag: null,
   };
 }
