@@ -50,6 +50,8 @@ interface Step {
   readonly s: CycleState;
   readonly evals: number;
   readonly cause: string | null;
+  /** D4-92 (c): this step ran an episode's one escalation (D4-13's whole walk, unbudgeted). */
+  readonly escalated: boolean;
 }
 
 /** The fit at ground idle, the lever ramped to take-off over 1 s from RAMP_FROM_S, at 60 Hz. */
@@ -64,8 +66,10 @@ function ramp(seconds: number, opts: CycleModelOptions = {}) {
     const ramped = (t - RAMP_FROM_S) / P5.leverRampS.value;
     const lever = t < RAMP_FROM_S ? 0 : Math.max(0.01, Math.min(1, ramped));
     const e0 = gasPathEvaluations();
+    const x0 = m.heldRetryEscalations();
     const s = m.step(DT, inputs({ throttleLever: lever }));
-    steps.push({ s, evals: gasPathEvaluations() - e0, cause: m.lostSolveCause() });
+    const escalated = m.heldRetryEscalations() > x0;
+    steps.push({ s, evals: gasPathEvaluations() - e0, cause: m.lostSolveCause(), escalated });
   }
   const warnings = warn.mock.calls.length;
   warn.mockRestore();
@@ -96,7 +100,8 @@ describe('D4-84: the held frame on the part-power fit ramp', { timeout: TIMEOUT_
     const { steps } = run();
     let checked = 0;
     steps.forEach((k, i) => {
-      if (!held(steps[i - 1])) return;
+      // D4-92 (c): an episode's one escalation is the exception beside P5, like the sub-idle entry
+      if (!held(steps[i - 1]) || k.escalated) return;
       checked++;
       expect(k.evals, `step at ${k.s.timeS.toFixed(3)} s`).toBeLessThanOrEqual(
         P5.maxHeldStepEvaluations.value,
@@ -107,8 +112,19 @@ describe('D4-84: the held frame on the part-power fit ramp', { timeout: TIMEOUT_
 
   it('P5: every step of the ramp, held or matched, at most one converged direct solve more', () => {
     const { steps } = run();
-    const worst = Math.max(...steps.map((k) => k.evals));
+    const worst = Math.max(...steps.filter((k) => !k.escalated).map((k) => k.evals));
     expect(worst).toBeLessThanOrEqual(P5.maxStepEvaluations.value);
+  });
+
+  it('D4-92 (c): the exception beside P5 is at most one escalated step per held episode', () => {
+    const { steps, warnings } = run();
+    const escalated = steps.filter((k) => k.escalated);
+    expect(escalated.length).toBeGreaterThan(0);
+    // the warnings count the episodes exactly (W2F-I1)
+    expect(escalated.length).toBeLessThanOrEqual(warnings);
+    escalated.forEach((k) => {
+      expect(k.s.gasPathSolve.lostSolves).toBeGreaterThan(0);
+    });
   });
 
   it('the hold stays visible: status, count, cause, one warning per held episode (W2F-I1)', () => {
