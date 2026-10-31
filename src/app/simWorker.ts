@@ -46,6 +46,7 @@ import { cutPlaneQuantity, flowModeFor } from '../shell/viewState';
 import { createRasterScheduler, type RasterScheduler } from '../shell/mockRaster';
 import { backingDpr, backingSize } from '../shell/pixelCap';
 import { createSettleTracker, type SettleTracker } from '../shell/settle';
+import { createPostFaults, stepFault } from '../shell/faults';
 import {
   BOOT_CONFIGS,
   WARM_CONFIGS,
@@ -405,7 +406,7 @@ function loop(a: App) {
   const cycleMs = new Rolling(COST_WINDOW);
   const frameMs = new Rolling(COST_WINDOW);
   const stamps: number[] = [];
-  let failedPosts = 0;
+  const postFaults = createPostFaults(MAX_FAILED_POSTS);
   let lastFrameMs = 0;
   let stats = a.view.stats();
   const tick = (t: number) => {
@@ -419,15 +420,15 @@ function loop(a: App) {
     let held = false;
     if (!a.simFailed) {
       const c0 = performance.now();
-      try {
+      // a throwing model is a bug: stop the sim, keep rendering, say so (never silent): the
+      // overlay annunciates SIM STOPPED with this message (W2A-I1; src/shell/faults.ts)
+      const fault = stepFault(() => {
         a.core.advance(dt);
-      } catch (e) {
-        // a throwing model is a bug: stop the sim, keep rendering, say so (never silent): the
-        // overlay annunciates SIM STOPPED with this message (W2A-I1)
+      });
+      if (fault !== null) {
         a.simFailed = true;
-        const msg = `cycle step failed: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`;
-        pushError(a, msg);
-        post({ type: 'sim-stopped', message: msg });
+        pushError(a, fault);
+        post({ type: 'sim-stopped', message: fault });
       }
       held = a.core.state().gasPathSolve.status === 'held';
       cycleMs.push(performance.now() - c0, held);
@@ -512,14 +513,13 @@ function loop(a: App) {
           engineBox: screenBox(viewProjection(a), ENGINE_RINGS, a.size.width, a.size.height),
           refused: a.refused.splice(0),
         });
-        failedPosts = 0;
+        postFaults.posted();
       } catch (e) {
         // the errors travel in the snapshot, so a post that keeps failing (a DataCloneError)
         // would freeze the overlay with no message: say so once it is not a one-off (W2A-N2)
-        const msg = `snapshot: ${e instanceof Error ? e.message : String(e)}`;
-        pushError(a, msg);
-        if (++failedPosts === MAX_FAILED_POSTS)
-          post({ type: 'fatal', message: `${msg} (${MAX_FAILED_POSTS} posts in a row failed)` });
+        const f = postFaults.failed(e);
+        pushError(a, f.error);
+        if (f.fatal !== null) post({ type: 'fatal', message: f.fatal });
       }
     }
     frame++;
