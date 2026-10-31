@@ -68,7 +68,8 @@ describe('the Schlieren signature (W2A-I6, W2A-I10)', () => {
 
   it('a field that is not the neutral grey (a dark studio background) fails the grey-share bar', () => {
     const s = sig((x, y) => (inEngine(x, y) ? 0.02 : inJet(x, y) ? bands(x) : 0.12 + y / 2000));
-    expect(failedBars(s)).toEqual(['grey']);
+    // (with no grey pixel there is no grey to measure the silhouette against either)
+    expect(failedBars(s)).toEqual(['grey', 'silhouette']);
   });
 
   it('a label in the jet box (a dark box with light text) gives S1 a banded jet: so the signature is computed on the canvas alone', () => {
