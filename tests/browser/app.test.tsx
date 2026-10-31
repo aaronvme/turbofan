@@ -246,6 +246,15 @@ function calloutProblems(): string[] {
     };
   });
   leaders.forEach((a, i) => {
+    // W2A-N28: round 5's rule as drawn: no anchor under a panel, and no leader through one
+    for (const r of reserved) {
+      const b = shown(r);
+      const [ax, ay] = a.seg;
+      if (ax > b.left && ax < b.right && ay > b.top && ay < b.bottom)
+        out.push(`callout ${a.id}'s anchor is under ${nameOf(r)}`);
+      else if (edges(b).some((e) => segmentsCross(a.seg, e)))
+        out.push(`leader ${a.id} runs through ${nameOf(r)}`);
+    }
     for (const b of leaders.slice(i + 1))
       if (segmentsCross(a.seg, b.seg)) out.push(`leader ${a.id} crosses leader ${b.id}`);
     for (const l of labels)
