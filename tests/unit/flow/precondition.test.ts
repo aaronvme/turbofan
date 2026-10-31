@@ -19,6 +19,7 @@ import {
   DEFAULT_CFL,
   DEFAULT_CFL_PRECONDITIONED,
   ReferenceSolver,
+  type SolverOptions,
 } from '../../../src/flow/reference/solver';
 import { NP, NU, consToPrim, physicalToPrim, primToCons } from '../../../src/flow/reference/state';
 import { converge } from '../../ladder/common';
@@ -270,6 +271,40 @@ describe('preconditioned tracking mode', () => {
     expect(cflOf({ minMach: 1 })).toBe(DEFAULT_CFL);
     expect(cflOf()).toBe(DEFAULT_CFL);
     expect(cflOf({ minMach: 0.01 }, 1.2)).toBe(1.2);
+  });
+
+  // D4-81: the global cutoff of the standard preconditioners (Weiss & Smith 1995; Turkel's
+  // beta^2 >= K M_ref^2), one floor on beta and on the flux's M_cut, the same in every cell, which
+  // the caller ties to the domain's peak velocity. The pulse runs at M 0.06-0.07 (u 20-25 m/s), so a
+  // cut of 0.1 binds in every cell and one of 0.005 in none. The far field (top) takes it too.
+  it('takes a global M_cut as minMach = max(minMach, cut) and M_cut = max(M_cut, cut) (D4-81)', () => {
+    type Pre = NonNullable<SolverOptions['lowMachPreconditioning']>;
+    const run = (pre?: Pre) => {
+      const s = new ReferenceSolver(mesh, {
+        gas: THERMALLY_PERFECT,
+        freeStream: fs,
+        ...(pre === undefined ? {} : { lowMachPreconditioning: pre }),
+      });
+      s.setState(pulse);
+      const dt = s.localDt();
+      const residual = s.residual();
+      s.iterate(3);
+      return { U: Float64Array.from(s.U), dt, residual, cfl: s.trackingCfl };
+    };
+    const floored = run({ minMach: 0.1, machCut: 0.1 });
+    // it binds: the run at minMach = M_cut = the cut, whatever M_cut was given below it
+    expect(run({ minMach: 0.01, globalMachCut: 0.1 })).toEqual(floored);
+    expect(run({ minMach: 0.01, machCut: 0.003, globalMachCut: 0.1 })).toEqual(floored);
+    expect(run({ minMach: 0.01, globalMachCut: 0.1 }).U).not.toEqual(run({ minMach: 0.01 }).U);
+    // below minMach and M_cut it changes nothing
+    expect(run({ minMach: 0.01, globalMachCut: 0.005 })).toEqual(run({ minMach: 0.01 }));
+    // the scaling switched off (M_cut >= 1) stays off, and minMach >= 1 stays the plain scheme
+    expect(run({ minMach: 0.01, machCut: 1, globalMachCut: 0.1 })).toEqual(
+      run({ minMach: 0.1, machCut: 1 }),
+    );
+    expect(run({ minMach: 1, globalMachCut: 0.1 })).toEqual(run());
+    expect(() => run({ minMach: 0.01, globalMachCut: -0.01 })).toThrow(RangeError);
+    expect(() => run({ minMach: 0.01, globalMachCut: Number.NaN })).toThrow(RangeError);
   });
 
   it('keeps the quiescent ambient exactly', () => {

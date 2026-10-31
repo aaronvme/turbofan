@@ -454,6 +454,46 @@ describe('reference solver: time stepping', () => {
     expect(s.iterations).toBe(2);
   });
 
+  it(
+    'reports the density residual of stage 1 in both norms: the cell mean and the volume-weighted (D4-77)',
+    () => {
+      for (const pre of [undefined, { minMach: 0.003 }]) {
+        const s = new ReferenceSolver(solverMesh(allBcs), {
+          gas: THERMALLY_PERFECT,
+          freeStream: AMBIENT,
+          ...(pre === undefined ? {} : { lowMachPreconditioning: pre }),
+        });
+        s.iterate(1);
+        expect(s.stats.residualDensityL2Volume).toBe(0); // at rest: exactly zero in both
+        s.setState((x, r) => pulse(x, r));
+        s.setBlockage(Float64Array.from(s.mesh.cellX, (x) => 1 - 0.2 * Math.exp(-(x ** 2) / 0.01)));
+        // as above: the plain run iterates, the preconditioned one is taken at the pulse (its 10 %
+        // wave at M_cut leaves the linear range within a few iterations)
+        if (pre === undefined) s.iterate(2);
+        // stage 1 of the next iteration sees the current state, so residual() is its R_0
+        const R = s.residual();
+        let mean = 0;
+        let weighted = 0;
+        let volume = 0;
+        for (let c = 0; c < s.mesh.nCells; c++) {
+          const bv = (s.blockage[c] ?? NaN) * (s.mesh.cellVolR[c] ?? NaN);
+          const q = (R[6 * c] ?? NaN) / bv;
+          mean += q * q;
+          weighted += bv * q * q;
+          volume += bv;
+        }
+        const st = s.iterate(1);
+        const unweighted = Math.sqrt(mean / s.mesh.nCells);
+        const byVolume = Math.sqrt(weighted / volume);
+        expect(Math.abs(st.residualDensityL2 - unweighted) / unweighted).toBeLessThan(1e-14);
+        expect(Math.abs(st.residualDensityL2Volume - byVolume) / byVolume).toBeLessThan(1e-14);
+        // the cells differ in volume, so the weight matters: the two norms are different numbers
+        expect(Math.abs(byVolume - unweighted) / unweighted).toBeGreaterThan(1e-3);
+      }
+    },
+    ITERATING,
+  );
+
   it('remaps BC codes when asked (slip wall -> far field)', () => {
     const fs = { pressure: 101325, temperature: 288.15, velocity: 100 };
     const s = new ReferenceSolver(solverMesh(closed), {

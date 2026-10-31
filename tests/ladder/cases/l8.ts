@@ -5,7 +5,7 @@ import { THRESHOLDS } from '../../../src/contracts/thresholds';
 import { ReferenceSolver } from '../../../src/flow/reference/solver';
 import { NP } from '../../../src/flow/reference/state';
 import { STEADY_WINDOW, converge, scaledCap, steadyWindow } from '../common';
-import { SINK, sinkCase } from '../oracle';
+import { GLOBAL_MACH_CUT, SINK, sinkCase } from '../oracle';
 
 /** minMach = M_cut of the preconditioned tracking mode (D4-20): the engine's value, SOLVER.md 7. */
 const MACH_CUT = Number(process.env.L8_MACH_CUT ?? 0.003);
@@ -20,7 +20,9 @@ function sinkRun(precondition: boolean, machCut = MACH_CUT) {
     options,
     sinkCells,
     growth: g,
-  } = sinkCase(precondition ? { minMach: machCut, machCut } : undefined);
+  } = sinkCase(
+    precondition ? { minMach: machCut, machCut, globalMachCut: GLOBAL_MACH_CUT } : undefined,
+  );
   const K = SINK.k;
   const radius = (c: number) => Math.hypot(mesh.cellX[c] ?? NaN, mesh.cellR[c] ?? NaN);
   const s = new ReferenceSolver(mesh, options);

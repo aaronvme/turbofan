@@ -54,6 +54,15 @@ export interface SolverOptions {
   readonly lowMachPreconditioning?: {
     readonly minMach: number;
     readonly machCut?: number;
+    /**
+     * D4-81's trial, not the contract: the global cutoff of the standard preconditioners (Weiss &
+     * Smith 1995; Turkel's beta^2 >= K M_ref^2), one floor the same in every cell, which the caller
+     * ties to the domain's peak velocity (the engine's inlet Mach is about 0.5, so 0.02 is about
+     * 4 % of it, D4-59). It raises minMach and M_cut to it: beta >= globalMachCut everywhere, the
+     * far field included, and the flux's M_cut >= globalMachCut. An M_cut >= 1 (the scaling off)
+     * and a minMach >= 1 (the plain scheme) stay as they are. Absent: minMach and M_cut as given.
+     */
+    readonly globalMachCut?: number;
   };
   /**
    * The limiter (section 6): 'sharp' van Albada (default) or the 'smooth' eps form, the D4-25
@@ -65,9 +74,28 @@ export interface SolverOptions {
   readonly storage?: 'f64' | 'f32';
 }
 
+/** The preconditioning's minMach and M_cut in force (section 10): D4-81's global cut applied. */
+type Preconditioning = { readonly minMach: number; readonly machCut?: number };
+
+function withGlobalCut(pre: NonNullable<SolverOptions['lowMachPreconditioning']>): Preconditioning {
+  const cut = pre.globalMachCut;
+  if (cut === undefined) return pre;
+  if (!(Number.isFinite(cut) && cut >= 0))
+    throw new RangeError(`globalMachCut must be finite and >= 0, not ${cut}`);
+  return {
+    minMach: Math.max(pre.minMach, cut),
+    machCut: Math.max(pre.machCut ?? pre.minMach, cut),
+  };
+}
+
 export interface IterationStats {
   /** sqrt(mean (R_rho / (b V))^2) of the last iteration's first stage, kg/(m^3 s). */
   readonly residualDensityL2: number;
+  /**
+   * The same residual in the volume-weighted norm, sqrt(sum b V (R_rho / (b V))^2 / sum b V)
+   * (D4-77: the energy norm of D4-72's rule; the cell mean weights the small near-axis cells).
+   */
+  readonly residualDensityL2Volume: number;
 }
 
 export class ReferenceSolver {
@@ -82,9 +110,11 @@ export class ReferenceSolver {
   readonly blockage: Float64Array;
   iterations = 0;
   time = 0;
-  stats: IterationStats = { residualDensityL2: 0 };
+  stats: IterationStats = { residualDensityL2: 0, residualDensityL2Volume: 0 };
 
   private readonly opts: SolverOptions;
+  /** The tracking mode's preconditioning in force (undefined: none), D4-81's global cut applied. */
+  private readonly pre: Preconditioning | undefined;
   private readonly cfl: number;
   private readonly cflPhysical: number;
   /** M_cut of the tracking mode's dissipation scaling (1: off); physical time always uses 1. */
@@ -130,7 +160,9 @@ export class ReferenceSolver {
       ...(opts.outflowPressure === undefined ? {} : { outflowPressure: opts.outflowPressure }),
     };
     this.bcPhysical = boundaryParams(this.ref, bcOpts);
-    const pre = opts.lowMachPreconditioning;
+    const given = opts.lowMachPreconditioning;
+    const pre = given === undefined ? undefined : withGlobalCut(given);
+    this.pre = pre;
     const mInf2 = (this.ref.u * this.ref.u) / (this.ref.c * this.ref.c);
     this.bc =
       pre === undefined
@@ -501,7 +533,7 @@ export class ReferenceSolver {
     const m = this.mesh;
     const n = m.nCells;
     const { P, cellNbr, beta2, betaExt } = this;
-    const pre = tracking ? this.opts.lowMachPreconditioning : undefined;
+    const pre = tracking ? this.pre : undefined;
     for (let c = 0; c < n; c++) {
       let b2 = 1;
       if (pre !== undefined) {
@@ -673,11 +705,18 @@ export class ReferenceSolver {
   private recordResidual(): void {
     const m = this.mesh;
     let sum = 0;
+    let weighted = 0;
+    let volume = 0;
     for (let c = 0; c < m.nCells; c++) {
-      const q =
-        (this.R[NU * c] as number) / ((this.blockage[c] as number) * (m.cellVolR[c] as number));
+      const bv = (this.blockage[c] as number) * (m.cellVolR[c] as number);
+      const q = (this.R[NU * c] as number) / bv;
       sum += q * q;
+      weighted += bv * q * q;
+      volume += bv;
     }
-    this.stats = { residualDensityL2: Math.sqrt(sum / m.nCells) };
+    this.stats = {
+      residualDensityL2: Math.sqrt(sum / m.nCells),
+      residualDensityL2Volume: Math.sqrt(weighted / volume),
+    };
   }
 }

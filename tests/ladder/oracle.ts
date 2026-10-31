@@ -52,6 +52,19 @@ export function closedBoxMesh(precision: 'f32' | 'f64' = 'f32'): SolverMesh {
 export const ENGINE_PRECONDITIONING = { minMach: 0.003 } as const;
 
 /**
+ * D4-81: the global M_cut (SOLVER.md 10, lowMachPreconditioning.globalMachCut) that every
+ * preconditioned CPU ladder run takes: L7's M 0.01 sphere, L8, 12.2's C-pre and S, and the d463
+ * cases. The GPU tests keep ENGINE_PRECONDITIONING (0.003) until the kernel round mirrors the cut.
+ */
+export const GLOBAL_MACH_CUT = 0.02;
+
+/** The engine's preconditioning with D4-81's global M_cut: in force, minMach = M_cut = 0.02. */
+export const ENGINE_PRECONDITIONING_CUT = {
+  ...ENGINE_PRECONDITIONING,
+  globalMachCut: GLOBAL_MACH_CUT,
+} as const;
+
+/**
  * D4-38's GPU stopping rule, with the floors restated by D4-58 (SOLVER.md 12.4): the GPU's L4 (a)
  * and L5 runs count as converged once the density residual has reached its f32 plateau, at or
  * below this fraction of the first iteration's, and the accuracy metric moves by less than 1e-4
