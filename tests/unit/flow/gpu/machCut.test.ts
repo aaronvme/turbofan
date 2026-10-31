@@ -100,6 +100,35 @@ describe('D4-89: the engine adapter default is the global M_cut', () => {
         String(bad),
       ).toThrow(/globalMachCut/);
   });
+
+  // W2K-N1 (critic pass 16's mutant K4, the twin of the CPU's W2R-N31 / A4): a global cut >= 1
+  // raises minMach to >= 1 itself, the plain scheme (beta = 1, f_a = 1), so everything reads the
+  // values in force: the CFL switch too, which must give the plain default, not the
+  // preconditioned one the given minMach (0.003) would pick. tests/gpu/oracle.test.ts runs the
+  // same options on Dawn against the plain oracle.
+  it.each([1, 1.5])(
+    'a global M_cut of %s switches the preconditioning off: the plain uniforms and CFL',
+    (cut) => {
+      const viaCut = stageParams(
+        { ...AT_REST, lowMachPreconditioning: { minMach: 0.003, globalMachCut: cut } },
+        SIZES,
+      );
+      const t = viaCut.tracking[0];
+      expect(t?.cfl).toBe(DEFAULT_CFL);
+      expect(t?.minMach2).toBe(cut * cut);
+      expect(t?.machCut).toBe(1);
+      expect(viaCut.bcTracking.farFieldBeta2).toBe(1);
+      // the same scheme as minMach >= 1 given directly
+      const direct = stageParams({ ...AT_REST, lowMachPreconditioning: { minMach: cut } }, SIZES);
+      expect(viaCut.tracking).toEqual(direct.tracking);
+      expect(viaCut.bcTracking).toEqual(direct.bcTracking);
+      expect(viaCut.physical).toEqual(direct.physical);
+      // and the plain scheme's far field and CFL (the uniforms differ only in the switch itself)
+      const plain = stageParams(AT_REST, SIZES);
+      expect(viaCut.bcTracking).toEqual(plain.bcTracking);
+      expect(t?.cfl).toBe(plain.tracking[0]?.cfl);
+    },
+  );
 });
 
 // D4-93 (the merge with w2/reference-9): the GPU mirror and the CPU adoption are one cut, so
