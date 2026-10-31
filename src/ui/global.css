@@ -1,15 +1,17 @@
 /* A restrained, dark technical overlay: tabular numerals, one accent, cockpit status colours
-   (white normal, cyan advisory, amber caution, red warning), contrast >= 4.5:1 for text. */
+   (white normal, cyan advisory, amber caution, red warning), contrast >= 4.5:1 for text: --faint
+   is 4.9:1 on the panel over a mid studio grey (128) and 5.7:1 over the darkest backdrop (W2A-N9,
+   the critic's w2a-contrast probe; it was 3.3:1 and 4.1:1). */
 :root {
   color-scheme: dark;
   --bg: #07090c;
-  --panel: rgb(11 14 19 / 0.8);
+  --panel: rgb(11 14 19 / 0.86);
   --panel-solid: #0d1117;
   --line: rgb(255 255 255 / 0.08);
   --line-strong: rgb(255 255 255 / 0.16);
   --fg: #e6e9ee;
   --muted: #9aa3b1;
-  --faint: #6b7483;
+  --faint: #838c9b;
   --accent: #7cc4ff;
   --normal: #e6e9ee;
   --advisory: #5ad1f0;
@@ -63,6 +65,10 @@ body,
   outline: none;
   touch-action: none;
   cursor: grab;
+}
+/* D4-88: the boot's warm-up frames (every mode once) stay behind the spinner */
+.viewport.booting canvas.view {
+  visibility: hidden;
 }
 .viewport canvas.view:active {
   cursor: grabbing;
@@ -139,6 +145,11 @@ button:disabled {
   border-radius: var(--radius);
   padding: 9px 12px 10px;
   box-shadow: 0 8px 30px rgb(0 0 0 / 0.35);
+}
+/* the drawer sits over the view's brightest boards (the Data plane): nearly opaque, so its muted
+   notes read on panel, not on purple (critic pass 13's visual note 4) */
+.drawer .panel {
+  background: rgb(11 14 19 / 0.95);
 }
 .panel-head {
   display: flex;
@@ -593,6 +604,26 @@ legend {
 .chart figcaption .value.caution {
   color: var(--caution);
 }
+.chart figcaption .value.warning {
+  color: var(--warning);
+}
+.chart figcaption .value-group {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+/* D4-87: a margin taken below the map is an extrapolation: dimmed, tagged, never amber */
+.chart figcaption .value[data-level='belowMap'] {
+  opacity: 0.6;
+}
+.chart figcaption .tag {
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  padding: 0 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+}
 svg text {
   font-size: 9.5px;
   fill: var(--muted);
@@ -623,6 +654,22 @@ svg text {
   fill: none;
   stroke: #fff;
   stroke-opacity: 0.6;
+}
+/* below the map's lowest speed line (D4-87): a hollow, dimmed point */
+.op[data-below-map='true'] {
+  fill: var(--bg);
+  stroke: #fff;
+  stroke-width: 1.2;
+}
+.op-ring[data-below-map='true'] {
+  stroke-dasharray: 2 2;
+}
+.op-off {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .axis {
   fill: var(--faint);
@@ -827,10 +874,13 @@ svg text {
 .leaders circle {
   fill: #fff;
 }
+/* W2A-I3: the layout reserves the box as drawn (measured), border and padding included */
 .callout {
   position: absolute;
   top: 0;
   left: 0;
+  box-sizing: border-box;
+  white-space: nowrap;
   display: flex;
   flex-direction: column;
   padding: 3px 7px;
@@ -839,6 +889,11 @@ svg text {
   border-radius: 5px;
   backdrop-filter: blur(6px);
   transition: transform 160ms ease-out;
+}
+/* a label with no place yet, drawn only to be measured */
+.callout.measure {
+  visibility: hidden;
+  transition: none;
 }
 .callout span {
   font-size: 10px;
@@ -919,6 +974,21 @@ svg text {
   max-width: 520px;
   font-size: 11px;
   color: var(--fg);
+}
+/* W2A-I1: the fault counts are chips that open the Diagnostics drawer (the messages) */
+.annunciators button.badge {
+  pointer-events: auto;
+  min-height: 0;
+  padding: 3px 7px;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+  background: rgb(7 9 12 / 0.78);
+}
+.annunciators button.badge:hover {
+  background: rgb(255 255 255 / 0.1);
+}
+.clock .warning {
+  color: var(--warning);
 }
 
 /* the view dock: legend, camera presets, tracers, the Data view's field */

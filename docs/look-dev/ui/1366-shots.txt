@@ -1,5 +1,7 @@
-realistic: 2049x1152 centre std 0.239 lit 0.774
-cutaway: 2049x1152 centre std 0.284 lit 0.492
-exploded: 2049x1152 centre std 0.223 lit 0.635
-schlieren: 2049x1152 centre std 0.161 lit 0.134
-data: 2049x1152 centre std 0.146 lit 0.199
+realistic: 1366x768 centre std 0.212 lit 0.904 · backing 1366x768 · render 12.1 ms · flow 1.0 ms · 51 fps
+cutaway: 1366x768 centre std 0.157 lit 0.250 · backing 1366x768 · render 13.8 ms · flow 0.4 ms · 58 fps
+exploded: 1366x768 centre std 0.221 lit 0.642 · backing 1366x768 · render 9.3 ms · flow 0.0 ms · 57 fps
+schlieren: 1366x768 centre std 0.055 lit 0.003 · backing 1366x768 · render 9.4 ms · flow 1.5 ms · 58 fps
+data: 1366x768 centre std 0.150 lit 0.255 · backing 1366x768 · render 12.3 ms · flow 0.6 ms · 60 fps
+realistic again (a full window): render 9.9 ms · flow 0.9 ms · 61 fps at dpr 1
+ultra: backing 1366x768 at dpr 1 (high: 1)

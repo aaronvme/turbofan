@@ -15,11 +15,14 @@ export interface CaseResult {
   readonly extra?: Record<string, unknown>;
 }
 
-export async function runCase(name: string): Promise<CaseResult> {
+/** The child's time limit: the ladder's per-test timeout (vitest.ladder.config.ts), 30 min. */
+export const CASE_TIMEOUT_MS = 1_800_000;
+
+export async function runCase(name: string, timeoutMs = CASE_TIMEOUT_MS): Promise<CaseResult> {
   const { stdout } = await run(
     process.execPath,
     ['--import', './tools/mesh/ts-resolve.mjs', 'tests/ladder/runCase.ts', name],
-    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 1_800_000 },
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: timeoutMs },
   );
   const line = stdout.split('\n').find((l) => l.startsWith('@@RESULT@@'));
   if (line === undefined) throw new Error(`case ${name} printed no result:\n${stdout}`);

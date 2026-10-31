@@ -2,6 +2,7 @@
 // converts here, with the cockpit's conventions (EGT in degrees C, fuel flow per hour) and the
 // unit system the user picked. A missing or non-finite value shows as an en dash, never as 0.
 
+import type { FadecLimiter } from '../contracts/cycle';
 import type { UnitSystem } from '../contracts/ui';
 import { kelvinToCelsius, LB_TO_KG, LBF_TO_N } from '../engine/units';
 
@@ -70,6 +71,21 @@ export function simTime(s: number): string {
   const rest = s - 60 * m;
   return `${m}:${rest < 10 ? '0' : ''}${rest.toFixed(1)}`;
 }
+
+const LIMITER_TEXT: Readonly<Record<FadecLimiter, string>> = {
+  none: 'no limiter',
+  n1Target: 'N1 target',
+  accelSchedule: 'accel schedule',
+  decelSchedule: 'decel schedule',
+  idleFloor: 'idle floor',
+  n1Max: 'N1 limit',
+  n2Max: 'N2 limit',
+  egtMax: 'EGT limit',
+  startSchedule: 'start schedule',
+};
+
+/** The FADEC loop that sets the fuel flow, in words (W2A-N8: not its code identifier). */
+export const limiterText = (l: FadecLimiter): string => LIMITER_TEXT[l];
 
 /** A time scale as "x1", "x1/200" or "x4". */
 export function timeScale(k: number): string {

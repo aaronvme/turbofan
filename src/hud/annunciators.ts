@@ -6,6 +6,7 @@ import type { CycleState } from '../contracts/cycle';
 import type { FlowStatus, SnapshotSources } from '../contracts/sim';
 import type { FlowLinkState } from '../flow/viz/fieldLink';
 import { provenanceLabel } from '../flow/viz/legend';
+import type { RasterHealth } from '../shell/protocol';
 
 export type Level = 'normal' | 'advisory' | 'caution' | 'warning';
 
@@ -63,7 +64,18 @@ export function flagAnnunciations(cycle: Pick<CycleState, 'flags'>): Annunciatio
     .map((k) => ({ id: k, level: FLAG_TEXT[k][0], text: FLAG_TEXT[k][1] }));
 }
 
-export function flowAnnunciation(flow: FlowStatus): Annunciation {
+/**
+ * The flow solver's status; `drawn` false: a running solver that is not drawn is idle (it is not
+ * stepped, W2A-N8), not "running" at 0 iterations.
+ */
+export function flowAnnunciation(flow: FlowStatus, drawn = true): Annunciation {
+  if (flow.status === 'running' && !drawn)
+    return {
+      id: 'flow',
+      level: 'normal',
+      text: 'SOLVER IDLE',
+      detail: 'started, not drawn: not stepped',
+    };
   switch (flow.status) {
     case 'unavailable':
       return {
@@ -97,13 +109,8 @@ export type FieldLinkView = FlowLinkState;
 
 function fieldBadge(flow: SnapshotSources['flow'], link: FieldLinkView | null): Annunciation {
   if (flow === 'solver') {
-    if (link?.coupling === 'uncoupled')
-      return {
-        id: 'field',
-        level: 'advisory',
-        text: 'FIELD: solver (uncoupled until W3)',
-        detail: provenanceLabel('uncoupled'),
-      };
+    // only a link that says so is coupled: an unknown coupling reads the conservative way
+    // (W2A-N3), as the dock's legend does
     if (link?.coupling === 'coupled')
       return {
         id: 'field',
@@ -111,7 +118,12 @@ function fieldBadge(flow: SnapshotSources['flow'], link: FieldLinkView | null): 
         text: 'FIELD: SOLVER (coupled)',
         detail: provenanceLabel('coupled'),
       };
-    return { id: 'field', level: 'normal', text: 'FIELD: SOLVER', detail: 'the live GPU solver' };
+    return {
+      id: 'field',
+      level: 'advisory',
+      text: 'FIELD: solver (uncoupled until W3)',
+      detail: provenanceLabel('uncoupled'),
+    };
   }
   if (flow === 'mock') {
     if (link !== null && link.fallback !== null)
@@ -154,6 +166,62 @@ export function provenanceBadges(
           detail: 'a labelled stand-in, not the model',
         };
   return [cycle, fieldBadge(s.flow, link)];
+}
+
+/** What the overlay knows of the worker's faults outside the field switch (W2A-I1). */
+export interface FaultInputs {
+  /** Why the sim stopped (a thrown cycle step); null while it runs. */
+  readonly simStopped: string | null;
+  /** GPU errors posted so far (validation, out-of-memory, internal). */
+  readonly gpuErrors: number;
+  readonly raster: RasterHealth | null;
+  /** Commands the worker refused, recently. */
+  readonly refused: number;
+}
+
+/**
+ * W2A-I1: the worker's faults on screen, not only in the closed Diagnostics drawer. A stopped sim
+ * is a warning (the clock and the gas path are frozen); GPU errors and a failing MOCK raster are
+ * cautions; refused commands an advisory. The counts open the drawer, which lists the messages.
+ */
+export function faultAnnunciations(f: FaultInputs): Annunciation[] {
+  const out: Annunciation[] = [];
+  if (f.simStopped !== null)
+    out.push({
+      id: 'simStopped',
+      level: 'warning',
+      text: 'SIM STOPPED',
+      detail: `${f.simStopped}: the clock and the gas path are frozen (reset or reload)`,
+    });
+  if (f.gpuErrors > 0)
+    out.push({
+      id: 'gpuErrors',
+      level: 'caution',
+      text: `GPU ERRORS (${f.gpuErrors})`,
+      detail: 'the messages are in Diagnostics',
+    });
+  if (f.raster?.onFrame === true)
+    out.push({
+      id: 'raster',
+      level: 'caution',
+      text: 'MOCK RASTER ON FRAME',
+      detail: f.raster.lastError ?? 'the MOCK raster worker failed: rasterizing on the frame',
+    });
+  else if (f.raster != null && f.raster.lastError !== null)
+    out.push({
+      id: 'raster',
+      level: 'caution',
+      text: 'MOCK RASTER FAILED',
+      detail: f.raster.lastError,
+    });
+  if (f.refused > 0)
+    out.push({
+      id: 'refused',
+      level: 'advisory',
+      text: `REFUSED (${f.refused})`,
+      detail: 'commands the sim refused: the reasons are in Diagnostics',
+    });
+  return out;
 }
 
 /** W2V-I6 in the shell: a MOCK drawn instead of the solver asked for is annunciated, with why. */

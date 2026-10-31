@@ -1,0 +1,52 @@
+// Critic pass 15, w2/app-ui round 3 (W2A-I3's layout search): does layoutCallouts place the most
+// labels (by priority), as its doc says, or can it hide a label that another placement of the
+// labels before it would have shown? Brute force over every candidate place on small random cases.
+//   node --import ./tools/mesh/ts-resolve.mjs <this file>   (from the checkout's root)
+import { pathToFileURL } from 'node:url';
+const ROOT = process.env.ROOT ?? '.';
+const { layoutCallouts, overlaps } = await import(pathToFileURL(process.env.CALLOUTS ?? `${ROOT}/src/hud/callouts.ts`).href);
+type R = { x: number; y: number; w: number; h: number };
+// the module's offsets (src/hud/callouts.ts), copied: the brute force enumerates the same places
+const OFFSETS = [[18,-34],[18,14],[-18,-34],[-18,14],[40,-62],[-40,-62],[40,42],[-40,42],[70,-10],[-70,-10],[60,-96],[-60,-96],[60,76],[-60,76],[110,-40],[-110,-40],[110,20],[-110,20]];
+const GAP = 4;
+let seed = 12345;
+const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+const size = { w: 140, h: 36 };
+let worse = 0;
+let example: unknown = null;
+const cases = Number(process.env.CASES ?? 3000);
+for (let c = 0; c < cases; c++) {
+  const vp = { w: 420, h: 300 };
+  const n = 3 + Math.floor(rnd() * 2);
+  const anchors = Array.from({ length: n }, (_, i) => ({ id: `a${i}`, x: 60 + rnd() * 300, y: 40 + rnd() * 220, visible: true, priority: n - i }));
+  const got = layoutCallouts(anchors, () => size, vp);
+  // brute force: the most labels shown, compared by priority rank (a higher one shown wins)
+  const order = [...anchors].sort((a, b) => b.priority - a.priority);
+  const cand = order.map((a) => {
+    const out: R[] = [];
+    for (const [dx, dy] of OFFSETS) {
+      const box = { x: dx >= 0 ? a.x + dx : a.x + dx - size.w, y: a.y + dy, ...size };
+      const on = box.x >= 0 && box.y >= 0 && box.x + size.w <= vp.w && box.y + size.h <= vp.h;
+      const cov = order.some((o) => o !== a && overlaps(box, { x: o.x - 3, y: o.y - 3, w: 6, h: 6 }));
+      if (on && !cov) out.push(box);
+    }
+    return out;
+  });
+  let best: boolean[] | null = null;
+  const better = (s: boolean[]) => { if (best === null) return true; for (let k = 0; k < s.length; k++) if (s[k] !== best[k]) return s[k]; return false; };
+  const placed: R[] = [];
+  const shown: boolean[] = [];
+  const dfs = (i: number) => {
+    if (i === order.length) { if (better(shown)) best = [...shown]; return; }
+    for (const b of cand[i] ?? []) if (!placed.some((p) => overlaps(p, b, GAP))) { placed.push(b); shown.push(true); dfs(i + 1); shown.pop(); placed.pop(); }
+    shown.push(false); dfs(i + 1); shown.pop();
+  };
+  dfs(0);
+  const gotShown = order.map((a) => got.some((p: { id: string }) => p.id === a.id));
+  if (better(gotShown) === false && JSON.stringify(gotShown) !== JSON.stringify(best)) {
+    worse++;
+    example ??= { anchors: anchors.map((a) => [a.id, Math.round(a.x), Math.round(a.y)]), got: gotShown, best };
+  }
+}
+console.log(`cases ${cases}: layoutCallouts shows fewer labels than the best possible in ${worse}`);
+if (example !== null) console.log('first:', JSON.stringify(example));

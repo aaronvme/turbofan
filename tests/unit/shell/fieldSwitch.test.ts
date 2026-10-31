@@ -161,9 +161,13 @@ describe('createFieldSwitch (D4-82 in the shell)', () => {
     expect(t.s.kinds()).toEqual(['cpu', 'solver', 'cpu']);
     expect(solver.disposed).toBe(true);
     expect(t.warned).toHaveLength(1);
-    // asking again does not resurrect a disposed solver: the fallback says why
+    // W2A-N5 (M1): a disposed solver that reads healthy again (a device that came back) is
+    // still not resurrected: only the switch's own record can say why it is gone
+    solver.run = 'running';
+    solver.error = null;
     await sw.choose('solver');
     expect(sw.state().fallback).toMatch(/solver unavailable: .*solver lost/);
+    expect(sw.drawn()).toBe('mock');
     expect(t.starts()).toBe(1);
     expect(t.warned).toHaveLength(2);
   });

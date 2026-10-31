@@ -1,0 +1,91 @@
+// Critic pass 14, w2/cycle-hold @f2c0779 (D4-84 / D4-90): two checks on the held retry.
+// 1. W2H-I1 reach: does the DEFAULT reference model hold its gas path on hard transients at the
+//    app's 60 Hz (and at dt 0.02), and how far do the spools move while held?
+// 2. The matched path: on the part-power fit ramp (P5's case, 20 s), how many held episodes
+//    START with a direct solve that the budget cut ("held-retry budget" in the first cause)? That
+//    is a solve on the matched path (not holding) that D4-13's policy would have run to its end.
+// Plain Node, imports the checkout at ROOT:
+//   ROOT=<checkout> node --import file:///<checkout>/tools/mesh/ts-resolve.mjs w2h-held.ts [1|2]
+import { pathToFileURL } from 'node:url';
+
+const ROOT = process.env.ROOT ?? '.';
+const imp = (p: string) => import(pathToFileURL(`${ROOT}/${p}`).href);
+const { ISA_SLS } = await imp('src/contracts/ambient.ts');
+const { DEFAULT_CYCLE_INPUTS } = await imp('src/contracts/cycle.ts');
+const { createCycleModel } = await imp('src/cycle/model.ts');
+const { PART_POWER_FIT_CALIBRATION, referenceEngine } = await imp('src/cycle/engine.ts');
+const { withCalibration } = await imp('src/cycle/partPower.ts');
+
+const base = { ...DEFAULT_CYCLE_INPUTS, fuelLever: 'run', ignition: 'auto' };
+type Inp = typeof base;
+type Plan = (t: number) => Partial<Inp>;
+
+function run(name: string, opts: object, ambient: object, plan: Plan, seconds: number, dt: number, faults: Record<string, number> = {}) {
+  const warns: string[] = [];
+  const orig = console.warn;
+  console.warn = (...a: unknown[]) => void warns.push(String(a[0]));
+  const m = createCycleModel(opts);
+  m.reset('groundIdle', ambient);
+  const n = Math.round(seconds / dt);
+  const pending = Object.entries(faults);
+  let held = 0;
+  let run = 0;
+  let longest = 0;
+  let maxN1 = 0;
+  let maxN1Held = 0;
+  let runStartN1 = 0;
+  let maxRise = 0;
+  let s = m.state();
+  for (let i = 0; i < n; i++) {
+    const t = i * dt;
+    for (const [f, at] of pending) if (Math.abs(t - at) < dt / 2) m.injectFault(f);
+    s = m.step(dt, { ...base, ambient, ...plan(t) });
+    maxN1 = Math.max(maxN1, s.n1Percent);
+    if (s.gasPathSolve.status === 'held') {
+      if (run === 0) runStartN1 = s.n1Percent;
+      held++;
+      run++;
+      longest = Math.max(longest, run);
+      maxN1Held = Math.max(maxN1Held, s.n1Percent);
+      maxRise = Math.max(maxRise, Math.abs(s.n1Percent - runStartN1));
+    } else run = 0;
+  }
+  console.warn = orig;
+  const budgetFirst = warns.filter((w) => w.includes('held-retry budget')).length;
+  console.log(
+    `${name.padEnd(34)} lost ${String(s.gasPathSolve.lostSolves).padStart(5)} heldSteps ${String(held).padStart(5)} longest ${(longest * dt).toFixed(2)} s` +
+      ` maxN1 ${maxN1.toFixed(1)} maxN1held ${maxN1Held.toFixed(1)} |dN1| in a run ${maxRise.toFixed(2)} episodes ${warns.length} budget-first ${budgetFirst}`,
+  );
+  return warns;
+}
+
+const mode = process.argv[2] ?? '1';
+const slam: Plan = (t) => ({ throttleLever: t < 3 ? 0 : t < 15 ? 1 : t < 25 ? 0 : 1 });
+const ramp1s: Plan = (t) => ({ throttleLever: t < 3 ? 0 : Math.max(0.01, Math.min(1, t - 3)) });
+const to: Plan = (t) => ({ throttleLever: t < 3 ? 0 : 1 });
+const cutRelight: Plan = (t) => ({ throttleLever: t < 3 ? 0 : 1, fuelLever: t >= 10 && t < 10.5 ? 'cutoff' : 'run' });
+const bleed: Plan = (t) => ({ throttleLever: t < 3 ? 0 : t < 15 ? 1 : 0, customerBleedFraction: 0.08, powerExtractionW: 150e3 });
+if (mode === '1') {
+  const ambients: Record<string, object> = {
+    isa: ISA_SLS,
+    'isa+15': { ...ISA_SLS, temperatureK: 303.15 },
+    'isa+30': { ...ISA_SLS, temperatureK: 318.15 },
+    'isa+40': { ...ISA_SLS, temperatureK: 328.15 },
+    'isa-40': { ...ISA_SLS, temperatureK: 248.15 },
+    '3000m': { pressurePa: 70121, temperatureK: 268.65, machNumber: 0 },
+  };
+  for (const dt of [1 / 60, 0.02]) {
+    for (const [an, amb] of Object.entries(ambients)) {
+      run(`slam/chop/reslam ${an} dt ${dt.toFixed(4)}`, {}, amb, slam, 35, dt);
+      run(`ramp1s ${an} dt ${dt.toFixed(4)}`, {}, amb, ramp1s, 20, dt);
+      run(`TO surge10 flameout20 ${an}`, {}, amb, to, 35, dt, { surge: 10, flameout: 20 });
+      run(`idle flameout5 ${an}`, {}, amb, (t) => ({ throttleLever: t < 10 ? 0 : 1 }), 25, dt, { flameout: 5 });
+      run(`TO fuel cut/relight ${an}`, {}, amb, cutRelight, 30, dt);
+      run(`bleed+PX slam/chop ${an}`, {}, amb, bleed, 25, dt);
+    }
+  }
+} else {
+  const fit = withCalibration(referenceEngine(), PART_POWER_FIT_CALIBRATION);
+  const w = run('fit ramp 1 s, 60 Hz, 20 s', { engine: fit }, ISA_SLS, (t) => ({ throttleLever: t < 3 ? 0 : Math.max(0.01, Math.min(1, (t - 3) / 1)) }), 23, 1 / 60);
+  for (const x of w) console.log('  ', x);
+}

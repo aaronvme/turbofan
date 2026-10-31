@@ -1,0 +1,78 @@
+// Critic pass 15: two traces for W2H-B1 / W2H-I3 on trial15 (run each from the checkout's root:
+//   node --import ./tools/mesh/ts-resolve.mjs <file>). Part 1: every 0.5 s while held at dt 0.02,
+// ISA and ISA+30. Part 2 (a separate file when run): every step from 25.2 s at ISA+30, up to the throw.
+// ===== part 1 (w2h-trace.ts) =====
+// Critic pass 15: trace W2H-B1 (default model, ISA SLS, take-off, surge 10 s, flameout 20 s, dt 0.02)
+// and the ISA+30 throw: per 0.5 s while held, N1/N2, the cause, the gas-path evaluations of the step.
+import { pathToFileURL } from 'node:url';
+const ROOT = process.env.ROOT ?? '.';
+const imp = (p: string) => import(pathToFileURL(`${ROOT}/${p}`).href);
+const { ISA_SLS } = await imp('src/contracts/ambient.ts');
+const { DEFAULT_CYCLE_INPUTS } = await imp('src/contracts/cycle.ts');
+const { createCycleModel } = await imp('src/cycle/model.ts');
+const { gasPathEvaluations } = await imp('src/cycle/engine.ts');
+const base = { ...DEFAULT_CYCLE_INPUTS, fuelLever: 'run', ignition: 'auto' };
+for (const [an, amb] of [['isa', ISA_SLS], ['isa+30', { ...ISA_SLS, temperatureK: 318.15 }]] as const) {
+  const warns: string[] = [];
+  const orig = console.warn;
+  console.warn = (...a: unknown[]) => void warns.push(String(a[0]));
+  const m = createCycleModel({});
+  m.reset('groundIdle', amb);
+  const dt = 0.02;
+  let last = '';
+  let lastPrint = -1;
+  console.log(`== ${an} dt ${dt}`);
+  try {
+    for (let i = 0; i < 35 / dt; i++) {
+      const t = i * dt;
+      if (Math.abs(t - 10) < dt / 2) m.injectFault('surge');
+      if (Math.abs(t - 20) < dt / 2) m.injectFault('flameout');
+      const e0 = gasPathEvaluations();
+      const s = m.step(dt, { ...base, ambient: amb, throttleLever: t < 3 ? 0 : 1 });
+      const ev = gasPathEvaluations() - e0;
+      const st = s.gasPathSolve.status;
+      if (t >= 19.9 && (st !== last || (st === 'held' && t - lastPrint >= 0.5) || t < 21)) {
+        if (st !== last || t - lastPrint >= 0.5) {
+          console.log(`t ${t.toFixed(2)} ${st.padEnd(8)} N1 ${s.n1Percent.toFixed(1)} N2 ${s.n2Percent.toFixed(1)} lit ${s.combustorLit} start ${s.startPhase} wf ${s.fuelFlowKgPerS.toFixed(3)} P3 ${s.stations['3'].ptPa.toFixed(0)} surge ${s.flags?.surge ?? '-'} ev ${ev}`);
+          lastPrint = t;
+        }
+      }
+      last = st;
+      if (t > 30 && st !== 'held') break;
+    }
+  } catch (e) {
+    console.log(`THREW: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  console.warn = orig;
+  for (const w of warns) console.log('  warn:', w.slice(0, 200));
+}
+
+// ===== part 2 (w2h-trace2.ts) =====
+// Critic pass 15: the ISA+30 dt 0.02 throw (W2H-B1), every step from 25.2 s.
+import { pathToFileURL } from 'node:url';
+const ROOT = process.env.ROOT ?? '.';
+const imp = (p: string) => import(pathToFileURL(`${ROOT}/${p}`).href);
+const { ISA_SLS } = await imp('src/contracts/ambient.ts');
+const { DEFAULT_CYCLE_INPUTS } = await imp('src/contracts/cycle.ts');
+const { createCycleModel } = await imp('src/cycle/model.ts');
+const base = { ...DEFAULT_CYCLE_INPUTS, fuelLever: 'run', ignition: 'auto' };
+const amb = { ...ISA_SLS, temperatureK: 318.15 };
+console.warn = () => undefined;
+const m = createCycleModel({});
+m.reset('groundIdle', amb);
+const dt = 0.02;
+for (let i = 0; i < 35 / dt; i++) {
+  const t = i * dt;
+  if (Math.abs(t - 10) < dt / 2) m.injectFault('surge');
+  if (Math.abs(t - 20) < dt / 2) m.injectFault('flameout');
+  let s;
+  try {
+    s = m.step(dt, { ...base, ambient: amb, throttleLever: t < 3 ? 0 : 1 });
+  } catch (e) {
+    const p = m.state();
+    console.log(`t ${t.toFixed(2)} THREW ${(e as Error).message.slice(0, 60)}; state before: N1 ${p.n1Percent} N2 ${p.n2Percent} wf ${p.fuelFlowKgPerS} P3 ${p.stations['3'].ptPa} T4 ${p.stations['4'].ttK} solve ${p.gasPathSolve.status}`);
+    break;
+  }
+  if (t >= 25.2)
+    console.log(`t ${t.toFixed(2)} ${s.gasPathSolve.status.padEnd(8)} N1 ${s.n1Percent.toFixed(2)} N2 ${s.n2Percent.toFixed(2)} wf ${s.fuelFlowKgPerS.toFixed(4)} P3 ${s.stations['3'].ptPa.toFixed(0)} T4 ${s.stations['4'].ttK.toFixed(0)} SM ${s.hpc.surgeMarginFraction.toFixed(3)} cause ${String(m.lostSolveCause()).slice(0, 70)}`);
+}

@@ -9,6 +9,11 @@
 export const MOCK_FIELD_N1_STEP = 1.5;
 /** ...or the last request is this old, ms (the slower parts of the state, T4, the bleed). */
 export const MOCK_FIELD_MAX_AGE_MS = 2000;
+/**
+ * A raster in flight this long, ms, has timed out (W2A-N7: a raster worker that never answers
+ * would leave the MOCK stale with no message): ten times the slowest raster measured (515 ms).
+ */
+export const MOCK_RASTER_TIMEOUT_MS = 10_000;
 
 export interface RasterScheduler {
   /** Whether to ask for a raster of this state now: none in flight, and the last one stale. */
@@ -17,6 +22,8 @@ export interface RasterScheduler {
   requested(n1Percent: number, nowMs: number): void;
   /** Its raster arrived, or it failed (either way the next stale state may ask again). */
   settled(): void;
+  /** Whether the raster in flight has been out longer than MOCK_RASTER_TIMEOUT_MS. */
+  timedOut(nowMs: number): boolean;
   readonly inFlight: boolean;
 }
 
@@ -38,6 +45,9 @@ export function createRasterScheduler(): RasterScheduler {
     },
     settled() {
       inFlight = false;
+    },
+    timedOut(now) {
+      return inFlight && last !== null && now - last.t > MOCK_RASTER_TIMEOUT_MS;
     },
     get inFlight() {
       return inFlight;

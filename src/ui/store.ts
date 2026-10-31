@@ -7,7 +7,13 @@ import type { SimCommand, SimSnapshot } from '../contracts/sim';
 import { DEFAULT_UI_STATE, type UnitSystem } from '../contracts/ui';
 import type { Anchor } from '../hud/callouts';
 import { pushTrail, type MapPoint } from '../hud/compressorMap';
-import type { AppDiagnostics, CameraPresetId, FieldChoice, ToWorker } from '../shell/protocol';
+import type {
+  AppDiagnostics,
+  CameraPresetId,
+  FieldChoice,
+  FromWorker,
+  ToWorker,
+} from '../shell/protocol';
 import type { OrbitInput } from '../shell/orbit';
 
 export const TRAIL_POINTS = 120;
@@ -27,20 +33,32 @@ export interface AppStore {
   diagnostics: AppDiagnostics | null;
   anchors: readonly Anchor[];
   trails: { fan: MapPoint[]; hpc: MapPoint[] };
+  /** The last 8 GPU errors the worker posted, and how many it posted in all. */
   gpuErrors: string[];
+  gpuErrorCount: number;
+  /** W2A-I1: why the sim stopped (a thrown cycle step); null while it runs. */
+  simStopped: string | null;
   refused: string[];
   units: UnitSystem;
   field: FieldChoice;
   panels: Record<PanelId, boolean>;
   /** The transport to the worker (set by the client; a no-op before it exists). */
   post: (m: ToWorker) => void;
-  send: (c: SimCommand) => void;
+  /** Sends a command; its seq (the snapshot's lastCommandSeq reaches it once applied). */
+  send: (c: SimCommand) => number;
   orbit: (i: OrbitInput) => void;
   camera: (p: CameraPresetId) => void;
   setField: (f: FieldChoice) => void;
   setUnits: (u: UnitSystem) => void;
   togglePanel: (p: PanelId) => void;
-  receive: (m: import('../shell/protocol').FromWorker) => void;
+  openPanel: (p: PanelId) => void;
+  /**
+   * A new worker (W2A-N11): forgets the last one's connection, snapshot, diagnostics, trails,
+   * faults and field choice, so nothing of it passes for the new one's. The viewer's own
+   * settings (units, panels) stay.
+   */
+  resetSession: () => void;
+  receive: (m: FromWorker) => void;
   setConnection: (c: Connection) => void;
 }
 
@@ -53,13 +71,17 @@ export const useApp = create<AppStore>((set, get) => ({
   anchors: [],
   trails: { fan: [], hpc: [] },
   gpuErrors: [],
+  gpuErrorCount: 0,
+  simStopped: null,
   refused: [],
   units: DEFAULT_UI_STATE.units,
   field: 'mock',
   panels: { maps: true, ts: true, stations: true, fidelity: false, diagnostics: false },
   post: () => undefined,
   send: (command) => {
-    get().post({ type: 'command', message: { seq: seq++, command } });
+    const s = seq++;
+    get().post({ type: 'command', message: { seq: s, command } });
+    return s;
   },
   orbit: (input) => {
     get().post({ type: 'orbit', input });
@@ -76,6 +98,23 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   togglePanel: (p) => {
     set((s) => ({ panels: { ...s.panels, [p]: !s.panels[p] } }));
+  },
+  openPanel: (p) => {
+    set((s) => ({ panels: { ...s.panels, [p]: true } }));
+  },
+  resetSession: () => {
+    set({
+      connection: { state: 'booting' },
+      snapshot: null,
+      diagnostics: null,
+      anchors: [],
+      trails: { fan: [], hpc: [] },
+      gpuErrors: [],
+      gpuErrorCount: 0,
+      simStopped: null,
+      refused: [],
+      field: 'mock',
+    });
   },
   setConnection: (connection) => {
     set({ connection });
@@ -100,19 +139,20 @@ export const useApp = create<AppStore>((set, get) => ({
         return;
       }
       case 'gpu-error':
-        set((s) => ({ gpuErrors: [...s.gpuErrors, m.message].slice(-8) }));
+        set((s) => ({
+          gpuErrors: [...s.gpuErrors, m.message].slice(-8),
+          gpuErrorCount: s.gpuErrorCount + 1,
+        }));
         return;
       case 'device-lost':
         set({ connection: { state: 'lost', message: m.message } });
         return;
+      case 'sim-stopped':
+        // the worker keeps rendering the frozen state: the connection stays up, the sim does not
+        set({ simStopped: m.message });
+        return;
       case 'fatal':
-        set((s) => ({
-          connection:
-            s.connection.state === 'running' && m.message.startsWith('cycle step')
-              ? s.connection
-              : { state: 'failed', message: m.message },
-          gpuErrors: [...s.gpuErrors, m.message].slice(-8),
-        }));
+        set({ connection: { state: 'failed', message: m.message } });
         return;
     }
   },

@@ -14,7 +14,7 @@ import type { SolverMesh } from '../../../src/flow/reference/solverMesh';
 import { NP } from '../../../src/flow/reference/state';
 import type { LadderRow } from '../common';
 import {
-  ENGINE_PRECONDITIONING,
+  ENGINE_PRECONDITIONING_CUT,
   closedBoxMesh,
   closedBoxOptions,
   relativeError,
@@ -79,18 +79,18 @@ export function run() {
   };
   storageRun('C tracking', box, closedBoxOptions('tracking'), 'tracking', pulse, rows, extra);
   storageRun(
-    'C-pre tracking (minMach 0.003)',
+    'C-pre tracking (minMach 0.003, global M_cut 0.02)',
     box,
-    closedBoxOptions('preconditioned'),
+    { ...closedBoxOptions('preconditioned'), lowMachPreconditioning: ENGINE_PRECONDITIONING_CUT },
     'tracking',
     pulse,
     rows,
     extra,
   );
   storageRun('C physical', box, closedBoxOptions('physical'), 'physical', pulse, rows, extra);
-  const sink = sinkCase(ENGINE_PRECONDITIONING, 'f32');
+  const sink = sinkCase(ENGINE_PRECONDITIONING_CUT, 'f32');
   storageRun(
-    'S sink (L8 set-up, minMach 0.003)',
+    'S sink (L8 set-up, minMach 0.003, global M_cut 0.02)',
     sink.mesh,
     sink.options,
     'tracking',

@@ -12,6 +12,7 @@ import { THERMALLY_PERFECT } from '../../../src/flow/reference/gas';
 import { ReferenceSolver } from '../../../src/flow/reference/solver';
 import { BC, polarMesh, solverMesh } from '../../unit/flow/helpers';
 import { converge, geometricGrowth } from '../common';
+import { GLOBAL_MACH_CUT } from '../oracle';
 
 const RS = 0.5;
 /** The pass rows' grid (D4-26) and the refinement sequence. */
@@ -53,7 +54,9 @@ export function sphere(
   const s = new ReferenceSolver(mesh, {
     gas: THERMALLY_PERFECT,
     freeStream: { pressure: 101325, temperature: 288.15, velocity: u },
-    ...(precondition ? { lowMachPreconditioning: { minMach: mach, machCut } } : {}),
+    ...(precondition
+      ? { lowMachPreconditioning: { minMach: mach, machCut, globalMachCut: GLOBAL_MACH_CUT } }
+      : {}),
   });
   s.setUniform({ rho: s.ref.rho, u, v: 0, w: 0, p: 101325, z: 0 });
   const conv = converge(s, tol, cap);
