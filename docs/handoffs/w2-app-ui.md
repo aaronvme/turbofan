@@ -1,4 +1,57 @@
-w2/app-ui: round 3 DONE (the critic pass 13 fix round, with D4-85, D4-87 and D4-88). Main @42cf8e9 is merged (a fast-forward; the lockfile did not change). HEAD: the handoff commit; the code is at d6fed99 and the shots at 2d9da68.
+w2/app-ui: round 4 (D4-91, D4-92 zz, W2A-I6, N13-N20). Main @cf87af0 merged (a fast-forward; the lockfile did not change). STOP-CLEAN (usage brake): code at 2082e56; test:gpu and test:browser still running detached (see GATES); the re-shoot not yet looked at.
+
+# Round 4 (2026-10-31)
+
+DONE (TDD: each test commit first)
+- **D4-91, the progressive warm-up** (357bbbb, d3f4ca1, 33bdf0e TDD; 1f0a49d, 27a120c, f5dd316, 2082e56). **FLAGGED RENDER EDIT** (engineView, post, passTimer, flowViz).
+  - `src/shell/warmUp.ts` (pure): the configuration each view needs, BOOT_CONFIGS (Realistic with and without tracers), BACKGROUND_ORDER (Cutaway, Schlieren, Data:mach, Exploded, Data p/rho/T), a slot every 2 frames after a frame under 8.3 ms CPU, a 400-slot give-up (shown anyway, listed in `diagnostics.warm.gaveUp`), `shownView` (the asked view once warm, else the shown one plus `preparing`).
+  - `EngineView.warmFrame(config, budget)`: one warm frame before the tick's real frame (which overwrites the canvas). New render pipelines go through createRenderPipelineAsync (three's compileAsync path) and draw once ready; new objects get at most 4 ms of own CPU a frame (nested passes timed apart, one always let through); TRAA's history, jitter and camera uniforms, the rotor motion's previous view-projection and the pass timer's medians are untouched. `warmUp(configs)` warms the boot configurations the same way and waits on them.
+  - The worker posts `ready` after the boot configurations; the rest warm in the background. A view not yet warm is held: the shown view keeps running, the overlay shows "Preparing the <mode> view…" (role status), and the switch happens when it is warm. The settled count stays 0 while preparing (callouts and shots wait).
+  - flowViz keeps one cut-plane material per quantity (no node rebuild per quantity switch).
+- **W2A-I6, Schlieren's own check** (4b6ca8d TDD, 15fd68d). `tests/browser/lib/schlierenCheck.ts`: >= 30 % of the free area outside the engine at the knife-edge grey (0.4-0.6), the engine box's middle under 0.5 x that grey, the jet behind it with a luminance spread >= 0.08. Unit-tested on synthetic frames. In Chrome it must pass on the Schlieren shot and FAIL on the Realistic and Exploded shots (the controls), every run.
+- **D4-91 item 3 + W2A-N19** (33bdf0e TDD, cf06c30). PHYSICS.md 3.5 rows U1 (amber below 5 %, red at or below 0, on the map only), U2 (first switch into a warmed mode <= 250 ms), U3 (boot-to-ready <= 5 s), both indicative. `src/hud/uiLevels.ts` mirrors them verbatim (its own mirror test; the T/C/L/P mirror is untouched). The map reads U1; the 5.0 % case is pinned normal (kills C1).
+- **D4-92 (zz), the callouts** (07db72a, dd66262 TDD; eab74c9, 0bd12e8, 15fd68d, 2fb0730).
+  - N13: the crossing prune cuts only when the best also shows every later label: 0 of 400 seeded probe cases short of the brute force (unit test).
+  - `calloutPoint`: the closed views' Fan at the fan face on the far side, when the eye sees it through the intake (else the intake lip on the eye's side); the cut views' anchors on the upper cut face, so the bypass duct's is in the duct.
+  - `layoutAxial`: in Cutaway and Data the labels sit in a row above and one below the engine's screen box (clamped under the top bar and over the station strip), alternating in axial order, each as near its anchor as the row allows, order kept. The row places go first in the general search, so its guarantees hold (no overlap, no panel, fewest crossings) and a label without room in its row gets an offset place.
+  - Schlieren's framing: the overlay posts its free area (`viewArea`); entering Schlieren frames the engine and the near-field jet in it (`framedOrbit`: dolly out, at most to 0.6, and pan), leaving it restores the orbit; a camera preset cancels the restore.
+- **Nits**: N15 (SIM STOPPED says "frozen until a reload"), N16 (the wall-time bars gate only with VITE_UI_QUIET=1; every run records them, fails a first-switch gap over 1000 ms, and checks the errors), N17 (each boot clears the slow message), N18 (pixelCap: ultra keeps the DPR up to the client's cap of 2), N19 (above).
+- **FLAGGED RENDER EDIT in flowViz (2fb0730)**: the raymarch samples the gradient at an explicit level 0 (one mip, the same texels). It aimed at Schlieren's first-use stall (an implicit-derivative sample in a loop forces FXC to unroll it); the loaded run after it still showed ~1.1 s, so the cause is not settled (decision 1).
+
+BOOT AND FIRST SWITCH (1366 x 768, `reports/ui/first-switch-*.json`; indicative, shared machine)
+| | boot-to-ready | first switch, longest gap (echo) | background warm, longest gap |
+|---|---|---|---|
+| Before (round 3 code at cf87af0) | 10.8 / 12.7 s (warm-up 9.4-9.9 s) | Schlieren 99 ms (298), Cutaway 89 ms (113) | none (all at boot) |
+| After, quieter run (27a120c) | 3.9-4.4 s | Schlieren 195 ms (183); Cutaway 706 ms (706, a Schlieren warm frame in the window) | Cutaway 108 ms, Schlieren 750 ms |
+| After, loaded runs (f5dd316..2fb0730) | 3.9-7.7 s | Schlieren 205-636 ms, Cutaway 133-582 ms | 0.65-1.6 s |
+- A cold switch into Data: "preparing" within 100-177 ms, shown 3.5 s (quiet) to 33 s (loaded) later, longest gap 123-171 ms, 47-540 snapshots while preparing.
+- Background warm time to Cutaway: 5.2 s quiet, 17-34 s loaded (slots need a frame under 8.3 ms CPU).
+
+NEEDS AN ORCHESTRATOR DECISION
+1. **The background warm-up still stalls the GPU process once, about 0.65-1.1 s, on Schlieren's configuration** (and up to 1.6 s on a loaded run). The worker's CPU is not the cause: the slowest warm frame's new objects took 3-6 ms and its time outside the draws 1-2 ms; the stall is in the GPU process (the round-3 measure). Cutaway's many pipelines compile asynchronously with gaps of 108-113 ms (quiet). Options: (a) warm Schlieren at boot (about +1 s of boot, against U3's 5 s); (b) the render owner finds what in Schlieren's composite compiles on the GPU process's main thread (the level-0 sample did not remove it); (c) accept one ~1 s hitch a few seconds after boot. The test records it and gates it only in a quiet run.
+2. Under load the background warm-up is slow (17-34 s to Cutaway), since a slot needs the last frame under 8.3 ms. A cold switch then waits behind "preparing" (33 s seen). A looser slot rule trades smoothness for speed.
+3. The warm-up reaches into three r186 internals (pinned): `backend.createRenderPipeline`'s promises argument, the prototype `renderObject`, TRAANode's `_historyRenderTarget`, `_previousDepthNode`, `_jitterIndex` and camera uniforms (checked at creation, a rename throws).
+
+NOT DONE (listed)
+- N14: the worker's fault paths still have no worker-level test (a pure tick-fault function or a test CycleChoice that throws).
+- N20: the solver's first bind is not warmed (it binds new textures; warming it means binding the solver field in a warm frame). A quality change compiles nothing new here (the profiles change the render scale and the DPR only); not measured in Chrome.
+- The Schlieren stall (decision 1); visual notes 5 and 7; flowviz's purple board (W2V-I7, D4-86).
+
+GOTCHAS
+- A warm frame's pass inputs render nested inside the object that samples them (the output quad holds TRAA, which holds the scene passes): budget the objects' own time, not their inclusive time.
+- The warm frame and the real frame share three's node frame: the pass timer's `beginFrame(true)` advances it, or the real frame would not re-render the passes.
+- Runs were detached (`reports/scratch/app-ui/r4/run.ps1`, `gates.ps1`). Dev port 5194 unused; no MCP page opened.
+
+GATES (code at 2082e56; STOP-CLEAN at the usage brake, so the last two are still running)
+- npm run typecheck: clean, 14 s. npm run lint: clean, 64 s.
+- coverage (`--coverage.reportsDirectory=reports/scratch/app-ui/r4/coverage`): 125 files, 2202 passed + 11 expected fail, exit 0 (thresholds met), 835 s.
+- npm run test:mesh: 2 files, 29 passed.
+- **UNRUN at handoff: test:gpu and test:browser.** They run in the detached gates script, PID 48328: status `reports/scratch/app-ui/r4/gates.status`, logs `gate-gpu.log` and `gate-browser.log` there. The browser step waits for >= 2 GB free and runs with VITE_UI_LOOKDEV=1, so it also re-shoots `docs/look-dev/ui/` (both sizes, every mode, the drawer). Those shots are uncommitted and **not looked at** (item 6 not done).
+- Before the gates, the browser app suite (both sizes, all modes, the layout bar, the Schlieren check and its controls) passed at 2fb0730; the first-switch file failed there only on the background-warm gap (1.1-1.6 s, loaded), which 2082e56 now records and gates only in a quiet run.
+
+NEXT
+1. Read gates.status; if test:browser passed, look at every new shot in `docs/look-dev/ui/` against the bar (nothing clipped or overlapping, labels on their parts, the hierarchy reads) and commit them with their `*-shots.txt` (the Schlieren signature rows are in it).
+2. Decisions 1-3 above. 3. N14, N20.
 
 # Round 3 (2026-10-30)
 
