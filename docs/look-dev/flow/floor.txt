@@ -1,0 +1,3 @@
+MOCK idle: 46.6 % of 273798 px dark before, 7.0 % after
+solver idle: 98.9 % of 273993 px dark before, 0.0 % after
+take-off: 155241 of 156467 flow px unchanged (99.22 %)

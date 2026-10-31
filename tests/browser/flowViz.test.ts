@@ -433,6 +433,26 @@ describe('flow visuals', () => {
       }
       return { footprint, before: darkOld / footprint, after: darkNow / footprint };
     };
+    // the look, as the viewer sees it (tracers on), before (the old look) and after; first,
+    // since a mesh hidden by `hide` stays hidden
+    for (const [lever, name] of [
+      [0, 'idle'],
+      [1, 'takeoff'],
+    ] as const) {
+      v.setThrottle(lever, true);
+      v.setFlowField(
+        createMockFlowField(ENGINE_DEFINITION, mockSteadyState(ENGINE_DEFINITION, lever), ISA_SLS),
+      );
+      for (const [off, when] of [
+        [true, 'before'],
+        [false, 'after'],
+      ] as const) {
+        v.setDebugFlags(off ? { noFlowFloor: true } : {});
+        settle(150);
+        await commands.writeFile(`${OUT}/data-${name}-${when}.png`, pixels(c).png, 'base64');
+      }
+    }
+    v.setDebugFlags({});
     const notes: string[] = [];
     // the MOCK at ground idle (lever 0)
     v.setThrottle(0, true);
@@ -474,30 +494,9 @@ describe('flow visuals', () => {
       notes.push(
         `take-off: ${String(kept)} of ${String(flow)} flow px unchanged (${((100 * kept) / flow).toFixed(2)} %)`,
       );
-      // the look, as the viewer sees it (tracers on), before (the old look) and after
-      for (const [lever, name] of [
-        [0, 'idle'],
-        [1, 'takeoff'],
-      ] as const) {
-        v.setThrottle(lever, true);
-        v.setFlowField(
-          createMockFlowField(
-            ENGINE_DEFINITION,
-            mockSteadyState(ENGINE_DEFINITION, lever),
-            ISA_SLS,
-          ),
-        );
-        for (const [off, when] of [
-          [true, 'before'],
-          [false, 'after'],
-        ] as const) {
-          v.setDebugFlags(off ? { noFlowFloor: true } : {});
-          settle(150);
-          await commands.writeFile(`${OUT}/data-${name}-${when}.png`, pixels(c).png, 'base64');
-        }
-      }
       v.setDebugFlags({});
       await annotate(`[look] W2V-I7: ${notes.join('; ')}`);
+      await commands.writeFile(`${OUT}/floor.txt`, notes.map((n) => `${n}\n`).join(''));
       expect(mock.footprint).toBeGreaterThan(20_000);
       expect(mock.before).toBeGreaterThan(0.3);
       expect(mock.after).toBeLessThanOrEqual(0.1);
