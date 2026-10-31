@@ -14,7 +14,7 @@ import { BACKING_STORE_MAX_PX } from '../../src/shell/pixelCap';
 import { SETTLED_FRAMES } from '../../src/shell/settle';
 import { App } from '../../src/ui/App';
 import { useApp } from '../../src/ui/store';
-import { schlierenSignature, type SchlierenSignature } from './lib/schlierenCheck';
+import { failedBars, schlierenSignature, type SchlierenSignature } from './lib/schlierenCheck';
 import '../../src/ui/global.css';
 
 const env = (import.meta as { env?: Record<string, string | undefined> }).env;
@@ -65,16 +65,33 @@ interface Shot {
   /** The luminance spread and the lit fraction of the centre of the view (the engine). */
   readonly centreStd: number;
   readonly centreLit: number;
-  /** W2A-I6: the frame's knife-edge Schlieren signature (null: no engine box on screen). */
+  /**
+   * W2A-I6: the frame's knife-edge Schlieren signature (null: no engine box on screen), on the
+   * canvas alone (W2A-I10: the overlay hidden for that screenshot, so no label or legend in it).
+   */
   readonly schlieren: SchlierenSignature | null;
   readonly jpeg: string;
 }
 
+const bitmapOf = async (png: string) =>
+  createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob());
+
+/** The worker's canvas alone: a screenshot with the overlay hidden (W2A-I10). */
+async function canvasAlone(): Promise<ImageBitmap> {
+  const overlay = document.querySelector<HTMLElement>('.overlay');
+  const was = overlay?.style.visibility ?? '';
+  if (overlay !== null) overlay.style.visibility = 'hidden';
+  try {
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    return await bitmapOf(await page.screenshot({ save: false }));
+  } finally {
+    if (overlay !== null) overlay.style.visibility = was;
+  }
+}
+
 /** A screenshot of the page (the worker's canvas composited with the overlay), as a JPEG. */
 async function shoot(): Promise<Shot> {
-  const png = await page.screenshot({ save: false });
-  const blob = await (await fetch(`data:image/png;base64,${png}`)).blob();
-  const bmp = await createImageBitmap(blob);
+  const bmp = await bitmapOf(await page.screenshot({ save: false }));
   const c = document.createElement('canvas');
   c.width = bmp.width;
   c.height = bmp.height;
@@ -106,9 +123,14 @@ async function shoot(): Promise<Shot> {
   out.height = window.innerHeight;
   out.getContext('2d')?.drawImage(bmp, 0, 0, out.width, out.height);
   const jpeg = out.toDataURL('image/jpeg', 0.9).slice('data:image/jpeg;base64,'.length);
-  // the luminance at the CSS size, for the Schlieren signature (the engine box and the free area
-  // are in CSS px)
-  const cpx = out.getContext('2d')?.getImageData(0, 0, out.width, out.height).data;
+  // the canvas's luminance at the CSS size, for the Schlieren signature (the engine box and the
+  // free area are in CSS px)
+  const raw = await canvasAlone();
+  const cv = document.createElement('canvas');
+  cv.width = window.innerWidth;
+  cv.height = window.innerHeight;
+  cv.getContext('2d')?.drawImage(raw, 0, 0, cv.width, cv.height);
+  const cpx = cv.getContext('2d')?.getImageData(0, 0, cv.width, cv.height).data;
   const lum = new Float32Array(out.width * out.height);
   if (cpx !== undefined)
     for (let i = 0; i < lum.length; i++)
@@ -122,7 +144,7 @@ async function shoot(): Promise<Shot> {
   const schlieren =
     engineBox === null || view === undefined
       ? null
-      : schlierenSignature(lum, out.width, out.height, engineBox, {
+      : schlierenSignature(lum, cv.width, cv.height, engineBox, {
           x: view.left,
           y: view.top,
           w: view.width,
@@ -345,13 +367,37 @@ describe('the app in Chrome', () => {
         // shots passed this only because they showed the exploded engine (W2A-I4).
         if (mode !== 'schlieren')
           expect(shot.centreLit, `${mode}: lit fraction of the centre`).toBeGreaterThan(0.02);
-        // W2A-I6: Schlieren's own check (the grey field, the dim silhouette, the banded jet); the
-        // Realistic and Exploded frames are its controls, and must fail it
+        // W2A-I6: Schlieren's own check (the grey field, the dim silhouette, the banded jet), on
+        // the canvas alone. W2A-I10: each bar has its own failing control, stated before the run:
+        // Realistic and Exploded (a lit engine) fail the silhouette bar, Cutaway and Data (the
+        // studio round a near-field plane) the grey-share bar, and S1 (the knife edge off, below)
+        // the jet bar
         const sig = JSON.stringify(shot.schlieren);
         rows.push(`  ${mode} schlieren signature ${sig}`);
-        if (mode === 'schlieren') expect(shot.schlieren?.pass, `schlieren: ${sig}`).toBe(true);
-        if (mode === 'realistic' || mode === 'exploded')
+        const fails = shot.schlieren === null ? null : failedBars(shot.schlieren);
+        if (mode === 'schlieren') {
+          expect(shot.schlieren?.pass, `schlieren: ${sig}`).toBe(true);
+          // S1: the same view with the knife edge compositing no deflection (the bandless jet)
+          useApp.getState().post({ type: 'debug', knifeEdge: false });
+          const v = useApp.getState().snapshot?.version ?? 0;
+          await until('S1 drawn', () => (useApp.getState().snapshot?.version ?? 0) >= v + 10);
+          const s1 = await shoot();
+          useApp.getState().post({ type: 'debug', knifeEdge: true });
+          const s1sig = JSON.stringify(s1.schlieren);
+          rows.push(`  schlieren S1 (knife edge off, control) schlieren signature ${s1sig}`);
+          expect(s1.schlieren?.pass, `S1 (control): ${s1sig}`).toBe(false);
+          expect(s1.schlieren === null ? null : failedBars(s1.schlieren), s1sig).toContain('jet');
+          const v1 = useApp.getState().snapshot?.version ?? 0;
+          await until(
+            'knife edge back',
+            () => (useApp.getState().snapshot?.version ?? 0) >= v1 + 10,
+          );
+        } else {
           expect(shot.schlieren?.pass, `${mode} (control): ${sig}`).toBe(false);
+          expect(fails, `${mode} (control): ${sig}`).toContain(
+            mode === 'realistic' || mode === 'exploded' ? 'silhouette' : 'grey',
+          );
+        }
         expect(problems(), mode).toEqual([]);
       }
       // the drawer (Diagnostics and What's simulated) opens without covering the other panels
