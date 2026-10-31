@@ -599,10 +599,11 @@ export function createPipeline(
     const schPipe = new RenderPipeline(renderer);
     schPipe.outputNode = Fn(() => {
       // w2/app-ui round 5 (flagged edit, D4-95 item 2): the beauty first, as a statement, as in
-      // the other composites, so TRAA's chain renders the scene passes (jittered) before anything
-      // below reads their depth. Reading the depth first rendered the scene pass a call level up,
-      // and three keys its render contexts by the call depth: every engine object got a second
-      // render object, node build (~15 ms each) and pipeline on Schlieren's first frame
+      // the other composites, so TRAA's chain renders the scene passes before anything below
+      // reads their depth (the same image: the passes render once a frame). Reading the depth
+      // first rendered the scene pass a call level up, and three keys its render contexts by the
+      // call depth (GPU_FACTS M56): every engine object got a second render object, node build
+      // (~15 ms each) and pipeline on Schlieren's first frame
       const dim = display().rgb.mul(0.22).toVar();
       const eps = schTex.sample(screenUV).x;
       const grey = float(0.5).add(eps.mul(0.5).div(h.schlierenRangeRad)).clamp(0, 1);
