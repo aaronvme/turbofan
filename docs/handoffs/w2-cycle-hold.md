@@ -1,3 +1,48 @@
+w2/cycle-hold ROUND 2 (D4-92, critic pass 15 FIX FIRST): W2H-B1 and W2H-I3 fixed and tested; W2H-I2, N6 and B2's tests NOT written (usage brake). Merged main ca0a3aa first (32654d2). HEAD = the commit that adds this section.
+
+DONE
+- 32654d2: `git merge main`; the W2A-N6 conflict resolved as critic pass 15 did (our `model.ts` lines, both tests). Lockfile unchanged.
+- 56279fc (TDD): `tests/unit/cycle/heldRecovery.test.ts`, D4-92 (b)'s row before the fix: critic pass 15's scenario on the default model (ISA SLS, take-off at 3 s, Surge 10 s, Flameout 20 s, auto relight, 35 s) at dt 1/120, 1/60, 0.020, 0.0205, 0.021, 0.025, 1/30: every held episode (consecutive held steps x dt) <= 0.5 s, N1 <= the 104 % redline while held. It failed at all seven. In the slow mutation set. `tools/cycle/held-reach.ts` prints the scenario table (any checkout, `--ambient-k`, `--unbounded`).
+- 0f9af06, the fix:
+  - **(a) the spools are bounded, not frozen.** While held they follow D4-17's held balance but never past n1MaxRpm / n2MaxRpm (`model.ts` substep). Freezing (dN/dt = 0) was tried first and fails: the relight's entry state (N1 32 %, N2 80 %) has no root reachable from the anchor, so frozen it holds 12 s at every frame step (`reports/cycle-hold/scratch/variants.txt`). It is the spools moving that lets D4-13 find a root within 0.15 s. The clamp never engages in the critic's scenario once (c) is in; it bounds the fit (below).
+  - **(c) escalation, needed:** a held episode that has lasted `ESCALATE_AFTER_S` = 0.25 s runs D4-13's whole walk (`solveMatched`) once, unbudgeted, in one snapshot; it counts as a walk start. **0.25 s, not D4-92's "past 0.5 s":** escalating at 0.5 s cannot meet a <= 0.5 s bound counted in whole steps. 0.25 s is half the bound. `heldRetryEscalations()` (CycleDiagnostics) counts them. `heldFrame.test.ts`'s P5 rows exempt the escalated step (the exception beside P5, like the sub-idle entry) and pin at most one per episode. Cost: 3100-4400 gas-path evaluations, 50-240 ms in Node, once per episode (fit ramp: 4355 evaluations, 60 ms).
+  - **W2H-I3:** a surge starts only from a solved gas path. The detected start skips a held snapshot; an injected surge on a held snapshot stays pending until the solve recovers (bounded by (b)).
+- 80fbcae: heldFrame P5 exemption + the escalation pin.
+
+SCENARIO TABLE (tools/cycle/held-reach.ts; longest hold / max N1 while held; before = f2c0779 policy, after = 0f9af06)
+| dt | 1/120 | 1/60 | 0.020 | 0.0205 | 0.021 | 0.025 | 1/30 |
+|---|---|---|---|---|---|---|---|
+| ISA before | 0.54 s / 33.2 % | 0.58 / 32.6 | **7.88 / 198.2** | **4.49 / 217.9** | **4.14 / 205.3** | **4.78 / 168.0** | 1.23 / 31.9 |
+| ISA after | 0.26 / 35.4 | 0.27 / 34.6 | 0.26 / 35.2 | 0.35 / 36.2 | 0.36 / 36.2 | 0.28 / 34.6 | 0.27 / 34.7 |
+| ISA UNBOUNDED_RETRY (D4-13) | 0.35 / 37.3 | 0.13 / 35.4 | 0.12 / 35.8 | 0.33 / 37.2 | 0.36 / 37.2 | 0.38 / 37.2 | 0.13 / 35.2 |
+| ISA+30 before | 0.54 / 36.4 | 0.57 / 35.3 | **throws 25.46 s** | 0.64 / 35.6 | 0.65 / 35.6 | 0.80 / 33.8 | 1.43 / 33.7 |
+| ISA+30 after | 0.26 / 39.1 | 0.27 / 36.9 | 0.26 / 37.7 | 0.27 / 39.2 | 0.25 / 39.2 | 0.28 / 37.3 | 0.27 / 37.3 |
+Raw: `reports/cycle-hold/reach/before.txt`, `after-isa.txt`, `after-isa30.txt` (also dt 0.05 / 0.1 before).
+
+FINDINGS (need a decision)
+1. **The real mechanism of B1 and I3 is a non-physical matched root.** After the long relight hold the spools have integrated the stale (unlit, sub-idle) balance, N1 lags N2, and the matched path tracks a branch where the booster cools the flow: T25 < T2 by up to 61 K at ISA (226.8 K at 27.1 s, where B1's episode starts) and 82 K at ISA+30. `attempt()` accepts it (only the residual and BPR > 1 are checked). At ISA+30 that branch reaches HPC corrected speed 1.22, where `hpcCubic`'s fit is degenerate (psi0 20014, H -10002): a surge started there from a MATCHED point integrates to NaN. So the throw's surge was not from a held point; the held-start guard is right but not the cause. With (c) the trajectory stays physical (UNBOUNDED min T25 - T2 is +2.4 K). Proposed: refuse a root with a compressor temperature rise <= 0 as non-physical (like BPR <= 1), and make `hpcCubic` reject H <= 0 with a named error. Neither is done: both change the matched-path acceptance.
+2. **ESCALATE_AFTER_S = 0.25 s instead of 0.5 s** (above). Please confirm, or set it.
+3. **W2H-I1 (fit):** not fixed by (a)+(c). Fit ramp at 60 Hz: episode 1 still 3.37 s (its escalation fails), episode 2 (13.05 s) never recovers, but N1 ends at **104.00 %** (was 260-275 %). Stays on the part-power backlog.
+4. The (b) bound lives in the test (D4-92), not in P5 / PHYSICS.md. Say if it should be a P5 row.
+
+NEXT
+1. W2H-I2 (test only): a fakeNewton walk sliced every 3 iterations whose solves never converge: each solve totals exactly 25 iterations and the walk ends lost (B1 makes it never end). Plan in this round's notes; not written.
+2. B2 (W2H-N4 143:7): a walk in flight past 0.5 s keeps its walkStartedS (small budget so it spans > 25 steps).
+3. N6/B4: assert in heldFrame that a held episode's held P3 changes mid-episode (a walk reached its old target).
+4. A fast test of the I3 start condition (an injected surge on a held snapshot waits; the clamp at the redline with a double that always loses mid-acceleration). Today only the slow ISA+30 sweep and heldRecovery exercise them.
+5. N1-N5: not touched. Fingerprint probe and Stryker not rerun.
+
+GOTCHAS
+- The escalation is per held episode and only in `retried()` (not the sub-idle entry, which already walks whole). `UNBOUNDED_RETRY` stays call-for-call D4-13 (an escalation is the same solveMatched).
+- Step-level episode length can include one frame on each side: compare with the bound in whole frame steps.
+
+GATES @ the commit adding this section (shared machine, usage brake: partial)
+- typecheck clean; ESLint + Prettier clean on src/cycle, tests/unit/cycle, tools/cycle.
+- heldRecovery.test.ts 9 passed (@0f9af06); heldFrame.test.ts 11 passed (@80fbcae). heldRetry, gasPathHold, lostSolveCause, surgeDetection, surge: 5 files, 68 passed.
+- NOT RUN: full `npm run coverage`, `test:mesh`, the other slow transient files (model, modelPaths, surgeRecovery), the fingerprint probe, Stryker.
+
+---
+
 w2/cycle-hold: DONE. D4-84, a held gas path stays inside the frame budget: the held retry is bounded per step (a work budget, resumed walks) and the walk runs at most once per 0.5 s; (c) not done, as decided. (from main 42cf8e9; HEAD = the commit that adds this file)
 
 DONE
