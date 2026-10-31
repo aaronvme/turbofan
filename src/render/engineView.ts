@@ -91,6 +91,11 @@ import { createRendererOnDevice } from './rendererOnDevice';
 import { createStandMesh, createStudio, FLOOR_Y, type Studio } from './studio';
 import { standLayout } from '../geometry/stand';
 import type { WarmConfig } from '../shell/warmUp';
+import {
+  checkBackendInternals,
+  checkRendererInternals,
+  type ThreeRendererInternals,
+} from './threeInternals';
 import { X as STATIONS } from '../geometry/parts';
 
 export interface EngineViewOptions {
@@ -271,6 +276,11 @@ export interface WarmFrameReport {
   /** Render pipelines created (asynchronously) in this frame, and all still compiling. */
   readonly created: number;
   readonly pending: number;
+  /**
+   * D4-95 item 2: pipelines created while drawing an object the budget did not count as new
+   * (a node build and compile it could not see); 0 when the warm key is three's own.
+   */
+  readonly unbudgeted: number;
   /** The new object whose own CPU (nested passes excluded) was the longest, and its ms. */
   readonly slowest: { readonly name: string; readonly ms: number };
   /** CPU ms outside three's object draws (its pass bookkeeping, and any wait on the GPU process). */
@@ -581,8 +591,7 @@ async function assemble(
   };
 
   // D4-91's warm frames: the live warm frame's counts (null outside one), the objects drawn
-  // before (by object, material, camera, pass and target: three's render object), and every
-  // pipeline still compiling asynchronously
+  // before (by three's own render object key), and every pipeline still compiling asynchronously
   type RenderObjectArgs = [
     Object3D,
     unknown,
@@ -593,6 +602,7 @@ async function assemble(
   ];
   let warm: {
     created: number;
+    unbudgeted: number;
     newObjects: number;
     newMs: number;
     deferred: number;
@@ -600,24 +610,31 @@ async function assemble(
     slowest: { name: string; ms: number };
     objectsMs: number;
   } | null = null;
+  // the internals below, checked at startup (pinned in tests/unit/render/threeInternals.test.ts)
+  checkRendererInternals(renderer);
+  checkBackendInternals(renderer.backend);
   const seen = new Set<string>();
-  const targetIds = new WeakMap<object, number>();
-  let nextTargetId = 1;
+  // w2/app-ui round 5 (flagged edit, D4-95 item 2): three's render object key (RenderObjects.get:
+  // the object, the material, the render context, the lights node and the pass). The render
+  // context is keyed by the target's attachments, the MRT and the renderer's call depth, so one
+  // target drawn at another depth is another render object: its own node build (~15 ms for an
+  // engine material) and pipeline. Round 4 keyed by the target, so Schlieren's composite, which
+  // reached the scene passes a level up, rebuilt every engine object in one unbudgeted warm frame
+  const internals = renderer as unknown as Pick<ThreeRendererInternals, '_currentRenderContext'>;
   const renderKey = (args: RenderObjectArgs): string => {
-    const rt = renderer.getRenderTarget();
-    let rtId = 0;
-    if (rt !== null) {
-      rtId = targetIds.get(rt) ?? nextTargetId++;
-      targetIds.set(rt, rtId);
-    }
-    const [object, scene, camera, , material] = args;
-    return `${String(object.id)}:${String((scene as { id?: number }).id)}:${String(camera.id)}:${String(material.id)}:${String(args[8])}:${String(rtId)}`;
+    const [object, , , , material, , lightsNode] = args;
+    const context = internals._currentRenderContext?.id ?? -1;
+    const lights = (lightsNode as { id?: number } | null)?.id ?? -1;
+    return `${String(object.id)}:${String(material.id)}:${String(context)}:${String(lights)}:${String(args[8])}`;
   };
   // three's own renderObject (the prototype's), called with the renderer as `this`
   const baseRenderObject = (
     Object.getPrototypeOf(renderer) as { renderObject: (...args: RenderObjectArgs) => void }
   ).renderObject;
   const pendingPipelines = new Set<Promise<unknown>>();
+  // the objects a warm frame is drawing (nested: a pass renders its inputs inside the object that
+  // samples them), each with its nested ms and whether the budget counted it as new
+  const drawing: { childMs: number; isNew: boolean }[] = [];
   // in a warm frame every new render pipeline is created asynchronously (three's compileAsync
   // path, createRenderPipelineAsync), and its object is drawn once it is ready
   const backend = renderer.backend as unknown as {
@@ -632,6 +649,8 @@ async function assemble(
     const list: Promise<unknown>[] = [];
     baseCreatePipeline(renderObject, list);
     warm.created++;
+    // a pipeline is built for the object being drawn: one the budget saw as new, or a miss
+    if (drawing.at(-1)?.isNew !== true) warm.unbudgeted++;
     for (const p of list) {
       pendingPipelines.add(p);
       void p.finally(() => pendingPipelines.delete(p));
@@ -861,6 +880,7 @@ async function assemble(
       view.setMode(c.look, true);
       const w = {
         created: 0,
+        unbudgeted: 0,
         newObjects: 0,
         newMs: 0,
         deferred: 0,
@@ -875,7 +895,6 @@ async function assemble(
       // a pass's updateBefore renders its inputs inside the object that samples them (the output
       // quad holds TRAA, which holds the scene passes), so each object's own time excludes its
       // nested ones, and the budget (the new objects' own CPU) is checked as each new one starts
-      const stack: { childMs: number }[] = [];
       own.renderObject = function (this: WebGPURenderer, ...args: RenderObjectArgs) {
         const key = renderKey(args);
         const isNew = !seen.has(key);
@@ -885,13 +904,13 @@ async function assemble(
         }
         if (isNew) w.newObjects++;
         const s0 = performance.now();
-        stack.push({ childMs: 0 });
+        drawing.push({ childMs: 0, isNew });
         try {
           baseRenderObject.apply(this, args);
         } finally {
           const ms = performance.now() - s0;
-          const own = ms - (stack.pop()?.childMs ?? 0);
-          const parent = stack.at(-1);
+          const own = ms - (drawing.pop()?.childMs ?? 0);
+          const parent = drawing.at(-1);
           if (parent !== undefined) parent.childMs += ms;
           else w.objectsMs += ms;
           if (isNew) {
@@ -927,6 +946,7 @@ async function assemble(
         newMs: w.newMs,
         deferred: w.deferred,
         created: w.created,
+        unbudgeted: w.unbudgeted,
         pending: pendingPipelines.size,
         slowest: w.slowest,
         outsideMs: performance.now() - t0 - w.objectsMs,

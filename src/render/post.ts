@@ -84,6 +84,7 @@ import { traa } from 'three/addons/tsl/display/TRAANode.js';
 import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { installTraaResolve } from './traaResolve';
+import { TRAA_MATRICES, checkTraaInternals } from './threeInternals';
 import type { FlowPostDeps } from './flowViz';
 import { fromHalfBits } from '../contracts/half';
 
@@ -185,16 +186,6 @@ interface TraaInternals {
   readonly _previousDepthNode: { value: Texture };
   _jitterIndex: number;
 }
-
-/** TRAA's camera uniforms (three r186 TRAANode), which its updateBefore rolls each frame. */
-const TRAA_MATRICES = [
-  '_cameraNearFar',
-  '_cameraWorldMatrix',
-  '_cameraWorldMatrixInverse',
-  '_cameraProjectionMatrixInverse',
-  '_previousCameraWorldMatrix',
-  '_previousCameraProjectionMatrixInverse',
-] as const;
 
 export function createPipeline(
   renderer: WebGPURenderer,
@@ -448,16 +439,9 @@ export function createPipeline(
   // accumulating: the copy is made here instead whenever three skipped it.
   const traaState = traaNode as unknown as TraaInternals;
   // W1V-N3: the patch below reaches into three's TRAA internals; a renamed field would make it
-  // create a new property and leave TRAA's disocclusion test on a stale depth, silently
-  for (const field of [
-    '_historyRenderTarget',
-    '_previousDepthNode',
-    'updateBefore',
-    '_jitterIndex',
-    ...TRAA_MATRICES,
-  ] as const)
-    if (!(field in traaState))
-      throw new Error(`three's TRAANode has no ${field} (render-scale and warm patches, post.ts)`);
+  // create a new property and leave TRAA's disocclusion test on a stale depth, silently (pinned
+  // by tests/unit/render/threeInternals.test.ts; this throw is the second line of defence)
+  checkTraaInternals(traaState);
   const traaUpdate = traaState.updateBefore.bind(traaNode);
   const drawing = new Vector2();
   // D4-91: a warm frame resolves into a throwaway history, then puts TRAA's state back, so the
@@ -614,7 +598,12 @@ export function createPipeline(
     // schlieren: the knife-edge grey (Settles 2001, eq. 3.5), the engine a dim silhouette
     const schPipe = new RenderPipeline(renderer);
     schPipe.outputNode = Fn(() => {
-      const beauty = display();
+      // w2/app-ui round 5 (flagged edit, D4-95 item 2): the beauty first, as a statement, as in
+      // the other composites, so TRAA's chain renders the scene passes (jittered) before anything
+      // below reads their depth. Reading the depth first rendered the scene pass a call level up,
+      // and three keys its render contexts by the call depth: every engine object got a second
+      // render object, node build (~15 ms each) and pipeline on Schlieren's first frame
+      const dim = display().rgb.mul(0.22).toVar();
       const eps = schTex.sample(screenUV).x;
       const grey = float(0.5).add(eps.mul(0.5).div(h.schlierenRangeRad)).clamp(0, 1);
       const suv = screenUV;
@@ -627,7 +616,7 @@ export function createPipeline(
         .greaterThan(h.engineBox.x0)
         .and(pw.x.lessThan(h.engineBox.x1))
         .and(length(pw.yz).lessThan(h.engineBox.r));
-      return vec4(select(inBox, beauty.rgb.mul(0.22), vec3(grey)), 1);
+      return vec4(select(inBox, dim, vec3(grey)), 1);
     })();
     schPipe.outputColorTransform = false;
     flow = {

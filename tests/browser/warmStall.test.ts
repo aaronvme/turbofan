@@ -10,7 +10,7 @@
 // render contexts by the call depth, so every engine object got a second render object, a node
 // rebuild (~15 ms each, ~0.7 s) and a second pipeline, inside one warm frame: the warm budget
 // keyed objects by their render target, so it saw none of them as new. Checked here, every run:
-// - a warm frame creates pipelines only for objects its budget counted as new;
+// - a warm frame creates pipelines only while drawing objects its budget counted as new;
 // - no background configuration recompiles an object the boot already drew with that material.
 // The timings are recorded (reports/ui/warm-stall.json), indicative, not gated.
 import { commands } from 'vitest/browser';
@@ -128,10 +128,11 @@ describe('the background warm frames (D4-95 item 2)', () => {
           n++;
           maxCpu = Math.max(maxCpu, r.cpuMs);
           created += r.created;
-          // a pipeline is created only for an object the budget let through as new
-          if (r.created > r.newObjects)
+          // a pipeline is created only while drawing an object the budget let through as new
+          // (one new object may build two: a double-sided transparent plane draws both faces)
+          if (r.unbudgeted > 0)
             overBudget.push(
-              `${id} warm ${String(n - 1)}: ${String(r.created)} pipelines for ${String(r.newObjects)} new objects (${r.cpuMs.toFixed(0)} ms)`,
+              `${id} warm ${String(n - 1)}: ${String(r.unbudgeted)} of ${String(r.created)} pipelines outside the ${String(r.newObjects)} new objects (${r.cpuMs.toFixed(0)} ms)`,
             );
           done = r.done;
         }
