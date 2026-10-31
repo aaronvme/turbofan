@@ -85,6 +85,7 @@ import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { installTraaResolve } from './traaResolve';
 import { TRAA_MATRICES, checkTraaInternals } from './threeInternals';
+import { createViewProjRoll } from './viewProjRoll';
 import type { FlowPostDeps } from './flowViz';
 import { fromHalfBits } from '../contracts/half';
 
@@ -380,7 +381,12 @@ export function createPipeline(
   const prevViewProj = uniform(new Matrix4());
   const currViewProj = uniform(new Matrix4());
   const currViewProjInv = uniform(new Matrix4());
-  let havePrev = false;
+  const viewProjs = createViewProjRoll(
+    prevViewProj.value,
+    currViewProj.value,
+    currViewProjInv.value,
+  );
+  const frameViewProj = new Matrix4();
   if (motion !== undefined) {
     const velocityNode = sceneVelocity as unknown as {
       load(texel: Node<'vec2'>): Node<'vec4'>;
@@ -639,11 +645,9 @@ export function createPipeline(
     // the rotor motion vectors' view-projections, unjittered (TRAA jitters the camera only
     // inside the pipeline's render)
     camera.updateMatrixWorld();
-    if (havePrev) prevViewProj.value.copy(currViewProj.value);
-    currViewProj.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    currViewProjInv.value.copy(currViewProj.value).invert();
-    if (!havePrev) prevViewProj.value.copy(currViewProj.value);
-    havePrev = true;
+    viewProjs.roll(
+      frameViewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse),
+    );
     if (!withTraa || linear) {
       debugPipeline(withTraa, linear).render();
       return;
@@ -725,16 +729,13 @@ export function createPipeline(
       applyFlowScale();
     },
     render: (withTraa = true, linear = false, warm = false) => {
-      const prev = warm ? { p: prevViewProj.value.clone(), had: havePrev } : null;
+      const restore = warm ? viewProjs.save() : null;
       warming = warm;
       try {
         renderFrame(withTraa, linear);
       } finally {
         warming = false;
-        if (prev !== null) {
-          prevViewProj.value.copy(prev.p);
-          havePrev = prev.had;
-        }
+        restore?.();
       }
     },
     dispose: () => {
