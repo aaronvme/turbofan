@@ -13,6 +13,8 @@ import {
   calloutGeometry,
   calloutPoint,
   componentAnchors,
+  engineRings,
+  screenBox,
   seenThroughIntake,
   type CalloutView,
 } from '../../../src/hud/anchors';
@@ -24,6 +26,7 @@ import {
   overlaps,
   type Rect,
 } from '../../../src/hud/callouts';
+import { framedOrbit } from '../../../src/shell/orbit';
 
 const OFFSETS = [
   [18, -34],
@@ -229,5 +232,41 @@ describe('Schlieren framing: the content fitted into the free area (D4-92 zz)', 
     expect(o.w).toBeCloseTo(canvas.w, 9);
     const huge: Rect = { x: -2000, y: -1000, w: 6000, h: 3000 };
     expect(fitViewOffset(huge, canvas, free, 0.6).w).toBeCloseTo(canvas.w / 0.6, 9);
+  });
+});
+
+describe('the engine on screen, and the Schlieren orbit (D4-92 zz)', () => {
+  it('engineRings span the intake to the given end, and screenBox bounds what is in view', () => {
+    const rings = engineRings(def, 5);
+    const xs = rings.map((p) => p[0]);
+    expect(Math.min(...xs)).toBeCloseTo(geo.lipX, 9);
+    expect(Math.max(...xs)).toBeCloseTo(5, 9);
+    // an identity view-projection: the world's [-1, 1] square is the screen
+    const m = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+    const b = screenBox(
+      m,
+      [
+        [-0.5, 0.5, 0],
+        [0.5, -0.5, 0],
+        [9, 9, 0],
+      ],
+      200,
+      100,
+    );
+    expect(b).toEqual({ x: 50, y: 25, w: 100, h: 50 });
+    expect(screenBox(m, [[9, 9, 0]], 200, 100)).toBeNull();
+  });
+
+  it('framedOrbit dollies out to fit and pans the box toward the free area, and leaves a fitting, centred box alone', () => {
+    const o = { target: [1, 0, 0] as const, azimuth: -0.8, elevation: 0.2, distance: 5 };
+    const canvas = { w: 1920, h: 1000 };
+    const free: Rect = { x: 360, y: 100, w: 1200, h: 800 };
+    const centred: Rect = { x: 760, y: 300, w: 400, h: 400 };
+    expect(framedOrbit(o, centred, canvas, free, 30, 0.6)).toEqual(o);
+    const wide: Rect = { x: 400, y: 200, w: 1600, h: 600 };
+    const f = framedOrbit(o, wide, canvas, free, 30, 0.6);
+    expect(f.distance).toBeCloseTo(5 / (1200 / 1600), 9);
+    expect(f.azimuth).toBe(o.azimuth);
+    expect(f.target).not.toEqual(o.target);
   });
 });
