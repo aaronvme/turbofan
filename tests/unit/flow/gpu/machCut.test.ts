@@ -15,6 +15,10 @@ import {
 } from '../../../../src/flow/gpu/params';
 import { THERMALLY_PERFECT } from '../../../../src/flow/reference/gas';
 import { DEFAULT_CFL } from '../../../../src/flow/reference/solver';
+import {
+  ENGINE_PRECONDITIONING_CUT as ORACLE_PRECONDITIONING_CUT,
+  GLOBAL_MACH_CUT,
+} from '../../../ladder/oracle';
 
 const AT_REST = {
   gas: THERMALLY_PERFECT,
@@ -95,5 +99,24 @@ describe('D4-89: the engine adapter default is the global M_cut', () => {
           ),
         String(bad),
       ).toThrow(/globalMachCut/);
+  });
+});
+
+// D4-93 (the merge with w2/reference-9): the GPU mirror and the CPU adoption are one cut, so
+// neither can move without the other
+describe("D4-89 / D4-93: the GPU's cut is the CPU ladder's", () => {
+  it('ENGINE_MACH_CUT === GLOBAL_MACH_CUT (tests/ladder/oracle.ts)', () => {
+    expect(ENGINE_MACH_CUT).toBe(GLOBAL_MACH_CUT);
+  });
+
+  it("the oracle's ENGINE_PRECONDITIONING_CUT gives the GPU default's uniforms", () => {
+    const oracle = stageParams(
+      { ...AT_REST, lowMachPreconditioning: ORACLE_PRECONDITIONING_CUT },
+      SIZES,
+    );
+    const gpu = stageParams({ ...AT_REST, lowMachPreconditioning: enginePreconditioning() }, SIZES);
+    expect(oracle.tracking).toEqual(gpu.tracking);
+    expect(oracle.bcTracking).toEqual(gpu.bcTracking);
+    expect(oracle.physical).toEqual(gpu.physical);
   });
 });
