@@ -3,6 +3,7 @@
 // engine's own start: Newton from the reset's idle unknowns at 57 % N2 (w2/followups probe).
 import { describe, expect, it } from 'vitest';
 import { ISA_SLS } from '../../../src/contracts/ambient';
+import type { StationId } from '../../../src/contracts/stations';
 import { at } from '../../../src/cycle/at';
 import {
   groundIdle,
@@ -165,6 +166,52 @@ describe('D4-13: the matched solve with a continuation entry', () => {
       };
     expect(solveMatched(root(1), REF, C, a, a.n1Rpm, a.n2Rpm, a.wfKgPerS)).toBeNull();
     expect(solveMatched(root(1.01), REF, C, a, a.n1Rpm, a.n2Rpm, a.wfKgPerS)).not.toBeNull();
+  });
+
+  // D4-94 (W2H-B1/I3): after a long hold the matched path followed a branch on which the booster
+  // cools the flow (T25 below T2 by up to 61 K at ISA, 82 K at ISA+30); the residual and BPR alone
+  // accepted it. A compressor whose total temperature does not rise is not the engine.
+  const COMPRESSORS = [
+    // name, its exit stations (the booster's 24 and the HPC inlet 25 carry the same Tt), its inlet
+    ['fan bypass', ['13'], '2'],
+    ['fan core', ['21'], '2'],
+    ['booster', ['24', '25'], '21'],
+    ['HPC', ['3'], '25'],
+  ] as const satisfies readonly (readonly [string, readonly StationId[], StationId])[];
+
+  it.each(COMPRESSORS)(
+    'D4-94: a root whose %s total-temperature rise is 0 or less is refused, with its cause',
+    (name, exits, inlet) => {
+      const a = idleAnchor();
+      /** The reference root with the compressor's exit Tt set dK above its inlet's. */
+      const rise =
+        (dK: number): GasPathSolver =>
+        (...args) => {
+          const s = solveGasPath(...args);
+          const st = { ...s.point.stations };
+          for (const id of exits) st[id] = { ...st[id], ttK: st[inlet].ttK + dK };
+          return { ...s, point: { ...s.point, stations: st } };
+        };
+      for (const dK of [0, -61]) {
+        const why = { cause: null as string | null };
+        expect(solveMatched(rise(dK), REF, C, a, a.n1Rpm, a.n2Rpm, a.wfKgPerS, why)).toBeNull();
+        expect(why.cause).toBe(`non-physical root (${name} total-temperature rise ${dK} K)`);
+      }
+      expect(solveMatched(rise(0.01), REF, C, a, a.n1Rpm, a.n2Rpm, a.wfKgPerS)).not.toBeNull();
+    },
+  );
+
+  it('D4-94: the reference roots raise the total temperature across every compressor', () => {
+    const a = idleAnchor();
+    const s = solveMatched(solveGasPath, REF, C, a, START.n1Rpm, START.n2Rpm, START.wf);
+    expect(s).not.toBeNull();
+    for (const p of [idle().point, REF.design.point, s?.point]) {
+      for (const [, exits, inlet] of COMPRESSORS) {
+        for (const id of exits) {
+          expect(p?.stations[id].ttK).toBeGreaterThan(p?.stations[inlet].ttK ?? Infinity);
+        }
+      }
+    }
   });
 
   it('accepts a residual just under ACCEPTED_RESIDUAL and rejects one at it', () => {

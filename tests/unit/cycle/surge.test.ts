@@ -271,6 +271,27 @@ describe('the compression-system pieces, checked independently (D3-13 mutation s
     }
   });
 
+  it('D4-94: hpcCubic rejects a speed line whose cubic has H <= 0, by name, instead of integrating it', () => {
+    // Above the map's top speed line the extrapolated line's pressure rises with flow, so the least
+    // squares put the shut-off head above the peak (at 1.22, W2H-I3's ISA+30 point: psi0 2.9e4,
+    // H -1.5e4). A Greitzer episode on that cubic integrated to a NaN P3.
+    const sys = compressionSystem(def);
+    const p = REF.design.point;
+    const inlet = {
+      pt25Pa: p.stations['25'].ptPa,
+      tt25K: p.stations['25'].ttK,
+      n2Rpm: p.n2Rpm,
+      rJPerKgK: gasConstant(0),
+    };
+    for (const nc of [1.2, 1.22, 1.25]) {
+      expect(() => hpcCubic(REF.maps.hpc, nc, sys, inlet)).toThrow(RangeError);
+      expect(() => hpcCubic(REF.maps.hpc, nc, sys, inlet)).toThrow(
+        new RegExp(`^HPC cubic at corrected speed ${nc}: H -[0-9.e+]+ must be > 0 `),
+      );
+    }
+    expect(hpcCubic(REF.maps.hpc, 1.15, sys, inlet).h).toBeGreaterThan(0);
+  });
+
   it('engineGreitzerParams: the equilibrium is at the requested flow, with B passed through', () => {
     const fit = { psi0: 0.3, h: 0.18, w: 0.25, rms: 0 };
     for (const phiEq of [0.3, 0.5, 0.7]) {
