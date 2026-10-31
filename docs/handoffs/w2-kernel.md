@@ -45,7 +45,17 @@ DONE
 - dd008d8: the stale comments now say the cut is merged and pinned (`tests/gpu/helpers/solver.ts`, `tests/ladder/oracle.ts`, `src/flow/gpu/params.ts`, the machCut header). SOLVER.md 15.1's coupling note records the merge and the pin.
 
 NEXT
-1. **Item 5, the gates on the merged tree @dd008d8:** RUNNING detached at this hand-back (PID 4224; `reports/scratch/k3/gates.cmd`; summary `gates.log`, per-gate logs `g-*.log`, status `gates.status`). Typecheck was clean; lint, coverage (`--coverage.reportsDirectory=reports/scratch/k3/coverage`), test:mesh, test:gpu and test:gpu-ladder follow. Read the logs, or re-run, and record the numbers under GATES.
+1. **Item 5, the gates on the merged tree @dd008d8:** test:gpu and test:gpu-ladder are RUNNING detached at this hand-back (PID 4224; `reports/scratch/k3/gates.cmd`; summary `gates.log`, logs `g-gpu.log` and `g-gpuladder.log`, status `gates.status`). Read those logs, or re-run them, and record the numbers under GATES R3 below.
+
+GATES R3 @dd008d8 (main cf87af0 merged; code unchanged by 5222f9d and later, which touch only the handoff)
+- typecheck: clean.
+- lint: ESLint `--max-warnings 0` clean, Prettier clean.
+- coverage (`--coverage.reportsDirectory=reports/scratch/k3/coverage`): 123 files, 2183 passed + 11 expected fail.
+  - Lines 99.46 %, statements 98.47 %, branches 87.58 %, functions 99.41 %.
+  - Core lines: thermo 100 %, cycle 99.59 %, flow/reference 100 %, geometry 99.59 %, src/flow 99.19 %. `src/flow/coupling` has no files.
+- test:mesh: 29 passed.
+- test:gpu and test:gpu-ladder: RUNNING (above).
+- test:browser: NOT YET RUN on the merged tree. Run it once, detached, with ≥ 2 GB free: `npx vitest run -c vitest.browser.config.ts --api 63391`. rotorMotion alone passed at 02cee6f, before the merge (DONE above).
 2. Then test:browser once, detached, with ≥ 2 GB free: `npx vitest run -c vitest.browser.config.ts --api 63391`. Main's `engineView.ts` warm-up is in the merged tree, so the rotor tests are checked again there.
 3. The critic reviews rounds 1-3 (D4-93). Points to judge: GOTCHAS R1-R2.
 4. From round 1, still open: an official `--flow` capture in a quiet window (D0-1; Chrome holds the OS focus, D4-73), and the P1 bench under D4-73.
