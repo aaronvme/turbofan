@@ -156,9 +156,11 @@ describe('the progressive warm-up (D4-91)', () => {
       expect(useApp.getState().diagnostics?.view.preparing).toBeNull();
       // a warmed mode is shown at once: never through "preparing"
       expect(rec.list.some((a) => a.t >= click && a.preparing !== null)).toBe(false);
-      expect(r.longestGapWhileWarmingMs, JSON.stringify(r)).toBeLessThanOrEqual(FREEZE_MS);
       expect(r.longestGapMs, JSON.stringify(r)).toBeLessThanOrEqual(FREEZE_MS);
       if (QUIET) {
+        // the background warm-up's own gaps: recorded every run; on the shared machine they
+        // include the other jobs' GPU load (round 4: 108-113 ms quiet, 0.65-1.6 s loaded)
+        expect(r.longestGapWhileWarmingMs, JSON.stringify(r)).toBeLessThanOrEqual(FREEZE_MS);
         expect(r.bootMs, JSON.stringify(r)).toBeLessThanOrEqual(MAX_BOOT_MS);
         expect(r.longestGapMs, JSON.stringify(r)).toBeLessThanOrEqual(MAX_GAP_MS);
       }

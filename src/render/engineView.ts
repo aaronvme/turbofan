@@ -873,13 +873,13 @@ async function assemble(
       // an object not drawn before is let through while the budget lasts (at least one a frame)
       const own = renderer as unknown as { renderObject?: unknown };
       // a pass's updateBefore renders its inputs inside the object that samples them (the output
-      // quad holds TRAA, which holds the scene passes), so the budget is the warm frame's elapsed
-      // CPU, checked as each new object starts, and each object's own time excludes its nested ones
+      // quad holds TRAA, which holds the scene passes), so each object's own time excludes its
+      // nested ones, and the budget (the new objects' own CPU) is checked as each new one starts
       const stack: { childMs: number }[] = [];
       own.renderObject = function (this: WebGPURenderer, ...args: RenderObjectArgs) {
         const key = renderKey(args);
         const isNew = !seen.has(key);
-        if (isNew && w.newObjects > 0 && performance.now() - t0 >= w.budget) {
+        if (isNew && w.newObjects > 0 && w.newMs >= w.budget) {
           w.deferred++;
           return;
         }
