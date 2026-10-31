@@ -3507,6 +3507,16 @@ None.
     - the inferno ΔE comment (CIEDE2000 6.6-8.3, a visible band);
     - K4: a GPU test of a global M_cut ≥ 1.
   - App-ui rounds 4-5 (@0f3b21e) go to critic pass 17. They adopt flowviz's dock/legend edits when they merge main (D4-95).
+- **D4-97 (critic pass 17's questions; w2/app-ui rounds 4-5 merged on main 8216c83, the tree equal to the critic's trial17).**
+  - **The merged app**, indicative on AC: boot-to-ready 3.85-4.28 s (U3 ≤ 5 s); the first switch into a warmed mode 72-81 ms, also while the queue warms (U2 ≤ 250 ms); Schlieren's warm frame 8 ms (it was 645-706 ms); all nine configurations warm 7.0 s after ready.
+  1. **W2A-I7: a cold switch gets a time limit.** A switch into a view that isn't warmed takes a warm slot after at most 60 frames of preparing, whatever the last frame's CPU, and the give-up counts the frames waited. Pre-registered as **U4: an unwarmed switch shows its view within 2 s at any steady frame CPU** (indicative; official only in a quiet run). The critic's 10-minute probe at a steady 8.4 ms and 11.2 ms frame becomes the test. Skipping the CPU rule outright for the asked view isn't adopted: the 60-frame bound keeps the frame budget the default.
+  2. **W2A-I8: the 1366 cut views dolly the camera out to make room for the label rows,** as Schlieren's framing does, with a minimum engine scale stated beside U1-U3. Only if the minimum scale can't fit the rows are labels shown by a stated priority (fan, combustor, HPT, LPT, exhaust first). D4-92 (zz)'s axial rows then hold at both sizes.
+  3. **W2A-I10 confirmed: W2A-I6 stays open.** The Schlieren signature is computed on the canvas alone, never the page screenshot with its overlay, and each of its three bars gets its own failing control: S1 (knife edge off), the Cutaway frame and the Data frame. That's the same rule D4-96 set for the cut-face band.
+  4. **Cutaway's own warm frames are accepted as measured:** 47 frames at ≤ 41 ms each, about 2 s, once per session. They're recorded as an indicative row beside U2/U3, with the background warm-up's own row (all nine configurations warm, in seconds after ready).
+  - **App-ui round 6:**
+    - D4-97 items 1-4;
+    - W2A-I9, the warm frame zeroing the next frame's camera motion (`post.ts` restores `prevViewProj` but not `currViewProj`, about two lines, with a test that a warm frame leaves the next frame's motion vectors intact);
+    - the nits N21-N28, including N26 (TRAA `updateBefore` state outside the guard) and N27 (`post.ts:605` citing M56, now M57).
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
