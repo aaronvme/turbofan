@@ -3430,6 +3430,17 @@ None.
   2. **The sub-idle entry is accepted for W2.** It costs 448-654 evaluations, 19-59 ms, once per start or relight, on a frame that ends matched. That's a single hitch at an event, not a held stream. W3's start scenario revisits it with a better entry anchor, with no new status or contract change now.
   3. **The later recovery is accepted:** 3.37 s against 2.97 s in episode 1. D4-84's 0.5 s walk interval stays, since the budget bounds the frame either way.
   4. **Spool runaway while held is raised as W2H-I1 (important).** It's existing D4-17 behaviour, not from this branch: on the fit's second episode the solve never recovers, and N1 reaches 260-275 % on the held power balance. A held point must not integrate the spools past their limits on a stale balance. It only bites on the part-power fit, which is on the backlog (D4-2), and the default model doesn't hold on the ramp. So it doesn't block the cycle-hold merge, but it must be fixed before the fit ships, in the part-power round with the fit's never-recovering episode. Until then the app annunciates a held gas path, and the critic checks the default model can't reach it.
+- **D4-91 (w2/app-ui round 3 @ff95d99 and critic pass 14's questions): the warm-up is made progressive, and two UI levels are pre-registered.**
+  1. **Boot:** D4-88's warm-up moved the first-switch stall into boot. The first switch now takes 52 ms into Schlieren (was 1323-1581) and 70 ms into Cutaway (was 421-2818), but boot-to-ready is 10-26 s (was 2.4-4.7). About 80 % of that is the GPU process compiling Cutaway's pipelines. **Adopted: a progressive warm-up.**
+     - The worker posts `ready` once the default mode (Realistic) is compiled.
+     - The other modes warm in the background, Cutaway and Schlieren first, at most one configuration per frame-budget slot.
+     - A switch into a mode not yet warmed shows a visible "preparing view" state, never a freeze, and switches as soon as the mode is ready.
+     - Bars, indicative on the shared machine: boot-to-ready ≤ 5 s, and the first switch into a warmed mode ≤ 250 ms.
+     - An async compile through three's internals and fewer cut-view pipelines are not adopted now. They come back only if the background warm-up can't keep up.
+  2. **Schlieren's lit-centre check:** skipping it is accepted only with a Schlieren-specific content check in its place. For example, the knife-edge image's luminance varies across the jet and nacelle region instead of being uniform. The true view draws the engine as a dim silhouette, so a lit centre is the wrong test there.
+  3. **UI levels, pre-registered in PHYSICS.md's UI rows:** surge margin amber below 5 % and red at or below 0, on the map only (D4-87); the first switch into a warmed mode ≤ 250 ms; boot-to-ready ≤ 5 s (both indicative; official only in a quiet run).
+  4. **(vv):** a non-holding direct solve keeps being charged against the step's budget. P5 bounds a step's total work, which is what the frame budget needs, and on the fit ramp those cuts were genuine losses. P5's limits stand.
+  5. **(ww):** yes. Critic pass 15 finishes pass 14 (A's remaining gates and mutants; B's verdict, its mutants and the default-model sweep for W2H-I1), and reviews app-ui round 3 in the same combined trial merge.
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
