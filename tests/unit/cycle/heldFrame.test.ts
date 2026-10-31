@@ -29,14 +29,14 @@ import { lazy } from './fixtures';
 const TIMEOUT_MS = 240_000;
 const P5 = THRESHOLDS.P5.values;
 const DT = 1 / P5.stepRateHz.value;
-/** The browser row boots at idle and waits 3 s before the ramp. */
-const RAMP_FROM_S = 3;
+/** The browser row boots at idle and waits 3 s before the ramp (P5's window, D4-96). */
+const RAMP_FROM_S = P5.idleS.value;
 /**
  * W2H-N3: the gated run lasts 20 s from the ramp's start, the length tools/cycle/held-cost.ts and
  * the handoffs measure (it was 10 s, which left the fit's second held episode, then at 13.05 s,
- * outside). P5's row does not state a length; the handoff asks for one.
+ * outside). P5's row states it since D4-96 (N3): 23 s from ground idle, 3 s of them at idle.
  */
-const GATED_S = 20;
+const GATED_S = P5.windowS.value - P5.idleS.value;
 /**
  * The largest converged direct solve in the whole cycle suite: 77 gas-path evaluations (10 Newton
  * iterations; an instrumented run of tests/unit/cycle, 2026-10-30). A 60 Hz step has two

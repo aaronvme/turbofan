@@ -425,18 +425,21 @@ export const THRESHOLDS = {
     },
   },
   // D4-90 (flagged contract addition): D4-84's held-frame bar, gated in Node in the held retry's
-  // own deterministic unit (gas-path evaluations); the browser's wall time is a record
+  // own deterministic unit (gas-path evaluations); the browser's wall time is a record. D4-96 item 3
+  // (N3, a flagged contract text edit): the check states the window D4-90 measured; no bar changed
   P5: {
     id: 'P5',
     section: '3.4',
     checkText:
-      "Held gas-path frame (D4-84, D4-90): the W1K-I2 part-power fit's 1 s lever ramp from ground idle (the W2F-N5 case), stepped at 60 Hz, with the matched gas-path solve held",
+      "Held gas-path frame (D4-84, D4-90): the W1K-I2 part-power fit's 1 s lever ramp (the W2F-N5 case), stepped at 60 Hz, with the matched gas-path solve held; the window is 23 s from ground idle: 3 s at idle, the 1 s ramp, then the take-off lever (D4-96)",
     passText:
       "Gated in Node, deterministic: every step that starts held costs ≤ 137 gas-path evaluations (the retry budget plus one Newton iteration), and every step ≤ 217 (plus one converged direct solve). The browser's held-frame wall time, ≤ 16.7 ms, is recorded beside it and counts only in an official run under D0-1, like P1 and P4.",
     targetsFrom: 'PHYSICS',
     values: {
       leverRampS: check(1, 's', '1 s'),
       stepRateHz: check(60, 'Hz', '60 Hz'),
+      windowS: check(23, 's', '23 s from ground idle'),
+      idleS: check(3, 's', '3 s at idle'),
       maxHeldStepEvaluations: pass(137, 'evaluations', '≤ 137'),
       maxStepEvaluations: pass(217, 'evaluations', '≤ 217'),
       heldFrameMs: pass(16.7, 'ms', '≤ 16.7 ms'),
