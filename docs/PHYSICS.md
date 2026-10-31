@@ -139,3 +139,10 @@ C12 was added by decision D3-17 (critic pass 5, question s, after W1K-I2) before
 | P2 | Default preset frame rate | ≥ 55 fps (performance trace) |
 | P3 | WebGPU validation errors during any test or scenario | zero |
 | P4 | Render GPU time (engine plus post, excluding the solver and flow visuals) at the default preset, 1080p, default three-quarter front view (D4-2) | ≤ 8.0 ms median under D0-1. The cutaway and hero views are reported (target ≤ 10 ms) but not gated. |
+
+### 3.5 UI display levels (the app shell; pre-registered by D4-87 and D4-91, mirrored in `src/hud/uiLevels.ts`)
+| ID | Check | Pass |
+|---|---|---|
+| U1 | Surge-margin annunciation on the compressor maps (D4-87): on the map only; an operating point below the map's lowest speed line shows its margin dimmed and tagged "below map", with no level | amber (caution) below 5 %; red (warning) at or below 0 %; normal at 5 % and above |
+| U2 | First switch into a warmed view mode (D4-91): the longest gap between snapshots on the main thread in the 3 s after the click (`tests/browser/firstSwitch.test.tsx`, 1366 x 768) | ≤ 250 ms; indicative on the shared machine, official only in a quiet run (D0-1) |
+| U3 | Boot to ready (D4-91): from mounting the app to the worker's `ready` and the first snapshot, the default view (Realistic) compiled, the other modes warming in the background | ≤ 5 s; indicative on the shared machine, official only in a quiet run (D0-1) |
