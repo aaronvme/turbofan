@@ -1,4 +1,107 @@
-w2/app-ui: round 5 (D4-95 items 1-4, the re-shoot, N14, N20). Main @10b78ad merged (602f9bb, docs only). Code and shots at 3612355; gates at 3612355 (see GATES); this handoff on top.
+w2/app-ui: round 6 (D4-97 items 1-4, W2A-I7..I10, N21, N22, N24-N28, the re-shoot). Main @7a35c60 merged (a fast-forward). Code and shots at 70812f9; gates at 70812f9 (see GATES); this handoff on top.
+
+# Round 6 (2026-10-31): critic pass 17's findings, as D4-97 decided
+
+DONE (TDD: each failing test committed first, "(TDD)" in its message)
+- **W2A-I9, a warm frame zeroed the next real frame's camera motion** (748e7b9 TDD; 379f1c1). **FLAGGED RENDER EDIT** (`post.ts`).
+  - The view-projection roll moved out of `post.ts`, unchanged, to the pure `src/render/viewProjRoll.ts`; the fix saves and restores all three matrices (previous, current and its inverse), not only the previous.
+  - `tests/unit/render/viewProjRoll.test.ts`: an orbiting camera with a warm frame before each real frame (a cold switch preparing while the viewer drags). Each real frame's matrices equal those of the same frames without warm frames, its previous is the last real frame's, and a scene point's camera motion is the orbit's, not zero. It failed on the old restore (2 of 3).
+- **W2A-I7 / D4-97 item 1, a cold switch has a bound** (1795061 TDD; 9a4448e).
+  - `src/shell/warmUp.ts`: the asked view takes its slots under the CPU rule, and once it has waited `COLD_SWITCH_WAIT_FRAMES` = 60 frames, whatever the last frame's CPU (one every SLOT_EVERY). Its give-up counts the frames waited (`MAX_PREPARE_FRAMES` = 800, about 13 s, the slots' old give-up). The background keeps the CPU rule (D4-95 item 3).
+  - **U4 pre-registered** in PHYSICS.md 3.5 and `src/hud/uiLevels.ts` (`coldSwitchMaxMs` 2000): an unwarmed switch shown within 2 s at any steady frame CPU, indicative, official only quiet.
+  - Unit tests from the critic's probe: at a steady 8.4, 11.2 and 16 ms frame, the first slot at frame 60, then one every 2 frames; 8.0 ms from frame 0, as before; the loaded pattern; a configuration needing k warm frames shown at exactly 60 + 2(k - 1) frames at 8.4, 11.2 and 30 ms; a never-finishing view given up at 800 frames waited; no background slot at a steady 8.4 ms; the wait restarting for the next cold switch.
+  - Chrome (`firstSwitch.test.tsx`): the cold switch into Data now also runs at a steady 8.4 and 11.2 ms frame CPU. The worker pads each frame to it through a test-only `debug` protocol message (never sent by the app, not an input for the quiet rule). It records U4 every run, fails a freeze or a give-up every run, and gates U4 in a quiet run.
+- **W2A-I8 / D4-97 item 2, the cut views framed for their label rows** (55786c7 TDD; 19acf3f).
+  - `src/shell/orbit.ts` `cutViewOrbit`: entering Cutaway or Data dollies the camera out and pans it until the engine's screen box lies inside the free area above the dock, less a 52 px label row above and below. It re-projects after each pass, three passes, and stops at the minimum engine scale, 0.6 of the size at the orbit before (Schlieren's). Leaving puts the orbit back. The overlay posts `viewArea.rows`, the centre column above the dock; a change re-frames from the saved orbit (the dock's legend appears with the mode).
+  - **U5 pre-registered** beside U1-U4 (`cutViewMinScale` 0.6, `calloutRowPx` 52, the stated priority).
+  - `layoutAxial` now offers only the row places. A label with no room in its row is hidden by D4-97's priority, never placed on the section: `anchors.ts` PRIORITY is now fan, combustor, HPT, LPT, exhaust, then HPC, booster, bypass duct.
+  - Unit: the framing checked by projecting the engine rings after the orbit, at both sizes. Chrome: the layout bar asserts the axial rows hold in Cutaway and Data at both sizes (every shown label clear of the engine box above or below it, each row in axial order).
+  - In the targeted run (t1) and the gate run: 8 of 8 labels in their rows in both cut views at 1366 and 1920.
+- **W2A-I10 / D4-97 item 3, the Schlieren signature on the canvas alone** (915d710 TDD; 4539b72, 70338fe). W2A-I6 is closed only if the critic agrees.
+  - `app.test.tsx` computes the signature from a second screenshot with the overlay hidden.
+  - Each bar has its own failing control, asserted by name (`failedBars`):
+    - S1, the knife edge off (a new `knifeEdge` uniform in `post.ts`, set through EngineView's `noKnifeEdge` and the `debug` message, in the same run), fails the jet bar;
+    - Cutaway and Data fail the grey-share bar;
+    - Realistic and Exploded fail the silhouette bar.
+  - The grey-share bar is tightened from 0.3 to 0.7, midway between Schlieren on the canvas (0.84-0.90) and the controls (≤ 0.55 once the cut views are framed for their rows). The jet (0.08) and silhouette (0.5) bars are unchanged.
+  - The unit controls are drawn at the studio's grey (0.47). One more case shows a label in the jet box passing a bandless jet, which is why the signature is taken on the canvas.
+- **D4-97 item 4** (33c74c9): **U6** (Cutaway's own warm frames, 47 at ≤ 41 ms, about 2 s, once) and **U7** (all nine configurations warm, s after ready) are recorded rows with no bar in PHYSICS.md 3.5 and the mirror. warmStall writes `u6Cutaway` (with `warmFramesOver16_7Ms`); firstSwitch's while-warming case writes `allWarmMs`.
+- **Nits**:
+  - N21 (32299c6 TDD; 70338fe): the search tries every crossing place, fewest crossings first. The critic's probe, dense (5 anchors in 360 x 280): 0 of 600 short of the exhaustive best (was 17 of 1500). The BIG case was not rerun to the end (timeout).
+  - N22 (78be8d7 TDD; 70812f9): Diagnostics shows "Boot warm-up (D4-91)" and a "Background warm-up" row (n of 9 warm, the next, paused for input, given up).
+  - N24 (19acf3f): an orbit in a framed view (Schlieren, the cut views) cancels the restore.
+  - N25 (55786c7, 19acf3f): `fitViewOffset` is deleted; `framedOrbit` is tested by projecting the engine after the orbit.
+  - N26 (d40758d): the guard pins every field TRAANode's `updateBefore` writes (the six camera uniforms, the previous depth and the one-shot `_needsPostProcessingSync`, which setup sets and the first frame clears: not per-frame state). Critic mutant G4 would now fail it (not re-run: it edits `node_modules/three`).
+  - N27 (379f1c1): `post.ts` cites GPU_FACTS M57.
+  - N28 (e41d6f0): the drawn layout bar checks that no callout anchor is under a panel and no leader runs through one.
+  - **Skipped: N23** (the boot's `warmUp` reports no done flag).
+
+MEASURED (1366 x 768, `reports/ui/first-switch-*.json`; AC, shared machine, not quiet: indicative)
+| cold switch into Data (U4 ≤ 2 s), shown / warm frames | before (critic 17's probe) | t1 (19acf3f) | gate run (70812f9) |
+|---|---|---|---|
+| light frame CPU | 3.07 s (critic's run) | 1.95 s, 43 warm frames | 2.53 s, 46 |
+| steady 8.4 ms | never (0 slots in 10 min) | 3.89 s, 44 warm frames | 3.10 s, 45 |
+| steady 11.2 ms | never | 4.29 s, 47 warm frames | 3.19 s, 45 |
+- No switch was given up; the longest snapshot gap while preparing stayed under FREEZE_MS.
+- U2: Schlieren 57 / 85 ms, Cutaway 67 / 53 ms, a switch while the queue warms 65 / 57 ms (t1 / gate run). U3 in the gate run: boot 2.8-3.4 s.
+- U6 (gate run, warmStall): Cutaway's own warm, 41 warm frames over 1.37 s, at most 22 ms of warm-frame CPU, 9 frames over 16.7 ms, the longest frame gap 17 ms, 42 pipelines.
+- U7: all nine warm 6.2 s after ready (both runs).
+- The Schlieren signature on the canvas (t1):
+  - Schlieren passes: grey share 0.90 / 0.84 (1366 / 1920), silhouette 0.25, jet 0.16 / 0.15.
+  - S1 fails the jet bar: 0.0009 / 0.0056.
+  - Cutaway fails the grey bar: 0.55 / 0.50; Data 0.55 / 0.50.
+  - Realistic fails the silhouette bar: 1.18; Exploded: 0.67.
+
+NEEDS AN ORCHESTRATOR DECISION
+1. **U4 (≤ 2 s) is not met at a steady frame CPU over the slot bar.** The cold switch is no longer stuck, but D4-97's mechanism shows it in about 3.9-4.3 s at 8.4 and 11.2 ms.
+   - The time is about 1 s of waiting (60 frames), then the view's own 44-47 warm frames, one every 2 frames, each frame longer by its node build (up to 41 ms).
+   - At a light CPU it was 1.95 s in t1 and 2.53 s in the gate run. A quiet run gates U4, so it would fail at 8.4 and 11.2 ms, and maybe at a light CPU too.
+   - Options, none adopted here:
+     - (a) after the 60-frame bound, the asked view warms every frame instead of every 2nd: about 1 s off, maybe still over 2 s at 11.2 ms;
+     - (b) a shorter bound, or none for the asked view (D4-97 declined the latter);
+     - (c) U4 restated as "60 frames plus the view's own warm frames".
+   - U4 is pre-registered as decided and not loosened.
+2. **The W2F-N5 held-frame case threw in the cycle in the targeted run (t1)**: `cycle step failed: Error: enthalpy 4475806.6 is outside the range of [200, 3500] K`, on the part-power fit's slam, so the sim stopped and the test's "no problems" failed.
+   - The cycle code is unchanged since critic 17's passing run (main 664203f had the same `src/cycle`), and this round touches no cycle code. So it is a timing-dependent path on the part-power fit (W2H-I1 / W2H-I4's ground), surfaced correctly as SIM STOPPED.
+   - The gate run's same case passed (990 lost solves, no problem), so it is intermittent. It needs the cycle owner's look: the scenario is the browser's real-time lever ramp, and t1's log has the message.
+3. **The grey-share bar's move to 0.7** was set after seeing t1's controls (0.50-0.55, the cut views framed). It tightens the test's own bar (Schlieren passes at 0.84-0.90); the critic may want it stated differently.
+4. **New test-only protocol message `debug`** (`frameCpuMs`, `knifeEdge`) in `src/shell/protocol.ts` and the worker (not `src/contracts`). It is not an input for the quiet rule.
+5. **Display rules changed** (UI, not physics): the callout priority order (D4-97's), and in the cut views a label with no room in its row is hidden rather than placed on the section.
+
+NOT DONE
+- N23 (the boot `warmUp` without a done flag).
+- Visual notes 5 and 7; flowviz's crop outline (W2V-N25) in the app's shots; labels in Exploded (critic's suggestion 4); "Preparing the pressure field" for a quantity change (small note).
+
+SHOTS (`docs/look-dev/ui/`, from the gate run at 70812f9, `VITE_UI_LOOKDEV=1`; the signatures and the callouts shown are in `*-shots.txt`)
+I looked at 11 of the 14: both sizes of Cutaway, Data, Schlieren and the drawer, plus 1366's Realistic and Exploded.
+- 1920 Realistic, 1920 Exploded and `1920-data-solver.jpg` I did not open, to stay under the usage brake. Their code paths are unchanged this round, and their numeric checks passed (the layout bar, the signature controls).
+- `*-2-cutaway.jpg`, `*-5-data.jpg`: the engine is dollied out, with Fan, Bypass duct, Combustor and Low-pressure turbine in the row above, and Booster, HPC, HPT and Core exhaust in the row below. Both rows keep axial order, with straight leaders to dots on the parts, nothing on the section, and nothing clipped or overlapping, at both sizes. That meets W2A-I8.
+- `*-6-drawer.jpg` (Data with Diagnostics open):
+  - at 1920, six labels (those left of the drawer), the Background warm-up row reading "9 of 9 warm";
+  - at 1366, one label (Fan: the rest are under the drawer), placed in the lower row with a long leader. It is clear of everything.
+- `*-4-schlieren.jpg`: the knife-edge grey, the dim silhouette, the banded jet. The framing is the same as round 5's: at 1920 there is still no margin at the left column (critic visual note 2, open).
+- `1366-1-realistic.jpg`: Fan on the fan face, Core exhaust on the cowl, as before.
+- `1366-3-exploded.jpg`: the parts run under the right column, as in round 5 (Exploded is not framed; a suggestion for later).
+- Short of the bar, still open: flowviz's crop outline (W2V-N25) crosses the cut views like a stray leader; the 1366 drawer's single long leader; Schlieren's margin at 1920.
+
+GOTCHAS
+- `viewArea.rows` is the centre column above the dock. The dock's legend appears with the cut modes, so the worker re-frames when the area changes (a jump of a few px, a snapshot after the switch).
+- The `debug` message is the only way the browser suite reaches the knife edge and the frame CPU. A worker frame padded to N ms still runs at 60 fps up to about 16 ms.
+- The critic's exact-search probe needs `--import ./tools/mesh/ts-resolve.mjs` and a `.ts` copy (`reports/scratch/app-ui/r6/probe/`). Its BIG case runs for minutes.
+- Detached runs: `reports/scratch/app-ui/r6/run.ps1` (one command: waits for free RAM and no other browser run, records the battery) and `gates.ps1`. Dev port 5194 unused; no MCP page opened.
+
+GATES @70812f9 (detached, `reports/scratch/app-ui/r6/gates.ps1`, logs `gate-*.log` there; AC, battery status 2, 5.3 GB free before the browser step, no other vitest browser run)
+- npm run typecheck: clean, 12 s. npm run lint: clean, 59 s.
+- coverage (`--coverage.reportsDirectory=reports/scratch/app-ui/r6/coverage`): 136 files, 2339 passed + 11 expected fail, exit 0 (thresholds met). Lines 99.52 %, statements 98.53 %, branches 87.87 %, functions 99.55 %; 763 s.
+- npm run test:mesh: 2 files, 29 passed.
+- npm run test:gpu: 12 files, 70 passed, 44 s.
+- npm run test:browser (`VITE_UI_LOOKDEV=1`, the re-shoot): 14 files, 46 passed, 0 failed, 428 s.
+- Earlier targeted run t1 (app + firstSwitch at 19acf3f): 9 of 10. W2F-N5 failed on the cycle's throw (decision 2), and everything else passed.
+
+NEXT
+1. Decisions 1-5 above.
+2. Critic: W2A-I6/I10's controls, and U4/U5 as measured.
+3. N23. Schlieren's margin at 1920, Exploded framing and labels, "Preparing the pressure field" for a quantity change, visual notes 5 and 7.
 
 # Round 5 (2026-10-31)
 
