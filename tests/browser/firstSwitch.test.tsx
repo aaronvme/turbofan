@@ -5,7 +5,9 @@
 // - the viewer's first switch into a warmed mode does not stall the view (U2);
 // - a switch into a mode not yet warmed shows "preparing" over the running view, never a freeze,
 //   and switches as soon as the mode is warm;
-// - the background warm-up itself keeps the snapshots coming.
+// - the background warm-up itself keeps the snapshots coming;
+// - D4-95: a switch started while the background warm-up is in progress suspends it (no warm
+//   frame from the switch until a second after it settles), so U2 holds with the queue active.
 //
 // Measured on the main thread (the round-3 measure: the GPU process's compile stalls the worker's
 // frames without the worker's CPU seeing it): the longest gap between snapshots (20 Hz) in a
@@ -61,13 +63,25 @@ function problems(): string[] {
 
 /** Records snapshot arrivals from now on; the longest gap over [from, to] with its ends. */
 function arrivals() {
-  const list: { t: number; mode: ViewMode; preparing: ViewMode | null }[] = [];
+  const list: {
+    t: number;
+    mode: ViewMode;
+    preparing: ViewMode | null;
+    settledFrames: number;
+    warmFrames: number;
+    queue: number;
+    suspended: boolean;
+  }[] = [];
   const unsubscribe = useApp.subscribe((s, p) => {
     if (s.snapshot !== null && s.snapshot !== p.snapshot)
       list.push({
         t: performance.now(),
         mode: s.snapshot.view.viewMode,
         preparing: s.diagnostics?.view.preparing ?? null,
+        settledFrames: s.diagnostics?.view.settledFrames ?? 0,
+        warmFrames: s.diagnostics?.warm.frames ?? 0,
+        queue: s.diagnostics?.warm.queue.length ?? 0,
+        suspended: s.diagnostics?.warm.suspended ?? false,
       });
   });
   const longestGap = (from: number, to: number) => {
@@ -165,6 +179,66 @@ describe('the progressive warm-up (D4-91)', () => {
         expect(r.longestGapMs, JSON.stringify(r)).toBeLessThanOrEqual(MAX_GAP_MS);
       }
     });
+
+  it('a switch while the background warm-up is in progress suspends it until a second after the switch (D4-95)', async () => {
+    const { bootMs, rec } = await boot();
+    const ready = performance.now();
+    // Cutaway is warmed first; switch into it at once, while the rest of the queue still warms
+    await until('cutaway warm', () => isWarm('cutaway'), 120_000);
+    const warmedMs = Math.round(performance.now() - ready);
+    const click = performance.now();
+    await page.getByRole('radio', { name: /^cutaway/i }).click();
+    await sleep(WINDOW_MS + 500);
+    // then the background goes on to the end (item 4: its time, recorded)
+    await until(
+      'all warm',
+      () => (useApp.getState().diagnostics?.warm.queue.length ?? 1) === 0,
+      120_000,
+    );
+    const allWarmMs = Math.round(performance.now() - ready);
+    rec.unsubscribe();
+    const after = rec.list.filter((a) => a.t >= click);
+    const echoAt = after.findIndex((a) => a.mode === 'cutaway');
+    const echo = after[echoAt];
+    const fromEcho = after.slice(Math.max(0, echoAt));
+    const settled = fromEcho.find((a) => a.settledFrames > 0);
+    const resumed = fromEcho.find((a) => !a.suspended);
+    const r = {
+      case: 'cutaway (a switch while the background warms)',
+      mode: 'cutaway',
+      bootMs,
+      warmedMs,
+      allWarmMs,
+      queueAtEcho: echo?.queue ?? null,
+      echoMs: echo === undefined ? null : Math.round(echo.t - click),
+      settledMs: settled === undefined ? null : Math.round(settled.t - click),
+      resumedMs: resumed === undefined ? null : Math.round(resumed.t - click),
+      warmFramesSuspended:
+        fromEcho.filter((a) => a.suspended).length > 0
+          ? Math.max(...fromEcho.filter((a) => a.suspended).map((a) => a.warmFrames)) -
+            (echo?.warmFrames ?? 0)
+          : null,
+      longestGapMs: rec.longestGap(click, click + WINDOW_MS),
+    };
+    await record('while-warming', r);
+    expect(problems(), JSON.stringify(r)).toEqual([]);
+    expect(echo, JSON.stringify(r)).toBeDefined();
+    // the precondition: the queue was still warming when the switch reached the worker
+    expect(r.queueAtEcho, JSON.stringify(r)).toBeGreaterThan(0);
+    // suspended from the switch until it settled, and no warm frame while suspended
+    expect(echo?.suspended, JSON.stringify(r)).toBe(true);
+    expect(settled, JSON.stringify(r)).toBeDefined();
+    const toSettled = fromEcho.filter((a) => settled !== undefined && a.t <= settled.t);
+    expect(
+      toSettled.every((a) => a.suspended),
+      JSON.stringify(r),
+    ).toBe(true);
+    expect(r.warmFramesSuspended, JSON.stringify(r)).toBe(0);
+    // and it resumed: the queue went on to the end
+    expect(resumed, JSON.stringify(r)).toBeDefined();
+    expect(r.longestGapMs, JSON.stringify(r)).toBeLessThanOrEqual(FREEZE_MS);
+    if (QUIET) expect(r.longestGapMs, JSON.stringify(r)).toBeLessThanOrEqual(MAX_GAP_MS);
+  });
 
   it('a switch into a mode not yet warmed shows "preparing" over the running view, then the mode', async () => {
     const { bootMs, rec } = await boot();

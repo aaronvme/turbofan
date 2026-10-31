@@ -13,11 +13,15 @@
 // - a warm frame creates pipelines only while drawing objects its budget counted as new;
 // - no background configuration recompiles an object the boot already drew with that material.
 // The timings are recorded (reports/ui/warm-stall.json), indicative, not gated.
+// W2A-N20: then the live solver's field is bound (the app's first switch to the solver) and drawn
+// in the cut views: recorded, and checked to compile no pipeline (it binds new textures only).
 import { commands } from 'vitest/browser';
 import { afterAll, describe, expect, it } from 'vitest';
 import { ISA_SLS } from '../../src/contracts/ambient';
 import { ENGINE_DEFINITION } from '../../src/engine/definition';
 import { FLOW_SOLVER_LIMITS } from '../../src/gpu/device';
+import { GpuFlowSolver } from '../../src/flow/gpu/device/flowSolver';
+import { loadMeshAsset, parseMeshManifest } from '../../src/flow/mesh/loader';
 import { mockSteadyState } from '../../src/mocks/mockCycle';
 import { createMockFlowField } from '../../src/mocks/mockFlowField';
 import { createEngineView, type EngineView } from '../../src/render/engineView';
@@ -157,13 +161,78 @@ describe('the background warm frames (D4-95 item 2)', () => {
         maxGpuPingMs: Math.round(maxPing),
       });
     }
+    // W2A-N20: the solver's first bind, then its first frames in Cutaway and Data
+    const manifest = parseMeshManifest(await (await fetch('/mesh/manifest.json')).json());
+    const entry = manifest.specs['130k'];
+    if (entry === undefined) throw new Error('no 130k mesh');
+    const { asset } = await loadMeshAsset(
+      await (await fetch(`/mesh/${entry.file}`)).arrayBuffer(),
+      entry,
+    );
+    const solver = new GpuFlowSolver();
+    await solver.init({ device, mesh: asset, definition: ENGINE_DEFINITION });
+    const solverPhase: Record<string, unknown>[] = [];
+    for (const mode of ['cutaway', 'data'] as const) {
+      view.setFlowMode(mode);
+      for (let k = 0; k < 30; k++) {
+        await nextFrame();
+        view.frame(1 / 60);
+      }
+      where = `solver ${mode}`;
+      const before = pipes.length;
+      const t0 = performance.now();
+      if (mode === 'cutaway') view.setFlowSolverField(solver.fields());
+      let maxCpu = 0;
+      let maxGap = 0;
+      let last = await nextFrame();
+      for (let k = 0; k < 60; k++) {
+        const t = await nextFrame();
+        maxGap = Math.max(maxGap, t - last);
+        last = t;
+        const c0 = performance.now();
+        view.frame(1 / 60);
+        maxCpu = Math.max(maxCpu, performance.now() - c0);
+      }
+      solverPhase.push({
+        mode,
+        bindMs: Math.round(performance.now() - t0),
+        pipelines: pipes.slice(before).map((p) => `${p.object} ${p.material}`),
+        maxFrameCpuMs: Math.round(maxCpu),
+        maxFrameGapMs: Math.round(maxGap),
+      });
+    }
+    // and a quality change (W2A-N20): the performance profile, whose render scale follows the
+    // GPU time from 0.85 (a smaller target for every scaled pass), then back
+    for (const step of ['performance', 'quality'] as const) {
+      where = `solver profile ${step}`;
+      const before = pipes.length;
+      view.setProfile(step);
+      let maxCpu = 0;
+      for (let k = 0; k < 60; k++) {
+        await nextFrame();
+        const c0 = performance.now();
+        view.frame(1 / 60);
+        maxCpu = Math.max(maxCpu, performance.now() - c0);
+      }
+      solverPhase.push({
+        mode: `profile ${step}`,
+        pipelines: pipes.slice(before).map((p) => `${p.object} ${p.material}`),
+        maxFrameCpuMs: Math.round(maxCpu),
+      });
+    }
+    solver.dispose();
     // the objects the boot drew, by object and material: a background configuration that
     // creates a pipeline for one of them drew it in another render context (a rebuild)
     const drawnAtBoot = new Set(
       pipes.filter((p) => p.in === 'boot').map((p) => `${p.object} ${p.material}`),
     );
     const recompiled = pipes
-      .filter((p) => p.in !== 'boot' && drawnAtBoot.has(`${p.object} ${p.material}`))
+      .filter(
+        (p) =>
+          p.in !== 'boot' &&
+          !p.in.startsWith('solver') &&
+          drawnAtBoot.has(`${p.object} ${p.material}`),
+      )
       .map((p) => `${p.in}: ${p.object} ${p.material} (context ${String(p.context)})`);
     const out = {
       viewport: `${String(W)}x${String(H)} (main thread)`,
@@ -175,6 +244,7 @@ describe('the background warm frames (D4-95 item 2)', () => {
       overBudget,
       recompiledCount: recompiled.length,
       recompiled: recompiled.slice(0, 40),
+      solverPhase,
       errors,
     };
     await commands.writeFile('reports/ui/warm-stall.json', `${JSON.stringify(out, null, 2)}\n`);
@@ -182,5 +252,7 @@ describe('the background warm frames (D4-95 item 2)', () => {
     expect(configs.filter((x) => x.done !== true).map((x) => x.id)).toEqual([]);
     expect(overBudget).toEqual([]);
     expect(recompiled).toEqual([]);
+    // the solver's first bind and a quality change compile nothing (W2A-N20)
+    expect(solverPhase.flatMap((x) => x.pipelines as string[])).toEqual([]);
   });
 });
