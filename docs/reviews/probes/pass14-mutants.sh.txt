@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Critic pass 14: hand mutants on the trial merge (w2/reference-9 @d05e16d + w2/cycle-hold @f2c0779).
+# Each mutant is one sed on one src file, run against the named tests, then the file is restored
+# with git checkout. KILLED = the tests fail. Run from the worktree root: bash pass14-mutants.sh
+set -u
+run() { # id file sed-expr tests... (-t filter allowed)
+  local id=$1 f=$2 e=$3; shift 3
+  cp "$f" /tmp/mut.bak
+  sed -i "$e" "$f"
+  if cmp -s "$f" /tmp/mut.bak; then echo "$id: SED DID NOT APPLY"; return; fi
+  if npx vitest run "$@" > /tmp/mut.log 2>&1; then echo "$id: SURVIVED"; else echo "$id: KILLED ($(grep -cE '^\s+(×|FAIL)' /tmp/mut.log) failing lines)"; fi
+  git checkout -- "$f"
+}
+S=src/flow/reference/solver.ts
+PT="tests/unit/flow/precondition.test.ts -t global"
+# A1: the far field's beta ignores the cut (the unfloored minMach)
+run A1 $S 's/farFieldBeta2: Math.min(1, Math.max(mInf2, pre.minMach \* pre.minMach)),/farFieldBeta2: Math.min(1, Math.max(mInf2, (given?.minMach ?? 1) ** 2)),/' $PT
+# A2: the flux's M_cut is not floored
+run A2 $S 's/machCut: Math.max(pre.machCut ?? pre.minMach, cut),/machCut: pre.machCut ?? pre.minMach,/' $PT
+# A3: beta is not floored (computeBeta reads the options as given)
+run A3 $S 's/const pre = tracking ? this.pre : undefined;/const pre = tracking ? this.opts.lowMachPreconditioning : undefined;/' $PT
+# A4: the CFL default reads the minMach as given
+run A4 $S 's/opts.cfl ?? (pre !== undefined \&\& pre.minMach < 1/opts.cfl ?? (given !== undefined \&\& given.minMach < 1/' $PT
+H="tests/unit/cycle/heldRetry.test.ts tests/unit/cycle/heldFrame.test.ts tests/unit/cycle/gasPathHold.test.ts"
+# B1: a resumed solve gets C7's full 25 iterations, not the ones it has left
+run B1 src/cycle/matchedSolve.ts 's/maxIterations: MAX_NEWTON_ITERATIONS - used/maxIterations: MAX_NEWTON_ITERATIONS/' $H
+# B2: a walk in flight is replaced once the interval has passed (Stryker 143:7)
+run B2 src/cycle/heldRetry.ts 's/if (walk === null \&\& (walkStartedS === null/if (true \&\& (walkStartedS === null/' $H
+# B3: the entry from the sub-idle model goes through the budgeted retry
+run B3 src/cycle/model.ts 's/      this.entering = true;/      this.entering = false;/' $H tests/unit/cycle/lostSolveCause.test.ts
+# B4: a walk that converged on its old target does not move the anchor (Stryker 897)
+run B4 src/cycle/model.ts 's/    if (r.reached !== null) {/    if (false \&\& r.reached !== null) {/' $H
