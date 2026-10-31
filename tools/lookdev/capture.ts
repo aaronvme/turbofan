@@ -3,7 +3,7 @@
 //   npx vite --port 5184 --strictPort        (in another shell; not `npm run dev`, W1M-N1)
 //   node tools/lookdev/capture.ts [--out docs/look-dev] [--only hero,side | none] [--no-timing]
 //     [--warmup-s 10] [--run-s 60] [--reps 3] [--seed 1] [--diagnostics] [--counts] [--port 5184]
-//     [--pacing both | vsync | back-to-back]
+//     [--pacing both | vsync | back-to-back] [--flow]
 //
 // It launches its own headed Chrome (Playwright, channel "chrome", --enable-unsafe-webgpu so
 // timestamps are not quantized to 65.5 us, GPU_FACTS M12), opens the look-dev page at a
@@ -13,7 +13,8 @@
 // `--diagnostics`), a warm-up before EACH run, `--reps` runs per config in a seeded order
 // rotated per repetition (D2-12), every frame of a run kept (p10/p50/p90 per pass), the
 // median of the runs, and each run marked INVALID on the occlusion signature or a hidden
-// page or a blur (D2-11 as amended by D3-6; D4-46 for back to back). The conditions (battery,
+// page, a blur or a page without the OS focus at its start or end (D2-11 as amended by D3-6;
+// D4-46 for back to back; D4-73: the focus emulation is off, spikes/lib/focus.ts). The conditions (battery,
 // power plan, CPU load, Chrome, adapter) are recorded at the start and the end, and the OS
 // power source before and after every run (W2L-I4). Official only under D0-1's protocol with
 // the OS power source on AC throughout (a run on battery is then INVALID), nothing else running
@@ -25,6 +26,16 @@
 // D4-42: P4's measure of record is back to back, over VALID runs only (W2L-I2), with the GPU
 // busy fraction beside it; vsync is printed beside it. Back-to-back runs also record their
 // frames per second and the GPU busy fraction (a warning under BACK_TO_BACK_MIN_BUSY).
+//
+// `--flow` (timing.ts FLOW_CONFIGS): P4's timing with the flow visuals on, as the app draws them.
+// The page loads with the live solver on the view's device (`field=solver`) and steps it before
+// every frame at D4-2's budget; Realistic at its D4-83 default (the haze, no tracers) at the
+// default view and Cutaway with its tracers at the cutaway view, on the solver's field labelled
+// uncoupled (D4-82: a run is INVALID if the MOCK was drawn at its start or end). The protocol
+// above is unchanged. It reports the render GPU time (P4's measure: the flow passes are summed
+// apart and the solver times its own passes), the flow passes, the solver's GPU ms and its
+// iterations per frame, as `P4flow` in `timings-flow.json`: beside the flow-off P4 of record
+// (timings.json, D4-42), never instead of it.
 
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -34,22 +45,34 @@ import type { PowerSource } from '../../spikes/lib/system.ts';
 import { focusValidity, pageHasFocus, realFocus } from '../../spikes/lib/focus.ts';
 import { combineValidity, displayIntervalMs, type Validity } from '../../spikes/lib/validity.ts';
 import { THRESHOLDS } from '../../src/contracts/thresholds.ts';
-import { summarizeRun, type FrameSample, type RunSummary } from '../../src/gpu/passTimings.ts';
+import {
+  median,
+  summarizeRun,
+  type FrameSample,
+  type RunSummary,
+} from '../../src/gpu/passTimings.ts';
 import { osPowerSource } from './os.ts';
 import {
   acThroughout,
   backToBackLoad,
   combineValid,
-  DIAGNOSTIC_CONFIGS,
-  OFFICIAL_CONFIGS,
+  FLOW_CONFIGS,
+  flowFieldValidity,
+  flowRunSummary,
+  lookdevQuery,
   p4Verdict,
   pacedValidity,
   parseTimingArgs,
   powerValidity,
   runOrder,
+  timingConfigs,
   withPacings,
   type BackToBackLoad,
+  type FlowFieldState,
+  type FlowRunSummary,
+  type FlowSetting,
   type Pacing,
+  type SolverFrames,
 } from './timing.ts';
 
 // a command-line tool: its progress goes to stdout
@@ -77,6 +100,13 @@ const arg = (name: string): string | undefined => {
 const out = arg('--out') ?? 'docs/look-dev';
 const only = arg('--only')?.split(',');
 const timing = !args.includes('--no-timing');
+// the protocol's flags, read before the page loads: --flow needs the solver on the view's device
+const timingArgs = parseTimingArgs(args);
+/** A run whose page recorded no field: counted as the MOCK, so flowFieldValidity fails it. */
+const NO_FIELD: FlowFieldState = { asked: 'mock', coupling: 'mock', fallback: null };
+const FLOW_IDS = FLOW_CONFIGS.map((c) => c.id);
+/** The median of the finite values (NaN when none). */
+const medianOf = (xs: readonly number[]): number => median(xs.filter(Number.isFinite));
 const port = arg('--port') ?? '5184';
 // --clip x,y,w,h saves only that region (close inspection of artefacts)
 const clipArg = arg('--clip')?.split(',').map(Number);
@@ -97,6 +127,10 @@ interface LookdevPage {
     setPreset(id: string): void;
     setDebugFlags(f: Readonly<Record<string, boolean | number | string>>): void;
     setProfile(id: string): void;
+    /** The flow visuals (src/lookdev/main.ts): `--flow` only. */
+    setFlowMode(id: FlowSetting['mode'] | null): void;
+    setFlowTracers(on: boolean | null): void;
+    flowField(): FlowFieldState;
     renderFrames(n: number): Promise<void>;
     timeFrames(n: number): Promise<Medians>;
     renderFor(ms: number, saturate?: boolean): Promise<void>;
@@ -110,6 +144,8 @@ interface LookdevPage {
       blurs?: number;
       events: string[];
       vsyncDeltas?: number[];
+      solver?: SolverFrames;
+      field?: { start: FlowFieldState; end: FlowFieldState };
     }>;
     conditions(): Promise<Record<string, unknown>>;
     stats(): {
@@ -172,7 +208,7 @@ async function main(): Promise<void> {
     page.on('console', (m) => {
       if (m.type() === 'error' || m.type() === 'warning') log(`[page ${m.type()}] ${m.text()}`);
     });
-    await page.goto(`http://localhost:${port}/lookdev.html?clean=1`);
+    await page.goto(`http://localhost:${port}/lookdev.html?${lookdevQuery(timingArgs)}`);
     await page.waitForFunction(() => (window as LookdevPage).lookdev?.ready === true, null, {
       timeout: 120_000,
     });
@@ -220,10 +256,10 @@ async function main(): Promise<void> {
       );
     }
     if (timing) {
-      const t = parseTimingArgs(args);
+      const t = timingArgs;
       // D4-73: D3-6's blur rule sees the OS focus (the page is not navigated again)
       await realFocus(page, cdp, openOther);
-      const configs = withPacings(t.diagnostics ? DIAGNOSTIC_CONFIGS : OFFICIAL_CONFIGS, t.pacings);
+      const configs = withPacings(timingConfigs(t), t.pacings);
       const order = runOrder(configs, t.reps, t.seed);
       const atStart = await conditions(page, browser.version());
       log(
@@ -255,6 +291,8 @@ async function main(): Promise<void> {
           scales: number[];
           errors: number[];
           power: PowerSource[][];
+          /** --flow: each run's flow passes, solver GPU ms and iterations per frame. */
+          flow: FlowRunSummary[];
         }
       >();
       for (const [rep, ids] of order.entries()) {
@@ -265,16 +303,26 @@ async function main(): Promise<void> {
           const powerBefore = osPowerSource();
           const focusStart = await pageHasFocus(page);
           const run = await page.evaluate(
-            async ([preset, flags, profile, warmMs, runMs, sat]) => {
+            async ([preset, flags, profile, warmMs, runMs, sat, flow]) => {
               const l = (window as LookdevPage).lookdev;
               if (l === undefined) throw new Error('no lookdev');
               l.setDebugFlags(flags);
               l.setProfile(profile);
               l.setPreset(preset);
+              // --flow: the mode and its tracers after the preset (the mode picks the look mode);
+              // the warm-up then steps the solver too
+              if (flow !== null) {
+                l.setFlowMode(flow.mode);
+                l.setFlowTracers(flow.tracers);
+              }
               await l.renderFor(warmMs, sat);
               const r = await l.timeRun(runMs, sat);
               const errors = l.stats().errors.length;
               const scale = l.stats().renderScale;
+              if (flow !== null) {
+                l.setFlowMode(null);
+                l.setFlowTracers(null);
+              }
               l.setDebugFlags({});
               l.setProfile('quality');
               return { ...r, errors, scale };
@@ -286,6 +334,7 @@ async function main(): Promise<void> {
               t.warmupS * 1000,
               t.runS * 1000,
               saturate,
+              c.flow ?? null,
             ] as const,
           );
           const powerAfter = osPowerSource();
@@ -306,8 +355,16 @@ async function main(): Promise<void> {
             ),
             powerValidity([powerBefore, powerAfter], protocol),
             focusValidity(focusStart, focusEnd),
+            // --flow: the solver's field, labelled uncoupled, drawn throughout (D4-82)
+            ...(c.flow === undefined
+              ? []
+              : [flowFieldValidity(run.field?.start ?? NO_FIELD, run.field?.end ?? NO_FIELD)]),
           ]);
           const load = backToBackLoad(run.frames, run.rafDeltas);
+          const flowRun =
+            c.flow === undefined
+              ? null
+              : flowRunSummary(run.frames, run.solver ?? { gpuMs: [], iterations: [] });
           const e = perConfig.get(id) ?? {
             runs: [],
             validity: [],
@@ -315,7 +372,9 @@ async function main(): Promise<void> {
             scales: [],
             errors: [],
             power: [],
+            flow: [],
           };
+          if (flowRun !== null) e.flow.push(flowRun);
           e.runs.push(summary);
           e.validity.push(validity);
           e.load.push(load);
@@ -324,7 +383,7 @@ async function main(): Promise<void> {
           e.power.push([powerBefore, powerAfter]);
           perConfig.set(id, e);
           log(
-            `rep ${rep + 1} ${id}: GPU p50 ${summary.gpuTotal.p50.toFixed(2)} ms (p10 ${summary.gpuTotal.p10.toFixed(2)}, p90 ${summary.gpuTotal.p90.toFixed(2)}), ${summary.frames} frames, ${load.framesPerS.toFixed(1)} fps, GPU busy ${(100 * load.gpuBusy).toFixed(0)} %, ${validity.valid ? 'valid' : validity.reasons.join('; ')}${validity.warnings.length > 0 ? ` [${validity.warnings.join('; ')}]` : ''}${run.events.length > 0 ? ` events: ${run.events.join(', ')}` : ''}, render scale ${run.scale}, errors ${run.errors}, power ${powerBefore} -> ${powerAfter}${saturate ? `, rAF watcher ${(run.vsyncDeltas ?? []).length} ticks` : ''}`,
+            `rep ${rep + 1} ${id}: GPU p50 ${summary.gpuTotal.p50.toFixed(2)} ms (p10 ${summary.gpuTotal.p10.toFixed(2)}, p90 ${summary.gpuTotal.p90.toFixed(2)}), ${summary.frames} frames, ${load.framesPerS.toFixed(1)} fps, GPU busy ${(100 * load.gpuBusy).toFixed(0)} %, ${validity.valid ? 'valid' : validity.reasons.join('; ')}${validity.warnings.length > 0 ? ` [${validity.warnings.join('; ')}]` : ''}${run.events.length > 0 ? ` events: ${run.events.join(', ')}` : ''}, render scale ${run.scale}, errors ${run.errors}, power ${powerBefore} -> ${powerAfter}${saturate ? `, rAF watcher ${(run.vsyncDeltas ?? []).length} ticks` : ''}${flowRun === null ? '' : `; flow passes p50 ${flowRun.flowRender.p50.toFixed(2)} ms (${flowRun.flowRender.frames} frames), solver GPU p50 ${flowRun.solverGpuMs.p50.toFixed(2)} ms, ${flowRun.iterationsPerFrame.p50.toFixed(1)} iterations per frame, field ${run.field?.end.coupling ?? 'none'}${run.field?.end.fallback == null ? '' : ` (fallback: ${run.field.end.fallback})`}`}`,
           );
         }
       }
@@ -347,6 +406,20 @@ async function main(): Promise<void> {
           renderScale: e.scales,
           errors: e.errors,
           powerSource: e.power,
+          ...(c.flow === undefined
+            ? {}
+            : {
+                flow: {
+                  setting: c.flow,
+                  perRun: e.flow,
+                  // medians over the valid runs of each run's median, as the render total
+                  flowRenderMs: medianOf(used.map((i) => e.flow[i]?.flowRender.p50 ?? NaN)),
+                  solverGpuMs: medianOf(used.map((i) => e.flow[i]?.solverGpuMs.p50 ?? NaN)),
+                  iterationsPerFrame: medianOf(
+                    used.map((i) => e.flow[i]?.iterationsPerFrame.p50 ?? NaN),
+                  ),
+                },
+              }),
         };
         const passes = Object.entries(combined.gpu)
           .filter(([, v]) => v.p50 > 0.0005)
@@ -404,7 +477,45 @@ async function main(): Promise<void> {
         log(`P4: ${v.verdict}${ac ? '' : ' (OS power source not AC throughout)'}`);
         if (v.verdict.startsWith('FAIL') || v.verdict === 'INVALID') process.exitCode = 1;
       }
-      const file = join(out, 'timings.json');
+      // --flow: P4's measure (the render GPU time, the flow passes and the solver apart) with the
+      // flow visuals on, reported beside the flow-off capture of record (D4-42), not gated
+      if (t.flow) {
+        type FlowRow = Row & {
+          flow?: { flowRenderMs: number; solverGpuMs: number; iterationsPerFrame: number };
+        };
+        const flowRows = Object.fromEntries(
+          t.pacings.flatMap((pacing) =>
+            FLOW_IDS.map((id) => {
+              const r = results[pacing === 'vsync' ? id : `${id} [back to back]`] as
+                FlowRow | undefined;
+              return [
+                `${id}${pacing === 'vsync' ? '' : ' [back to back]'}`,
+                {
+                  renderGpuMs: r?.gpuTotal?.p50,
+                  valid: r?.valid,
+                  gpuBusy: r?.gpuBusyMedian,
+                  flowRenderMs: r?.flow?.flowRenderMs,
+                  solverGpuMs: r?.flow?.solverGpuMs,
+                  iterationsPerFrame: r?.flow?.iterationsPerFrame,
+                },
+              ];
+            }),
+          ),
+        );
+        results.P4flow = {
+          note: "P4's measure with the flow visuals on, on the solver's field (uncoupled): reported beside the flow-off P4 of record (D4-42), not gated",
+          maxMs: p4.maxRenderGpuMs.value,
+          rows: flowRows,
+        };
+        const f = (x: number | undefined) =>
+          x === undefined || Number.isNaN(x) ? '-' : x.toFixed(2);
+        for (const [id, r] of Object.entries(flowRows))
+          log(
+            `P4 with the flow on (reported): ${id}: render ${f(r.renderGpuMs)} ms (P4 <= ${String(p4.maxRenderGpuMs.value)} ms is gated on the flow-off default only), flow passes ${f(r.flowRenderMs)} ms, solver ${f(r.solverGpuMs)} ms at ${f(r.iterationsPerFrame)} iterations per frame${r.gpuBusy === undefined ? '' : `, GPU busy ${(100 * r.gpuBusy).toFixed(0)} %`}, ${r.valid === true ? 'VALID' : 'INVALID'}`,
+          );
+      }
+      // a --flow capture never overwrites the record of P4 (timings.json)
+      const file = join(out, t.flow ? 'timings-flow.json' : 'timings.json');
       writeFileSync(
         file,
         `${JSON.stringify(

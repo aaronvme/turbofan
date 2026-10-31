@@ -11,6 +11,7 @@
 // by the MOCK at once, with the reason on the badge (src/flow/viz/fieldLink.ts).
 
 import { ISA_SLS } from '../contracts/ambient';
+import type { FlowStepStats } from '../contracts/flow';
 import { ENGINE_DEFINITION } from '../engine/definition';
 import { GpuFlowSolver } from '../flow/gpu/device/flowSolver';
 import { solverBudgetMs } from '../flow/gpu/scheduler';
@@ -111,6 +112,10 @@ export interface FlowPanel {
   setTracers(on: boolean | null): void;
   /** Which field is drawn and why (D4-82; W2V-I6: a fallback's reason). */
   linkState(): FlowLinkState;
+  /** The flow mode drawn (null: the flow visuals off). */
+  mode(): FlowVizModeId | null;
+  /** The live solver's last step (the capture's --flow record); null without a live solver. */
+  solverStats(): FlowStepStats | null;
   /** The MOCK field follows the throttle (a rasterised steady state). */
   setThrottle(lever: number): void;
 }
@@ -320,6 +325,8 @@ export async function createFlowPanel(
       sync();
     },
     linkState: () => link.state(),
+    mode: () => mode,
+    solverStats: () => link.solver?.status().stats ?? null,
     setThrottle(l) {
       lever = l;
       // rasterising the MOCK takes a moment: once the lever rests. It is kept up to date while

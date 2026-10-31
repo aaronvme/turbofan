@@ -32,7 +32,41 @@ export interface TimingConfig {
   readonly flags: Readonly<Record<string, boolean | number | string>>;
   /** The render profile (D3-7); `quality` when absent. */
   readonly profile?: 'quality' | 'performance';
+  /** The flow visuals during the run (`--flow`); off when absent. */
+  readonly flow?: FlowSetting;
 }
+
+/** A flow mode on the live solver's field (src/lookdev/flowPanel.ts; D4-82, D4-83). */
+export interface FlowSetting {
+  readonly mode: 'realistic' | 'cutaway' | 'schlieren' | 'data';
+  /** D4-83: null is the mode's own default (Realistic: no tracers; Cutaway and Data: tracers). */
+  readonly tracers: boolean | null;
+}
+
+/**
+ * `--flow`: P4's timing with the flow visuals on, as the app draws them (the solver and the flow
+ * visuals share the frame), on the live solver's field labelled uncoupled (D4-82). Realistic at
+ * its D4-83 default (the haze and schlieren, no tracers) at the default view, Cutaway with its
+ * tracers at the cutaway view. The render GPU time is P4's measure (engine plus post, the flow
+ * passes summed apart, the solver's compute timed by the solver): reported beside P4's measure of
+ * record, the flow-off capture (D4-42), not instead of it.
+ */
+export const FLOW_CONFIGS: readonly TimingConfig[] = [
+  {
+    id: 'default (threeQuarterFront), flow Realistic (D4-83 default: haze, no tracers), solver uncoupled',
+    group: 'flow',
+    preset: 'threeQuarterFront',
+    flags: {},
+    flow: { mode: 'realistic', tracers: null },
+  },
+  {
+    id: 'cutaway, flow Cutaway with tracers, solver uncoupled',
+    group: 'flow',
+    preset: 'cutaway',
+    flags: {},
+    flow: { mode: 'cutaway', tracers: true },
+  },
+];
 
 /** The official set (D3-7): the default, the cutaway and the hero. About 11 min at D0-1. */
 export const OFFICIAL_CONFIGS: readonly TimingConfig[] = [
@@ -131,10 +165,16 @@ export interface TimingArgs {
   readonly reps: number;
   readonly seed: number;
   readonly diagnostics: boolean;
+  /** `--flow`: the flow-on set (FLOW_CONFIGS) on the solver's field. */
+  readonly flow: boolean;
   readonly pacings: readonly Pacing[];
 }
 
 export function parseTimingArgs(argv: readonly string[]): TimingArgs {
+  const diagnostics = argv.includes('--diagnostics');
+  const flow = argv.includes('--flow');
+  if (flow && diagnostics)
+    throw new Error('--flow and --diagnostics: the A/B diagnostics are flow-off configs, pick one');
   const num = (name: string, fallback: number, ok: (v: number) => boolean): number => {
     const i = argv.indexOf(name);
     if (i < 0) return fallback;
@@ -157,8 +197,93 @@ export function parseTimingArgs(argv: readonly string[]): TimingArgs {
     runS: num('--run-s', 60, (v) => v > 0),
     reps: num('--reps', 3, (v) => Number.isInteger(v) && v >= 1),
     seed: num('--seed', 1, Number.isInteger),
-    diagnostics: argv.includes('--diagnostics'),
+    diagnostics,
+    flow,
     pacings: chosen,
+  };
+}
+
+/** The configs a capture times: the official set, the A/B diagnostics, or the flow-on set. */
+export function timingConfigs(
+  a: Pick<TimingArgs, 'diagnostics' | 'flow'>,
+): readonly TimingConfig[] {
+  return a.flow ? FLOW_CONFIGS : a.diagnostics ? DIAGNOSTIC_CONFIGS : OFFICIAL_CONFIGS;
+}
+
+/** The look-dev page's query: with `--flow` the live solver shares the view's device (D4-64). */
+export function lookdevQuery(a: Pick<TimingArgs, 'flow'>): string {
+  return a.flow ? 'clean=1&field=solver' : 'clean=1';
+}
+
+/** Which field the flow visuals draw (src/flow/viz/fieldLink.ts FlowLinkState, D4-82). */
+export interface FlowFieldState {
+  readonly asked: 'mock' | 'solver';
+  readonly coupling: 'mock' | 'uncoupled' | 'coupled';
+  readonly fallback: string | null;
+}
+
+/**
+ * A `--flow` run measures the visuals on the live solver's field, labelled uncoupled until W3
+ * (D4-82): INVALID when, at its start or its end, the field drawn was not that (the MOCK, a
+ * fallback after a failed, lost or diverged solver, or a coupled field).
+ */
+export function flowFieldValidity(start: FlowFieldState, end: FlowFieldState): Validity {
+  const reasons: string[] = [];
+  for (const [when, s] of [
+    ['start', start],
+    ['end', end],
+  ] as const) {
+    if (s.fallback !== null)
+      reasons.push(
+        `INVALID (flow field): at the ${when} the MOCK was drawn (fallback: ${s.fallback})`,
+      );
+    else if (s.asked !== 'solver' || s.coupling !== 'uncoupled')
+      reasons.push(
+        `INVALID (flow field): at the ${when} the field was ${s.coupling === 'mock' ? 'the MOCK' : s.coupling}, not the solver's uncoupled one`,
+      );
+  }
+  return { valid: reasons.length === 0, reasons, warnings: [] };
+}
+
+/** A spread over the frames that had the value (NaN entries dropped). */
+export interface CountedSpread extends Spread {
+  readonly frames: number;
+}
+
+const counted = (xs: readonly number[]): CountedSpread => {
+  const v = xs.filter(Number.isFinite);
+  return {
+    frames: v.length,
+    p10: quantile(v, 0.1),
+    p50: quantile(v, 0.5),
+    p90: quantile(v, 0.9),
+  };
+};
+
+/** What the page records of the solver per frame of a `--flow` run (src/lookdev/main.ts). */
+export interface SolverFrames {
+  /** The solver's latest resolved GPU ms (iterations plus the resample) after each frame. */
+  readonly gpuMs: readonly number[];
+  /** The iterations each frame ran (D4-2's budget). */
+  readonly iterations: readonly number[];
+}
+
+export interface FlowRunSummary {
+  /** The flow visuals' render passes ("Flow ..."), outside P4's render GPU time. */
+  readonly flowRender: CountedSpread;
+  readonly solverGpuMs: CountedSpread;
+  readonly iterationsPerFrame: CountedSpread;
+}
+
+/** A `--flow` run beside its render summary: the flow passes, the solver, its iterations. */
+export function flowRunSummary(
+  frames: readonly FrameSample[],
+  solver: SolverFrames,
+): FlowRunSummary {
+  return {
+    flowRender: counted(frames.map((f) => f.flow ?? Number.NaN)),
+    solverGpuMs: counted(solver.gpuMs),
+    iterationsPerFrame: counted(solver.iterations),
   };
 }
 
