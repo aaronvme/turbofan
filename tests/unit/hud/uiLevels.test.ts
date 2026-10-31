@@ -24,8 +24,9 @@ function physicsUiRows(): { id: string; check: string; pass: string }[] {
 describe('the UI levels mirror docs/PHYSICS.md 3.5 (D4-91)', () => {
   const rows = physicsUiRows();
 
-  it('has U1-U3, verbatim', () => {
-    expect(rows.map((r) => r.id)).toEqual(['U1', 'U2', 'U3']);
+  it('has U1-U4, verbatim', () => {
+    expect(rows.map((r) => r.id).slice(0, 4)).toEqual(['U1', 'U2', 'U3', 'U4']);
+    expect(rows.map((r) => r.id).sort()).toEqual(Object.keys(UI_ROWS).sort());
     for (const r of rows) {
       const m = UI_ROWS[r.id as keyof typeof UI_ROWS];
       expect(m.checkText).toBe(r.check);
@@ -42,6 +43,10 @@ describe('the UI levels mirror docs/PHYSICS.md 3.5 (D4-91)', () => {
     expect(rows[1]?.pass).toContain('≤ 250 ms');
     expect(UI_LEVELS.bootToReadyMaxMs).toBe(5000);
     expect(rows[2]?.pass).toContain('≤ 5 s');
+    // D4-97 item 1 (W2A-I7): an unwarmed switch is shown within 2 s at any steady frame CPU
+    expect(UI_LEVELS.coldSwitchMaxMs).toBe(2000);
+    expect(rows[3]?.pass).toContain('≤ 2 s');
+    expect(rows[3]?.check).toContain('60 frames');
   });
 
   it('the map annunciates at U1: amber below 5 %, normal at exactly 5 % (W2A-N19), red at 0', () => {
