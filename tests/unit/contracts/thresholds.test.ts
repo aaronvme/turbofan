@@ -40,7 +40,8 @@ function readPhysicsThresholds(): PhysicsRow[] {
     const cells = line.split('|').map((c) => c.trim());
     if (cells.length !== 5) continue;
     const [, id = '', check = '', pass = ''] = cells;
-    if (!/^[TCLP]\d+$/.test(id)) continue;
+    // an ID is a letter, a number and an optional sub-row letter (P5b by D4-94)
+    if (!/^[TCLP]\d+[a-z]?$/.test(id)) continue;
     rows.push({ id, section, check, pass });
   }
   return rows;
@@ -50,8 +51,9 @@ const physics = readPhysicsThresholds();
 
 describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
   it('finds the full pre-registered set in PHYSICS.md', () => {
-    // T1-T4, C1-C12 (C10 by D3-3, C11 by D3-11, C12 by D3-17), L1-L13, P1-P5 (P4 by D4-2, P5 by D4-90)
-    expect(physics.length).toBe(4 + 12 + 13 + 5);
+    // T1-T4, C1-C12 (C10 by D3-3, C11 by D3-11, C12 by D3-17), L1-L13, P1-P5 and P5b (P4 by D4-2,
+    // P5 by D4-90, P5b by D4-94)
+    expect(physics.length).toBe(4 + 12 + 13 + 6);
   });
 
   it('has exactly the same IDs, in the same order', () => {
@@ -107,6 +109,14 @@ describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
     expect(THRESHOLDS.P5.values.maxStepEvaluations.value).toBe(217);
     expect(THRESHOLDS.P5.values.heldFrameMs.value).toBe(16.7);
     expect(THRESHOLDS.P5.values.stepRateHz.value).toBe(60);
+    expect(THRESHOLDS.P5b.values.maxHeldEpisodeS.value).toBe(0.5);
+    expect(THRESHOLDS.P5b.values.maxStepRateHz.value).toBe(120);
+    expect(THRESHOLDS.P5b.values.minStepRateHz.value).toBe(30);
+    expect(THRESHOLDS.P5b.values.takeoffAtS.value).toBe(3);
+    expect(THRESHOLDS.P5b.values.surgeAtS.value).toBe(10);
+    expect(THRESHOLDS.P5b.values.flameoutAtS.value).toBe(20);
+    expect(THRESHOLDS.P5b.values.scenarioS.value).toBe(35);
+    expect(THRESHOLDS.P5b.values.escalateAfterS.value).toBe(0.25);
   });
 
   it('marks the thresholds whose numbers live in ENGINE_FACTS.md instead', () => {
