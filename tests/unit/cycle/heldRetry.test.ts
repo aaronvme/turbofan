@@ -27,6 +27,7 @@ import {
   type RetryState,
 } from '../../../src/cycle/heldRetry';
 import {
+  MAX_CONTINUATION_SOLVES,
   MIN_CONTINUATION_STEP,
   advanceWalk,
   solveMatched,
@@ -496,5 +497,100 @@ describe('W2H-I2: a resumed solve gets only the iterations it has left', () => {
     expect(end).toBe('lost');
     // the halving from 1/2 to 1/256: 8 solves, each refused after exactly C7's 25 iterations
     expect(perSolve).toEqual(Array<number>(8).fill(MAX_NEWTON_ITERATIONS));
+  });
+});
+
+describe('W2H-N4: the policy branches only the slow suites reached (Stryker and hand-mutant survivors)', () => {
+  it('B2: a walk in flight past WALK_INTERVAL_S goes on to its own target: never replaced, its start kept', () => {
+    // two solves of C7's whole 25 iterations each, at one iteration a step (a budget of 23: the
+    // direct takes its share, 16, and the walk one iteration), so the walk spans about 1 s
+    const { fake, solve } = fakeNewton((n2, from) =>
+      n2 === 1050 && from === 1000 ? 25 : n2 === 1100 && from === 1050 ? 25 : Infinity,
+    );
+    const p = policy(fake, { budget: 23 });
+    let state = retry(solve, p, { tS: 2, target: targetAt(1100) }).r.state;
+    expect(state.walkStartedS).toBe(2);
+    let reached = null;
+    let k = 1;
+    for (; k < 200 && reached === null; k++) {
+      const { r } = retry(solve, p, { state, tS: 2 + 0.02 * k, target: targetAt(1100 + k) });
+      expect(r.kind).toBe('held');
+      if (r.kind === 'held') reached = r.reached;
+      // the walk that set out at 2 s is the one in flight, however long it takes
+      expect(r.state.walkStartedS, `step ${k}`).toBe(2);
+      if (reached === null) expect(r.state.walk?.target).toEqual(targetAt(1100));
+      state = r.state;
+    }
+    expect(0.02 * k).toBeGreaterThan(WALK_INTERVAL_S + 0.02);
+    expect(reached?.anchor).toEqual({ ...targetAt(1100), x: [1100, 6, 0.5, 0.5, 0.5, 0.5] });
+  });
+
+  it.each(['n1Rpm', 'wfKgPerS'] as const)(
+    'a walk that reaches its target while the state differs from it only in %s is held, not matched',
+    (key) => {
+      const { fake, solve } = fakeNewton((n2, from) =>
+        n2 === 1050 && from === 1000 ? 12 : n2 === 1100 && from === 1050 ? 3 : Infinity,
+      );
+      const p = policy(fake);
+      const moved = (k: number): GasPathTarget => ({
+        ...targetAt(1100),
+        [key]: targetAt(1100)[key] * (1 + 0.001 * k),
+      });
+      let state = retry(solve, p, { tS: 2, target: targetAt(1100) }).r.state;
+      let reached = null;
+      for (let k = 1; k < 20 && reached === null; k++) {
+        const { r } = retry(solve, p, { state, tS: 2 + 0.02 * k, target: moved(k) });
+        expect(r.kind).toBe('held');
+        if (r.kind === 'held') reached = r.reached;
+        state = r.state;
+      }
+      expect(reached?.anchor).toEqual({ ...targetAt(1100), x: [1100, 6, 0.5, 0.5, 0.5, 0.5] });
+    },
+  );
+
+  it('a walk that runs out of solves (it only creeps) is held with no walk in flight', () => {
+    // converges only on steps of at most MIN_CONTINUATION_STEP, so 64 solves never reach the target
+    let done = 0;
+    let calls = 0;
+    const creeping: GasPathSolver = (_e, _c, _n1, n2) => {
+      calls++;
+      const f = (n2 - 1000) / 100;
+      const ok = f - done <= MIN_CONTINUATION_STEP + 1e-9;
+      if (ok) done = f;
+      return {
+        point: idle().point,
+        x: [n2, 6, 0.5, 0.5, 0.5, 0.5],
+        iterations: 1,
+        converged: ok,
+        maxResidual: ok ? 0 : 1e-3,
+      };
+    };
+    const p: RetryPolicy = { budget: Infinity, walkIntervalS: 0, meter: () => calls };
+    const { r } = retry(creeping, p, { target: targetAt(1100) });
+    expect(r.kind).toBe('held');
+    if (r.kind === 'held') expect(r.reached).toBeNull();
+    expect(r.state.walk).toBeNull();
+    // the direct try, then the walk's MAX_CONTINUATION_SOLVES
+    expect(calls).toBe(1 + MAX_CONTINUATION_SOLVES);
+    expect(done).toBeGreaterThan(0);
+    expect(done).toBeLessThan(1);
+  });
+
+  it('a walk asked to stop before its next solve pauses without calling the solver', () => {
+    const { fake, solve } = fakeNewton(() => 3);
+    const r = advanceWalk(
+      solve,
+      REF,
+      C,
+      startWalk(anchorAt(1000), targetAt(1100)),
+      { cause: null },
+      () => true,
+    );
+    expect(r.kind).toBe('paused');
+    expect(fake.calls).toHaveLength(0);
+    if (r.kind === 'paused') {
+      expect(r.walk.paused).toBeNull();
+      expect(r.walk.solves).toBe(0);
+    }
   });
 });
