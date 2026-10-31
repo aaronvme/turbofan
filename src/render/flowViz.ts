@@ -567,9 +567,13 @@ export function createFlowViz(o: {
           const t = t0.add(float(i).add(jitter).mul(ds));
           const p = o3.add(d.mul(t));
           const r = length(p.yz);
-          const g = gradientNode.sample(
-            vec2(p.x.sub(e.xMin).div(e.xMax - e.xMin), r.sub(e.rMin).div(e.rMax - e.rMin)),
-          );
+          // w2/app-ui round 4 (flagged edit, D4-91): an explicit level 0 (the gradient has one
+          // mip level, so the same texels): an implicit-derivative sample in this loop made
+          // D3D12's shader compiler unroll all its steps, a compile that held the GPU process
+          // for about a second on Schlieren's first use
+          const g = gradientNode
+            .sample(vec2(p.x.sub(e.xMin).div(e.xMax - e.xMin), r.sub(e.rMin).div(e.rMax - e.rMin)))
+            .level(float(0));
           const invR = float(1).div(max(r, 1e-4));
           const grad = vec3(g.x, g.y.mul(p.y).mul(invR), g.y.mul(p.z).mul(invR));
           const de = vec2(dot(grad, ray.right), dot(grad, ray.up)).mul(kds);

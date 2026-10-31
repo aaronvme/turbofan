@@ -112,6 +112,8 @@ export function layoutCallouts(
   size: (id: string) => { readonly w: number; readonly h: number },
   viewport: { readonly w: number; readonly h: number },
   reserved: readonly Rect[] = [],
+  /** Places tried before the offsets (D4-92 zz: the cut views' row places). */
+  preferred: (id: string) => readonly Rect[] = () => [],
 ): PlacedCallout[] {
   const order = anchors
     .filter((a) => a.visible && Number.isFinite(a.x) && Number.isFinite(a.y))
@@ -120,8 +122,11 @@ export function layoutCallouts(
   const candidates = order.map((a) => {
     const { w, h } = size(a.id);
     const out: PlacedCallout[] = [];
-    for (const [dx, dy] of OFFSETS) {
-      const box: Rect = { x: dx >= 0 ? a.x + dx : a.x + dx - w, y: a.y + dy, w, h };
+    const boxes: Rect[] = [
+      ...preferred(a.id),
+      ...OFFSETS.map(([dx, dy]) => ({ x: dx >= 0 ? a.x + dx : a.x + dx - w, y: a.y + dy, w, h })),
+    ];
+    for (const box of boxes) {
       const onScreen =
         box.x >= 0 && box.y >= 0 && box.x + w <= viewport.w && box.y + h <= viewport.h;
       // the label must not cover another anchor's dot either
@@ -265,17 +270,23 @@ export function layoutAxial(
   const vis = anchors
     .filter((a) => a.visible && Number.isFinite(a.x) && Number.isFinite(a.y))
     .sort((a, b) => a.axial - b.axial || (a.id < b.id ? -1 : 1));
-  const dots = vis.map((o) => ({ id: o.id, r: { x: o.x - 3, y: o.y - 3, w: 6, h: 6 } }));
-  const attempt = (parity: number): PlacedCallout[] => {
-    const placed: PlacedCallout[] = [];
-    const rest: AxialAnchor[] = [];
+  // the rows' limits: under the full-width bar at the top, over the one at the bottom
+  const wide = reserved.filter((r) => r.w > viewport.w / 2);
+  const topLimit = Math.max(0, ...wide.filter((r) => r.y <= 1).map((r) => r.y + r.h + GAP));
+  const bottomLimit = Math.min(
+    viewport.h,
+    ...wide.filter((r) => r.y + r.h >= viewport.h - 1).map((r) => r.y - GAP),
+  );
+  const rows = (parity: number): Map<string, Rect> => {
+    const out = new Map<string, Rect>();
     for (const above of [true, false]) {
       const row = vis.filter((_, i) => (i % 2 === parity) === above);
       const boxes = row.map((a) => {
         const { w, h } = size(a.id);
         const y = above ? band.y - ROW_GAP - h : band.y + band.h + ROW_GAP;
-        return { a, w, h, y: Math.max(0, Math.min(viewport.h - h, y)), x: a.x - w / 2 };
+        return { a, w, h, y: Math.max(topLimit, Math.min(bottomLimit - h, y)), x: a.x - w / 2 };
       });
+      if (boxes.length === 0) continue;
       // the row's span: between the panels beside the engine at the row's height
       const rowY0 = Math.min(...boxes.map((b) => b.y));
       const rowY1 = Math.max(...boxes.map((b) => b.y + b.h));
@@ -283,7 +294,7 @@ export function layoutAxial(
       let lo = 0;
       let hi = viewport.w;
       for (const r of reserved) {
-        if (!(r.y < rowY1 && rowY0 < r.y + r.h)) continue;
+        if (!(r.y < rowY1 && rowY0 < r.y + r.h) || r.w > viewport.w / 2) continue;
         if (r.x + r.w <= mid) lo = Math.max(lo, r.x + r.w + GAP);
         else if (r.x >= mid) hi = Math.min(hi, r.x - GAP);
       }
@@ -300,21 +311,18 @@ export function layoutAxial(
         if (b === undefined) continue;
         b.x = Math.min(b.x, hi - b.w, next === undefined ? Infinity : next.x - b.w - GAP);
       }
-      for (const b of boxes) {
-        const box: Rect = { x: b.x, y: b.y, w: b.w, h: b.h };
-        const ok =
-          box.x >= lo - 1e-9 &&
-          box.x + box.w <= hi + 1e-9 &&
-          !reserved.some((r) => overlaps(box, r, GAP)) &&
-          !placed.some((p) => overlaps(box, p.box, GAP)) &&
-          !dots.some((d) => d.id !== b.a.id && overlaps(box, d.r));
-        if (ok) placed.push({ id: b.a.id, anchor: { x: b.a.x, y: b.a.y }, box });
-        else rest.push(b.a);
-      }
+      for (const b of boxes) out.set(b.a.id, { x: b.x, y: b.y, w: b.w, h: b.h });
     }
-    if (rest.length === 0) return placed;
-    const more = layoutCallouts(rest, size, viewport, [...reserved, ...placed.map((p) => p.box)]);
-    return [...placed, ...more];
+    return out;
+  };
+  // the row places go first in the general search, which keeps its guarantees (no overlap, no
+  // panel, the fewest leader crossings) and its offsets for a label its row has no room for
+  const attempt = (parity: number) => {
+    const r = rows(parity);
+    return layoutCallouts(vis, size, viewport, reserved, (id) => {
+      const box = r.get(id);
+      return box === undefined ? [] : [box];
+    });
   };
   const tries = [attempt(0), attempt(1)];
   tries.sort((p, q) => q.length - p.length || leaderCrossings(p) - leaderCrossings(q));
