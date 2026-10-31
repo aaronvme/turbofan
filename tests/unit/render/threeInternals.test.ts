@@ -171,6 +171,32 @@ describe('three r186 internals (D4-95 item 4)', () => {
     ).toBe(true);
     // the jitter: set from the index here, advanced as the beauty's render clears the offset
     expect(has(update, 'this.setViewOffset( width, height );')).toBe(true);
+    // W2A-N26: every field its updateBefore writes, pinned, so a three upgrade that gives it one
+    // more piece of per-frame state fails here (and is read) before a warm frame stops putting
+    // TRAA back: the six camera uniforms (TRAA_MATRICES, restored), the previous depth (restored),
+    // and the one-shot post-processing sync flag (set by setup, cleared on the first frame)
+    const writes = new Set<string>();
+    for (const m of update.matchAll(/this\.(\w+)((?:\.\w+)*)\s*(?:=(?!=)|\+\+|--|\+=|-=)/g))
+      writes.add(`${m[1] ?? ''}${m[2] ?? ''} =`);
+    for (const m of update.matchAll(
+      /this\.(\w+)((?:\.\w+)*)\.(copy|set|setSize|fromArray|multiplyMatrices|setFromMatrixPosition)\s*\(/g,
+    ))
+      writes.add(`${m[1] ?? ''}${m[2] ?? ''}.${m[3] ?? ''}()`);
+    expect([...writes].sort()).toEqual([
+      '_cameraNearFar.value.set()',
+      '_cameraProjectionMatrixInverse.value.copy()',
+      '_cameraWorldMatrix.value.copy()',
+      '_cameraWorldMatrixInverse.value.copy()',
+      '_needsPostProcessingSync =',
+      '_previousCameraProjectionMatrixInverse.value.copy()',
+      '_previousCameraWorldMatrix.value.copy()',
+      '_previousDepthNode.value =',
+    ]);
+    for (const m of TRAA_MATRICES)
+      expect(
+        [...writes].some((w) => w.startsWith(`${m}.`)),
+        m,
+      ).toBe(true);
     const traaProto = TRAANode.prototype as unknown as Record<string, unknown>;
     expect(has(src(traaProto.clearViewOffset), 'this._jitterIndex ++;')).toBe(true);
     expect(() => {
