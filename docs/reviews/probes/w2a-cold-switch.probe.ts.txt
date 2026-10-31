@@ -1,0 +1,35 @@
+// Critic pass 17, w2/app-ui round 5 (D4-91/D4-95's scheduler): does a cold switch always resolve?
+// A switch into a view not yet warm shows "Preparing" until the scheduler hands the asked view a
+// slot and its warm frames finish, or until MAX_WARM_FRAMES of them were given (the give-up). Every
+// slot, the asked view's included, needs the last frame's CPU <= SLOT_FRAME_CPU_MS. Here the shown
+// view's frames take a steady CPU above or around that bar (a held gas path: critic 15 measured
+// 11.2 ms median in the worker; a loaded machine: the builder's 45-48 s to Cutaway), for 10 min
+// of 60 fps, and the probe counts the asked view's slots.
+//   node --import ./tools/mesh/ts-resolve.mjs <this file>   (from the checkout's root)
+import { pathToFileURL } from 'node:url';
+const ROOT = process.env.ROOT ?? '.';
+const w = await import(pathToFileURL(`${ROOT}/src/shell/warmUp.ts`).href);
+const frames = 60 * 600;
+for (const [name, cpu] of [
+  ['steady 8.0 ms', () => 8.0],
+  ['steady 8.4 ms', () => 8.4],
+  ['held, 11.2 ms', () => 11.2],
+  ['loaded: 9-14 ms, 1 frame in 50 at 8 ms', (f: number) => (f % 50 === 0 ? 8 : 9 + (f % 6))],
+] as const) {
+  const s = w.createWarmScheduler();
+  for (const id of w.BOOT_CONFIGS) s.done(id);
+  let slots = 0;
+  let firstMs: number | null = null;
+  for (let f = 0; f < frames; f++) {
+    const nowMs = f * (1000 / 60);
+    // the viewer clicked Cutaway at t = 0: a switch is pending until the view is shown and settled
+    const id = s.next(f, cpu(f), 'cutaway+tracers', { nowMs, switchPending: true });
+    if (id !== null) {
+      slots++;
+      firstMs ??= nowMs;
+    }
+  }
+  console.log(
+    `${name}: ${slots} slots for the asked view in 10 min (first at ${firstMs === null ? 'never' : `${(firstMs / 1000).toFixed(2)} s`}); given up: ${JSON.stringify(s.gaveUp())}; warm: ${s.isWarm('cutaway+tracers')}`,
+  );
+}

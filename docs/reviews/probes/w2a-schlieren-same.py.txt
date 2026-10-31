@@ -1,0 +1,18 @@
+# Critic pass 17, w2/app-ui round 5 (D4-95 item 2's flagged post.ts edit): is Schlieren's image the
+# same with the composite's beauty built first? Compares two 1366 Schlieren shots pixel by pixel
+# (luminance, 0-255): A against B, inside the view (the canvas outside the panels is all it shows).
+#   python <this file> a.jpg b.jpg [c.jpg d.jpg ...]   (pairs; pass 17: HEAD vs the builder (run-to-run), HEAD vs S2 (round 4 order), HEAD vs S1 (knife edge off))
+import sys
+from PIL import Image
+def lum(p):
+    im = Image.open(p).convert('L')
+    return im, list(im.getdata())
+args = sys.argv[1:]
+for a, b in zip(args[0::2], args[1::2]):
+    ia, la = lum(a); ib, lb = lum(b)
+    w, h = ia.size
+    # the free area at 1366 x 768: between the side columns (280..1062) and the bars (52..658)
+    xs = range(285, 1055); ys = range(56, 652)
+    d = [abs(la[y * w + x] - lb[y * w + x]) for y in ys for x in xs]
+    n = len(d)
+    print(f'{a} vs {b}: mean |dL| {sum(d) / n:.2f}, > 8: {100 * sum(v > 8 for v in d) / n:.2f} %, > 24: {100 * sum(v > 24 for v in d) / n:.3f} %, max {max(d)}')

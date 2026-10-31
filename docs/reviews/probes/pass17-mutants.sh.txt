@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Critic pass 17's hand mutants on trial17 (w2/app-ui @0f3b21e merged into main 664203f). Each one
+# edits one file, runs the tests that should see it, records killed/survived, and restores the file
+# from a copy. Run from the checkout's root, after the gates (Vite reads src/ while a browser run
+# goes): bash <this file> [unit|guard|chrome]
+set -u
+OUT=${OUT:-reports/scratch/c17/mutants.log}
+: > "$OUT"
+run() { # id file sed-expr test-cmd...
+  local id=$1 file=$2 expr=$3; shift 3
+  cp "$file" "$file.orig"
+  sed -i "$expr" "$file"
+  if cmp -s "$file" "$file.orig"; then echo "$id NOT APPLIED ($file)" | tee -a "$OUT"; mv "$file.orig" "$file"; return; fi
+  if "$@" > "reports/scratch/c17/mut-$id.log" 2>&1; then r=SURVIVED; else r=KILLED; fi
+  mv "$file.orig" "$file"
+  echo "$id $r ($file)" | tee -a "$OUT"
+}
+V="npx vitest run"
+case "${1:-unit}" in
+unit)
+  # the scheduler (D4-95): a pending switch no longer suspends the background
+  run W1 src/shell/warmUp.ts 's/      if (clock.switchPending) quiet(clock.nowMs + QUIET_AFTER_INPUT_MS);/      void QUIET_AFTER_INPUT_MS;/' $V tests/unit/shell/warmUp.test.ts
+  # input and switches ignored: the background never waits
+  run W2 src/shell/warmUp.ts 's/const id = !isWarm(asked) ? asked : suspended ? undefined : queue()\[0\];/const id = !isWarm(asked) ? asked : queue()[0];/' $V tests/unit/shell/warmUp.test.ts
+  # a cold switch waits behind the quiet too (it would never resolve while the viewer acts)
+  run W3 src/shell/warmUp.ts 's/const id = !isWarm(asked) ? asked : suspended ? undefined : queue()\[0\];/const id = suspended ? undefined : !isWarm(asked) ? asked : queue()[0];/' $V tests/unit/shell/warmUp.test.ts
+  # the give-up never fires
+  run W4 src/shell/warmUp.ts 's/        if (n >= MAX_WARM_FRAMES) {/        if (n >= MAX_WARM_FRAMES \&\& n < 0) {/' $V tests/unit/shell/warmUp.test.ts
+  # the chip never cleared (it shows the last mode, or Realistic)
+  run P1 src/ui/App.tsx 's/  if (mode === null) return null;/  const m0 = mode ?? "realistic"; mode = m0;/' $V tests/unit/ui/preparing.test.tsx
+  # a label under a panel (round 5's rule dropped, both layouts)
+  run L1 src/hud/callouts.ts 's/  return !reserved.some((r) => a.x >= r.x \&\& a.x <= r.x + r.w \&\& a.y >= r.y \&\& a.y <= r.y + r.h);/  return reserved.length >= 0;/' $V tests/unit/hud/calloutLayout.test.ts
+  # N13's old prune back (the best's later labels not checked)
+  run L2 src/hud/callouts.ts 's/      best.chosen.slice(i).every((c) => c >= 0)/      true/' $V tests/unit/hud/calloutLayout.test.ts
+  # the cut views anchored on the lower cut face
+  run L3 src/hud/anchors.ts 's/    return anchorWorld(a, Math.cos(hi) > Math.cos(lo) ? hi : lo);/    return anchorWorld(a, Math.cos(hi) > Math.cos(lo) ? lo : hi);/' $V tests/unit/hud/calloutLayout.test.ts
+  # U1: amber at exactly 5 % (pass 15 C1)
+  run U1 src/hud/compressorMap.ts 's/      : m < SM_CAUTION_FRACTION/      : m <= SM_CAUTION_FRACTION/' $V tests/unit/hud
+  # N14: the fatal said on every failure past the max
+  run F1 src/shell/faults.ts 's/        fatal: inRow === max ?/        fatal: inRow >= max ?/' $V tests/unit/shell/faults.test.ts
+  ;;
+guard)
+  T=node_modules/three/examples/jsm/tsl/display/TRAANode.js
+  B=node_modules/three/build/three.webgpu.js
+  G="$V tests/unit/render/threeInternals.test.ts"
+  # TRAANode's jitter index renamed
+  run G1 $T 's/_jitterIndex/_jitterIdx/g' $G
+  # RenderObjects.get's chain reordered (the lights node before the render context)
+  run G2 $B 's/_chainKeys\$3\[ 2 \] = renderContext;/_chainKeys$3[ 2 ] = lightsNode;/' $G
+  # Renderer.renderObject's lights node parameter renamed
+  run G3 $B 's/renderObject( object, scene, camera, geometry, material, group, lightsNode, clippingContext = null, passId = null ) {/renderObject( object, scene, camera, geometry, material, group, lights, clippingContext = null, passId = null ) { const lightsNode = lights;/' $G
+  # TRAA's updateBefore starts rolling one more piece of state (a warm frame would not put it back)
+  run G4 $T 's/		this._cameraNearFar.value.set( this.camera.near, this.camera.far );/		this._cameraNearFar.value.set( this.camera.near, this.camera.far ); this._frameCount = ( this._frameCount || 0 ) + 1;/' $G
+  ;;
+chrome)
+  BR="$V -c vitest.browser.config.ts"
+  # Schlieren's knife edge composites nothing (eps x 0): the Schlieren check must fail
+  run S1 src/render/post.ts 's/      const eps = schTex.sample(screenUV).x;/      const eps = schTex.sample(screenUV).x.mul(0);/' $BR tests/browser/app.test.tsx -t "1366 x 768"
+  # round 4's composite order back (the depth read before the beauty): warmStall's recompiled check
+  run S2 src/render/post.ts 's/      const dim = display().rgb.mul(0.22).toVar();/      const beauty = display();/; s/      return vec4(select(inBox, dim, vec3(grey)), 1);/      return vec4(select(inBox, beauty.rgb.mul(0.22), vec3(grey)), 1);/' $BR tests/browser/warmStall.test.ts
+  # the warm key without the render context (round 4's)
+  run K1 src/render/engineView.ts 's/    const context = internals._currentRenderContext?.id ?? -1;/    const context = -1;/' $BR tests/browser/warmStall.test.ts
+  # the worker never reports a pending switch (the input's own second still holds)
+  run Q1 src/app/simWorker.ts 's/  const switchPending = a.preparing !== null || a.settledFrames === 0;/  const switchPending = false;/' $BR tests/browser/firstSwitch.test.tsx -t "suspends"
+  ;;
+image)
+  # S2's image: round 4's composite order, shot at 1366 (its Schlieren frame and signature kept)
+  BR="$V -c vitest.browser.config.ts"
+  run S2img src/render/post.ts 's/      const dim = display().rgb.mul(0.22).toVar();/      const beauty = display();/; s/      return vec4(select(inBox, dim, vec3(grey)), 1);/      return vec4(select(inBox, beauty.rgb.mul(0.22), vec3(grey)), 1);/' $BR tests/browser/app.test.tsx -t "1366 x 768"
+  mkdir -p reports/scratch/c17/s2-ui && cp reports/ui/1366-* reports/scratch/c17/s2-ui/
+  ;;
+esac
