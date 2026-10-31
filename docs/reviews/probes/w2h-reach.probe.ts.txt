@@ -1,0 +1,69 @@
+// Critic pass 15, w2/cycle-hold (W2H-I1 reach on the DEFAULT reference model): critic pass 14's
+// mode-1 sweep found the runaway at ISA, dt 0.02, take-off + surge at 10 s + flameout at 20 s
+// (held 7.9 s, N1 198 %), and a throw at ISA+30 dt 0.02 (P3 NaN into the surge detector). This
+// runs that scenario over frame steps on ROOT (the trial, or main) with the default policy and,
+// where the checkout has it, D4-13's UNBOUNDED_RETRY.
+//   ROOT=<checkout> node --import ./tools/mesh/ts-resolve.mjs w2h-reach.ts
+import { pathToFileURL } from 'node:url';
+const ROOT = process.env.ROOT ?? '.';
+const imp = (p: string) => import(pathToFileURL(`${ROOT}/${p}`).href);
+const { ISA_SLS } = await imp('src/contracts/ambient.ts');
+const { DEFAULT_CYCLE_INPUTS } = await imp('src/contracts/cycle.ts');
+const { createCycleModel } = await imp('src/cycle/model.ts');
+let UNBOUNDED: object | null = null;
+try {
+  UNBOUNDED = (await imp('src/cycle/heldRetry.ts')).UNBOUNDED_RETRY;
+} catch {
+  UNBOUNDED = null;
+}
+const base = { ...DEFAULT_CYCLE_INPUTS, fuelLever: 'run', ignition: 'auto' };
+function run(label: string, opts: object, ambient: object, dt: number) {
+  const warns: string[] = [];
+  const orig = console.warn;
+  console.warn = (...a: unknown[]) => void warns.push(String(a[0]));
+  const m = createCycleModel(opts);
+  m.reset('groundIdle', ambient);
+  const n = Math.round(35 / dt);
+  let held = 0, run = 0, longest = 0, maxN1Held = 0, maxN1 = 0, firstHeldAboveLimit: string | null = null;
+  let threw: string | null = null;
+  let t = 0;
+  try {
+    for (let i = 0; i < n; i++) {
+      t = i * dt;
+      if (Math.abs(t - 10) < dt / 2) m.injectFault('surge');
+      if (Math.abs(t - 20) < dt / 2) m.injectFault('flameout');
+      const s = m.step(dt, { ...base, ambient, throttleLever: t < 3 ? 0 : 1 });
+      maxN1 = Math.max(maxN1, s.n1Percent);
+      if (s.gasPathSolve.status === 'held') {
+        held++; run++; longest = Math.max(longest, run); maxN1Held = Math.max(maxN1Held, s.n1Percent);
+        if (s.n1Percent > 104 && firstHeldAboveLimit === null) firstHeldAboveLimit = `t ${t.toFixed(2)} s N1 ${s.n1Percent.toFixed(1)} N2 ${s.n2Percent.toFixed(1)}`;
+      } else run = 0;
+    }
+  } catch (e) {
+    threw = `at t ${t.toFixed(3)} s: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  console.warn = orig;
+  console.log(
+    `${label.padEnd(40)} held ${String(held).padStart(5)} longest ${(longest * dt).toFixed(2)} s maxN1 ${maxN1.toFixed(1)} maxN1held ${maxN1Held.toFixed(1)} episodes ${warns.length}` +
+      (firstHeldAboveLimit ? ` | held past 104 %: ${firstHeldAboveLimit}` : '') + (threw ? ` | THREW ${threw}` : ''),
+  );
+}
+const ambients: Record<string, object> = { isa: ISA_SLS, 'isa+30': { ...ISA_SLS, temperatureK: 318.15 } };
+for (const [an, amb] of Object.entries(ambients))
+  for (const dt of [1 / 60, 0.02, 1 / 30, 0.05, 0.1]) {
+    run(`${an} dt ${dt.toFixed(4)} default`, {}, amb, dt);
+    if (UNBOUNDED !== null) run(`${an} dt ${dt.toFixed(4)} UNBOUNDED_RETRY`, { heldRetry: UNBOUNDED }, amb, dt);
+  }
+// the sweep's bleed rows: N1 at full lever with 8 % customer bleed and 150 kW extraction (ISA 95.8 %,
+// ISA+30 41.1 %): the same on main? and which loop holds it
+for (const [an, amb] of Object.entries({ isa: ISA_SLS, 'isa+30': { ...ISA_SLS, temperatureK: 318.15 } })) {
+  const m = createCycleModel({});
+  m.reset('groundIdle', amb);
+  let s = m.state();
+  for (let i = 0; i < Math.round(15 / (1 / 60)); i++)
+    s = m.step(1 / 60, { ...base, ambient: amb, throttleLever: i * (1 / 60) < 3 ? 0 : 1, customerBleedFraction: 0.08, powerExtractionW: 150e3 });
+  console.log(`bleed+PX ${an} at 15 s: N1 ${s.n1Percent.toFixed(1)} N2 ${s.n2Percent.toFixed(1)} EGT ${(s.egtDisplayedK - 273.15).toFixed(0)} C limiter ${s.fadec.limiter} solve ${s.gasPathSolve.status}`);
+}
+
+// The finer sweep (w2h-reach-fine): the same run() at ISA only, the default policy only, with
+//   for (const dt of [0.016, 0.017, 0.018, 0.019, 0.0195, 0.0205, 0.021, 0.022, 0.023, 0.024, 0.025])
