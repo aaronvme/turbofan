@@ -9,6 +9,11 @@
 // frame that lands in a switch's window shows as a hitch in it, U2): no background slot while a
 // switch is pending, nor for QUIET_AFTER_INPUT_MS after any input or switch. A cold switch still
 // prepares its own view in that time, since the viewer waits for that one.
+// D4-97 item 1 (W2A-I7): a cold switch has a bound. The asked view takes its slots under the same
+// rule, but once it has waited COLD_SWITCH_WAIT_FRAMES frames it takes them whatever the last
+// frame's CPU (still one every SLOT_EVERY), and its give-up counts the frames waited, so a steady
+// frame CPU over the bar can no longer hold the switch in "Preparing" for good (U4, PHYSICS.md 3.5).
+// The background keeps the CPU rule (D4-95 item 3).
 
 import type { RenderState, ViewMode } from '../contracts/ui';
 import type { FieldQuantityId } from '../flow/viz/fields';
@@ -78,6 +83,16 @@ export const SLOT_FRAME_CPU_MS = 8.3;
  * slowest, Cutaway, took 6.9-14.5 s to compile in one frame at boot (round 3).
  */
 export const MAX_WARM_FRAMES = 400;
+/**
+ * D4-97 item 1: after this many frames of preparing, the asked view takes a slot whatever the
+ * last frame's CPU (one every SLOT_EVERY frames). 1 s at 60 fps.
+ */
+export const COLD_SWITCH_WAIT_FRAMES = 60;
+/**
+ * D4-97 item 1: the asked view is given up on (shown anyway, its last pipelines compiling on first
+ * use, and said so) after this many frames waited: about 13 s at 60 fps, the slots' give-up.
+ */
+export const MAX_PREPARE_FRAMES = SLOT_EVERY * MAX_WARM_FRAMES;
 /** D4-95: no background slot for this long after any input or switch, ms. */
 export const QUIET_AFTER_INPUT_MS = 1000;
 
@@ -125,7 +140,10 @@ export interface WarmScheduler {
   /** The configuration is compiled (its warm frame drew it whole, nothing pending). */
   done(id: WarmConfigId): void;
   isWarm(id: WarmConfigId): boolean;
-  /** The configurations given up on after MAX_WARM_FRAMES (shown anyway). */
+  /**
+   * The configurations given up on after MAX_WARM_FRAMES slots, or (the asked view) after
+   * MAX_PREPARE_FRAMES frames waited (shown anyway).
+   */
   gaveUp(): readonly WarmConfigId[];
   state(): { readonly warm: readonly WarmConfigId[]; readonly queue: readonly WarmConfigId[] };
 }
@@ -135,6 +153,12 @@ export function createWarmScheduler(): WarmScheduler {
   const frames = new Map<WarmConfigId, number>();
   const given: WarmConfigId[] = [];
   let lastSlot = -Infinity;
+  // D4-97 item 1: the cold view the viewer asked for, and the frame its wait began
+  let preparing: { readonly id: WarmConfigId; readonly since: number } | null = null;
+  const giveUp = (id: WarmConfigId) => {
+    given.push(id);
+    done(id);
+  };
   // the background waits until then: QUIET_AFTER_INPUT_MS after the last input or pending switch
   let quietUntil = -Infinity;
   const quiet = (untilMs: number) => {
@@ -148,7 +172,17 @@ export function createWarmScheduler(): WarmScheduler {
   return {
     next(frame, cpuMs, asked, clock) {
       if (clock.switchPending) quiet(clock.nowMs + QUIET_AFTER_INPUT_MS);
-      if (frame - lastSlot < SLOT_EVERY || !(cpuMs <= SLOT_FRAME_CPU_MS)) return null;
+      if (isWarm(asked)) preparing = null;
+      else if (preparing?.id !== asked) preparing = { id: asked, since: frame };
+      const waited = preparing === null ? 0 : frame - preparing.since;
+      if (preparing !== null && waited >= MAX_PREPARE_FRAMES) {
+        giveUp(preparing.id);
+        preparing = null;
+      }
+      // the asked view's own bound: past it, its slot comes whatever the last frame's CPU
+      const cpuOk =
+        cpuMs <= SLOT_FRAME_CPU_MS || (preparing !== null && waited >= COLD_SWITCH_WAIT_FRAMES);
+      if (frame - lastSlot < SLOT_EVERY || !cpuOk) return null;
       const suspended = clock.nowMs < quietUntil;
       for (;;) {
         // while suspended only a cold switch's own view (the one the viewer waits for)
@@ -156,8 +190,7 @@ export function createWarmScheduler(): WarmScheduler {
         if (id === undefined) return null;
         const n = frames.get(id) ?? 0;
         if (n >= MAX_WARM_FRAMES) {
-          given.push(id);
-          done(id);
+          giveUp(id);
           continue;
         }
         frames.set(id, n + 1);

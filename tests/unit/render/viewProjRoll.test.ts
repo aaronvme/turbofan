@@ -13,8 +13,8 @@ import { orbitPose, type OrbitState } from '../../../src/shell/orbit';
 function viewProjAt(s: OrbitState): Matrix4 {
   const cam = new PerspectiveCamera(35, 1366 / 768, 0.05, 200);
   const pose = orbitPose(s);
-  cam.position.set(pose.position[0] ?? 0, pose.position[1] ?? 0, pose.position[2] ?? 0);
-  cam.lookAt(new Vector3(pose.target[0] ?? 0, pose.target[1] ?? 0, pose.target[2] ?? 0));
+  cam.position.set(...pose.position);
+  cam.lookAt(new Vector3(...pose.target));
   cam.updateMatrixWorld();
   return new Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
 }

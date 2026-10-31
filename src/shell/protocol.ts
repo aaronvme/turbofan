@@ -41,7 +41,13 @@ export type ToWorker =
   | { readonly type: 'camera'; readonly preset: CameraPresetId }
   /** D4-92 (zz): the view's free area between the panels, CSS px (Schlieren's framing). */
   | { readonly type: 'viewArea'; readonly free: Rect }
-  | { readonly type: 'field'; readonly source: FieldChoice };
+  | { readonly type: 'field'; readonly source: FieldChoice }
+  /**
+   * The browser suite's controls, never sent by the app: a steady frame CPU (the worker pads each
+   * frame's CPU to at least this many ms: U4's cold switch at any frame CPU, W2A-I7) and the knife
+   * edge off (W2A-I10's S1 control, EngineView's noKnifeEdge).
+   */
+  | { readonly type: 'debug'; readonly frameCpuMs?: number; readonly knifeEdge?: boolean };
 
 export type CameraPresetId = 'threeQuarterFront' | 'side' | 'hero' | 'hotSection';
 

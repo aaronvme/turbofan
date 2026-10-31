@@ -163,6 +163,11 @@ export interface LookPipeline {
    * round 2 did), false (the default) with the unjittered camera.
    */
   setFlowJitter(on: boolean): void;
+  /**
+   * W2A-I10's S1 control (tests): false composites a zero knife-edge deflection in Schlieren (the
+   * grey field without its bands), true (the default) the deflection.
+   */
+  setKnifeEdge(on: boolean): void;
   /** The last frame's flow target, decoded (tests: W2V-I3 and W2V-I5). */
   readFlowTarget(id: FlowTargetId): Promise<FlowTargetPixels>;
   /**
@@ -563,6 +568,8 @@ export function createPipeline(
   // scene depth moves only the occlusion edges, by that half pixel.)
   const flowCamera = camera.clone();
   let flowJitter = false;
+  // W2A-I10: the knife edge's control (a uniform: no new pipeline)
+  const knifeEdge = uniform(1);
   const flowDeps: FlowPostDeps = {
     sceneDepth: sceneDepth,
     rotorDepth: rotorDepth,
@@ -612,7 +619,7 @@ export function createPipeline(
       // call depth (GPU_FACTS M57): every engine object got a second render object, node build
       // (~15 ms each) and pipeline on Schlieren's first frame
       const dim = display().rgb.mul(0.22).toVar();
-      const eps = schTex.sample(screenUV).x;
+      const eps = schTex.sample(screenUV).x.mul(knifeEdge);
       const grey = float(0.5).add(eps.mul(0.5).div(h.schlierenRangeRad)).clamp(0, 1);
       const suv = screenUV;
       const ndc = vec2(suv.x.mul(2).sub(1), float(1).sub(suv.y.mul(2)));
@@ -691,6 +698,9 @@ export function createPipeline(
     },
     setFlowJitter: (on) => {
       flowJitter = on;
+    },
+    setKnifeEdge: (on) => {
+      knifeEdge.value = on ? 1 : 0;
     },
     readFlowTarget: async (id) => {
       if (flow === null) throw new Error('post: readFlowTarget before attachFlow');

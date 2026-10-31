@@ -141,6 +141,8 @@ interface App {
   /** D4-92 (zz): the orbit before Schlieren's framing (restored on leaving it), and the free area. */
   orbitBeforeSchlieren: OrbitState | null;
   free: Rect | null;
+  /** The browser suite's steady frame CPU (the `debug` message; 0: none), ms. */
+  debugFrameCpuMs: number;
   size: { width: number; height: number };
   /** The device pixel ratio from the main thread, and the one rendered at (D4-85's cap). */
   dpr: number;
@@ -454,6 +456,10 @@ function loop(a: App) {
       renderMs = m.frames > 0 && Number.isFinite(m.gpuTotal) ? m.gpuTotal : null;
       flowVisualsMs = stats.flow.mode === null ? null : stats.flow.visualsMs;
     }
+    // the browser suite's steady frame CPU (U4 at any frame CPU): this frame padded to it
+    while (performance.now() - t0 < a.debugFrameCpuMs) {
+      // spin: a steady CPU, as a heavier frame would take
+    }
     lastFrameMs = performance.now() - t0;
     frameMs.push(lastFrameMs, held);
     if (frame % PUBLISH_EVERY === 0) {
@@ -530,10 +536,16 @@ function loop(a: App) {
 
 function handle(a: App, m: ToWorker) {
   // D4-95: the viewer's input suspends the background warm-up for a second (the overlay's own
-  // layout report, viewArea, is not an input: it follows the panels and the window)
-  if (m.type !== 'init' && m.type !== 'viewArea') a.warm.input(performance.now());
+  // layout report, viewArea, is not an input: it follows the panels and the window; nor are the
+  // browser suite's controls)
+  if (m.type !== 'init' && m.type !== 'viewArea' && m.type !== 'debug')
+    a.warm.input(performance.now());
   switch (m.type) {
     case 'init':
+      return;
+    case 'debug':
+      if (m.frameCpuMs !== undefined) a.debugFrameCpuMs = Math.max(0, m.frameCpuMs);
+      if (m.knifeEdge !== undefined) a.view.setDebugFlags({ noKnifeEdge: !m.knifeEdge });
       return;
     case 'resize':
       a.size = { width: m.width, height: m.height };
@@ -625,6 +637,7 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     orbit: orbitFromPose(preset.camera, preset.target),
     orbitBeforeSchlieren: null,
     free: null,
+    debugFrameCpuMs: 0,
     size: { width: m.width, height: m.height },
     dpr: m.dpr,
     renderDpr,

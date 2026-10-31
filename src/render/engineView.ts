@@ -352,6 +352,8 @@ export interface DebugFlags {
   readonly jitterFlow?: boolean;
   /** The cut plane draws the ambient air too (W2V-I7's negative control: the old look). */
   readonly noFlowFloor?: boolean;
+  /** Schlieren composites no knife-edge deflection (W2A-I10's S1 control: a bandless jet). */
+  readonly noKnifeEdge?: boolean;
 }
 
 const FPS = 60;
@@ -1021,6 +1023,7 @@ async function assemble(
       flowViz.setHazeOff(f.noHaze === true);
       post.setFlowJitter(f.jitterFlow === true);
       flowViz.setFloorOff(f.noFlowFloor === true);
+      post.setKnifeEdge(f.noKnifeEdge !== true);
       hidden = [];
       if (f.hide !== undefined && f.hide !== '') {
         // matched against "main:<name>" / "rotors:<name>", so a pattern can pick one pass
