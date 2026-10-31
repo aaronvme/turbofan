@@ -89,3 +89,72 @@ export const anchorWorld = (a: WorldAnchor, theta: number): [number, number, num
   a.r * Math.cos(theta),
   a.r * Math.sin(theta),
 ];
+
+/** Where the closed views' Fan callout can point (the intake's lip and the fan face). */
+export interface CalloutGeometry {
+  /** The intake highlight: its axial position and radius, m. */
+  readonly lipX: number;
+  readonly lipR: number;
+  /** The fan face (the fan's leading edge plane), m. */
+  readonly fanFaceX: number;
+}
+
+export function calloutGeometry(def: EngineDefinition): CalloutGeometry {
+  const lip = def.flowpath.curves.nacelleInner.points[0];
+  const fan = def.flowpath.components.find((c) => c.id === 'fan');
+  if (lip === undefined || fan === undefined) throw new Error('anchors: no intake or fan');
+  return { lipX: lip.x, lipR: lip.r, fanFaceX: fan.xStart };
+}
+
+/** The camera, and the cutaway wedge's centre and half-width (rad about +x), for the anchors. */
+export interface CalloutView {
+  readonly eye: readonly [number, number, number];
+  readonly cutCenter: number;
+  readonly cutHalf: number;
+}
+
+/**
+ * Whether the eye sees the point through the intake: the sight line crosses the lip's plane
+ * inside the lip (with a margin for the lip's own thickness), from in front of it.
+ */
+export function seenThroughIntake(
+  eye: readonly [number, number, number],
+  p: readonly [number, number, number],
+  g: CalloutGeometry,
+): boolean {
+  if (!(eye[0] < g.lipX && p[0] > g.lipX)) return false;
+  const t = (g.lipX - eye[0]) / (p[0] - eye[0]);
+  const y = eye[1] + t * (p[1] - eye[1]);
+  const z = eye[2] + t * (p[2] - eye[2]);
+  return Math.hypot(y, z) < 0.92 * g.lipR;
+}
+
+/**
+ * The world point a component's callout points at (D4-92 zz: labels on their parts).
+ * - The cut views (Cutaway, Data): the part's mid-length, mid-span point on the upper cut face,
+ *   where its section is drawn (the bypass duct's is in the duct, not on the core).
+ * - The closed views (Realistic, Schlieren): the Fan at the fan face, on the far side of the
+ *   axis, when the eye sees it through the intake, else at the intake lip on the eye's side; the
+ *   other parts (the exhaust) on the eye's side, as before.
+ */
+export function calloutPoint(
+  a: WorldAnchor,
+  mode: ViewMode,
+  v: CalloutView,
+  g: CalloutGeometry,
+): [number, number, number] {
+  const theta = Math.atan2(v.eye[2], v.eye[1]);
+  if (mode === 'cutaway' || mode === 'data') {
+    const lo = v.cutCenter - v.cutHalf;
+    const hi = v.cutCenter + v.cutHalf;
+    return anchorWorld(a, Math.cos(hi) > Math.cos(lo) ? hi : lo);
+  }
+  if (a.id !== 'fan') return anchorWorld(a, theta);
+  const face: [number, number, number] = [
+    g.fanFaceX,
+    a.r * Math.cos(theta + Math.PI),
+    a.r * Math.sin(theta + Math.PI),
+  ];
+  if (seenThroughIntake(v.eye, face, g)) return face;
+  return [g.lipX, g.lipR * Math.cos(theta), g.lipR * Math.sin(theta)];
+}

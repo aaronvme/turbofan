@@ -115,11 +115,7 @@ describe('the callouts point at their parts (D4-92 zz)', () => {
     // round 3's point (the fan's mid-length on the camera's side) is not seen: it is behind the
     // nacelle skin
     const theta = Math.atan2(threeQuarter.eye[2], threeQuarter.eye[1]);
-    const old: [number, number, number] = [
-      fan.x,
-      fan.r * Math.cos(theta),
-      fan.r * Math.sin(theta),
-    ];
+    const old: [number, number, number] = [fan.x, fan.r * Math.cos(theta), fan.r * Math.sin(theta)];
     expect(seenThroughIntake(threeQuarter.eye, old, geo)).toBe(false);
     expect(calloutPoint(fan, 'schlieren', threeQuarter, geo)).toEqual(p);
   });
@@ -207,7 +203,7 @@ describe('the cut views: labels outward in axial order (D4-92 zz)', () => {
 describe('Schlieren framing: the content fitted into the free area (D4-92 zz)', () => {
   const canvas = { w: 1920, h: 1001 };
   const free: Rect = { x: 330, y: 60, w: 1240, h: 820 };
-  const map = (o: ReturnType<typeof fitViewOffset>, u: number, v: number) => [
+  const map = (o: ReturnType<typeof fitViewOffset>, u: number, v: number): [number, number] => [
     ((u - o.x) * canvas.w) / o.w,
     ((v - o.y) * canvas.h) / o.h,
   ];
