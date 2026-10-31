@@ -64,7 +64,10 @@ describe('three r186 internals (D4-95 item 4)', () => {
         return [x, y];
       }
     }
-    expect(paramNames(K.prototype.m)).toEqual(['x', 'y']);
+    expect(paramNames(Object.getOwnPropertyDescriptor(K.prototype, 'm')?.value)).toEqual([
+      'x',
+      'y',
+    ]);
   });
 
   it('the renderer calls an own renderObject for every object, with these parameters', () => {
@@ -95,12 +98,10 @@ describe('three r186 internals (D4-95 item 4)', () => {
       ),
     ).toBe(true);
     expect(has(built, `const chainMap = this.getChainMap( passId );`)).toBe(true);
-    expect(
-      has(
-        built,
-        `_chainKeys[ 0 ] = object; _chainKeys[ 1 ] = material; _chainKeys[ 2 ] = renderContext; _chainKeys[ 3 ] = lightsNode;`,
-      ),
-    ).toBe(true);
+    // RenderObjects.get's chain (the bundle renames its module-level key array)
+    expect(built).toMatch(
+      /_chainKeys(\$\d+)?\[ 0 \] = object;\s*_chainKeys\1\[ 1 \] = material;\s*_chainKeys\1\[ 2 \] = renderContext;\s*_chainKeys\1\[ 3 \] = lightsNode;/,
+    );
     // the render context is keyed by the target's attachments, the MRT and the call depth
     expect(
       has(built, `const renderStateKey = attachmentState + '-' + mrtState + '-' + callDepth;`),
@@ -116,13 +117,11 @@ describe('three r186 internals (D4-95 item 4)', () => {
 
   it("the backend's createRenderPipeline(renderObject, promises) is three's compileAsync path", () => {
     const backend = new WebGPUBackend({});
-    expect(paramNames(WebGPUBackend.prototype.createRenderPipeline)).toEqual([
-      'renderObject',
-      'promises',
-    ]);
+    const proto = WebGPUBackend.prototype as unknown as Record<string, unknown>;
+    expect(paramNames(proto.createRenderPipeline)).toEqual(['renderObject', 'promises']);
     expect(
       has(
-        src(WebGPUBackend.prototype.createRenderPipeline),
+        src(proto.createRenderPipeline),
         'this.pipelineUtils.createRenderPipeline( renderObject, promises );',
       ),
     ).toBe(true);
@@ -170,7 +169,10 @@ describe('three r186 internals (D4-95 item 4)', () => {
     expect(
       has(update, 'this._previousCameraWorldMatrix.value.copy( this._cameraWorldMatrix.value );'),
     ).toBe(true);
-    expect(has(update, 'this._jitterIndex ++;')).toBe(true);
+    // the jitter: set from the index here, advanced as the beauty's render clears the offset
+    expect(has(update, 'this.setViewOffset( width, height );')).toBe(true);
+    const traaProto = TRAANode.prototype as unknown as Record<string, unknown>;
+    expect(has(src(traaProto.clearViewOffset), 'this._jitterIndex ++;')).toBe(true);
     expect(() => {
       checkTraaInternals(node);
     }).not.toThrow();
@@ -180,10 +182,14 @@ describe('three r186 internals (D4-95 item 4)', () => {
   });
 
   it("the inspector's node frame, which the pass timer advances for a warm frame", () => {
-    const get = Object.getOwnPropertyDescriptor(InspectorBase.prototype, 'nodeFrame')?.get;
+    const desc = Object.getOwnPropertyDescriptor(InspectorBase.prototype, 'nodeFrame') as
+      { readonly get?: unknown } | undefined;
+    const get = desc?.get;
     expect(typeof get).toBe('function');
     expect(has(src(get), 'return this._renderer._nodes.nodeFrame;')).toBe(true);
-    expect(typeof NodeFrame.prototype.update).toBe('function');
+    expect(typeof Object.getOwnPropertyDescriptor(NodeFrame.prototype, 'update')?.value).toBe(
+      'function',
+    );
   });
 
   it("the startup checks pass on three's own renderer (a canvas stand-in: no GPU here)", () => {
