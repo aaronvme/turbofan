@@ -1,3 +1,34 @@
+w2/flowviz: round 4 STOP-CLEAN at the brake (W2V-I7, D4-86: the code, tests, frames and docs DONE; the full gates partly unrun, below) (from main cf87af0, merged in fast-forward; HEAD: see `git log -1`, the handoff commit)
+
+DONE (round 4, W2V-I7 / D4-86)
+- c67e5a7 (TDD) the failing tests first: `tests/unit/flow/viz/floor.test.ts` (new) and a W2V-I7 case in `tests/browser/flowViz.test.ts`. **The bar, stated before the fix:** at ground idle, on the MOCK and on the uncoupled solver's field, at most 10 % of the Data plane's footprint is drawn (alpha >= 0.5) at or below the lightness of viridis' darkest 5 % (contour lines included); unit level, at most 10 % of the crop's fluid texels in the ambient's colour band (5 % of the scale) for each of p, rho, T, Mach. Take-off guard: >= 98 % of the old look's flow pixels (lighter than viridis at 10 %) unchanged. (The bar was set after probing the MOCK's value histogram, before any fix existed; the take-off share guard was set from it to 2 %, since p's fully expanded jets are at p∞.)
+- d41acfe **the fix: a transparent ambient floor, not a range from the field.** Air within `AMBIENT_FLOOR_FRACTION` = 2.5 % of a quantity's scale of its ambient value (M, |u| 0; log2 p/p∞ = log2 ρ/ρ∞ = 0; T∞) is not drawn (`fields.ts` `ambientValue`, `ambientFloor`, `drawnOnPlane`, the TS mirror; `flowViz.ts`: a crisp fwidth-anti-aliased edge, so every drawn pixel is still a LUT colour, D4-76; the crop outline still frames the undrawn sheet; `tInf` uniform from the bound reference). Why: the maps are perceptually uniform, so 2.5 % is a fixed colour step from the ambient's colour (CIE76 ΔE 3.6 viridis, 3.8 diverging centre, under two JNDs; inferno's near-blacks ΔE 12 within ±45 K), and the scale stays fixed so idle and take-off share one legend; a field-derived range would move the legend and still put the ambient at the map's end. Legend: `Legend.floor` {from, to, label}, e.g. "Not drawn: 0 to 0.04 M (the ambient ± 2.5 % of the scale)", hatched on the bar in the look-dev panel and **the app's dock (`src/ui/dock.tsx`, `src/ui/global.css`: a small additive edit in app-ui's files, flagged)**; the panel note says "air within 2.5 % of the scale of the ambient is not drawn"; `legendFor` takes an optional `tInfK` (ISA SLS default). `setDebugFlags({ noFlowFloor: true })` draws the old look (the negative control and the "before" frames; identical formula where drawn).
+- b7adc77 frames and numbers (Chrome, `floor.txt`): **MOCK idle 46.6 % → 7.0 %** of 273798 px; **uncoupled solver idle 98.9 % → 0.0 %**; **take-off 99.22 %** of 156467 flow px unchanged. Unit (MOCK idle, crop texels, ambient band): p 0.2 %, ρ 0.7 %, T 0.6 %, Mach 5.9 % (before 98/87/84/44 %); air at rest 100 % → 0. Cutaway's |u| has the same floor (11 % of texels stay in its band at idle: the MOCK intake's sink field; not under the bar, which is the Data plane's). Realistic and Schlieren have no cut plane: unchanged (their browser checks pass).
+- Screenshots (`docs/look-dev/flow/`, 960 x 540, tracers on): `data-idle-before.png`, `data-idle-after.png`, `data-takeoff-before.png`, `data-takeoff-after.png`; `cutaway.png`, `data.png` re-shot with the floor. Viewed: at idle the board is gone (studio and nacelle show; the intake capture region, ducts and jets stay); the idle flow itself is still dark purple-blue, which is honest (idle Mach <= 0.32 on a 0-1.6 scale); at take-off the jets and intake suction are unchanged, the still air beyond the jets' spreading edge is clear.
+- Docs: LOOKDEV "Flow visuals" round 4 paragraph and table rows; PHYSICS.md's flow-visuals ledger row (the fixed scales and the floor, a display choice).
+
+NEXT (in order)
+1. The gates below that are unrun: `npm run lint` (whole repo), `npm run test:browser` (full, detached, >= 2 GB free), and read the coverage run's result.
+2. Re-shoot `ui-data.jpg` and `ui-cutaway.jpg` (MCP Chrome) to see the legend's hatched floor band and its label; they are round 3's and still show the board. The legend's look is unit-tested as data only.
+3. The app-ui builder adopts the dock edit (or moves it): `legend.floor` in `FlowLegend`; pass the field reference's `tInfK` to `legendFor` when the ambient can change.
+4. Flight ambient: `FieldReference` has no flight speed, so the floor for Mach and |u| is about rest; with flight conditions it must be measured from u∞ (a contract addition then).
+5. Earlier NEXT items (P4 with the flow passes, the far field, W3's coupled field, polish) stand.
+
+GOTCHAS
+- A mesh hidden with `setDebugFlags({ hide })` stays hidden after the flags are cleared (`engineView.ts` only sets visible = false each frame); take composited frames before any hide, or in a fresh view.
+- The contour lines include the value 0 (and the ambient log2 0), so a uniform field at rest sits on a contour line; the floor now discards it.
+- Vitest 5 prints `[look]` annotations only for failing tests; the W2V-I7 case also writes `floor.txt`.
+- The detached runner `reports/run/browser.ps1` (-Files, -Filter, -Lookdev, -Name) logs UTF-16 (read with iconv -f UTF-16LE); browser API port 5199.
+
+GATES @b7adc77 (the code; the commits after it are docs only)
+- npm run typecheck: clean (at d41acfe; the later test edits linted with eslint + prettier per file).
+- npm run lint: UNRUN for the whole repo (eslint --max-warnings 0 clean on every touched file; prettier applied to them).
+- npm test, unit: `tests/unit/flow/viz` and `tests/unit/ui`: 156 passed (after `npm install --ignore-scripts`: the worktree's node_modules was stale, 33 ui tests failed the same at baseline).
+- npm run coverage: RUNNING detached at the brake (PID 48708, `reports/run/cov.status`, log `reports/run/cov.log`, reports to `reports/coverage-w2fv`); status at handoff: running.
+- npm run test:browser: full suite UNRUN. `tests/browser/flowViz.test.ts` alone: 5 of 6 passed (W2V-I7 passed; its rerun `-t W2V-I7` passed); the indicative [timing] case failed, tracers-on 3.44 ms > 2 ms, with P4's render total at 18.9 ms against round 3's 6.4 (another builder's browser tests on the GPU; Realistic draws no cut plane, so this change cannot move it). Re-run it on a quiet machine.
+
+---
+
 w2/flowviz: round 3 DONE (critic pass 12: W2V-I1..I6 and the nits fixed, D4-82 and D4-83 built; ready for the critic's next pass) (from main 1eb1e62; round 2 ended at 2cfd469; HEAD: see `git log -1`, the handoff commit)
 
 DONE (round 3, critic pass 12 and decisions D4-82, D4-83)

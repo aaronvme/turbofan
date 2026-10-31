@@ -5,7 +5,8 @@
 // - The cut plane: the near-extent field painted on the two faces of the cutaway wedge, where the
 //   caps show the metal (fluid texels get the field, solid ones are left to the caps). Colour by
 //   one quantity (src/flow/viz/fields.ts) through a 256-texel LUT (src/flow/viz/colormaps.ts),
-//   with contour lines one `contourStep` apart, cropped to the near field (D4-76). The LUT holds
+//   with contour lines one `contourStep` apart, cropped to the near field (D4-76), the ambient air
+//   left undrawn (W2V-I7, D4-86: within ambientFloor of the ambient value). The LUT holds
 //   display-encoded sRGB bytes and the plane composites after the tone map, so its pixels are
 //   the legend's colours exactly (D4-76).
 // - The particles: the GPU particle records (flowCompute.ts) drawn as camera-facing streaks along
@@ -87,7 +88,12 @@ import {
 } from 'three/tsl';
 import type { FieldExtent } from '../contracts/flow';
 import { bakeLut, COLORMAPS, type ColormapId } from '../flow/viz/colormaps';
-import { FIELD_QUANTITIES, GAMMA_R_TABLE, type FieldQuantityId } from '../flow/viz/fields';
+import {
+  ambientFloor,
+  FIELD_QUANTITIES,
+  GAMMA_R_TABLE,
+  type FieldQuantityId,
+} from '../flow/viz/fields';
 import {
   CROP_OUTLINE,
   STREAK_EXPOSURE_S,
@@ -180,6 +186,8 @@ export interface FlowViz {
   setHazeOff(off: boolean): void;
   /** D4-76: the cut plane over the full near-field raster instead of the mode's crop. */
   setFullDomain(full: boolean): void;
+  /** W2V-I7: the ambient air drawn too (the old look: the floor's A/B and negative control). */
+  setFloorOff(off: boolean): void;
   /** Follows the cutaway wedge (the planes lie on its faces) and the camera's pixel angle. */
   update(cutCenter: number, cutHalf: number, open: boolean, view: FlowViewGeometry): void;
   /** The haze's background shift in uv (xy), built on the pipeline's depth (post.ts). */
@@ -237,6 +245,9 @@ export function createFlowViz(o: {
   const gradientTex = linear(new ExternalTexture(compute.gradient));
   const gradientNode = texture(gradientTex);
   const rhoInf = uniform(1.225);
+  const tInf = uniform(288.15);
+  /** W2V-I7 (D4-86): 1 leaves the ambient air undrawn; 0 is the old look (a debug A/B). */
+  const floorOn = uniform(1);
   const dilation = uniform(1 / 200);
   const opacity = uniform(0);
   /** 1: display-encoded white streaks (D4-76 modes); 0: scene-linear radiance (Realistic). */
@@ -377,10 +388,20 @@ export function createFlowViz(o: {
         .mul(CROP_OUTLINE.alpha);
       const framed = mix(rgb, vec3(...CROP_OUTLINE.rgb), outline);
       const a = fluid.mul(inside);
-      If(a.lessThan(0.002), () => {
+      // W2V-I7 (D4-86): the ambient air is not drawn (fields.ts drawnOnPlane): a crisp,
+      // anti-aliased edge at the floor, so every drawn pixel is still a legend colour (D4-76)
+      const amb = id === 't' ? tInf : float(0);
+      const beyond = abs(q.sub(amb))
+        .sub(ambientFloor(id))
+        .div(max(fwidth(q), 1e-6));
+      const drawn = mix(float(1), beyond.add(0.5).clamp(0, 1), floorOn);
+      // where it is drawn the old look exactly; where not, the crop's outline alone frames it
+      const bare = outline.mul(a).mul(float(1).sub(drawn));
+      const alpha = a.mul(drawn).add(bare);
+      If(alpha.lessThan(0.002), () => {
         Discard();
       });
-      return vec4(framed.mul(a), a);
+      return vec4(framed.mul(a.mul(drawn)).add(vec3(...CROP_OUTLINE.rgb).mul(bare)), alpha);
     })();
     planeMaterial.needsUpdate = true;
   };
@@ -575,6 +596,7 @@ export function createFlowViz(o: {
       stateNode.value = ext.state;
       velocityNode.value = ext.velocity;
       rhoInf.value = b.reference.rhoInfKgPerM3;
+      tInf.value = b.reference.tInfK;
       prev?.state.dispose();
       prev?.velocity.dispose();
     },
@@ -593,6 +615,9 @@ export function createFlowViz(o: {
     setFullDomain(full) {
       fullDomain = full;
       applyCrop();
+    },
+    setFloorOff(off) {
+      floorOn.value = off ? 0 : 1;
     },
     setHazeOff(off) {
       hazeOff = off;

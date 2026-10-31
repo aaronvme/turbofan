@@ -77,6 +77,11 @@ const CSS = `
 #legend .u { color: rgba(226,230,235,.58); font-weight: 500; margin-left: 6px; }
 #legend .bar { height: 10px; margin: 8px 0 0; border-radius: 3px;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
+#legend .bar { position: relative; }
+#legend .bar .floor { position: absolute; top: 0; bottom: 0; border-radius: 2px;
+  background: repeating-linear-gradient(135deg, rgba(226,230,235,.34) 0 1px, rgba(20,22,26,.96) 1px 4px);
+  box-shadow: inset 0 0 0 1px rgba(226,230,235,.28); }
+#legend .floor-note { margin-top: 1px; font-size: 10.5px; color: rgba(226,230,235,.62); }
 #legend .ticks { position: relative; height: 22px; font: 500 10.5px ui-monospace, monospace;
   font-variant-numeric: tabular-nums; color: rgba(226,230,235,.72); }
 #legend .ticks span { position: absolute; top: 5px; transform: translateX(-50%); white-space: nowrap; }
@@ -223,8 +228,9 @@ export async function createFlowPanel(
       .map((s) => `rgb(${s.rgb.join(',')}) ${(100 * s.at).toFixed(2)}%`)
       .join(',');
     legend.innerHTML = `<div class="t">${l.title}<span class="u">${l.unit}</span></div>
-      <div class="bar" style="background:linear-gradient(90deg,${grad})"></div>
+      <div class="bar" style="background:linear-gradient(90deg,${grad})">${l.floor === null ? '' : `<span class="floor" style="left:${(100 * l.floor.from).toFixed(2)}%;width:${(100 * (l.floor.to - l.floor.from)).toFixed(2)}%"></span>`}</div>
       <div class="ticks">${l.ticks.map((t) => `<span class="${t.at < 0.03 ? 'lo' : t.at > 0.97 ? 'hi' : ''}" style="left:${(100 * t.at).toFixed(2)}%">${t.label}</span>`).join('')}</div>
+      ${l.floor === null ? '' : `<div class="floor-note">${l.floor.label}</div>`}
       <div class="badge${b.st.fallback === null ? '' : ' fallback'}">${b.text}</div>`;
   };
   const showMs = () => {

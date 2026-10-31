@@ -134,6 +134,45 @@ export function quantityValue(id: FieldQuantityId, s: FieldSample, ref: FieldRef
   }
 }
 
+/**
+ * W2V-I7 (D4-86): the cut plane leaves the ambient air undrawn. Air within this fraction of a
+ * quantity's scale of its ambient value is transparent, so the studio shows through, instead of
+ * painting the map's ambient colour (viridis' darkest end for Mach and |u|, the diverging map's
+ * near-white centre for p and rho, inferno's near-black for T) over most of the plane: at ground
+ * idle that was 44-98 % of it, a heavy board that carried no information. Why 2.5 %: the maps are
+ * perceptually uniform, so a fixed fraction of the scale is a fixed colour difference from the
+ * ambient's colour: 2.5 % is CIE76 Delta E 3.6 on viridis from its end and 3.8 on the diverging
+ * map from its centre, under two just-noticeable differences (2.3), which no eye reads as a value
+ * off the bar. (Inferno's near-blacks at T_inf turn faster, Delta E 12, which CIE76 overstates
+ * between near-blacks; +-45 K is still under the fan's take-off temperature rise, so the plane
+ * keeps the core and the hot jet.) So the floor hides about what the map could not show anyway,
+ * the ambient band is a thin fringe of the drawn flow, and the scale stays fixed: idle and
+ * take-off read on one legend (a range taken from the field would move it, and would still put
+ * the ambient at the map's end).
+ * The legend draws the band and says "Not drawn: ...".
+ */
+export const AMBIENT_FLOOR_FRACTION = 0.025;
+
+/**
+ * A quantity's value in the undisturbed ambient: p/p_inf = rho/rho_inf = 1 (log2 0), T_inf, and
+ * the air at rest (the static engine: the reference carries no flight speed; with one, Mach and
+ * |u| would be measured from it).
+ */
+export function ambientValue(id: FieldQuantityId, ref: FieldReference): number {
+  return id === 't' ? ref.tInfK : 0;
+}
+
+/** The floor's half-width about the ambient, in the quantity's units (D4-86). */
+export function ambientFloor(id: FieldQuantityId): number {
+  const s = FIELD_QUANTITIES[id];
+  return AMBIENT_FLOOR_FRACTION * (s.max - s.min);
+}
+
+/** Whether the cut plane draws a value: outside the ambient floor (TS mirror of flowViz.ts). */
+export function drawnOnPlane(id: FieldQuantityId, value: number, ref: FieldReference): boolean {
+  return Math.abs(value - ambientValue(id, ref)) >= ambientFloor(id);
+}
+
 /** The value mapped onto [0, 1] of the quantity's colour map (clamped). */
 export function normalizeQuantity(id: FieldQuantityId, value: number): number {
   const s = FIELD_QUANTITIES[id];
