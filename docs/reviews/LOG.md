@@ -3463,6 +3463,28 @@ None.
   - **D0-1 amended:** official P-runs also need Chrome holding the OS focus, so that D3-6's blur rule can fire (W2L-I7 / D4-73). The rest is unchanged: AC, no agents, nothing else on the GPU, display awake.
   - The `--flow` capture is the tool for the official P4 with the flow on. Indicative so far: Cutaway with tracers 9.53 / 10.34 ms and Realistic 8.07 / 7.82 ms (vsync / back to back).
   - **Next:** a fresh kernel round 3 runs the two fixed tests in the browser, writes SOLVER.md 15.3, merges main with an `ENGINE_MACH_CUT === GLOBAL_MACH_CUT` test, and runs the six gates. Then the critic reviews it.
+  - B also passes at the cut: 1.266e-11 ≤ 2e-10. Its velocity check is 1.95e-5, under 10× the oracle's 1.49e-5. The gpu-ladder run was 13 passed + 1 expected fail, at b777653.
+- **D4-94 (w2/cycle-hold round 2 @801bbba): D4-92's fix confirmed, and two guards on the matched root.**
+  - **Result:** in critic 15's scenario on the default model, the longest hold is now 0.25-0.36 s at every dt from 1/120 to 1/30, at ISA and ISA+30. Before, it was up to 7.88 s with N1 at 218 %, and ISA+30 threw at 25.46 s.
+  - **Spools:** (a) as a freeze was tried and fails, because the relight's entry has no root reachable from the anchor with the spools frozen, so it holds about 12 s. The spools therefore follow D4-17's held balance, bounded at their redlines. (c), the escalation, was needed.
+  1. **`ESCALATE_AFTER_S` = 0.25 s is confirmed.** D4-92's "past 0.5 s" can't meet a ≤ 0.5 s bound counted in whole frame steps, and half the bound leaves room for the escalated walk's own snapshot. The escalation costs 3,100-4,400 gas-path evaluations (50-240 ms in Node) once per episode. It is the recorded exception beside P5, like the sub-idle entry.
+  2. **Two guards on the matched root, adopted.** The mechanism behind B1 and I3 is a non-physical matched root. After a long hold, the matched path followed a branch where the booster cools the flow (T25 below T2 by up to 61 K at ISA and 82 K at ISA+30), and `attempt()` accepts it, because it checks only the residual and BPR > 1. At ISA+30 that branch reaches an HPC corrected speed of 1.22, where `hpcCubic`'s fit is degenerate (H < 0), and a surge from that matched point integrates to NaN.
+     - `attempt()` refuses a root with a compressor total-temperature rise ≤ 0 across any compressor, as BPR ≤ 1 is refused, with a named cause.
+     - `hpcCubic` rejects H ≤ 0 with a named error instead of integrating.
+
+     Both change what the matched path accepts, so the next round is TDD, and the fingerprint probe must show the matched-path hashes unchanged on slam-chop, c12, start and part-lever. A changed hash comes back with the scenario and the refused root. The surge-start guard (a surge starts only from a solved gas path) stays: it is right, even though it wasn't the cause.
+  3. **W2H-I1 on the part-power fit stays on the backlog.** N1 is now bounded at 104 % instead of 260-275 %, but episode 2 still never recovers. The part-power round owns it.
+  4. **D4-92 (b)'s recovery bound becomes a P5 row (P5b),** a flagged contract addition: on the default model in critic 15's scenario, every held episode is ≤ 0.5 s at every dt from 1/120 to 1/30, and N1 ≤ redline while held. `heldRecovery.test.ts` reads it from the contract.
+  - **The next round (cycle-hold round 3):**
+    - the two guards;
+    - P5b;
+    - mutants B2 and B4 (N6);
+    - fast tests of the surge-start condition and the redline clamp;
+    - N1-N5;
+    - the fingerprint probe;
+    - full coverage, test:mesh and the targeted Stryker run.
+
+    Then the critic reviews it.
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
