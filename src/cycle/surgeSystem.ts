@@ -164,6 +164,14 @@ export function hpcCubic(
   // from the peak.
   const psi0 = Math.max(SHUTOFF_TO_PEAK_MIN * stall.psi, stall.psi - (2 * num) / den);
   const h = (stall.psi - psi0) / 2;
+  // D4-94 (W2H-I3): above the map's top speed line (about 1.2) the extrapolated line's pressure
+  // rises with flow, the shut-off head lands above the peak and H < 0: no surge characteristic, and
+  // a Greitzer episode on it integrates to a NaN P3. Refused here, at its source, by name.
+  if (!(h > 0)) {
+    throw new RangeError(
+      `HPC cubic at corrected speed ${speedFraction}: H ${Number(h.toPrecision(3))} must be > 0 (shut-off head ${Number(psi0.toPrecision(3))}, stall point ${Number(stall.psi.toPrecision(3))}): no surge characteristic on this speed line`,
+    );
+  }
   let sq = 0;
   for (const q of line) sq += (psi0 + h * (2 + g(q.phi)) - q.psi) ** 2;
   return { psi0, h, w, rms: Math.sqrt(sq / Math.max(1, line.length)) };

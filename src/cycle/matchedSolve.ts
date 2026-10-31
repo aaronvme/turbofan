@@ -15,6 +15,7 @@
 // Only (N1, N2, Wf) are walked: the operating conditions (a VBV switch, an ambient change) take
 // their current value at every solve (W2F-N2).
 
+import type { StationId } from '../contracts/stations';
 import { at } from './at';
 import {
   MAX_NEWTON_ITERATIONS,
@@ -61,12 +62,25 @@ type Attempted =
   | { readonly kind: 'stopped'; readonly solution: GasPathSolution };
 
 /**
- * A solution the transient may use: converged, and on a physical root (the bypass ratio, unknown
- * 1, above 1; a root with it near zero exists and is not the engine). A solver that throws (a
- * thermo state out of range, or a programming error) has no solution there. The reason a solution
- * is refused goes into `why` (W2F-I1), so a lost solve keeps its cause: a thrown error by its
- * name and message, so a TypeError cannot pass for a physical loss. A solve its control stopped
- * (D4-84) is neither: it was interrupted, not refused.
+ * The compressors a matched root must raise the total temperature across (D4-94): the fan's two
+ * streams, the booster (its exit 24; the HPC inlet 25 has the same Tt) and the HPC.
+ */
+const COMPRESSOR_STATIONS = [
+  ['fan bypass', '2', '13'],
+  ['fan core', '2', '21'],
+  ['booster', '21', '24'],
+  ['HPC', '25', '3'],
+] as const satisfies readonly (readonly [string, StationId, StationId])[];
+
+/**
+ * A solution the transient may use: converged, and on a physical root. The bypass ratio, unknown
+ * 1, is above 1 (a root with it near zero exists and is not the engine), and every compressor
+ * raises the total temperature (D4-94: after a long hold the matched path followed a converged
+ * branch on which the booster cooled the flow, T25 up to 61-82 K below T2, out to an HPC speed off
+ * its map). A solver that throws (a thermo state out of range, or a programming error) has no
+ * solution there. The reason a solution is refused goes into `why` (W2F-I1), so a lost solve keeps
+ * its cause: a thrown error by its name and message, so a TypeError cannot pass for a physical
+ * loss. A solve its control stopped (D4-84) is neither: it was interrupted, not refused.
  */
 function attempt(f: () => GasPathSolution, why: SolveFailure): Attempted {
   try {
@@ -80,6 +94,14 @@ function attempt(f: () => GasPathSolution, why: SolveFailure): Attempted {
     if (!(bpr > 1)) {
       why.cause = `non-physical root (BPR ${Number(bpr.toPrecision(3))})`;
       return { kind: 'refused' };
+    }
+    const st = s.point.stations;
+    for (const [name, inlet, exit] of COMPRESSOR_STATIONS) {
+      const rise = st[exit].ttK - st[inlet].ttK;
+      if (!(rise > 0)) {
+        why.cause = `non-physical root (${name} total-temperature rise ${Number(rise.toPrecision(3))} K)`;
+        return { kind: 'refused' };
+      }
     }
     return { kind: 'solved', solution: s };
   } catch (e) {

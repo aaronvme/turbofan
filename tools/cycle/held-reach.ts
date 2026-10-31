@@ -6,7 +6,11 @@
 // critic pass 15's probe counts them: consecutive steps whose state is 'held'.
 //
 //   node --import ./tools/mesh/ts-resolve.mjs tools/cycle/held-reach.ts [--ambient-k=318.15]
-//     [--dt=0.02,0.025] [--unbounded] [--json=<file>]
+//     [--dt=0.02,0.025] [--unbounded] [--escalate-after=<s> | --no-escalate] [--json=<file>]
+//
+// --escalate-after sets D4-92 (c)'s escalation (--no-escalate: never, the round-1 policy with the
+// redline bound), on a checkout that has it. Each row also lists the distinct lost-solve causes the
+// model reported (CycleDiagnostics.lostSolveCause, where the checkout has it), with their counts.
 //
 // It reads only the public model API, so the same script measures a checkout before and after.
 
@@ -31,7 +35,12 @@ const DEFAULT_DTS = [1 / 120, 1 / 60, 0.02, 0.0205, 0.021, 0.025, 1 / 30];
 const dts = arg('dt')?.split(',').map(Number) ?? DEFAULT_DTS;
 const ambientK = Number(arg('ambient-k') ?? ISA_SLS.temperatureK);
 const ambient = { ...ISA_SLS, temperatureK: ambientK };
-const opts = flag('unbounded') ? { heldRetry: retry.UNBOUNDED_RETRY } : {};
+const escalateAfter = flag('no-escalate') ? Infinity : arg('escalate-after');
+const heldRetry = {
+  ...(flag('unbounded') ? retry.UNBOUNDED_RETRY : {}),
+  ...(escalateAfter === undefined ? {} : { escalateAfterS: Number(escalateAfter) }),
+};
+const opts = Object.keys(heldRetry).length > 0 ? { heldRetry } : {};
 const SECONDS = 35;
 
 interface Episode {
@@ -50,6 +59,8 @@ interface Row {
   maxStepMs: number;
   threw: string | null;
   wallS: number;
+  /** Each distinct lost-solve cause (numbers stripped) and the held steps that reported it. */
+  causes: Record<string, number>;
 }
 
 function run(dt: number): Row {
@@ -65,6 +76,11 @@ function run(dt: number): Row {
   let maxEv = 0;
   let maxMs = 0;
   let threw: string | null = null;
+  const causes: Record<string, number> = {};
+  const causeOf = (): string | null => {
+    const f = (m as { lostSolveCause?: () => string | null }).lostSolveCause;
+    return typeof f === 'function' ? f.call(m) : null;
+  };
   const w0 = performance.now();
   const n = Math.round(SECONDS / dt);
   let t = 0;
@@ -81,6 +97,8 @@ function run(dt: number): Row {
       maxN1 = Math.max(maxN1, s.n1Percent);
       lost = s.gasPathSolve.lostSolves;
       if (s.gasPathSolve.status === 'held') {
+        const cause = (causeOf() ?? 'unknown').replace(/-?[0-9][0-9.e+-]*/g, '#');
+        causes[cause] = (causes[cause] ?? 0) + 1;
         if (open === null) {
           open = { startS: t, lengthS: 0, maxN1Percent: 0 };
           episodes.push(open);
@@ -104,6 +122,7 @@ function run(dt: number): Row {
     maxStepMs: maxMs,
     threw,
     wallS: (performance.now() - w0) / 1000,
+    causes,
   };
 }
 
@@ -112,7 +131,8 @@ const say = (line: string) =>
 `);
 const rows: Row[] = [];
 say(
-  `ambient ${ambientK} K, ${flag('unbounded') ? 'UNBOUNDED_RETRY' : 'default policy'}, ${SECONDS} s`,
+  `ambient ${ambientK} K, ${flag('unbounded') ? 'UNBOUNDED_RETRY' : 'default policy'}` +
+    `${escalateAfter === undefined ? '' : `, escalate after ${escalateAfter} s`}, ${SECONDS} s`,
 );
 for (const dt of dts) {
   const r = run(dt);
@@ -126,6 +146,8 @@ for (const dt of dts) {
       `${r.maxStepMs.toFixed(1)} ms, wall ${r.wallS.toFixed(1)} s${r.threw ? ` | THREW ${r.threw}` : ''}`,
   );
   if (eps) say(`  episodes: ${eps}`);
+  const cs = Object.entries(r.causes).map(([c, k]) => `${k}x ${c}`);
+  if (cs.length > 0) say(`  causes (held steps): ${cs.join('; ')}`);
 }
 const out = arg('json');
 if (out !== undefined) writeFileSync(out, JSON.stringify({ ambientK, opts, rows }, null, 2));
