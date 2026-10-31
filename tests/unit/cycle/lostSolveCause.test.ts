@@ -56,6 +56,11 @@ describe('W2F-I1: the lost-solve cause', { timeout: 120_000 }, () => {
     m.step(0.1, inputs);
     m.step(0.1, inputs);
     expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^\[cycle\] matched gas-path solve lost at N2 \d+\.\d %: TypeError: cannot read/,
+      ),
+    );
     warn.mockRestore();
   });
 

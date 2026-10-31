@@ -5,6 +5,8 @@
 // - W2H-I3: a surge starts only from a solved gas path. The detected start skips a held snapshot,
 //   and an injected surge waits on one until the solve recovers.
 // - D4-92 (a): while held the spools follow the held power balance, but never past their redlines.
+// - D4-92 (c): a held episode escalates once, after ESCALATE_AFTER_S, to D4-13's whole walk.
+// - D4-84: the retry options are checked (moved here from heldFrame.test.ts, the slow file).
 import { describe, expect, it, vi } from 'vitest';
 import { ISA_SLS } from '../../../src/contracts/ambient';
 import {
@@ -13,6 +15,7 @@ import {
   type CycleState,
 } from '../../../src/contracts/cycle';
 import { solveGasPath, type GasPathSolution } from '../../../src/cycle/engine';
+import { ESCALATE_AFTER_S, UNBOUNDED_RETRY } from '../../../src/cycle/heldRetry';
 import { SUBIDLE_N2_PERCENT, createCycleModel } from '../../../src/cycle/model';
 import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 
@@ -167,6 +170,13 @@ describe('W2H-I3: a surge starts only from a solved gas path', () => {
           expect(s.hpc.surgeMarginFraction).toBeLessThan(0);
           expect(s.flags.surge, `a surge started held at ${s.timeS.toFixed(2)} s`).toBe(false);
         }
+        // recovered onto the reference root (inside the surge line): the held snapshots left no
+        // surge behind them
+        held.ctl.mode = 'none';
+        const back = held.m.step(SURGE_DT_S, inputs());
+        expect(back.gasPathSolve.status).toBe('matched');
+        expect(back.hpc.surgeMarginFraction).toBeGreaterThan(0);
+        expect(back.flags.surge).toBe(false);
         // the same point solved at the substep too: the surge starts there
         const solved = switchable();
         solved.m.reset('groundIdle', ISA_SLS);
@@ -202,6 +212,134 @@ describe('W2H-I3: a surge starts only from a solved gas path', () => {
       });
     },
   );
+
+  it('below the sub-idle speed an injected surge is dropped', { timeout: TIMEOUT_MS }, () => {
+    quiet(() => {
+      const { m } = switchable();
+      m.reset('shutdown', ISA_SLS);
+      const crank = inputs({ starter: true, fuelLever: 'cutoff' });
+      for (let i = 0; i < 10; i++) m.step(0.1, crank);
+      expect(m.state().n2Percent).toBeLessThan(SUBIDLE_N2_PERCENT);
+      m.injectFault('surge');
+      for (let i = 0; i < 5; i++) {
+        const s = m.step(0.1, crank);
+        expect(s.gasPathSolve.status).toBe('subIdle');
+        expect(s.flags.surge).toBe(false);
+      }
+    });
+  });
+
+  it('a matched point inside the surge line starts no surge', { timeout: TIMEOUT_MS }, () => {
+    quiet(() => {
+      const { m } = switchable();
+      m.reset('groundIdle', ISA_SLS);
+      for (let i = 0; i < 10; i++) {
+        const s = m.step(SURGE_DT_S, inputs());
+        expect(s.gasPathSolve.status).toBe('matched');
+        expect(s.hpc.surgeMarginFraction).toBeGreaterThan(0);
+        expect(s.flags.surge).toBe(false);
+      }
+    });
+  });
+});
+
+describe('D4-92 (c): a held episode escalates once, after ESCALATE_AFTER_S, to the whole walk', () => {
+  /** The reference solver, every solve refused while `lose` is set; its calls counted. */
+  function losing(opts: Parameters<typeof createCycleModel>[0] = {}) {
+    const ctl = { lose: false, calls: 0 };
+    const solver: typeof solveGasPath = (...args) => {
+      ctl.calls++;
+      const s = solveGasPath(...args);
+      return ctl.lose ? diverged(s) : s;
+    };
+    const m = createCycleModel({ ...opts, gasPathSolver: solver });
+    m.reset('groundIdle', ISA_SLS);
+    return { ctl, m };
+  }
+
+  it(
+    'once per episode, no earlier than 0.25 s held; a second episode escalates again',
+    { timeout: TIMEOUT_MS },
+    () => {
+      quiet(() => {
+        const { ctl, m } = losing();
+        const run = (steps: number) => {
+          const out: { s: CycleState; escalations: number }[] = [];
+          for (let i = 0; i < steps; i++) {
+            const s = m.step(0.05, inputs());
+            out.push({ s, escalations: m.heldRetryEscalations() });
+          }
+          return out;
+        };
+        // matched: never
+        expect(run(10).every((k) => k.escalations === 0)).toBe(true);
+        expect(ESCALATE_AFTER_S).toBe(0.25);
+        ctl.lose = true;
+        const first = run(20);
+        expect(first.every((k) => k.s.gasPathSolve.status === 'held')).toBe(true);
+        // the episode starts at the first step's first snapshot, one step before its end time
+        const heldFrom = (first[0]?.s.timeS ?? NaN) - 0.05;
+        const at = first.find((k) => k.escalations === 1);
+        expect(at, 'an escalation').toBeDefined();
+        expect((at?.s.timeS ?? 0) - heldFrom).toBeGreaterThanOrEqual(ESCALATE_AFTER_S);
+        expect((at?.s.timeS ?? 0) - heldFrom).toBeLessThan(ESCALATE_AFTER_S + 0.1);
+        // once: the episode goes on held, with no second escalation
+        expect(first[first.length - 1]?.escalations).toBe(1);
+        ctl.lose = false;
+        expect(run(1)[0]?.s.gasPathSolve.status).toBe('matched');
+        ctl.lose = true;
+        expect(
+          run(20)
+            .map((k) => k.escalations)
+            .pop(),
+        ).toBe(2);
+      });
+    },
+  );
+
+  it("the escalated step runs D4-13's whole walk: the direct try and 8 halvings", () => {
+    quiet(() => {
+      const { ctl, m } = losing({ heldRetry: { budget: 1 } });
+      m.step(0.05, inputs());
+      ctl.lose = true;
+      let escalations = 0;
+      for (let i = 0; i < 20 && escalations === 0; i++) {
+        const c0 = ctl.calls;
+        m.step(0.05, inputs());
+        escalations = m.heldRetryEscalations();
+        // a budget of one evaluation lets the bounded retry make one solve a step at most; the
+        // escalated step adds the whole walk
+        if (escalations === 1) expect(ctl.calls - c0).toBeGreaterThanOrEqual(9);
+        else expect(ctl.calls - c0).toBeLessThanOrEqual(2);
+      }
+      expect(escalations).toBe(1);
+    });
+  });
+
+  it('heldRetry.escalateAfterS: Infinity never escalates', { timeout: TIMEOUT_MS }, () => {
+    quiet(() => {
+      const { ctl, m } = losing({ heldRetry: { escalateAfterS: Infinity } });
+      m.step(0.05, inputs());
+      ctl.lose = true;
+      for (let i = 0; i < 20; i++) m.step(0.05, inputs());
+      expect(m.state().gasPathSolve.status).toBe('held');
+      expect(m.heldRetryEscalations()).toBe(0);
+    });
+  });
+});
+
+describe('D4-84: the retry options', () => {
+  it('rejects a budget that is not positive and a walk interval that is negative', () => {
+    expect(() => createCycleModel({ heldRetry: { budget: 0 } })).toThrow(
+      /^heldRetry.budget 0 must be above 0$/,
+    );
+    expect(() => createCycleModel({ heldRetry: { budget: Number.NaN } })).toThrow(/budget NaN/);
+    expect(() => createCycleModel({ heldRetry: { walkIntervalS: -1 } })).toThrow(
+      /^heldRetry.walkIntervalS -1 must be at least 0$/,
+    );
+    expect(() => createCycleModel({ heldRetry: { walkIntervalS: 0 } })).not.toThrow();
+    expect(() => createCycleModel({ heldRetry: UNBOUNDED_RETRY })).not.toThrow();
+  });
 });
 
 describe('D4-92 (a): held, the spools never pass their redlines', () => {

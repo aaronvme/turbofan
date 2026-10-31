@@ -156,6 +156,17 @@ describe('D4-13: the matched solve with a continuation entry', () => {
     expect(solveMatched(throwing, REF, C, a, a.n1Rpm, a.n2Rpm, a.wfKgPerS)).toBeNull();
   });
 
+  it('a solver that throws something other than an Error is lost with what it threw', () => {
+    const throwing: GasPathSolver = () => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- the case under test
+      throw 'boom';
+    };
+    const a = idleAnchor();
+    const why = { cause: null as string | null };
+    expect(solveMatched(throwing, REF, C, a, a.n1Rpm, a.n2Rpm, a.wfKgPerS, why)).toBeNull();
+    expect(why.cause).toBe('threw boom');
+  });
+
   it('a converged root with a bypass ratio of 1 or less is not accepted', () => {
     const a = idleAnchor();
     const root =

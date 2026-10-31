@@ -183,8 +183,12 @@ describe('D3-17 / C12: a lowered HPC surge line (Delta PRS, SAE ARP1420)', () =>
     const worn = createCycleModel({ hpcSurgeMarginLoss: loss }).reset('groundIdle', ISA_SLS).hpc
       .surgeMarginFraction;
     expect(worn).toBeCloseTo((1 + clean) * (1 - loss) - 1, 12);
-    expect(() => createCycleModel({ hpcSurgeMarginLoss: -0.01 })).toThrow();
-    expect(() => createCycleModel({ hpcSurgeMarginLoss: 1 })).toThrow();
+    expect(() => createCycleModel({ hpcSurgeMarginLoss: -0.01 })).toThrow(
+      /hpcSurgeMarginLoss -0.01 must be in \[0, 1\)/,
+    );
+    expect(() => createCycleModel({ hpcSurgeMarginLoss: 1 })).toThrow(
+      /hpcSurgeMarginLoss 1 must be/,
+    );
   });
 });
 

@@ -239,12 +239,3 @@ describe('D4-84: the matched path is unchanged', { timeout: TIMEOUT_MS }, () => 
     },
   );
 });
-
-describe('D4-84: the retry options', () => {
-  it('rejects a budget that is not positive and a walk interval that is negative', () => {
-    expect(() => createCycleModel({ heldRetry: { budget: 0 } })).toThrow(/budget/);
-    expect(() => createCycleModel({ heldRetry: { budget: Number.NaN } })).toThrow(/budget/);
-    expect(() => createCycleModel({ heldRetry: { walkIntervalS: -1 } })).toThrow(/walkIntervalS/);
-    expect(() => createCycleModel({ heldRetry: UNBOUNDED_RETRY })).not.toThrow();
-  });
-});
