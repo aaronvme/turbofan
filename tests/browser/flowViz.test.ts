@@ -888,9 +888,10 @@ describe('flow visuals', () => {
     const med = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? NaN;
     const flowMs = med(pairs.map((p) => p.flow));
     const deltaRender = med(pairs.map((p) => p.on - p.off));
-    // D4-96 item 4: recorded on every run (the log line and timing.json); the 2 ms bar fails the
-    // suite only in a quiet run (VITE_UI_QUIET=1, app-ui's W2A-N16 flag); a reading that measured
-    // nothing fails every run
+    // D4-96 item 4: recorded on every run in timing.json, with the flag, the bar and the problems
+    // (vitest 5's browser mode prints the console line only for a failing test); the 2 ms bar
+    // fails the suite only in a quiet run (VITE_UI_QUIET=1, app-ui's W2A-N16 flag); a reading that
+    // measured nothing fails every run
     const problems = flowTimingProblems({ visualsMs: flowMs, tracersMs: tracers.flow }, QUIET);
     const record = `[timing] flow visuals (realistic, default preset, 1080p, back to back, indicative; ${QUIET ? 'quiet run: gated' : 'not a quiet run: recorded, not gated'} at ${String(FLOW_VISUALS_BUDGET_MS)} ms): ${flowMs.toFixed(3)} ms (render passes ${med(pairs.map((p) => p.overlay)).toFixed(3)}, compute ${med(pairs.map((p) => p.compute ?? NaN)).toFixed(3)}); P4 render total off ${med(pairs.map((p) => p.off)).toFixed(2)} / on ${med(pairs.map((p) => p.on)).toFixed(2)} ms (paired change ${deltaRender.toFixed(3)} ms); with the tracers on ${tracers.flow.toFixed(3)} ms (compute ${(tracers.compute ?? NaN).toFixed(3)}) ${JSON.stringify(pairs)}`;
     console.warn(record);
