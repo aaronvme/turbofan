@@ -55,6 +55,15 @@ const OFFSETS: readonly (readonly [number, number])[] = [
 ];
 const GAP = 4;
 
+/**
+ * Round 5: an anchor is called out when it is in view and on the picture, not under a panel (the
+ * open drawer, a side column): a label there would point at a part the panel covers.
+ */
+function callable(a: Anchor, reserved: readonly Rect[]): boolean {
+  if (!a.visible || !Number.isFinite(a.x) || !Number.isFinite(a.y)) return false;
+  return !reserved.some((r) => a.x >= r.x && a.x <= r.x + r.w && a.y >= r.y && a.y <= r.y + r.h);
+}
+
 export const overlaps = (a: Rect, b: Rect, gap = 0): boolean =>
   a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
 
@@ -116,7 +125,7 @@ export function layoutCallouts(
   preferred: (id: string) => readonly Rect[] = () => [],
 ): PlacedCallout[] {
   const order = anchors
-    .filter((a) => a.visible && Number.isFinite(a.x) && Number.isFinite(a.y))
+    .filter((a) => callable(a, reserved))
     .sort((a, b) => b.priority - a.priority || (a.id < b.id ? -1 : 1));
   // each anchor's places that are on screen, off the reserved panels and the other dots
   const candidates = order.map((a) => {
@@ -268,7 +277,7 @@ export function layoutAxial(
   band: Rect,
 ): PlacedCallout[] {
   const vis = anchors
-    .filter((a) => a.visible && Number.isFinite(a.x) && Number.isFinite(a.y))
+    .filter((a) => callable(a, reserved))
     .sort((a, b) => a.axial - b.axial || (a.id < b.id ? -1 : 1));
   // the rows' limits: under the full-width bar at the top, over the one at the bottom
   const wide = reserved.filter((r) => r.w > viewport.w / 2);
