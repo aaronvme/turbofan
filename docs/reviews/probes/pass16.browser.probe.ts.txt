@@ -1,0 +1,245 @@
+// Critic pass 16 browser probe (copied into tests/browser/ only to run it; never committed there).
+// 1. W2L-I8 / R1: rotorMotion's measurement with D4-93's cut-face band, run on more poses than the
+//    suite runs: the legacyTraa control in the DEFAULT cutaway pose (the suite runs the control in
+//    the close-up only), and the close-up with and without the band, shipped and control. Does the
+//    band leave the cutaway preset's row able to fail?
+// 2. W2V-I7 / D4-86: the Data plane's ambient floor for EVERY quantity (the suite's browser case
+//    reads only the default, Mach): at ground idle on the MOCK, the share of the plane's footprint
+//    drawn in the ambient's own LUT band (nearest LUT entry within 5 % of the map of the ambient's
+//    entry), before (noFlowFloor) and after.
+import { afterAll, describe, expect, it } from 'vitest';
+import { commands } from 'vitest/browser';
+import { ISA_SLS } from '../../src/contracts/ambient';
+import { fieldReferenceFromAmbient } from '../../src/contracts/flow';
+import { ENGINE_DEFINITION } from '../../src/engine/definition';
+import { bakeLut } from '../../src/flow/viz/colormaps';
+import {
+  ambientValue,
+  FIELD_QUANTITIES,
+  normalizeQuantity,
+  type FieldQuantityId,
+} from '../../src/flow/viz/fields';
+import { mockSteadyState } from '../../src/mocks/mockCycle';
+import { createMockFlowField } from '../../src/mocks/mockFlowField';
+import { createEngineView, type DebugFlags, type EngineView } from '../../src/render/engineView';
+import type { LookPresetId } from '../../src/render/presets';
+import { TILE, diff, grab, nextFrame, settle } from './lib/frames';
+
+const W = 960;
+const H = 540;
+const THRESHOLD = 0.04;
+const MARGIN = 6;
+const SAMPLES = 8;
+const REST_BETWEEN = 16;
+const MOVING_BETWEEN = 48;
+const CAP_BAND_TILES = 1;
+
+interface Pose {
+  readonly preset: LookPresetId;
+  readonly camera?: [number, number, number];
+  readonly target?: [number, number, number];
+}
+const CLOSE: Pose = { preset: 'cutaway', camera: [-0.9, 1.0, 2.2], target: [0.1, 0.15, 0] };
+const CUTAWAY: Pose = { preset: 'cutaway' };
+const mean = (xs: readonly number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
+
+const views: EngineView[] = [];
+afterAll(async () => {
+  for (const v of views) await v.dispose();
+});
+
+function canvas(): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  document.body.appendChild(c);
+  return c;
+}
+
+describe('critic 16: rotorMotion R1', () => {
+  it('the band in the default cutaway pose and the close-up, shipped and legacyTraa', async () => {
+    const c = canvas();
+    const open = async (legacyTraa: boolean) => {
+      const v = await createEngineView({
+        gpu: navigator.gpu,
+        canvas: c,
+        definition: ENGINE_DEFINITION,
+        width: W,
+        height: H,
+        dpr: 1,
+        quality: 'high',
+        legacyTraa,
+      });
+      views.push(v);
+      return v;
+    };
+    const measure = async (v: EngineView, pose: Pose, useBand: boolean) => {
+      const flags: DebugFlags = {};
+      const run = async (frames: number, dt: number) => {
+        for (let i = 0; i < frames; i++) {
+          v.frame(dt);
+          await nextFrame();
+        }
+      };
+      const place = () => {
+        v.setPreset(pose.preset);
+        if (pose.camera && pose.target) v.setCameraPose(pose.camera, pose.target);
+      };
+      let skip: ((tx: number, ty: number) => boolean) | undefined;
+      const sample = () => {
+        const traa = grab(v, c);
+        v.setDebugFlags({ ...flags, noTraa: true });
+        const still = grab(v, c);
+        v.setDebugFlags(flags);
+        return diff(traa, still, THRESHOLD, skip).tilesOver25;
+      };
+      v.setDebugFlags(flags);
+      place();
+      await settle(v, 48);
+      let band = 0;
+      if (useBand) {
+        v.setDebugFlags({ ...flags, noTraa: true });
+        const withCaps = grab(v, c);
+        v.setDebugFlags({ ...flags, noTraa: true, noCaps: true });
+        const withoutCaps = grab(v, c);
+        v.setDebugFlags(flags);
+        const nx = Math.ceil(W / TILE);
+        const ny = Math.ceil(H / TILE);
+        const cap = new Uint8Array(nx * ny);
+        for (let y = 0; y < H; y++)
+          for (let x = 0; x < W; x++)
+            if (Math.abs((withCaps.lum[y * W + x] ?? 0) - (withoutCaps.lum[y * W + x] ?? 0)) > THRESHOLD)
+              cap[Math.floor(y / TILE) * nx + Math.floor(x / TILE)] = 1;
+        const banned = new Uint8Array(nx * ny);
+        for (let ty = 0; ty < ny; ty++)
+          for (let tx = 0; tx < nx; tx++) {
+            if (cap[ty * nx + tx] !== 1) continue;
+            for (let dy = -CAP_BAND_TILES; dy <= CAP_BAND_TILES; dy++)
+              for (let dx = -CAP_BAND_TILES; dx <= CAP_BAND_TILES; dx++) {
+                const x = tx + dx;
+                const y = ty + dy;
+                if (x >= 0 && x < nx && y >= 0 && y < ny) banned[y * nx + x] = 1;
+              }
+          }
+        band = banned.reduce((a, b) => a + b, 0);
+        skip = (tx, ty) => banned[ty * nx + tx] === 1;
+        await settle(v, REST_BETWEEN);
+      }
+      const floor: number[] = [];
+      for (let k = 0; k < SAMPLES; k++) {
+        if (k > 0) await settle(v, REST_BETWEEN);
+        floor.push(sample());
+      }
+      place();
+      await run(48, 1 / 60);
+      const moving: number[] = [];
+      for (let k = 0; k < SAMPLES; k++) {
+        if (k > 0) await run(MOVING_BETWEEN, 1 / 60);
+        moving.push(sample());
+      }
+      const f = mean(floor);
+      const m = mean(moving);
+      return `floor ${f.toFixed(2)} [${floor.join(' ')}] moving ${m.toFixed(2)} [${moving.join(' ')}] band ${band} tiles; excess ${(m - f).toFixed(2)} (fails the bound: ${String(m > f + MARGIN)})`;
+    };
+    const rows: string[] = [];
+    let v = await open(false);
+    rows.push(`shipped cutaway, band: ${await measure(v, CUTAWAY, true)}`);
+    rows.push(`shipped cutawayFanClose, band: ${await measure(v, CLOSE, true)}`);
+    rows.push(`shipped cutawayFanClose, no band: ${await measure(v, CLOSE, false)}`);
+    rows.push(`shipped cutaway, no band: ${await measure(v, CUTAWAY, false)}`);
+    expect(v.stats().errors).toEqual([]);
+    await v.dispose();
+    views.pop();
+    v = await open(true);
+    rows.push(`legacyTraa cutaway, band: ${await measure(v, CUTAWAY, true)}`);
+    rows.push(`legacyTraa cutaway, no band: ${await measure(v, CUTAWAY, false)}`);
+    rows.push(`legacyTraa cutawayFanClose, band: ${await measure(v, CLOSE, true)}`);
+    rows.push(`legacyTraa cutawayFanClose, no band: ${await measure(v, CLOSE, false)}`);
+    await commands.writeFile('test-results/critic16-rotor.txt', `${rows.join('\n')}\n`);
+    expect(v.stats().errors).toEqual([]);
+  }, 600_000);
+});
+
+describe('critic 16: the ambient floor for every Data quantity', () => {
+  it('MOCK idle: share of the footprint in the ambient LUT band, floor off and on', async () => {
+    const c = canvas();
+    const v = await createEngineView({
+      gpu: navigator.gpu,
+      canvas: c,
+      definition: ENGINE_DEFINITION,
+      width: W,
+      height: H,
+      dpr: 1,
+    });
+    views.push(v);
+    const ref = fieldReferenceFromAmbient(ISA_SLS);
+    v.setPreset('cutaway');
+    v.setMode('cutaway', true);
+    v.setFlowMode('data');
+    const rows: string[] = [];
+    for (const [lever, name] of [
+      [0, 'idle'],
+      [1, 'take-off'],
+    ] as const) {
+      v.setThrottle(lever, true);
+      v.setFlowField(
+        createMockFlowField(ENGINE_DEFINITION, mockSteadyState(ENGINE_DEFINITION, lever), ISA_SLS),
+      );
+      const quantities: FieldQuantityId[] = ['p', 'rho', 't', 'mach', 'speed'];
+      for (const q of quantities) {
+        v.setFlowQuantity(q);
+        const read = async (floorOff: boolean) => {
+          v.setDebugFlags({
+            hide: '.',
+            noFlowParticles: true,
+            ...(floorOff ? { noFlowFloor: true } : {}),
+          });
+          for (let k = 0; k < 30; k++) v.frame(1 / 60);
+          return (await v.readFlowTarget('overlay')).rgba;
+        };
+        const old = await read(true);
+        const now = await read(false);
+        const lut = bakeLut(FIELD_QUANTITIES[q].colormap);
+        const ambIdx = 255 * normalizeQuantity(q, ambientValue(q, ref));
+        const nearest = (o: Float32Array, k: number) => {
+          const a = o[k + 3] ?? 0;
+          const r = (255 * (o[k] ?? 0)) / a;
+          const g = (255 * (o[k + 1] ?? 0)) / a;
+          const b = (255 * (o[k + 2] ?? 0)) / a;
+          let best = 0;
+          let bd = Infinity;
+          for (let i = 0; i < 256; i++) {
+            const d =
+              (r - (lut[4 * i] ?? 0)) ** 2 +
+              (g - (lut[4 * i + 1] ?? 0)) ** 2 +
+              (b - (lut[4 * i + 2] ?? 0)) ** 2;
+            if (d < bd) {
+              bd = d;
+              best = i;
+            }
+          }
+          return best;
+        };
+        let footprint = 0;
+        let bandOld = 0;
+        let bandNow = 0;
+        let drawnNow = 0;
+        for (let k = 0; k < old.length; k += 4) {
+          if ((old[k + 3] ?? 0) < 0.5) continue;
+          footprint++;
+          if (Math.abs(nearest(old, k) - ambIdx) <= 0.05 * 255) bandOld++;
+          if ((now[k + 3] ?? 0) >= 0.5) {
+            drawnNow++;
+            if (Math.abs(nearest(now, k) - ambIdx) <= 0.05 * 255) bandNow++;
+          }
+        }
+        rows.push(
+          `${name} ${q}: footprint ${String(footprint)} px; in the ambient band ${((100 * bandOld) / footprint).toFixed(1)} % before, ${((100 * bandNow) / footprint).toFixed(1)} % after; drawn after ${((100 * drawnNow) / footprint).toFixed(1)} %`,
+        );
+      }
+    }
+    v.setDebugFlags({});
+    await commands.writeFile('test-results/critic16-floor.txt', `${rows.join('\n')}\n`);
+    expect(v.stats().errors).toEqual([]);
+  }, 300_000);
+});

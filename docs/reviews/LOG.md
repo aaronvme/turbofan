@@ -4380,3 +4380,273 @@ The chrome is at the bar: restrained glass panels, coloured badges, tabular nume
   - Also, does D4-90 item 3's "later recovery is accepted" (3.37 against 2.97 s on the fit ramp) cover the default model's holds? Where it recovers, they are 4-57 times D4-13's (0.58 against 0.13 s at 60 Hz, 5.7 against 0.1 s at dt 0.1). Or should P5 gain a recovery row on the default model?
 - (yy) Merge order. cycle-hold and app-ui both fixed W2A-N6, so they conflict in `src/cycle/model.ts` and `lostSolveCause.test.ts`. If app-ui merges first (B is FIX FIRST), cycle-hold's fix round merges main and keeps its own `model.ts` lines (a superset) and both tests, as trial15 did.
 - (zz) The callout layout (visual notes 1-2, W2A-N13): should round 4 re-anchor the closed views' Fan at the fan face and place the cut views' labels outward in axial order? Round 4 is also the progressive warm-up and W2A-I6.
+
+## Critic pass 16: w2/kernel @be07478, w2/cycle-hold @7f3fb22, w2/flowviz @7dac273
+
+**Scope.**
+- A, w2/kernel: rounds 1-3 (`ee97061..be07478`, with main cf87af0 merged): D4-89's mirror, the GPU d463 trend to 40k, W2R-I19's rows, W2L-I6's disocclusion mask, W2L-I8's cut-face band, W2L-I7's focus fix, the capture's `--flow`, the M_cut pin. GOTCHAS R1-R2 judged below.
+- B, w2/cycle-hold: rounds 2-3 since pass 15's FIX FIRST (`f2c0779..7f3fb22`): W2H-B1 per D4-92/D4-94, W2H-I2/I3, the two root guards, P5b, the mutants. The builder's three questions answered below.
+- C, w2/flowviz: round 4 (`cf87af0..7dac273`): W2V-I7 / D4-86, the ambient floor, its legend band, the dock/CSS edits, the frames; D4-95's quiet rerun of the flow timing row.
+
+**Setup** (2026-10-31, the critic worktree):
+- `critic` merged main 10b78ad (a fast-forward). A throwaway local branch `trial16` took three `--no-ff` merges, all clean: w2/kernel (9fa728a), w2/cycle-hold (6163608), w2/flowviz (48acbf9).
+- Every gate ran alone and detached (`Start-Process`, a status file per step), on trial16. test:browser started at 3.27 GB free with no other vitest-browser or Chrome for Testing process; the app-ui builder's `npm run coverage` (Node, CPU only) was running at the time, nothing else on the GPU.
+- Probes ran after the gates, except the kernel/cycle unit mutants and the Node probes, which ran beside test:gpu-ladder (on other files; trial16's `src` was not mutated while a gate read it).
+- The builders' worktrees were only read (their `reports/` logs and JSON).
+- `critic` is checked out again and clean. The local branch `trial16` (48acbf9, unpushed) is left in place, because the PreToolUse hook blocked `git branch -D`: the orchestrator can delete it. No detached run is left going.
+- Probes and mutants: `docs/reviews/probes/pass16-mutants.sh.txt`, `w2h-pass16.probe.ts.txt` (fine / sweep / fit), `w2h-fitthrow.probe.ts.txt`, `w2v-floor-deltae.probe.ts.txt`, `pass16.browser.probe.ts.txt`; pass 15's `w2h-reach` and pass 7's `w2f-fingerprint` were rerun as they are.
+
+### A. w2/kernel @be07478 (rounds 1-3)
+
+**What holds (checked by reading, the gates and mutants K1-K5):**
+- **The mirror is exact.** `inForce` (`src/flow/gpu/params.ts:72-79`) is the oracle's `withGlobalCut`: minMach' = max(minMach, cut), M_cut' = max(M_cut ?? minMach, cut), RangeError on NaN, ±∞ and a negative cut, and an M_cut or minMach ≥ 1 stays ≥ 1. Every consumer reads the values in force: the far field's β² (:238), the CFL switch (:260), minMach² (:262) and M_cut (:269). `enginePreconditioning` refuses a cut outside (0, 1); `adapterPreconditioning` refuses `machCut` beside explicit options. No WGSL changed: the kernel already took minMach² and M_cut as uniforms.
+- **The pin binds.** `ENGINE_MACH_CUT === GLOBAL_MACH_CUT`, and the oracle's `ENGINE_PRECONDITIONING_CUT` gives the GPU default's tracking, BC and physical uniforms (`tests/unit/flow/gpu/machCut.test.ts:107-121`). The CPU side's equivalence of {0.003, cut 0.02} and {0.02, 0.02} is reference-9's `precondition.test.ts -t global`, so the chain closes. Mutants: K2 (M_cut not raised), K3 (the adapter ignores its `machCut`) and K5 (the far field from the given minMach) are killed. K4, the CFL switch read from the given minMach, survives (W2K-N1, the twin of W2R-N31).
+- **The stale comments are gone.** `0.003` survives only as history (`params.ts:24`, `engine-stability.test.ts:4-5`, whose trace numbers are labelled as 0.003's), as an explicit test value (`forms.test.ts`, `host.test.ts`) and in the oracle's `ENGINE_PRECONDITIONING`, which the pin reads.
+- **The GPU d463 trend is real.** I recomputed it from `w2-kernel/reports/scratch/k/D4-63-gpu-0.02-ext40k.json` (400 checkpoints), and it matches SOLVER.md 15.2 in every figure:
+  - (a) 0.7779 / 0.4859, (b) 0.4913 / 0.2111, peak 4.21;
+  - the weighted residual 1.809 / 2.272 / 2.595 / 0.7775 / 0.3584 / 0.3820 at 100 / 1k / 2k / 10k / 15k / 20k, then 0.2878 / 0.1843 / 0.1591 / 0.1496 at 25k / 30k / 35k / 40k;
+  - the log-linear trend is 0.9939 per 1000 over 15k-20k and 0.9525 over 20k-40k; the max over 20k-40k is 1.16 × the 20k value (at 21k);
+  - L2(p′)/first falls at every 5k checkpoint past 20k: 0.486 / 0.448 / 0.411 / 0.380 / 0.328.
+  - My trial16 gate run reproduced the 20k rows bit for bit. D4-89's reopen condition ("if it grows past 20k") is not met. The residual's decay flattens at the end, though (W2K-N4).
+- **The tightened rows are tight and can fail.** On trial16: E-L5 2.67e-8 ≤ 3e-7 (11×), E-L9a 2.46e-12 ≤ 1e-10 (41×), B 1.266e-11 ≤ 2e-10 (16×), each D4-62's "ten times the measured error, rounded up" (E-L9a at D4-71's 1e-10). Commit 7110467 says their power "is shown by a mutant (handoff)", but the handoff records none. My K1 shows it:
+  - the WGSL mass flux off by 2e-6 relative on faces with a radial normal component, `gm * (1 + 2e-6 |n_r|)`. That is not a uniform scale, which would cancel in the residual sum.
+  - E-L9a fails at 1.29e-9 > 1e-10. D4-48's 1e-3 and the residual form (3.47e-6 ≤ 1e-3) would both pass it.
+  - E-L5 does not see this mutant (2.67e-8 unchanged), and B was not mutated. W2K-N2.
+- **The focus fix is in all four harnesses** (`spikes/lib/focus.ts`; `spikes/bench/run.ts:478, 490, 535, 569, 599, 632`; `tools/lookdev/capture.ts:262`; `ab.ts:219, 255`; `variantAb.ts:78`).
+  - Every navigation before a timed run is followed by `realFocus`, and every run carries `focusValidity(start, end)` beside the blur count.
+  - `realFocus` throws only if the emulation is still on; an unfocused window makes the runs INVALID instead.
+  - The bench's `refocus` opens and closes a second tab before every run (twice per P1 run). The warm-up absorbs it.
+- **`--flow` keeps D0-1 and writes P4flow only** (`tools/lookdev/timing.ts:51-69, 205-217`; `capture.ts:478-519`).
+  - Warm-up, runs, reps, seed and pacings are unchanged, and `--flow` with `--diagnostics` is refused.
+  - The flow configs' ids never match `default (threeQuarterFront)`, so `p4Verdict` returns NONE and `results.P4` is not written.
+  - The file is `timings-flow.json`, and a run is INVALID unless the solver's uncoupled field was drawn at its start and end.
+  - The stills are the exception (W2K-N3).
+
+**GOTCHA R1 (the cut-face band) and R2 (the per-run mask): measured.** I ran `rotorMotion`'s own measurement on more poses than the suite does (`pass16.browser.probe.ts.txt` part 1; means of 8; tiles out of 2040):
+
+| pose, pipeline | band | floor | moving | excess (bound: 6) |
+|---|---|---|---|---|
+| default cutaway, shipped | on (819 tiles out) | 0.00 | 0.50 | 0.50 |
+| default cutaway, shipped | off | 30.50 | 38.25 | **7.75 (fails)** |
+| default cutaway, legacyTraa | on | 0.00 | 0.63 | **0.63 (passes)** |
+| default cutaway, legacyTraa | off | 27.50 | 40.13 | 12.63 (fails) |
+| close-up, shipped | on (982 out) | 1.63 | 1.88 | 0.25 |
+| close-up, shipped | off | 2.50 | 6.75 | 4.25 |
+| close-up, legacyTraa (the suite's control) | on | 1.75 | 13.00 | 11.25 (fails) |
+| close-up, legacyTraa | off | 2.88 | 27.50 | 24.63 (fails) |
+
+The suite's own rows on trial16 equal the builder's 02cee6f run to the digit. The measurement is deterministic here.
+- **R1.** D4-93 adopted the band for the cutaway preset, and the close-up is a pose of that preset, so applying it there follows the decision as written. In the close-up it costs half the control's excess (24.63 → 11.25), and the row still fails the ghosting pipeline by 5 tiles.
+  - In the default cutaway pose it costs everything. The legacy pipeline, which ghosts (12.63 without the band), passes with it (0.63).
+  - That row can no longer fail. Excluding every tile that tells the two pipelines apart is a widening in effect, which D4-74's rule forbids ("robust, never widened"). W2L-I9.
+- **R2.** The forward-backward mask is the standard occlusion test, and in the shipped run all four baselines share its pixel set. So the bound compares like with like, and it fails the defect W2L-I6 exists for: the half-length control loses at 30.37 against 0.6 × 22.04 = 13.2.
+  - That the controls are judged on sets their own vectors chose does not weaken them here: −1, 0.5 and 1.5 fail by 18-20 /255.
+  - `noRotorMotion` fails only by the empty-set rule (no pixel moves 4 px), and the shipped run's zero baseline (ratio 0.30) is the real zero-vector check.
+  - The shipped margin is 0.021 (0.579), deterministic. Acceptable. W2L-N15 is a reporting nit.
+
+#### Blocking
+None.
+
+#### Important
+- **W2K-I1: the D0-1 checklist lost a protocol item to a substitution artefact** (`spikes/README.md:77`, commit 184680f).
+  - The line "- [ ] Notifications off (Do not disturb), so no toast takes focus. No other window over Chrome. Don't touch the machine until the summary prints." is now a literal `$1` (a regex replacement's unexpanded group; GOTCHA 5 names the tool).
+  - D4-93 amended D0-1 with the focus rule and said "the rest is unchanged". The checklist the official window follows now omits notifications-off, no-window-over-Chrome and hands-off.
+  - The failure: the next official P1/P4 window runs with notifications on and nothing forbids a window over Chrome. A toast that takes the focus makes a run INVALID (D4-73), so the window loses runs. A window that covers part of Chrome without taking the focus or throttling rAF trips no rule at all.
+  - The fix: restore the line, above the new D4-73 item.
+- **W2L-I9: with the cut-face band, the default cutaway pose's row cannot fail** (`tests/browser/rotorMotion.test.ts:132-160`, the control at `:205`; table above).
+  - The legacyTraa pipeline passes it (0.00 → 0.63 tiles against 6) though it ghosts there (12.63 excess without the band). The band holds every tile in which the two pipelines differ.
+  - The suite runs its control only in the close-up, so it cannot see this. The row reports PASS on a measurement that cannot see ghosting.
+  - The fix, stated before a run (D4-74):
+    - a legacyTraa control in every banded pose, which must fail;
+    - for the default cutaway pose, a narrower band whose control fails (e.g. the cap pixels only, without the one-tile dilation), or the pose taken out of the moving bound with the reason stated. The latter narrows the test's coverage, so it is the orchestrator's call (question 1).
+  - The close-up keeps its power, and a pipeline-wide ghosting regression is still caught there.
+
+#### Nits
+- **W2K-N1: a global M_cut ≥ 1 is untested on the GPU too** (`params.ts:259-260`; `machCut.test.ts:84-91`). Mutant K4 (the CFL switch reads the given minMach) survives, as A4 did on the CPU (W2R-N31). Fix: `{ minMach: 0.003, globalMachCut: 1 }` gives minMach² 1 and the plain CFL, or refuse a cut ≥ 1.
+- **W2K-N2: the tightened rows' power is not recorded** (7110467's message; SOLVER.md 15.3). Record K1 (E-L9a 1.29e-9 against 1e-10, where 1e-3 and the residual form pass) and one mutant that E-L5 and B see.
+- **W2K-N3: `--flow` re-shoots the record stills unless `--only none` is given** (`capture.ts:212-256`). The page loads with `field=solver`, and the stills go to `--out` (default `docs/look-dev`). Fix: `--flow` implies `--only none`, or it refuses stills.
+- **W2K-N4: the GPU residual's decay flattens past 35k** (SOLVER.md 15.2, "keeps decaying past 20000").
+  - It rises in 7 of the 20 thousand-iteration steps past 20k, and the 35k-40k log-linear fit is 1.018 per 1000 (0.159 → 0.150 at the ends).
+  - L2(p′) keeps falling. This is no reopen by D4-89's rule. Put the 35k-40k figure beside the 20k-40k 0.953, so a later extension compares against it.
+- **W2L-N15: report each rotor control on the shipped run's pixel set too** (`rotorMotion.test.ts:448-482`). The controls lose 3250-12527 of their moved pixels to their own masks. One shared set makes the power check like for like.
+
+#### Verdict A: **MERGE**
+- B 0, I 2 (W2K-I1, W2L-I9), N 5 (W2K-N1..N4, W2L-N15).
+- D4-89's mirror is exact and pinned. The trend, the rows and the focus fix hold. W2K-I1 is a one-line restore before the next official window. W2L-I9 needs a decision and a test round, not a revert: the close-up keeps the rotor test's power.
+
+### B. w2/cycle-hold @7f3fb22 (rounds 2-3)
+
+**What holds:**
+- **W2H-B1 is fixed on the default model, and P5b holds between its samples.**
+  - P5b's scenario on a fine grid (`w2h-pass16` fine; 32 frame steps from 1/120 to 1/30 s, at ISA and ISA+30): the longest hold is 0.24-0.39 s (0.39 at dt 0.023, which P5b does not sample). N1 while held is ≤ 39.3 %, there is no throw, and every run ends matched.
+  - Pass 15's `w2h-reach` on trial16: ISA 0.20-0.27 s and ISA+30 0.20-0.27 s at dt 1/60-0.1 (main 0.10-0.15 s). Pass 15 had 7.88 s, 198 % and the ISA+30 throw.
+  - Pass 14's six-ambient sweep (`w2h-pass16` sweep, caught; dt 1/60, 0.02, 1/30, 0.05): 144 runs, no throw. Only the surge-plus-flameout plan holds (24 runs, every ambient and step), for 0.05-0.27 s, with N1 ≤ 42.7 % while held. Pass 15 had 7.88 s at dt 0.02 and the ISA+30 throw that stopped the sweep.
+- **The guards refuse no physical root I could find.** On the default model the smallest compressor rise on any matched step is the ground idle's booster, 0.98-1.54 K. It is idle-like on every plan and ambient (the fine grid and the sweep).
+  - The matched-path fingerprints equal main's: slam-chop 677bc456986a5a05, c12 c34d477cd5c496da, start dd082a71bf4f71e5, part-lever 0b0723fc0d3f481e, on trial16 and on main 10b78ad's `src`.
+  - hot-surge-flameout is d8672202aee1546d, as the handoff says (main: 63915b7e9bdc421b, the held path).
+  - What the guards do admit is W2H-N9.
+- **P5b gates what D4-94 says:** the scenario, the seven sampled steps, ≤ 0.5 s per episode, N1 ≤ the redline while held, read from the contract (`heldRecovery.test.ts`), and the escalation recorded as the exception.
+  - Its N1 half cannot fail while the clamp stands. That is fine: the clamp is the fix, and BH8 (the clamp at 1.01 × the redline) is killed by `heldModel`.
+- **The escalation runs at most once per episode** (`model.ts:917-925`, `:900-901`). `escalated` resets only at an episode's first lost snapshot. `heldModel.test.ts:260-298` pins once, ≥ 0.25 s, and again in a second episode.
+  - Mutants: BH3 (the episode start never recorded) and BH4 (escalating at 0.5 s) are killed. BH2 survives: the escalation's walk reset is untested (W2H-N7).
+- **The redline clamp is right** (`model.ts:722-731`): only on a held snapshot, after the integration, and `dn1`/`dn2` are taken after it. A matched overspeed is still flagged.
+- **W2H-I2's test and W2H-I3's guards are in.** BH7 (a surge never waits) is killed. N2 is pinned (BH1 killed).
+- **The Stryker survivors' classification (`docs/MUTATION.md`, round 3) is right where I checked it:**
+  - 722 is equivalent on the tested paths (the FADEC keeps a matched N1 under the redline);
+  - 893 is the unreached fallback text;
+  - 918 `>` is the 0.25 s boundary;
+  - 170 `>=` is H exactly 0.
+  - BH5 shows what the measure-zero label leaves out (W2H-N8).
+
+**The part-power fit (the builder's NEEDS A DECISION 1)** (`w2h-pass16` fit; trial16 against main 10b78ad, D4-13's retry):
+
+| fit, 60 Hz unless noted | main (D4-13) | trial16 |
+|---|---|---|
+| 1 s ramp, ISA, 23 s (heldFrame's case) | never recovers, N1 274.9 %, booster rise −103 K | recovers; ends matched at N1 101.0 % |
+| the same at dt 1/30; a 0.5 s ramp | episode 1 2.60 / 2.95 s | episode 1 **6.77 / 6.60 s** |
+| 1 s ramp, ISA+15 | never recovers, N1 176 % | **never recovers: ends held at N1 104.0 % (the clamp), the last episode open 6.6 s** |
+| TO + surge 10 s + flameout 20 s | ends matched, N1 101.5 % | **throws at 27.95 s** (below) |
+| slam / chop / reslam | never recovers, N1 396 % | ends matched; holds 4.5 s |
+
+- So W2H-I1 is not closed on the fit. It changed shape: bounded above, but not gone (W2H-I4).
+- The handoff's "episode 1 recovers at 11.67 s onto a physical root" does not hold.
+  - The step after it (11.73 s, N1 56.6 %, N2 86.8 %) is matched with a booster rise of 0.61 K, beside a 12.2 K fan-core rise.
+  - That is the booster-cooling branch just before it crosses zero, and episode 2 starts on it at 11.75 s ("-0.168 K").
+  - The +0.61 K the handoff quotes as the smallest rise is that root.
+
+#### Blocking
+None. W2H-B1 is fixed.
+
+#### Important
+- **W2H-I4 (the part-power round; follows W2H-I1): on the part-power fit the held spools still carry the state off any root.** The clamp bounds them only above, so a held episode can end in the sub-idle model with an impossible N1/N2 pair, which throws (`src/cycle/model.ts:722-731`, `:869-878`, `:1015`; `src/thermo/gas.ts:192`; `w2h-fitthrow.probe.ts.txt`).
+  - The scenario: the fit, ISA, take-off, surge at 10 s, flameout at 20 s and the auto relight, at 60 Hz.
+    - Held from about 24 s, the held balance takes N2 from 98 % to 57 % while N1 climbs from 60 % to 83 %.
+    - At 27.95 s the snapshot crosses the sub-idle switch, and `subIdle()` is asked for N1 83 % at N2 57 %. It throws `enthalpy 4411409 is outside the range of [200, 3500] K`: SIM STOPPED.
+    - Main recovers in the same run.
+  - With the fit at ISA+15 the ramp ends held at the redline. The recovery D4-94's question rests on is one point of a fragile landscape: dt 1/30 or a 0.5 s ramp holds 6.6-6.8 s.
+  - Not reachable from the app's controls (the fit is only the `cycle` prop, with no UI), and not on the default model (the sweep). So it does not block this merge. D4-94 item 3 keeps W2H-I1 on the part-power backlog, and this is what that round must cover.
+  - The fix (that round):
+    - bound the held spools below as well, e.g. hold N2 at or above the sub-idle switch while held, or stop integrating a balance whose sign the held point no longer supports;
+    - refuse a sub-idle entry from a state the similarity model cannot represent, with a named cause;
+    - a fit row across ambients and frame steps (ISA, ISA+15, 1/30 s, a 0.5 s ramp), with every episode bounded and a recovery onto a root with a plausible booster rise.
+  - Answer to NEEDS A DECISION 1: don't rely on N2 for the fit, and keep W2H-I1 open.
+
+#### Nits
+- **W2H-N7: the escalation's walk reset is untested** (`model.ts:923`, `this.retry = { walk: null, walkStartedS: this.t }`). BH2 drops it and every fast test passes, though the doc says the escalation "counts as a walk start". Fix: a `heldModel` case in which an episode escalates with a walk in flight; after a failed escalation, the next walk sets out no earlier than `walkIntervalS` later.
+- **W2H-N8: `hpcCubic`'s H ≤ 0 boundary is untested in the crossover** (`surgeSystem.ts:170`; `surge.test.ts`). BH5 (the guard as `h < -1`) passes, because the throwing speeds sit at H ≪ 0 (about −1e4 at 1.22). Fix: bisect the speed between 1.15 and 1.2 where H crosses 0, and test just above it.
+- **W2H-N9: the guard is a sign test, and on the fit the matched path still lands on the booster-cooling branch while its rise is still above zero.** D4-94 settled "≤ 0", so this is data for W2H-I4, not a re-raise.
+  - Matched steps with a booster rise of 0.07 K (slam/chop, 31.37 s, N1 47.8 %, N2 82.3 %, fan core 8.6 K), 0.17 K (ISA+15, 16.40 s) and 0.61 K (the ramp, 11.73 s).
+  - On the default model the smallest rise anywhere is the idle booster's, 0.98-1.54 K. So a rise far below the fan core's at the same speed marks that branch before the sign does.
+
+**The builder's other questions:**
+- **N3 (P5's check text):** yes, state the window. "23 s from ground idle: 3 s at idle, the 1 s ramp, then the lever held at take-off" is the window D4-90 set P5 from (held-cost.ts `--seconds=20`). It names the gated steps; the bar is unchanged.
+- **The `hpcCubic` throw:** keep it. Before, the same speed integrated to a NaN P3 and threw from the detector without a cause; now it throws by name. I could not reach it on a physical root: none of the sweep's 6 ambients × 6 plans × 4 frame steps did, nor the fine grid, ISA−40 included. It marks the HPC map's extrapolation above its top line (the map backlog, D4-3). If a W3 scenario reaches it on a plausible root, the fix is the map, not the guard.
+
+#### Verdict B: **MERGE**
+- B 0, I 1 (W2H-I4, for the part-power round), N 3 (W2H-N7..N9). Pass 15's W2H-N1..N6 are closed.
+- W2H-B1 and W2H-I3 are fixed on the default model, with margin across the whole frame-step range. The guards change no matched-path fingerprint. P5b is in the contract.
+- What remains is the part-power fit, which D4-94 already keeps on the backlog. W2H-I4 gives that round its cases.
+
+### C. w2/flowviz @7dac273 (round 4)
+
+**What holds:**
+- **The floor is a display choice, stated where it is drawn.**
+  - `drawnOnPlane` (`src/flow/viz/fields.ts:172-174`) and the shader's crisp edge (`src/render/flowViz.ts:391-404`; drawn = clamp((|q − amb| − floor)/fwidth(q) + 0.5)) agree at the floor.
+  - The legend hatches the band and says, for each quantity:
+    - "Not drawn: 0 to 0.04 M";
+    - "0 to 17.5 m/s";
+    - "0.841 to 1.19 p / p∞";
+    - "0.871 to 1.15 ρ / ρ∞";
+    - "243 to 333 K".
+  - Each label is followed by "(the ambient ± 2.5 % of the scale)", and the panel note says so too. Checked with `w2v-floor-deltae.probe.ts.txt`.
+- **The ΔE rationale is right for viridis and the diverging map and overstated for inferno** (`fields.ts:137-153`; my LUT computation, sRGB D65 to CIELAB):
+  - viridis from its end: ΔE76 3.41 (the comment says 3.6) and ΔE2000 1.95;
+  - the diverging centre: 3.64 / 4.12 below / above (the comment: 3.8), ΔE2000 2.96 / 4.36;
+  - inferno at T∞: ΔE76 12.0 / 13.6, ΔE2000 8.3 / 6.6, about three JNDs. So T's floor hides a band you can see (W2V-N22).
+- **Every Data quantity behaves on the GPU** (`pass16.browser.probe.ts.txt` part 2: the plane alone, the MOCK at idle, 273,798 px of footprint, each pixel's nearest LUT entry within 5 % of the map from the ambient's entry, the floor off → on):
+
+| quantity | in the ambient band | drawn |
+|---|---|---|
+| p | 98.0 → 0.5 % | 2.2 % |
+| ρ | 90.5 → 0.9 % | 9.8 % |
+| T | 90.5 → 1.0 % | 9.8 % |
+| Mach | 46.2 → 6.6 % | 59.6 % |
+| \|u\| | 52.8 → 11.8 % | 58.2 % (Cutaway's quantity, not under the bar, as the handoff says) |
+
+  - At take-off: T 1.6 %, Mach 7.1 % and |u| 8.0 % still in the band.
+  - p and ρ keep 20 % in it. Those are drawn duct pixels between 2.5 % and 5 % of the scale from the ambient: the map's resolution, not the floor.
+  - The suite checks only Mach on the GPU (W2V-I8).
+- **Realistic and Schlieren are unchanged:** the floor lives only in the cut plane's material, and neither mode draws a plane. Their browser checks pass.
+- **The frames** (`docs/look-dev/flow/data-{idle,takeoff}-{before,after}.png`, viewed):
+  - at idle the purple board is gone; the nacelle's outer skin, the stand and the studio show, and the intake capture lobe, the ducts and the plume remain;
+  - at take-off the jets, the intake suction and its contours are unchanged, and the still air beyond the plume's spreading edge is clear.
+  - What reads badly is W2V-N25.
+- **The dock and CSS edits merge cleanly with app-ui** (`git merge-tree` of trial16 with w2/app-ui @5800e4d, its round 4 so far):
+  - `src/ui/dock.tsx` and `src/ui/global.css` auto-merge;
+  - the only conflict is `docs/PHYSICS.md` at its end, cycle-hold's P5b row against app-ui's new §3.5 (U1-U3): keep both;
+  - react-reviewer: the hatched span is decorative and empty, the note is text, the conditionals render null, and no list keys are involved.
+- **D4-95's quiet timing rerun** (my test:browser on trial16, `reports/flow/timing.json`):
+  - the Realistic flow visuals 0.69-0.72 ms (three pairs) and **tracers 1.20 ms ≤ 2 ms: PASS**;
+  - round 4's loaded run had 3.44 ms. P4's render total was 7.60-7.71 ms off (round 3 quiet: 6.42-6.47; the app-ui builder's CPU-only coverage ran beside it).
+  - Not a regression: Realistic draws no cut plane, so the floor cannot reach it.
+
+#### Blocking
+None.
+
+#### Important
+- **W2V-I8: the GPU floor is tested for Mach only, so the legend's "Not drawn" for p, ρ and T is unverified where it is drawn** (`tests/browser/flowViz.test.ts:375-519`; LOOKDEV's "Every Data quantity behaves" rests on the TS mirror, `floor.test.ts`).
+  - Mutant V1 (the shader's T floor centred on 0 K instead of T∞, `flowViz.ts:393`) passes the whole W2V-I7 case.
+  - The legend would then say "Not drawn: 243 to 333 K" over a plane that draws all of it. My probe shows it: T 90.5 → 90.5 % under V1, against 90.5 → 1.0 % at HEAD.
+  - The shader is right today (table above).
+  - The fix: loop the browser case over p, ρ, T and Mach with a band measure that does not assume viridis (each pixel's nearest LUT entry, as the probe does), with the same ≤ 10 % bar, stated before it runs.
+
+#### Nits
+- **W2V-N22: the floor comment's colour claim** (`fields.ts:141-149`; LOOKDEV round 4). Say "ΔE76 3.4-4.1, 1.5-1.8 JND" rather than "no eye reads it". For T, say the floor is a display choice that hides a visible band (ΔE2000 6.6-8.3): at idle the T view draws 9.8 % of the plane, the hot core only, and the bypass and booster air go.
+- **W2V-N23: `floor.test.ts`'s take-off case cannot fail** (`floor.test.ts:130-148`). "Every sample beyond twice the floor is drawn" follows from `drawnOnPlane`'s definition, and the 2 % share is a property of the MOCK. D4-95's explicit timeout is not in yet; it passed in my coverage run.
+- **W2V-N24: `docs/look-dev/flow/timing.json` now records the loaded run** (off 7.5-22.3 ms, tracers 3.44 ms) over round 3's quiet one. Re-record it in a quiet run, or restore it. Mine is above.
+- **W2V-N25: the crop outline frames nothing at idle** (`flowViz.ts:398-404`; `data-idle-after.png`). Two thin light lines now cross the empty studio above and below the engine and read as stray wires. Draw the outline only where the plane draws, or drop it once the floor hides the sheet.
+
+#### Verdict C: **MERGE**
+- B 0, I 1 (W2V-I8, test-only), N 4 (W2V-N22..N25).
+- D4-86 is met as decided: a transparent floor, a fixed scale and the legend saying what is not drawn. It holds on the GPU for every quantity, and the board is gone in the frames. The flow timing row passes quiet.
+
+### Gates (trial16: main 10b78ad + w2/kernel @be07478 + w2/cycle-hold @7f3fb22 + w2/flowviz @7dac273)
+| gate | result |
+|---|---|
+| `npm run typecheck` | clean, 17 s |
+| `npm run lint` (ESLint + Prettier) | clean, 73 s |
+| `npm run coverage` (own reportsDirectory) | 128 files, 2265 passed + 11 expected fail (2276), exit 0 (the per-directory thresholds hold), 835 s. Statements 98.55 %, branches 87.88 %, functions 99.48 %, lines 99.53 %. Core lines: thermo 100 %, cycle 99.62 %, flow/reference 100 %, geometry 99.59 %, src/flow 99.50 %. heldRetry 100 / 100, matchedSolve 100 / 100, model 100 / 98.38, surgeSystem 100 / 96.87, gpu/params 100 / 93.33, viz/legend 100 / 90.74, viz/fields 96.77 / 77.77 (lines / branches). `floor.test.ts`'s take-off case did not time out |
+| `npm run test:mesh` | 2 files, 29 passed |
+| `npm run test:gpu` | 12 files, 70 passed, 53 s. E-L5 2.67e-8, E-L9a 2.46e-12, C-pre 5.13e-7 / 3.77e-7 / 1.05e-6, S 5.32e-7 / 4.77e-7 / 7.67e-6 |
+| `npm run test:gpu-ladder` | 3 files, 13 passed + 1 expected fail (L9a's D4-45 steadiness), 330 s. B 1.266e-11 (velocity 1.954e-5); D4-63 on the GPU (a) 0.7779 / 0.4859, (b) 0.4913 / 0.2111, trend 0.9939; L7 1.779; L8 0.754 % |
+| `npm run test:browser` | 13 files, 41 passed, 0 WebGPU errors, exit 0, 456 s, 3.27 GB free at the start. The flow timing row quiet: Realistic 0.69-0.72 ms, **tracers 1.20 ms ≤ 2 ms**. The rotor rows equal the builder's 02cee6f run. W2V-I7: MOCK idle 46.6 → 7.0 %, solver idle 98.9 → 0.0 %, take-off 99.22 % kept. `docs/` stayed clean |
+
+### Mutants (by hand on trial16; `pass16-mutants.sh.txt`; each file restored from a copy after)
+| set | killed | survived |
+|---|---|---|
+| A (kernel; machCut, host, `tests/gpu/oracle.test.ts`) | K1 (WGSL mass flux × (1 + 2e-6 \|n_r\|): E-L9a 1.29e-9 > 1e-10), K2 (M_cut not raised to the cut), K3 (the adapter's `machCut` ignored), K5 (the far field's β from the given minMach) | K4 (the CFL switch from the given minMach: W2K-N1) |
+| A (rotorMotion's bound, in Chrome) | legacyTraa in the close-up, band on and off | legacyTraa in the default cutaway pose with the band (W2L-I9) |
+| B (cycle-hold; the fast set: heldRetry, heldModel, matchedSolve, gasPathHold, lostSolveCause, surge) | BH1 (N2 removed), BH3 (the episode start never recorded), BH4 (escalating at 0.5 s), BH6 (the booster's rise from station 2), BH7 (a surge never waits), BH8 (the clamp at 1.01 × the redline) | BH2 (the escalation keeps the walk in flight: W2H-N7), BH5 (H < −1 accepted: W2H-N8) |
+| C (flowviz, in Chrome) | V1 caught by the critic probe (T 90.5 → 90.5 %) | V1 (the shader's T floor about 0 K) against the suite's W2V-I7 case (W2V-I8) |
+
+**Totals:** A 4/5 unit and GPU, 1/2 rotor poses; B 6/8; C 0/1 in the suite.
+
+### Verdicts
+- **A. w2/kernel @be07478: MERGE.**
+  - B 0, I 2 (W2K-I1, W2L-I9), N 5.
+  - Restore the D0-1 line (W2K-I1) before the next official window. W2L-I9 is the next kernel round's, after question 1.
+- **B. w2/cycle-hold @7f3fb22: MERGE.**
+  - B 0, I 1 (W2H-I4, the part-power round), N 3.
+  - Pass 15's W2H-B1, I2 and I3 are fixed: P5b holds at 32 frame steps, and the matched-path fingerprints are unchanged.
+- **C. w2/flowviz @7dac273: MERGE.**
+  - B 0, I 1 (W2V-I8, a test), N 4.
+  - The quiet flow timing row passes (tracers 1.20 ms).
+
+**Merge order:** kernel, cycle-hold, flowviz (trial16's order). They touch disjoint code, and all three merge cleanly in that order.
+- Flowviz goes before app-ui round 4, which adopts its dock and CSS edits at its merge (D4-95). Those auto-merge.
+- App-ui round 4 will then conflict with cycle-hold only at the end of `docs/PHYSICS.md` (P5b against §3.5): keep both.
+
+### Questions for the orchestrator
+1. **W2L-I9:** for the default cutaway pose, a narrower band whose legacyTraa control fails (stated before the run), or that pose out of the moving bound with the reason stated? Either way, every banded pose gets its own control.
+2. **W2H-I4:** confirm that W2H-I1 stays open on the fit with this evidence (an ISA+15 ramp ends held at the redline; the fit's surge-plus-flameout run throws in the sub-idle model after N2 falls 41 points while held), and that the part-power round also bounds the held spools below.
+3. **N3:** adopt P5's check-text clarification ("23 s from ground idle: 3 s at idle, the 1 s ramp, then take-off lever")? It states the window D4-90 measured; the bar is unchanged.

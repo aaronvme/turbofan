@@ -1,0 +1,39 @@
+// Critic pass 16: the part-power fit, take-off at 3 s, surge at 10 s, flameout at 20 s with the
+// auto relight, 60 Hz: trial16 throws at 27.95 s ("enthalpy ... outside the range"), main does not.
+// Prints the state every 0.25 s from 22 s, every step from 27.5 s, and the throw's stack. ESC=0 runs
+// it with the escalation off (heldRetry.escalateAfterS: Infinity).
+import { pathToFileURL } from 'node:url';
+const ROOT = process.env.ROOT ?? '.';
+const imp = (p: string) => import(pathToFileURL(`${ROOT}/${p}`).href);
+const { ISA_SLS } = await imp('src/contracts/ambient.ts');
+const { DEFAULT_CYCLE_INPUTS } = await imp('src/contracts/cycle.ts');
+const { createCycleModel } = await imp('src/cycle/model.ts');
+const { PART_POWER_FIT_CALIBRATION, referenceEngine } = await imp('src/cycle/engine.ts');
+const { withCalibration } = await imp('src/cycle/partPower.ts');
+const warns: string[] = [];
+console.warn = (...a: unknown[]) => void warns.push(String(a[0]));
+const fit = withCalibration(referenceEngine(), PART_POWER_FIT_CALIBRATION);
+const opts = process.env.ESC === '0' ? { engine: fit, heldRetry: { escalateAfterS: Infinity } } : { engine: fit };
+const m = createCycleModel(opts);
+m.reset('groundIdle', ISA_SLS);
+const dt = 1 / 60;
+const base = { ...DEFAULT_CYCLE_INPUTS, fuelLever: 'run', ignition: 'auto', ambient: ISA_SLS };
+type St = Record<string, { ttK: number; ptPa?: number }>;
+const fmt = (t: number, s: { n1Percent: number; n2Percent: number; stations: St; gasPathSolve: { status: string; lostSolves: number }; flags?: Record<string, boolean> }) => {
+  const st = s.stations;
+  return `t ${t.toFixed(3)} ${s.gasPathSolve.status.padEnd(7)} N1 ${s.n1Percent.toFixed(1)} N2 ${s.n2Percent.toFixed(1)} T25-T21 ${(st['24'].ttK - st['21'].ttK).toFixed(1)} T3 ${st['3'].ttK.toFixed(0)} T4 ${st['4'].ttK.toFixed(0)} lost ${s.gasPathSolve.lostSolves} flags ${Object.entries(s.flags ?? {}).filter(([, v]) => v).map(([k]) => k).join(',')}`;
+};
+let t = 0;
+try {
+  for (let i = 0; i < Math.round(35 / dt); i++) {
+    t = i * dt;
+    if (Math.abs(t - 10) < dt / 2) m.injectFault('surge');
+    if (Math.abs(t - 20) < dt / 2) m.injectFault('flameout');
+    const s = m.step(dt, { ...base, throttleLever: t < 3 ? 0 : 1 });
+    if ((t >= 22 && i % 15 === 0) || t >= 27.5) console.log(fmt(t, s), (m as { lostSolveCause?: () => string | null }).lostSolveCause?.()?.slice(0, 60) ?? '');
+  }
+  console.log('no throw; end', fmt(t, m.state()));
+} catch (e) {
+  console.log(`THREW at ${t.toFixed(3)}: ${e instanceof Error ? `${e.message}\n${e.stack?.split('\n').slice(1, 9).join('\n')}` : String(e)}`);
+}
+console.log(`warnings (${warns.length}):`, warns.slice(-6).join(' | ').slice(0, 900));
