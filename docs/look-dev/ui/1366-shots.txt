@@ -1,7 +1,12 @@
-realistic: 1366x768 centre std 0.212 lit 0.904 · backing 1366x768 · render 12.1 ms · flow 1.0 ms · 51 fps
-cutaway: 1366x768 centre std 0.157 lit 0.250 · backing 1366x768 · render 13.8 ms · flow 0.4 ms · 58 fps
-exploded: 1366x768 centre std 0.221 lit 0.642 · backing 1366x768 · render 9.3 ms · flow 0.0 ms · 57 fps
-schlieren: 1366x768 centre std 0.055 lit 0.003 · backing 1366x768 · render 9.4 ms · flow 1.5 ms · 58 fps
-data: 1366x768 centre std 0.150 lit 0.255 · backing 1366x768 · render 12.3 ms · flow 0.6 ms · 60 fps
-realistic again (a full window): render 9.9 ms · flow 0.9 ms · 61 fps at dpr 1
-ultra: backing 1366x768 at dpr 1 (high: 1)
+realistic: 2049x1152 centre std 0.210 lit 0.915 · backing 1920x1079 · render 6.5 ms · flow 0.5 ms · 60 fps
+  realistic schlieren signature {"greyShare":0.2349254376485844,"greyMean":0.47282704764697786,"silhouetteRatio":1.170847850342661,"jetStd":0.11275781559614954,"pass":false}
+cutaway: 2049x1152 centre std 0.152 lit 0.250 · backing 1920x1079 · render 8.4 ms · flow 0.4 ms · 61 fps
+  cutaway schlieren signature {"greyShare":0.12472444348389886,"greyMean":0.48310435460688356,"silhouetteRatio":0.3899046648915185,"jetStd":0.06047302544674822,"pass":false}
+exploded: 2049x1152 centre std 0.222 lit 0.637 · backing 1920x1079 · render 6.9 ms · flow 0.0 ms · 61 fps
+  exploded schlieren signature {"greyShare":0.24385130754268425,"greyMean":0.48111776881983737,"silhouetteRatio":0.6741656836259998,"jetStd":0.14401404512977692,"pass":false}
+schlieren: 2049x1152 centre std 0.092 lit 0.045 · backing 1920x1079 · render 6.8 ms · flow 1.1 ms · 61 fps
+  schlieren schlieren signature {"greyShare":0.7743680626807201,"greyMean":0.49947349389924217,"silhouetteRatio":0.25445317625104236,"jetStd":0.17398772957882644,"pass":true}
+data: 2049x1152 centre std 0.146 lit 0.247 · backing 1920x1079 · render 8.8 ms · flow 0.5 ms · 61 fps
+  data schlieren signature {"greyShare":0.12398962610762913,"greyMean":0.4830955001136786,"silhouetteRatio":0.3987513065726824,"jetStd":0.05904290525456178,"pass":false}
+realistic again (a full window): render 7.5 ms · flow 0.6 ms · 61 fps at dpr 1.5
+ultra: backing 2049x1152 at dpr 1.5 (high: 1.405906802923504)

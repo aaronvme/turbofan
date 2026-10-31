@@ -5,7 +5,7 @@
 import { create } from 'zustand';
 import type { SimCommand, SimSnapshot } from '../contracts/sim';
 import { DEFAULT_UI_STATE, type UnitSystem } from '../contracts/ui';
-import type { Anchor } from '../hud/callouts';
+import type { AxialAnchor, Rect } from '../hud/callouts';
 import { pushTrail, type MapPoint } from '../hud/compressorMap';
 import type {
   AppDiagnostics,
@@ -31,7 +31,9 @@ export interface AppStore {
   connection: Connection;
   snapshot: SimSnapshot | null;
   diagnostics: AppDiagnostics | null;
-  anchors: readonly Anchor[];
+  anchors: readonly AxialAnchor[];
+  /** D4-92 (zz): the engine's screen box, for the cut views' label rows. */
+  engineBox: Rect | null;
   trails: { fan: MapPoint[]; hpc: MapPoint[] };
   /** The last 8 GPU errors the worker posted, and how many it posted in all. */
   gpuErrors: string[];
@@ -69,6 +71,7 @@ export const useApp = create<AppStore>((set, get) => ({
   snapshot: null,
   diagnostics: null,
   anchors: [],
+  engineBox: null,
   trails: { fan: [], hpc: [] },
   gpuErrors: [],
   gpuErrorCount: 0,
@@ -108,6 +111,7 @@ export const useApp = create<AppStore>((set, get) => ({
       snapshot: null,
       diagnostics: null,
       anchors: [],
+      engineBox: null,
       trails: { fan: [], hpc: [] },
       gpuErrors: [],
       gpuErrorCount: 0,
@@ -130,6 +134,7 @@ export const useApp = create<AppStore>((set, get) => ({
           snapshot: m.snapshot,
           diagnostics: m.diagnostics,
           anchors: m.anchors,
+          engineBox: m.engineBox,
           trails: {
             fan: pushTrail(s.trails.fan, cycle.fan, TRAIL_POINTS),
             hpc: pushTrail(s.trails.hpc, cycle.hpc, TRAIL_POINTS),

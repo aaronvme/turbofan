@@ -14,6 +14,7 @@ import { BACKING_STORE_MAX_PX } from '../../src/shell/pixelCap';
 import { SETTLED_FRAMES } from '../../src/shell/settle';
 import { App } from '../../src/ui/App';
 import { useApp } from '../../src/ui/store';
+import { schlierenSignature, type SchlierenSignature } from './lib/schlierenCheck';
 import '../../src/ui/global.css';
 
 const env = (import.meta as { env?: Record<string, string | undefined> }).env;
@@ -64,6 +65,8 @@ interface Shot {
   /** The luminance spread and the lit fraction of the centre of the view (the engine). */
   readonly centreStd: number;
   readonly centreLit: number;
+  /** W2A-I6: the frame's knife-edge Schlieren signature (null: no engine box on screen). */
+  readonly schlieren: SchlierenSignature | null;
   readonly jpeg: string;
 }
 
@@ -103,11 +106,34 @@ async function shoot(): Promise<Shot> {
   out.height = window.innerHeight;
   out.getContext('2d')?.drawImage(bmp, 0, 0, out.width, out.height);
   const jpeg = out.toDataURL('image/jpeg', 0.9).slice('data:image/jpeg;base64,'.length);
+  // the luminance at the CSS size, for the Schlieren signature (the engine box and the free area
+  // are in CSS px)
+  const cpx = out.getContext('2d')?.getImageData(0, 0, out.width, out.height).data;
+  const lum = new Float32Array(out.width * out.height);
+  if (cpx !== undefined)
+    for (let i = 0; i < lum.length; i++)
+      lum[i] =
+        (0.2126 * (cpx[4 * i] ?? 0) +
+          0.7152 * (cpx[4 * i + 1] ?? 0) +
+          0.0722 * (cpx[4 * i + 2] ?? 0)) /
+        255;
+  const engineBox = useApp.getState().engineBox;
+  const view = document.querySelector('.center')?.getBoundingClientRect();
+  const schlieren =
+    engineBox === null || view === undefined
+      ? null
+      : schlierenSignature(lum, out.width, out.height, engineBox, {
+          x: view.left,
+          y: view.top,
+          w: view.width,
+          h: view.height,
+        });
   return {
     w: bmp.width,
     h: bmp.height,
     centreStd: Math.sqrt(Math.max(0, sum2 / n - mean * mean)),
     centreLit: lit / n,
+    schlieren,
     jpeg,
   };
 }
@@ -319,6 +345,13 @@ describe('the app in Chrome', () => {
         // shots passed this only because they showed the exploded engine (W2A-I4).
         if (mode !== 'schlieren')
           expect(shot.centreLit, `${mode}: lit fraction of the centre`).toBeGreaterThan(0.02);
+        // W2A-I6: Schlieren's own check (the grey field, the dim silhouette, the banded jet); the
+        // Realistic and Exploded frames are its controls, and must fail it
+        const sig = JSON.stringify(shot.schlieren);
+        rows.push(`  ${mode} schlieren signature ${sig}`);
+        if (mode === 'schlieren') expect(shot.schlieren?.pass, `schlieren: ${sig}`).toBe(true);
+        if (mode === 'realistic' || mode === 'exploded')
+          expect(shot.schlieren?.pass, `${mode} (control): ${sig}`).toBe(false);
         expect(problems(), mode).toEqual([]);
       }
       // the drawer (Diagnostics and What's simulated) opens without covering the other panels

@@ -95,7 +95,8 @@ body,
 .center > * {
   pointer-events: auto;
 }
-.center > .annunciators {
+.center > .annunciators,
+.center > .preparing {
   pointer-events: none;
 }
 
@@ -923,6 +924,23 @@ svg text {
   align-items: center;
   gap: 12px;
   color: var(--muted);
+}
+/* D4-91: the asked view compiles in the background; the shown one keeps running under this */
+.preparing {
+  grid-row: 2;
+  justify-self: center;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  color: var(--fg);
+  font-size: 13px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  backdrop-filter: blur(14px);
+  pointer-events: none;
 }
 .spinner {
   width: 14px;

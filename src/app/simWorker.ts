@@ -24,7 +24,16 @@ import { GpuFlowSolver } from '../flow/gpu/device/flowSolver';
 import { solverBudgetMs } from '../flow/gpu/scheduler';
 import { loadMeshAsset, parseMeshManifest } from '../flow/mesh/loader';
 import { FLOW_SOLVER_LIMITS, type GpuErrorReport } from '../gpu/device';
-import { anchorWorld, calloutShownIn, componentAnchors, projectPoint } from '../hud/anchors';
+import {
+  calloutGeometry,
+  calloutPoint,
+  calloutShownIn,
+  componentAnchors,
+  engineRings,
+  projectPoint,
+  screenBox,
+} from '../hud/anchors';
+import { FIELD_EXTENTS } from '../contracts/flow';
 import { createMockFlowField } from '../mocks/mockFlowField';
 import { createEngineView, type EngineView } from '../render/engineView';
 import { LOOK_PRESETS } from '../render/presets';
@@ -37,10 +46,20 @@ import { cutPlaneQuantity, flowModeFor } from '../shell/viewState';
 import { createRasterScheduler, type RasterScheduler } from '../shell/mockRaster';
 import { backingDpr, backingSize } from '../shell/pixelCap';
 import { createSettleTracker, type SettleTracker } from '../shell/settle';
+import { createPostFaults, stepFault } from '../shell/faults';
+import {
+  BOOT_CONFIGS,
+  WARM_CONFIGS,
+  configFor,
+  createWarmScheduler,
+  shownView,
+  type WarmScheduler,
+} from '../shell/warmUp';
 import type { RasterReply, RasterRequest } from './mockRasterWorker';
-import { applyOrbit, orbitFromPose, orbitPose, type OrbitState } from '../shell/orbit';
+import { applyOrbit, framedOrbit, orbitFromPose, orbitPose, type OrbitState } from '../shell/orbit';
 import type { AppDiagnostics, CycleChoice, FromWorker, ToWorker } from '../shell/protocol';
-import type { Anchor } from '../hud/callouts';
+import type { ViewMode } from '../contracts/ui';
+import type { AxialAnchor, Rect } from '../hud/callouts';
 
 interface Scope {
   onmessage: ((e: MessageEvent<ToWorker>) => void) | null;
@@ -61,8 +80,21 @@ const COST_WINDOW = 120;
 const MAX_ERRORS = 8;
 /** Snapshot posts that may fail in a row before the overlay is told the app cannot go on. */
 const MAX_FAILED_POSTS = 3;
+/**
+ * D4-91: the CPU a warm frame may spend on objects not drawn before (three's node builds), ms.
+ * With the warm frame's draws and the real frame it stays inside a 16.7 ms frame; one object is
+ * always let through, so a single slow build (a large material) can exceed it once.
+ */
+const WARM_BUDGET_MS = 4;
 
 const anchors = componentAnchors(ENGINE_DEFINITION);
+const calloutGeo = calloutGeometry(ENGINE_DEFINITION);
+/** The engine's outside to the core nozzle (the cut views' label rows). */
+const ENGINE_RINGS = engineRings(ENGINE_DEFINITION, 2.75);
+/** Schlieren's content: the engine and the near field's jet (its framing, D4-92 zz). */
+const SCHLIEREN_RINGS = engineRings(ENGINE_DEFINITION, FIELD_EXTENTS.near.xMax);
+/** Schlieren's framing zooms out at most this much (the engine stays the subject). */
+const SCHLIEREN_MIN_SCALE = 0.6;
 
 const median = (xs: readonly number[]): number | null => {
   if (xs.length === 0) return null;
@@ -106,6 +138,9 @@ interface App {
   mockRasterMs: number | null;
   mockRasters: number;
   orbit: OrbitState;
+  /** D4-92 (zz): the orbit before Schlieren's framing (restored on leaving it), and the free area. */
+  orbitBeforeSchlieren: OrbitState | null;
+  free: Rect | null;
   size: { width: number; height: number };
   /** The device pixel ratio from the main thread, and the one rendered at (D4-85's cap). */
   dpr: number;
@@ -115,6 +150,15 @@ interface App {
   settledFrames: number;
   warmUpMs: number;
   warmUpSteps: readonly { readonly name: string; readonly ms: number; readonly cpuMs: number }[];
+  /** D4-91: the background warm-up, the mode being prepared (null: the asked view is shown). */
+  warm: WarmScheduler;
+  preparing: ViewMode | null;
+  warmFrames: number;
+  warmCpuMaxMs: number;
+  /** The slowest warm frame's configuration and its slowest object (where a hitch comes from). */
+  warmSlowest: string;
+  /** D4-95: the background waited in the last frame (an input or a switch less than 1 s ago). */
+  warmSuspended: boolean;
   appliedView: RenderState | null;
   errors: string[];
   refused: string[];
@@ -137,14 +181,21 @@ function applySize(a: App) {
   a.view.setSize(width, height, a.renderDpr);
 }
 
-/** Applies the render state the core holds to the view (only what changed). */
+/**
+ * Applies the render state the core holds to the view (only what changed). D4-91: a view whose
+ * configuration is not compiled yet waits (the shown view stays, `preparing` says so).
+ */
 function applyView(a: App) {
-  const v = a.core.view;
+  const shown = shownView(a.core.view, a.appliedView, (id) => a.warm.isWarm(id));
+  a.preparing = shown.preparing;
+  const v = shown.view;
   const was = a.appliedView;
   if (was === v) return;
   a.appliedView = v;
   if (was !== null && was.quality !== v.quality) applySize(a);
   if (was?.viewMode !== v.viewMode) {
+    if (v.viewMode === 'schlieren' || was?.viewMode === 'schlieren')
+      frameSchlieren(a, v.viewMode === 'schlieren');
     // D4-83: Realistic draws its haze and schlieren always, its tracers only when asked
     const fm = flowModeFor(v.viewMode);
     a.view.setFlowMode(fm);
@@ -242,19 +293,61 @@ function flowStatus(a: App): FlowStatus {
   return sanitizeFlowStatus(a.flow.status());
 }
 
-function projectAnchors(a: App): Anchor[] {
+function viewProjection(a: App): ArrayLike<number> {
   const cam = a.view.camera;
   cam.updateMatrixWorld();
-  const vp = cam.projectionMatrix.clone().multiply(cam.matrixWorldInverse).elements;
-  const theta = Math.atan2(cam.position.z, cam.position.y);
+  return cam.projectionMatrix.clone().multiply(cam.matrixWorldInverse).elements;
+}
+
+/** The callouts' anchors on screen (D4-92 zz: each on its part, as the mode shows it). */
+function projectAnchors(a: App): AxialAnchor[] {
+  const cam = a.view.camera;
+  const vp = viewProjection(a);
+  const u = a.view.uniforms;
+  const view = {
+    eye: [cam.position.x, cam.position.y, cam.position.z] as const,
+    cutCenter: u.cutCenter.value,
+    cutHalf: u.cutHalf.value,
+  };
   // W2A-N10: only on a settled view (during a transition the parts are not at the anchors)
   const mode = a.core.view.viewMode;
   const shown = a.core.view.overlays.callouts && a.settledFrames > 0;
   return anchors.map((w) => {
-    const p = projectPoint(vp, anchorWorld(w, theta), a.size.width, a.size.height);
+    const p = projectPoint(
+      vp,
+      calloutPoint(w, mode, view, calloutGeo),
+      a.size.width,
+      a.size.height,
+    );
     const visible = shown && calloutShownIn(mode, w.id) && p.visible;
-    return { id: w.id, x: p.x, y: p.y, visible, priority: w.priority };
+    return { id: w.id, x: p.x, y: p.y, visible, priority: w.priority, axial: w.x };
   });
+}
+
+/**
+ * D4-92 (zz): Schlieren's plume clear of the panels: entering it frames the engine and its jet in
+ * the free area (an orbit, dollied out and panned), and leaving it puts the orbit back.
+ */
+function frameSchlieren(a: App, entering: boolean) {
+  if (!entering) {
+    if (a.orbitBeforeSchlieren !== null) a.orbit = a.orbitBeforeSchlieren;
+    a.orbitBeforeSchlieren = null;
+    return;
+  }
+  if (a.free === null) return;
+  const pose = orbitPose(a.orbit);
+  a.view.setCameraPose(pose.position, pose.target);
+  const box = screenBox(viewProjection(a), SCHLIEREN_RINGS, a.size.width, a.size.height);
+  if (box === null) return;
+  a.orbitBeforeSchlieren = a.orbit;
+  a.orbit = framedOrbit(
+    a.orbit,
+    box,
+    { w: a.size.width, h: a.size.height },
+    a.free,
+    a.view.camera.fov,
+    SCHLIEREN_MIN_SCALE,
+  );
 }
 
 /** Starts the solver at boot (its status shows in the diagnostics); rejects with why it failed. */
@@ -275,6 +368,35 @@ async function startSolver(a: App): Promise<GpuFlowSolver> {
   }
 }
 
+/**
+ * D4-91: one warm frame in this frame's slot, if it has one (src/shell/warmUp.ts): the asked
+ * view's configuration first, then the background order. A warm frame that throws is an error,
+ * said, and its configuration is given up on (shown anyway), never a stuck "preparing". D4-95:
+ * the background waits while a switch is pending (the asked view not shown yet, or its transition
+ * not settled) and for a second after it and after any input (handle()).
+ */
+function warmSlot(a: App, frame: number, lastFrameMs: number) {
+  const nowMs = performance.now();
+  const switchPending = a.preparing !== null || a.settledFrames === 0;
+  const id = a.warm.next(frame, lastFrameMs, configFor(a.core.view), { nowMs, switchPending });
+  a.warmSuspended = a.warm.suspended(nowMs);
+  if (id === null) return;
+  try {
+    const r = a.view.warmFrame(WARM_CONFIGS[id], { cpuMs: WARM_BUDGET_MS });
+    a.warmFrames++;
+    if (r.cpuMs > a.warmCpuMaxMs) {
+      a.warmCpuMaxMs = r.cpuMs;
+      a.warmSlowest = `${id}: ${r.slowest.name} ${r.slowest.ms.toFixed(0)} ms, outside the draws ${r.outsideMs.toFixed(0)} ms`;
+    }
+    if (r.done) a.warm.done(id);
+  } catch (e) {
+    a.warm.done(id);
+    const msg = `warm-up ${id}: ${e instanceof Error ? e.message : String(e)}`;
+    pushError(a, msg);
+    console.warn(msg);
+  }
+}
+
 function loop(a: App) {
   let last: number | null = null;
   let frame = 0;
@@ -284,7 +406,8 @@ function loop(a: App) {
   const cycleMs = new Rolling(COST_WINDOW);
   const frameMs = new Rolling(COST_WINDOW);
   const stamps: number[] = [];
-  let failedPosts = 0;
+  const postFaults = createPostFaults(MAX_FAILED_POSTS);
+  let lastFrameMs = 0;
   let stats = a.view.stats();
   const tick = (t: number) => {
     if (a.lost) return;
@@ -297,15 +420,15 @@ function loop(a: App) {
     let held = false;
     if (!a.simFailed) {
       const c0 = performance.now();
-      try {
+      // a throwing model is a bug: stop the sim, keep rendering, say so (never silent): the
+      // overlay annunciates SIM STOPPED with this message (W2A-I1; src/shell/faults.ts)
+      const fault = stepFault(() => {
         a.core.advance(dt);
-      } catch (e) {
-        // a throwing model is a bug: stop the sim, keep rendering, say so (never silent): the
-        // overlay annunciates SIM STOPPED with this message (W2A-I1)
+      });
+      if (fault !== null) {
         a.simFailed = true;
-        const msg = `cycle step failed: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`;
-        pushError(a, msg);
-        post({ type: 'sim-stopped', message: msg });
+        pushError(a, fault);
+        post({ type: 'sim-stopped', message: fault });
       }
       held = a.core.state().gasPathSolve.status === 'held';
       cycleMs.push(performance.now() - c0, held);
@@ -319,15 +442,20 @@ function loop(a: App) {
     a.fields?.beforeFrame(stepping ? { gpuTimeBudgetMs: budget, maxIterations: 1000 } : null);
     const pose = orbitPose(a.orbit);
     a.view.setCameraPose(pose.position, pose.target);
+    warmSlot(a, frame, lastFrameMs);
     a.view.frame(Math.min(dt, 0.1));
-    a.settledFrames = a.settle.frame(a.core.view.viewMode, a.view.viewSettled());
+    a.settledFrames = a.settle.frame(
+      a.core.view.viewMode,
+      a.view.viewSettled() && a.preparing === null,
+    );
     if (frame % TIMINGS_EVERY === 0) {
       stats = a.view.stats();
       const m = stats.timings;
       renderMs = m.frames > 0 && Number.isFinite(m.gpuTotal) ? m.gpuTotal : null;
       flowVisualsMs = stats.flow.mode === null ? null : stats.flow.visualsMs;
     }
-    frameMs.push(performance.now() - t0, held);
+    lastFrameMs = performance.now() - t0;
+    frameMs.push(lastFrameMs, held);
     if (frame % PUBLISH_EVERY === 0) {
       const flow = flowStatus(a);
       const drawn = a.fields?.drawn() ?? 'none';
@@ -351,7 +479,19 @@ function loop(a: App) {
         },
         field: a.fields?.state() ?? null,
         raster: { onFrame: a.raster === null, lastError: a.rasterError },
-        view: { mode: a.core.view.viewMode, settledFrames: a.settledFrames },
+        view: {
+          mode: a.core.view.viewMode,
+          settledFrames: a.settledFrames,
+          preparing: a.preparing,
+        },
+        warm: {
+          ...a.warm.state(),
+          frames: a.warmFrames,
+          cpuMaxMs: a.warmCpuMaxMs,
+          slowest: a.warmSlowest,
+          gaveUp: a.warm.gaveUp(),
+          suspended: a.warmSuspended,
+        },
         backingStore: {
           ...backingSize(a.size.width, a.size.height, a.renderDpr),
           dpr: a.renderDpr,
@@ -370,16 +510,16 @@ function loop(a: App) {
           snapshot: a.core.snapshot({ flow, flowSource: drawn }),
           diagnostics,
           anchors: projectAnchors(a),
+          engineBox: screenBox(viewProjection(a), ENGINE_RINGS, a.size.width, a.size.height),
           refused: a.refused.splice(0),
         });
-        failedPosts = 0;
+        postFaults.posted();
       } catch (e) {
         // the errors travel in the snapshot, so a post that keeps failing (a DataCloneError)
         // would freeze the overlay with no message: say so once it is not a one-off (W2A-N2)
-        const msg = `snapshot: ${e instanceof Error ? e.message : String(e)}`;
-        pushError(a, msg);
-        if (++failedPosts === MAX_FAILED_POSTS)
-          post({ type: 'fatal', message: `${msg} (${MAX_FAILED_POSTS} posts in a row failed)` });
+        const f = postFaults.failed(e);
+        pushError(a, f.error);
+        if (f.fatal !== null) post({ type: 'fatal', message: f.fatal });
       }
     }
     frame++;
@@ -389,6 +529,9 @@ function loop(a: App) {
 }
 
 function handle(a: App, m: ToWorker) {
+  // D4-95: the viewer's input suspends the background warm-up for a second (the overlay's own
+  // layout report, viewArea, is not an input: it follows the panels and the window)
+  if (m.type !== 'init' && m.type !== 'viewArea') a.warm.input(performance.now());
   switch (m.type) {
     case 'init':
       return;
@@ -406,7 +549,11 @@ function handle(a: App, m: ToWorker) {
     case 'orbit':
       a.orbit = applyOrbit(a.orbit, m.input);
       return;
+    case 'viewArea':
+      a.free = m.free;
+      return;
     case 'camera': {
+      a.orbitBeforeSchlieren = null;
       const p = LOOK_PRESETS[m.preset];
       a.view.camera.fov = p.fovDeg;
       a.view.camera.updateProjectionMatrix();
@@ -476,6 +623,8 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     mockRasterMs: null,
     mockRasters: 0,
     orbit: orbitFromPose(preset.camera, preset.target),
+    orbitBeforeSchlieren: null,
+    free: null,
     size: { width: m.width, height: m.height },
     dpr: m.dpr,
     renderDpr,
@@ -483,6 +632,12 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     settledFrames: 0,
     warmUpMs: 0,
     warmUpSteps: [],
+    warm: createWarmScheduler(),
+    preparing: null,
+    warmFrames: 0,
+    warmCpuMaxMs: 0,
+    warmSlowest: '',
+    warmSuspended: false,
     appliedView: null,
     errors: [],
     refused: [],
@@ -510,9 +665,10 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
       pushError(a, message);
     },
   });
-  // D4-88: every mode's pipelines compiled behind the boot spinner (the MOCK is bound, so the
-  // flow layers draw), so the viewer's first switch into a mode does not stall the worker
-  const warm = await view.warmUp();
+  // D4-91: the boot view's pipelines compiled behind the boot spinner (the MOCK is bound, so the
+  // flow layers draw); the other modes warm in the background once the app runs
+  const warm = await view.warmUp(BOOT_CONFIGS.map((id) => WARM_CONFIGS[id]));
+  for (const id of BOOT_CONFIGS) a.warm.done(id);
   a.warmUpMs = warm.ms;
   a.warmUpSteps = warm.configurations;
   // messages wait in `pending` until the field is bound (a 'field' choice needs the switch)

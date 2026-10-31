@@ -55,6 +55,15 @@ const OFFSETS: readonly (readonly [number, number])[] = [
 ];
 const GAP = 4;
 
+/**
+ * Round 5: an anchor is called out when it is in view and on the picture, not under a panel (the
+ * open drawer, a side column): a label there would point at a part the panel covers.
+ */
+function callable(a: Anchor, reserved: readonly Rect[]): boolean {
+  if (!a.visible || !Number.isFinite(a.x) || !Number.isFinite(a.y)) return false;
+  return !reserved.some((r) => a.x >= r.x && a.x <= r.x + r.w && a.y >= r.y && a.y <= r.y + r.h);
+}
+
 export const overlaps = (a: Rect, b: Rect, gap = 0): boolean =>
   a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
 
@@ -112,16 +121,21 @@ export function layoutCallouts(
   size: (id: string) => { readonly w: number; readonly h: number },
   viewport: { readonly w: number; readonly h: number },
   reserved: readonly Rect[] = [],
+  /** Places tried before the offsets (D4-92 zz: the cut views' row places). */
+  preferred: (id: string) => readonly Rect[] = () => [],
 ): PlacedCallout[] {
   const order = anchors
-    .filter((a) => a.visible && Number.isFinite(a.x) && Number.isFinite(a.y))
+    .filter((a) => callable(a, reserved))
     .sort((a, b) => b.priority - a.priority || (a.id < b.id ? -1 : 1));
   // each anchor's places that are on screen, off the reserved panels and the other dots
   const candidates = order.map((a) => {
     const { w, h } = size(a.id);
     const out: PlacedCallout[] = [];
-    for (const [dx, dy] of OFFSETS) {
-      const box: Rect = { x: dx >= 0 ? a.x + dx : a.x + dx - w, y: a.y + dy, w, h };
+    const boxes: Rect[] = [
+      ...preferred(a.id),
+      ...OFFSETS.map(([dx, dy]) => ({ x: dx >= 0 ? a.x + dx : a.x + dx - w, y: a.y + dy, w, h })),
+    ];
+    for (const box of boxes) {
       const onScreen =
         box.x >= 0 && box.y >= 0 && box.x + w <= viewport.w && box.y + h <= viewport.h;
       // the label must not cover another anchor's dot either
@@ -174,7 +188,14 @@ export function layoutCallouts(
   const chosen: number[] = [];
   const search = (i: number, crossings: number): boolean => {
     if (++nodes > SEARCH_NODES) return true;
-    if (best !== null && crossings >= best.crossings && bestShowsPrefix(chosen, i - 1))
+    // W2A-N13: a branch with as many crossings is cut only when the best also shows every label
+    // from here on (otherwise this branch may still show a label the best hides)
+    if (
+      best !== null &&
+      crossings >= best.crossings &&
+      bestShowsPrefix(chosen, i - 1) &&
+      best.chosen.slice(i).every((c) => c >= 0)
+    )
       return false;
     if (i === order.length) {
       if (better(chosen, crossings)) best = { chosen: [...chosen], crossings };
@@ -228,5 +249,115 @@ export function leaderEnd(anchor: { x: number; y: number }, box: Rect): { x: num
   return {
     x: Math.max(box.x, Math.min(anchor.x, box.x + box.w)),
     y: Math.max(box.y, Math.min(anchor.y, box.y + box.h)),
+  };
+}
+
+/** A cut view's anchor with its part's axial position (world x, m): the labels keep its order. */
+export interface AxialAnchor extends Anchor {
+  readonly axial: number;
+}
+
+/** The gap between the engine's screen box and a row of labels, CSS px. */
+const ROW_GAP = 12;
+
+/**
+ * D4-92 (zz): the cut views' labels go outward, in a row above the engine's screen box and one
+ * below it, the parts alternating between them in axial order (fan first), each label as near
+ * above (or below) its anchor as the row allows, the row's order kept left to right, so the
+ * leaders fan out from the parts instead of running along the shaft. A label its row has no room
+ * for (a panel, the screen's edge) is placed by the general search among the placed ones, or
+ * hidden. Of the two ways to start the alternation, the one that places more labels with fewer
+ * leader crossings wins.
+ */
+export function layoutAxial(
+  anchors: readonly AxialAnchor[],
+  size: (id: string) => { readonly w: number; readonly h: number },
+  viewport: { readonly w: number; readonly h: number },
+  reserved: readonly Rect[],
+  band: Rect,
+): PlacedCallout[] {
+  const vis = anchors
+    .filter((a) => callable(a, reserved))
+    .sort((a, b) => a.axial - b.axial || (a.id < b.id ? -1 : 1));
+  // the rows' limits: under the full-width bar at the top, over the one at the bottom
+  const wide = reserved.filter((r) => r.w > viewport.w / 2);
+  const topLimit = Math.max(0, ...wide.filter((r) => r.y <= 1).map((r) => r.y + r.h + GAP));
+  const bottomLimit = Math.min(
+    viewport.h,
+    ...wide.filter((r) => r.y + r.h >= viewport.h - 1).map((r) => r.y - GAP),
+  );
+  const rows = (parity: number): Map<string, Rect> => {
+    const out = new Map<string, Rect>();
+    for (const above of [true, false]) {
+      const row = vis.filter((_, i) => (i % 2 === parity) === above);
+      const boxes = row.map((a) => {
+        const { w, h } = size(a.id);
+        const y = above ? band.y - ROW_GAP - h : band.y + band.h + ROW_GAP;
+        return { a, w, h, y: Math.max(topLimit, Math.min(bottomLimit - h, y)), x: a.x - w / 2 };
+      });
+      if (boxes.length === 0) continue;
+      // the row's span: between the panels beside the engine at the row's height
+      const rowY0 = Math.min(...boxes.map((b) => b.y));
+      const rowY1 = Math.max(...boxes.map((b) => b.y + b.h));
+      const mid = band.x + band.w / 2;
+      let lo = 0;
+      let hi = viewport.w;
+      for (const r of reserved) {
+        if (!(r.y < rowY1 && rowY0 < r.y + r.h) || r.w > viewport.w / 2) continue;
+        if (r.x + r.w <= mid) lo = Math.max(lo, r.x + r.w + GAP);
+        else if (r.x >= mid) hi = Math.min(hi, r.x - GAP);
+      }
+      // order kept: pushed right past the previous label, then back left from the span's end
+      for (let k = 0; k < boxes.length; k++) {
+        const b = boxes[k];
+        const prev = boxes[k - 1];
+        if (b === undefined) continue;
+        b.x = Math.max(b.x, lo, prev === undefined ? -Infinity : prev.x + prev.w + GAP);
+      }
+      for (let k = boxes.length - 1; k >= 0; k--) {
+        const b = boxes[k];
+        const next = boxes[k + 1];
+        if (b === undefined) continue;
+        b.x = Math.min(b.x, hi - b.w, next === undefined ? Infinity : next.x - b.w - GAP);
+      }
+      for (const b of boxes) out.set(b.a.id, { x: b.x, y: b.y, w: b.w, h: b.h });
+    }
+    return out;
+  };
+  // the row places go first in the general search, which keeps its guarantees (no overlap, no
+  // panel, the fewest leader crossings) and its offsets for a label its row has no room for
+  const attempt = (parity: number) => {
+    const r = rows(parity);
+    return layoutCallouts(vis, size, viewport, reserved, (id) => {
+      const box = r.get(id);
+      return box === undefined ? [] : [box];
+    });
+  };
+  const tries = [attempt(0), attempt(1)];
+  tries.sort((p, q) => q.length - p.length || leaderCrossings(p) - leaderCrossings(q));
+  return tries[0] ?? [];
+}
+
+/**
+ * D4-92 (zz): a camera view offset (three's setViewOffset) that fits a screen box (the content,
+ * at the view without an offset) into the free area between the panels: centred in it, zoomed out
+ * if the box is larger than the area (never below `minScale`), never zoomed in.
+ */
+export function fitViewOffset(
+  box: Rect,
+  canvas: { readonly w: number; readonly h: number },
+  free: Rect,
+  minScale: number,
+): { fullW: number; fullH: number; x: number; y: number; w: number; h: number } {
+  const s = Math.max(minScale, Math.min(1, free.w / box.w, free.h / box.h));
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  return {
+    fullW: canvas.w,
+    fullH: canvas.h,
+    x: cx - (free.x + free.w / 2) / s,
+    y: cy - (free.y + free.h / 2) / s,
+    w: canvas.w / s,
+    h: canvas.h / s,
   };
 }

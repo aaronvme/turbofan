@@ -2,7 +2,8 @@
 // pre-registered at 1080p, and at Chrome's 1.5x scaling a 1920 x 1001 window rendered 4.33 MP,
 // 2.1 times that (27.9 ms on the shared machine, leaving D4-2's solver at its floor). So for
 // quality up to high the backing store holds at most 1920 x 1080 pixels and the browser upscales
-// the canvas; ultra, the explicit opt-in, keeps the full device pixel ratio. Pure: the worker
+// the canvas; ultra, the explicit opt-in, keeps the device pixel ratio up to the client's cap of 2
+// (W2A-N18: a 3x display renders at 2). Pure: the worker
 // applies it on every resize and quality change.
 
 import type { QualityPreset } from '../contracts/ui';

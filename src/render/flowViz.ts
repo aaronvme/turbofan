@@ -319,10 +319,20 @@ export function createFlowViz(o: {
     }
   };
 
-  const planeMaterial = new MeshBasicNodeMaterial({ side: DoubleSide });
-  planeMaterial.transparent = true;
-  planeMaterial.depthWrite = true;
-  premultiplied(planeMaterial);
+  // w2/app-ui round 4 (flagged edit, D4-91): one material per quantity, kept, so a switch between
+  // quantities (the Data view's field, the background warm-up's frames) swaps the material
+  // instead of rebuilding one material's nodes every time
+  const planeMaterials = new Map<FieldQuantityId, MeshBasicNodeMaterial>();
+  const newPlaneMaterial = () => {
+    const m = new MeshBasicNodeMaterial({ side: DoubleSide });
+    m.transparent = true;
+    m.depthWrite = true;
+    premultiplied(m);
+    return m;
+  };
+  // the faces' material until the first quantity is built
+  const unbuiltPlane = newPlaneMaterial();
+  let planeMaterial = unbuiltPlane;
   let quantity: FieldQuantityId | null = null;
   let built: FieldQuantityId | null = null;
   let mode: FlowVizMode | null = null;
@@ -343,6 +353,15 @@ export function createFlowViz(o: {
   };
   const buildPlane = (id: FieldQuantityId) => {
     built = id;
+    const kept = planeMaterials.get(id);
+    if (kept !== undefined) {
+      planeMaterial = kept;
+      for (const f of faces) f.material = kept;
+      return;
+    }
+    planeMaterial = newPlaneMaterial();
+    planeMaterials.set(id, planeMaterial);
+    for (const f of faces) f.material = planeMaterial;
     const spec = FIELD_QUANTITIES[id];
     const lut = luts.get(spec.colormap);
     if (lut === undefined) throw new Error(`flowViz: no LUT ${spec.colormap}`);
@@ -569,9 +588,13 @@ export function createFlowViz(o: {
           const t = t0.add(float(i).add(jitter).mul(ds));
           const p = o3.add(d.mul(t));
           const r = length(p.yz);
-          const g = gradientNode.sample(
-            vec2(p.x.sub(e.xMin).div(e.xMax - e.xMin), r.sub(e.rMin).div(e.rMax - e.rMin)),
-          );
+          // w2/app-ui round 4 (flagged edit, D4-91): an explicit level 0 (the gradient has one
+          // mip level, so the same texels): an implicit-derivative sample in this loop made
+          // D3D12's shader compiler unroll all its steps, a compile that held the GPU process
+          // for about a second on Schlieren's first use
+          const g = gradientNode
+            .sample(vec2(p.x.sub(e.xMin).div(e.xMax - e.xMin), r.sub(e.rMin).div(e.rMax - e.rMin)))
+            .level(float(0));
           const invR = float(1).div(max(r, 1e-4));
           const grad = vec3(g.x, g.y.mul(p.y).mul(invR), g.y.mul(p.z).mul(invR));
           const de = vec2(dot(grad, ray.right), dot(grad, ray.up)).mul(kds);
@@ -668,7 +691,8 @@ export function createFlowViz(o: {
     },
     dispose() {
       planeGeo.dispose();
-      planeMaterial.dispose();
+      unbuiltPlane.dispose();
+      for (const m of planeMaterials.values()) m.dispose();
       streakGeo.dispose();
       streakMaterial.dispose();
       gammaR.dispose();

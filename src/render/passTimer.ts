@@ -41,10 +41,13 @@ class LabelInspector extends InspectorBase {
 }
 
 export interface PassTimer {
-  /** Call before encoding a frame. */
-  beginFrame(): void;
+  /**
+   * Call before encoding a frame. A discarded frame (D4-91: a warm frame) advances three's node
+   * frame like any other, but its timings never join the medians.
+   */
+  beginFrame(discard?: boolean): void;
   /** Call after the frame is submitted, with the CPU ms it took. */
-  endFrame(cpuMs: number): void;
+  endFrame(cpuMs: number, discard?: boolean): void;
   medians(): PassMedians;
   /** Records every frame from now on (a timing run, W1L-I4). */
   beginRun(): void;
@@ -62,6 +65,7 @@ export function createPassTimer(
   renderer.inspector = inspector;
   const stats = new RollingPassStats(window);
   const cpuByFrame = new Map<number, number>();
+  const discarded = new Set<number>();
   let frame = 0;
   let pending = false;
   const unclassified = new Set<string>();
@@ -83,6 +87,7 @@ export function createPassTimer(
       }
     }
     for (const [f, list] of [...byFrame].sort((a, b) => a[0] - b[0])) {
+      if (discarded.delete(f)) continue;
       // the flow visuals' passes are timed apart from the render (P4 excludes them, D4-2)
       const flow = list.some((e) => isFlowPass(e.label)) ? sumFlowMs(list) : undefined;
       stats.push(sumByGroup(list), cpuByFrame.get(f) ?? Number.NaN, flow);
@@ -91,12 +96,14 @@ export function createPassTimer(
     // labels of frames whose queries were dropped (pool overflow) must not pile up
     for (const [uid, l] of inspector.labels) if (l.frame < frame - 8) inspector.labels.delete(uid);
     for (const f of cpuByFrame.keys()) if (f < frame - 8) cpuByFrame.delete(f);
+    for (const f of discarded) if (f < frame - 8) discarded.delete(f);
   };
 
   return {
     enabled,
-    beginFrame: () => {
+    beginFrame: (discard = false) => {
       frame++;
+      if (discard) discarded.add(frame);
       inspector.frame = frame;
       inspector.advance();
       // three's timestamp query uids end in renderer.info.frame, which only its own rAF
@@ -104,7 +111,8 @@ export function createPassTimer(
       // here keeps them unique (it stays monotonic; three uses it for nothing else)
       (renderer.info as { frame: number }).frame++;
     },
-    endFrame: (cpuMs) => {
+    endFrame: (cpuMs, discard = false) => {
+      if (discard) return;
       if (!enabled) {
         stats.push(sumByGroup([]), cpuMs);
         return;
