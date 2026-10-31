@@ -24,7 +24,16 @@ import { GpuFlowSolver } from '../flow/gpu/device/flowSolver';
 import { solverBudgetMs } from '../flow/gpu/scheduler';
 import { loadMeshAsset, parseMeshManifest } from '../flow/mesh/loader';
 import { FLOW_SOLVER_LIMITS, type GpuErrorReport } from '../gpu/device';
-import { anchorWorld, calloutShownIn, componentAnchors, projectPoint } from '../hud/anchors';
+import {
+  calloutGeometry,
+  calloutPoint,
+  calloutShownIn,
+  componentAnchors,
+  engineRings,
+  projectPoint,
+  screenBox,
+} from '../hud/anchors';
+import { FIELD_EXTENTS } from '../contracts/flow';
 import { createMockFlowField } from '../mocks/mockFlowField';
 import { createEngineView, type EngineView } from '../render/engineView';
 import { LOOK_PRESETS } from '../render/presets';
@@ -46,10 +55,10 @@ import {
   type WarmScheduler,
 } from '../shell/warmUp';
 import type { RasterReply, RasterRequest } from './mockRasterWorker';
-import { applyOrbit, orbitFromPose, orbitPose, type OrbitState } from '../shell/orbit';
+import { applyOrbit, framedOrbit, orbitFromPose, orbitPose, type OrbitState } from '../shell/orbit';
 import type { AppDiagnostics, CycleChoice, FromWorker, ToWorker } from '../shell/protocol';
 import type { ViewMode } from '../contracts/ui';
-import type { Anchor } from '../hud/callouts';
+import type { AxialAnchor, Rect } from '../hud/callouts';
 
 interface Scope {
   onmessage: ((e: MessageEvent<ToWorker>) => void) | null;
@@ -78,6 +87,13 @@ const MAX_FAILED_POSTS = 3;
 const WARM_BUDGET_MS = 4;
 
 const anchors = componentAnchors(ENGINE_DEFINITION);
+const calloutGeo = calloutGeometry(ENGINE_DEFINITION);
+/** The engine's outside to the core nozzle (the cut views' label rows). */
+const ENGINE_RINGS = engineRings(ENGINE_DEFINITION, 2.75);
+/** Schlieren's content: the engine and the near field's jet (its framing, D4-92 zz). */
+const SCHLIEREN_RINGS = engineRings(ENGINE_DEFINITION, FIELD_EXTENTS.near.xMax);
+/** Schlieren's framing zooms out at most this much (the engine stays the subject). */
+const SCHLIEREN_MIN_SCALE = 0.6;
 
 const median = (xs: readonly number[]): number | null => {
   if (xs.length === 0) return null;
@@ -121,6 +137,9 @@ interface App {
   mockRasterMs: number | null;
   mockRasters: number;
   orbit: OrbitState;
+  /** D4-92 (zz): the orbit before Schlieren's framing (restored on leaving it), and the free area. */
+  orbitBeforeSchlieren: OrbitState | null;
+  free: Rect | null;
   size: { width: number; height: number };
   /** The device pixel ratio from the main thread, and the one rendered at (D4-85's cap). */
   dpr: number;
@@ -172,6 +191,8 @@ function applyView(a: App) {
   a.appliedView = v;
   if (was !== null && was.quality !== v.quality) applySize(a);
   if (was?.viewMode !== v.viewMode) {
+    if (v.viewMode === 'schlieren' || was?.viewMode === 'schlieren')
+      frameSchlieren(a, v.viewMode === 'schlieren');
     // D4-83: Realistic draws its haze and schlieren always, its tracers only when asked
     const fm = flowModeFor(v.viewMode);
     a.view.setFlowMode(fm);
@@ -269,19 +290,61 @@ function flowStatus(a: App): FlowStatus {
   return sanitizeFlowStatus(a.flow.status());
 }
 
-function projectAnchors(a: App): Anchor[] {
+function viewProjection(a: App): ArrayLike<number> {
   const cam = a.view.camera;
   cam.updateMatrixWorld();
-  const vp = cam.projectionMatrix.clone().multiply(cam.matrixWorldInverse).elements;
-  const theta = Math.atan2(cam.position.z, cam.position.y);
+  return cam.projectionMatrix.clone().multiply(cam.matrixWorldInverse).elements;
+}
+
+/** The callouts' anchors on screen (D4-92 zz: each on its part, as the mode shows it). */
+function projectAnchors(a: App): AxialAnchor[] {
+  const cam = a.view.camera;
+  const vp = viewProjection(a);
+  const u = a.view.uniforms;
+  const view = {
+    eye: [cam.position.x, cam.position.y, cam.position.z] as const,
+    cutCenter: u.cutCenter.value,
+    cutHalf: u.cutHalf.value,
+  };
   // W2A-N10: only on a settled view (during a transition the parts are not at the anchors)
   const mode = a.core.view.viewMode;
   const shown = a.core.view.overlays.callouts && a.settledFrames > 0;
   return anchors.map((w) => {
-    const p = projectPoint(vp, anchorWorld(w, theta), a.size.width, a.size.height);
+    const p = projectPoint(
+      vp,
+      calloutPoint(w, mode, view, calloutGeo),
+      a.size.width,
+      a.size.height,
+    );
     const visible = shown && calloutShownIn(mode, w.id) && p.visible;
-    return { id: w.id, x: p.x, y: p.y, visible, priority: w.priority };
+    return { id: w.id, x: p.x, y: p.y, visible, priority: w.priority, axial: w.x };
   });
+}
+
+/**
+ * D4-92 (zz): Schlieren's plume clear of the panels: entering it frames the engine and its jet in
+ * the free area (an orbit, dollied out and panned), and leaving it puts the orbit back.
+ */
+function frameSchlieren(a: App, entering: boolean) {
+  if (!entering) {
+    if (a.orbitBeforeSchlieren !== null) a.orbit = a.orbitBeforeSchlieren;
+    a.orbitBeforeSchlieren = null;
+    return;
+  }
+  if (a.free === null) return;
+  const pose = orbitPose(a.orbit);
+  a.view.setCameraPose(pose.position, pose.target);
+  const box = screenBox(viewProjection(a), SCHLIEREN_RINGS, a.size.width, a.size.height);
+  if (box === null) return;
+  a.orbitBeforeSchlieren = a.orbit;
+  a.orbit = framedOrbit(
+    a.orbit,
+    box,
+    { w: a.size.width, h: a.size.height },
+    a.free,
+    a.view.camera.fov,
+    SCHLIEREN_MIN_SCALE,
+  );
 }
 
 /** Starts the solver at boot (its status shows in the diagnostics); rejects with why it failed. */
@@ -438,6 +501,7 @@ function loop(a: App) {
           snapshot: a.core.snapshot({ flow, flowSource: drawn }),
           diagnostics,
           anchors: projectAnchors(a),
+          engineBox: screenBox(viewProjection(a), ENGINE_RINGS, a.size.width, a.size.height),
           refused: a.refused.splice(0),
         });
         failedPosts = 0;
@@ -474,7 +538,11 @@ function handle(a: App, m: ToWorker) {
     case 'orbit':
       a.orbit = applyOrbit(a.orbit, m.input);
       return;
+    case 'viewArea':
+      a.free = m.free;
+      return;
     case 'camera': {
+      a.orbitBeforeSchlieren = null;
       const p = LOOK_PRESETS[m.preset];
       a.view.camera.fov = p.fovDeg;
       a.view.camera.updateProjectionMatrix();
@@ -544,6 +612,8 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     mockRasterMs: null,
     mockRasters: 0,
     orbit: orbitFromPose(preset.camera, preset.target),
+    orbitBeforeSchlieren: null,
+    free: null,
     size: { width: m.width, height: m.height },
     dpr: m.dpr,
     renderDpr,

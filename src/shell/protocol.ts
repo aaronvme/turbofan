@@ -7,7 +7,7 @@
 import type { SimCommandMessage, SimSnapshot } from '../contracts/sim';
 import type { FlowFieldSource } from '../contracts/flow';
 import type { FlowLinkState } from '../flow/viz/fieldLink';
-import type { Anchor } from '../hud/callouts';
+import type { AxialAnchor, Rect } from '../hud/callouts';
 import type { ViewMode } from '../contracts/ui';
 import type { OrbitInput } from './orbit';
 
@@ -39,6 +39,8 @@ export type ToWorker =
   | { readonly type: 'command'; readonly message: SimCommandMessage }
   | { readonly type: 'orbit'; readonly input: OrbitInput }
   | { readonly type: 'camera'; readonly preset: CameraPresetId }
+  /** D4-92 (zz): the view's free area between the panels, CSS px (Schlieren's framing). */
+  | { readonly type: 'viewArea'; readonly free: Rect }
   | { readonly type: 'field'; readonly source: FieldChoice };
 
 export type CameraPresetId = 'threeQuarterFront' | 'side' | 'hero' | 'hotSection';
@@ -141,7 +143,9 @@ export type FromWorker =
       readonly type: 'snapshot';
       readonly snapshot: SimSnapshot;
       readonly diagnostics: AppDiagnostics;
-      readonly anchors: readonly Anchor[];
+      readonly anchors: readonly AxialAnchor[];
+      /** D4-92 (zz): the engine's screen box (the cut views' label rows), null off screen. */
+      readonly engineBox: Rect | null;
       /** Problems of the commands refused since the last snapshot. */
       readonly refused: readonly string[];
     }

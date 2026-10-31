@@ -26,7 +26,10 @@ describe('configFor: the configuration a view needs compiled', () => {
   it('is the mode with its tracers, the Data plane at its quantity', () => {
     expect(configFor(view('realistic'))).toBe('realistic');
     expect(
-      configFor({ ...view('realistic'), overlays: { ...APP_DEFAULT_VIEW.overlays, particles: true } }),
+      configFor({
+        ...view('realistic'),
+        overlays: { ...APP_DEFAULT_VIEW.overlays, particles: true },
+      }),
     ).toBe('realistic+tracers');
     expect(configFor(view('cutaway'))).toBe('cutaway+tracers');
     expect(configFor(view('schlieren'))).toBe('schlieren');

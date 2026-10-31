@@ -5,7 +5,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import physicsMd from '../../docs/PHYSICS.md?raw';
 import { parseFidelityLedger, type LedgerKind } from '../hud/ledger';
-import { layoutCallouts, leaderEnd, type Rect } from '../hud/callouts';
+import { layoutAxial, layoutCallouts, leaderEnd, type Rect } from '../hud/callouts';
 import { componentAnchors } from '../hud/anchors';
 import {
   faultAnnunciations,
@@ -528,6 +528,9 @@ type Size = { readonly w: number; readonly h: number };
  */
 export function Callouts({ snapshot }: { readonly snapshot: SimSnapshot }) {
   const anchors = useApp((s) => s.anchors);
+  const engineBox = useApp((s) => s.engineBox);
+  const post = useApp((s) => s.post);
+  const mode = snapshot.view.viewMode;
   const units = useApp((s) => s.units);
   const panels = useApp((s) => s.panels);
   const ref = useRef<HTMLDivElement>(null);
@@ -546,6 +549,13 @@ export function Callouts({ snapshot }: { readonly snapshot: SimSnapshot }) {
           return { x: b.left - r.left, y: b.top - r.top, w: b.width, h: b.height };
         }),
       );
+      // D4-92 (zz): the view's free area (the centre column), for Schlieren's framing
+      const c = document.querySelector('.center')?.getBoundingClientRect();
+      if (c !== undefined)
+        post({
+          type: 'viewArea',
+          free: { x: c.left - r.left, y: c.top - r.top, w: c.width, h: c.height },
+        });
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
@@ -555,13 +565,19 @@ export function Callouts({ snapshot }: { readonly snapshot: SimSnapshot }) {
     return () => {
       ro.disconnect();
     };
-  }, [panels, snapshot.view.viewMode]);
+  }, [panels, mode, post]);
   // laid out again only when an anchor, a size or the room changes (not on every snapshot)
-  const key = anchors
+  const box = engineBox === null ? '-' : [engineBox.x, engineBox.y, engineBox.w, engineBox.h];
+  const key = `${mode}:${box.toString()}:${anchors
     .map((a) => `${a.id}:${a.visible ? `${a.x.toFixed(1)},${a.y.toFixed(1)}` : '-'}`)
-    .join('|');
+    .join('|')}`;
+  // D4-92 (zz): the cut views label outward in axial order, the closed views as before
+  const cut = (mode === 'cutaway' || mode === 'data') && engineBox !== null;
   const placed = useMemo(
-    () => layoutCallouts(anchors, (id) => sizes[id] ?? LABEL, vp, reserved),
+    () =>
+      cut
+        ? layoutAxial(anchors, (id) => sizes[id] ?? LABEL, vp, reserved, engineBox)
+        : layoutCallouts(anchors, (id) => sizes[id] ?? LABEL, vp, reserved),
     // `key` stands for the anchors' values: a new array of the same anchors is no change
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [key, sizes, vp, reserved],
