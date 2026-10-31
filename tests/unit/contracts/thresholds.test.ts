@@ -119,6 +119,17 @@ describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
     expect(THRESHOLDS.P5b.values.escalateAfterS.value).toBe(0.25);
   });
 
+  it("N3 (D4-96): P5's check text states the window it gates, and the window's numbers are typed", () => {
+    // the window D4-90 measured (tools/cycle/held-cost.ts, 3 s at idle then --seconds=20); the
+    // bars are unchanged
+    expect(THRESHOLDS.P5.checkText).toContain(
+      '23 s from ground idle: 3 s at idle, the 1 s ramp, then the take-off lever',
+    );
+    expect(THRESHOLDS.P5.values.windowS.value).toBe(23);
+    expect(THRESHOLDS.P5.values.idleS.value).toBe(3);
+    expect(THRESHOLDS.P5.values.leverRampS.value).toBe(1);
+  });
+
   it('marks the thresholds whose numbers live in ENGINE_FACTS.md instead', () => {
     expect(thresholdNumbers('C4')).toEqual([]);
     expect(thresholdNumbers('C6')).toEqual([]);
