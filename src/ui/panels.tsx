@@ -381,8 +381,18 @@ function BudgetBar({ d }: { readonly d: AppDiagnostics }) {
           </dd>
         </div>
         <div>
-          <dt>Pipeline warm-up (D4-88)</dt>
-          <dd>{fmt.ms(d.warmUpMs)} ms at boot</dd>
+          <dt>Boot warm-up (D4-91)</dt>
+          <dd>{fmt.ms(d.warmUpMs)} ms</dd>
+        </div>
+        <div>
+          {/* W2A-N22: the background warm-up's state (a given-up one compiles on first use) */}
+          <dt>Background warm-up</dt>
+          <dd>
+            {d.warm.warm.length} of {d.warm.warm.length + d.warm.queue.length} warm
+            {d.warm.queue[0] === undefined ? '' : ` · next ${d.warm.queue[0]}`}
+            {d.warm.suspended ? ' · paused (input)' : ''}
+            {d.warm.gaveUp.length > 0 ? ` · given up: ${d.warm.gaveUp.join(', ')}` : ''}
+          </dd>
         </div>
       </dl>
     </div>
