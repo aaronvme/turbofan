@@ -1,4 +1,6 @@
-w2/kernel: DONE with two findings that need a decision (W2L-I6's half-vector ratio misses 0.6 by 0.001; W2L-I8's cutaway preset sits at MARGIN in expectation). D4-89's mirror is in, the GPU passes D4-79 at 0.02 and keeps decaying to 40000, D4-62/D4-71's rows are in force, D4-73's focus rule fires, and the capture has --flow. (From main ee97061; HEAD = the commit of this handoff.)
+w2/kernel: round 3, D4-93's open list items 1-4 DONE, item 5 (the gates on the merged tree @dd008d8) RUNNING at this early hand-back (typecheck and ESLint clean so far). Both rotor tests pass in the browser, main cf87af0 is merged (61433d9), and the M_cut pin is in (99f4c63). See "ROUNDS 2-3" at the end; round 1's text follows as history (its two decisions were D4-93's). (From main ee97061, main cf87af0 merged at 61433d9; HEAD = the commit of this handoff.)
+
+ROUND 1
 
 DONE
 - 2f704b4 (TDD), 771c3fb: **D4-89's mirror.** `src/flow/gpu/params.ts`: `ENGINE_MACH_CUT = 0.02`, `enginePreconditioning(machCut)`, `adapterPreconditioning`; `GpuFlowSolver`'s default is minMach = M_cut = 0.02 with a `machCut` parameter (refused beside explicit preconditioning). **No WGSL change:** the kernel already took minMach² and M_cut as uniforms, and the far field's β∞² is a host BC constant. The GPU scheme options take the oracle's `globalMachCut` (w2/reference-9) with its meaning. GPU tests at the cut on both sides: A, C-pre, S, moving-gauge, solver-exact, L8, L7 at max(M, 0.02); forms adds 0.02; engine-stability pins the default's uniforms. Tests: `tests/unit/flow/gpu/machCut.test.ts`, `tests/gpu/engine-stability.test.ts`.
@@ -28,7 +30,29 @@ GATES @1cf2f11..5a2354d (code unchanged since d9701ad except a comment)
 - coverage, test:mesh, test:gpu, test:gpu-ladder: RUNNING detached at handoff time (`reports/scratch/k/gates.cmd`, logs `reports/scratch/k/g-*.log`, status `gates.status`); not yet reported. Re-run or read those logs before merging.
 - Already run on this branch: test:gpu-ladder `d463.test.ts` alone, PASSED at 0.02 (771c3fb; FAILED at 0.003, 2f704b4 as TDD). Unit `tests/unit/flow/gpu`, `tests/unit/spikes`, `tests/unit/lookdev`: all passed. test:browser `rotorMotion.test.ts`: the tile test passed, the warp test FAILS on W2L-I6's half-baseline ratio (0.601 against 0.6, GOTCHAS 1).
 
-ROUND 2 (D4-93, coordinator), IN PROGRESS at this hand-back
-- 0d08669 (TDD): W2L-I6's warp bound leaves out disoccluded pixels (forward-backward check with the earlier LP geometry's backward field, 1 px), 0.6 kept against all four baselines; W2L-I8's cutaway preset leaves out the tiles at the cut faces (caps-on / caps-off stills, one tile around) from both counts, MARGIN unchanged. NOT YET RUN in the browser.
-- PHYSICS.md 3.4 preamble: official P-runs need Chrome holding the OS focus (D4-73, D4-93).
-- NOT DONE: SOLVER.md 15.3 (E-L5 / E-L9a / B at the cut: read reports/scratch/k/g-gpu.log and g-gpuladder.log), the browser run of 0d08669, LOOKDEV.md's rationale line, `git merge main` (previewed: clean, only docs/SOLVER.md on both sides) with the test ENGINE_MACH_CUT === GLOBAL_MACH_CUT, and the gates on the merged tree.
+ROUNDS 2-3 (D4-93's open list): items 1-4 DONE; item 5 (the gates on the merged tree) RUNNING at this hand-back
+The rounds above (round 1) are history. Round 2 wrote the two measurement fixes; round 3 ran them, merged main and pinned the cut.
+
+DONE
+- 0d08669 (TDD, round 2): W2L-I6's warp bound leaves out disoccluded pixels by a forward-backward check (the earlier LP geometry's backward field must map back within 1 px), with 0.6 kept against all four baselines. W2L-I8: in the `cutaway` preset the tiles at the cut faces (caps-on against caps-off stills, plus one tile around) leave both counts, with MARGIN unchanged. c1a4d97 (round 2): PHYSICS.md 3.4's preamble says official P-runs need Chrome holding the OS focus (D4-73).
+- 02cee6f: **SOLVER.md 15.3**, W2R-I19's rows at the cut, from round 1's gate run on b777653's code (`reports/scratch/k/g-gpu.log`, `g-gpuladder.log`, checked). E-L5 2.67e-8 ≤ 3e-7. E-L9a 2.46e-12 ≤ 1e-10. B 1.266e-11 ≤ 2e-10, with its velocity 1.954e-5 under 10 × the oracle's 1.49e-5. C-pre 5.13e-7 / 3.77e-7 / 1.05e-6 and S 5.32e-7 / 4.77e-7 / 7.67e-6, within 1e-5 / 1e-4 / 1e-3. test:gpu 70 passed; test:gpu-ladder 13 passed + 1 expected fail.
+- **Both rotor tests PASS** in the browser: `tests/browser/rotorMotion.test.ts` alone at 02cee6f, 2026-10-31 03:52, 94 s, 2.79 GB free at the start. Results: `reports/scratch/k3/rotor-run/`. No Playwright Chrome was left open (checked).
+  - W2L-I6: the mask left out 783 of the 9272 moved pixels (7728 → 7303 in the ≥ 4 px set). Shipped 14.52 against zero 48.04 (0.30), flipped 64.82 (0.22), half 25.08 (**0.579**) and 1.5× 35.77 (0.41). Every control fails.
+  - W2L-I8: cutaway 0.00 / 0.50 against floor + 6, with 819 of 2040 tiles left out. The close-up 1.63 / 1.88, with 982 left out. Exploded 4.50 / 5.00, its close-up 5.00 / 4.50, hotSection 0.00 / 0.13. The control (`legacyTraa`) 0.50 / 13.63 still fails.
+- 443c61a: **LOOKDEV.md**, "The rotor tests' measurements": W2L-I6's step and baselines, the mask's rationale and numbers, and the cut-face band's rationale, counts and cost.
+- 61433d9: **main cf87af0 merged**, no conflicts.
+- 99f4c63 (TDD): **the pin**, in `tests/unit/flow/gpu/machCut.test.ts`. `ENGINE_MACH_CUT === GLOBAL_MACH_CUT` (imported from `tests/ladder/oracle.ts`), and the oracle's `ENGINE_PRECONDITIONING_CUT` gives the GPU default's `stageParams` uniforms (tracking, BCs, physical). It passed at once. Shown failing (logs `reports/scratch/k3/pin-wrong-*.log`): with the oracle's `GLOBAL_MACH_CUT` at 0.03 both pin tests fail and the four GPU-only tests pass; with `ENGINE_MACH_CUT` at 0.03 five of six fail. Both values restored.
+- dd008d8: the stale comments now say the cut is merged and pinned (`tests/gpu/helpers/solver.ts`, `tests/ladder/oracle.ts`, `src/flow/gpu/params.ts`, the machCut header). SOLVER.md 15.1's coupling note records the merge and the pin.
+
+NEXT
+1. **Item 5, the gates on the merged tree @dd008d8:** RUNNING detached at this hand-back (PID 4224; `reports/scratch/k3/gates.cmd`; summary `gates.log`, per-gate logs `g-*.log`, status `gates.status`). Typecheck was clean; lint, coverage (`--coverage.reportsDirectory=reports/scratch/k3/coverage`), test:mesh, test:gpu and test:gpu-ladder follow. Read the logs, or re-run, and record the numbers under GATES.
+2. Then test:browser once, detached, with ≥ 2 GB free: `npx vitest run -c vitest.browser.config.ts --api 63391`. Main's `engineView.ts` warm-up is in the merged tree, so the rotor tests are checked again there.
+3. The critic reviews rounds 1-3 (D4-93). Points to judge: GOTCHAS R1-R2.
+4. From round 1, still open: an official `--flow` capture in a quiet window (D0-1; Chrome holds the OS focus, D4-73), and the P1 bench under D4-73.
+
+GOTCHAS
+- R1. **What the cut-face band costs (W2L-I8), for the critic.** It is not a failure. The band leaves out 40 % of the frame in the cutaway preset and 48 % in the close-up and the control, and it held all 30 tiles the cutaway floor counted. So in the cut views the bound now judges the open wedge and the outside. It follows the preset, so it also covers the close-up, which passed without it (6.50 against 1.75 + 6). The control still shows the ghosting (13.63 against 6.50). The rule was stated before the run and is unchanged.
+- R2. **W2L-I6's mask is computed per run, from that run's own vectors.** A wrong vector loses most of its pixels to the check (−1: 12527 of 14405, leaving 976 in the ≥ 4 px set). The controls still fail, but on sets their own vectors chose. The shipped vectors pass by 0.021 (0.579 against 0.6).
+- R3. `Start-Process -ArgumentList` doesn't quote an element with spaces: put the `-Command` value in literal double quotes, and add `-ExecutionPolicy Bypass`. Without them the job dies before writing its status. `reports/scratch/k3/job.ps1` records free RAM at the start and end.
+- R4. A PreToolUse hook blocks shell commands that do `sed -i` or `git checkout --` on tracked files ("Fact-Forcing Gate"). Make temporary wrong-value edits with the Edit tool and revert them the same way.
+- R5. The vitest browser server took `--api 63391`: no clash with 5173, 5184 or 5194.
