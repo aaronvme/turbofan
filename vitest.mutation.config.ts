@@ -14,6 +14,8 @@ export const SLOW_TRANSIENT_TESTS = [
   'tests/unit/cycle/surgeRecovery.test.ts',
   // D4-84: the part-power fit ramp at 60 Hz and three bit-identity scenarios, run twice each
   'tests/unit/cycle/heldFrame.test.ts',
+  // D4-92 (b): critic pass 15's surge-flameout-relight scenario, 35 s at seven frame steps
+  'tests/unit/cycle/heldRecovery.test.ts',
 ];
 
 /**
