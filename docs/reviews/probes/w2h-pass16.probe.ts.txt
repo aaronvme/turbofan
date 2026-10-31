@@ -1,0 +1,166 @@
+// Critic pass 16, w2/cycle-hold @7f3fb22 (rounds 2-3, D4-92 / D4-94). Plain Node, imports ROOT:
+//   ROOT=<checkout> node --import file:///<checkout>/tools/mesh/ts-resolve.mjs w2h-pass16.ts <mode>
+// fine:  P5b's scenario (ISA SLS, take-off at 3 s, surge 10 s, flameout 20 s, auto relight, 35 s) at
+//        ISA and ISA+30 on a fine grid of frame steps from 1/120 to 1/30 s (P5b samples 7), with the
+//        longest hold, N1 while held, the escalations and any throw.
+// sweep: critic pass 14's mode-1 default-model sweep (6 ambients x 6 plans) at dt 1/60, 0.02, 1/30
+//        and 0.05, each run caught (pass 15's stopped at the ISA+30 throw).
+// fit:   the part-power fit (W2H-I1 on the fit): the 1 s ramp from idle at 60 Hz (heldFrame's case),
+//        then the same at other frame steps, ramp lengths and ambients: does every held episode
+//        recover, and on what root (the smallest compressor Tt rise on a matched step)?
+import { pathToFileURL } from 'node:url';
+
+const ROOT = process.env.ROOT ?? '.';
+const imp = (p: string) => import(pathToFileURL(`${ROOT}/${p}`).href);
+const { ISA_SLS } = await imp('src/contracts/ambient.ts');
+const { DEFAULT_CYCLE_INPUTS } = await imp('src/contracts/cycle.ts');
+const { createCycleModel } = await imp('src/cycle/model.ts');
+const { PART_POWER_FIT_CALIBRATION, referenceEngine } = await imp('src/cycle/engine.ts');
+const { withCalibration } = await imp('src/cycle/partPower.ts');
+
+const base = { ...DEFAULT_CYCLE_INPUTS, fuelLever: 'run', ignition: 'auto' };
+type Inp = typeof base;
+type Plan = (t: number) => Partial<Inp>;
+type St = Record<string, { ttK: number }>;
+
+function rises(st: St) {
+  return {
+    fanB: st['13'].ttK - st['2'].ttK,
+    fanC: st['21'].ttK - st['2'].ttK,
+    boost: st['24'].ttK - st['21'].ttK,
+    hpc: st['3'].ttK - st['25'].ttK,
+  };
+}
+
+interface Result {
+  longestS: number;
+  maxN1Held: number;
+  episodes: number;
+  endHeld: boolean;
+  endN1: number;
+  lost: number;
+  escalations: number;
+  threw: string | null;
+  minRise: number;
+  minRiseAt: string;
+  episodesOver: string[];
+}
+
+function run(opts: object, ambient: object, plan: Plan, seconds: number, dt: number, faults: Record<string, number> = {}): Result {
+  const orig = console.warn;
+  console.warn = () => undefined;
+  const m = createCycleModel(opts);
+  m.reset('groundIdle', ambient);
+  const n = Math.round(seconds / dt);
+  let runSteps = 0;
+  let runStart = 0;
+  let longest = 0;
+  let maxN1Held = 0;
+  let episodes = 0;
+  let minRise = Infinity;
+  let minRiseAt = '';
+  let threw: string | null = null;
+  const over: string[] = [];
+  let s = m.state();
+  let t = 0;
+  try {
+    for (let i = 0; i < n; i++) {
+      t = i * dt;
+      for (const [f, at] of Object.entries(faults)) if (Math.abs(t - at) < dt / 2) m.injectFault(f);
+      s = m.step(dt, { ...base, ambient, ...plan(t) });
+      if (s.gasPathSolve.status === 'held') {
+        if (runSteps === 0) {
+          episodes++;
+          runStart = t;
+        }
+        runSteps++;
+        longest = Math.max(longest, runSteps);
+        maxN1Held = Math.max(maxN1Held, s.n1Percent);
+      } else {
+        if (runSteps * dt > 0.5 + 1e-9) over.push(`${runStart.toFixed(2)}+${(runSteps * dt).toFixed(2)}`);
+        runSteps = 0;
+        if (s.gasPathSolve.status === 'matched') {
+          const r = rises(s.stations as St);
+          const lo = Math.min(r.fanB, r.fanC, r.boost, r.hpc);
+          if (lo < minRise) {
+            minRise = lo;
+            minRiseAt = `t ${t.toFixed(2)} N1 ${s.n1Percent.toFixed(1)} N2 ${s.n2Percent.toFixed(1)} fanB ${r.fanB.toFixed(2)} fanC ${r.fanC.toFixed(2)} boost ${r.boost.toFixed(2)} hpc ${r.hpc.toFixed(2)}`;
+          }
+        }
+      }
+    }
+    if (runSteps * dt > 0.5 + 1e-9) over.push(`${runStart.toFixed(2)}+${(runSteps * dt).toFixed(2)} (open)`);
+  } catch (e) {
+    threw = `t ${t.toFixed(3)}: ${e instanceof Error ? e.message.slice(0, 160) : String(e)}`;
+  }
+  console.warn = orig;
+  const diag = m as unknown as { heldRetryEscalations?: () => number };
+  return {
+    longestS: longest * dt,
+    maxN1Held,
+    episodes,
+    endHeld: s.gasPathSolve.status === 'held',
+    endN1: s.n1Percent,
+    lost: s.gasPathSolve.lostSolves,
+    escalations: diag.heldRetryEscalations?.() ?? -1,
+    threw,
+    minRise,
+    minRiseAt,
+    episodesOver: over,
+  };
+}
+
+const line = (label: string, r: Result) =>
+  `${label.padEnd(44)} longest ${r.longestS.toFixed(2)} s maxN1held ${r.maxN1Held.toFixed(1)} episodes ${r.episodes} esc ${r.escalations} lost ${r.lost} end ${r.endHeld ? 'HELD' : 'matched'} N1 ${r.endN1.toFixed(1)} minRise ${r.minRise.toFixed(2)}` +
+  (r.episodesOver.length > 0 ? ` | >0.5 s: ${r.episodesOver.join(', ')}` : '') +
+  (r.minRise < 2 ? ` | min rise at ${r.minRiseAt}` : '') +
+  (r.threw ? ` | THREW ${r.threw}` : '');
+
+const mode = process.argv[2] ?? 'fine';
+const to: Plan = (t) => ({ throttleLever: t < 3 ? 0 : 1 });
+const ISA30 = { ...ISA_SLS, temperatureK: 318.15 };
+
+if (mode === 'fine') {
+  const steps: number[] = [1 / 120];
+  for (let k = 9; k <= 33; k++) steps.push(k / 1000);
+  steps.push(0.0205, 0.0215, 0.0245, 0.0255, 1 / 30);
+  steps.sort((a, b) => a - b);
+  for (const [an, amb] of [['isa', ISA_SLS], ['isa+30', ISA30]] as const)
+    for (const dt of steps) console.log(line(`P5b ${an} dt ${dt.toFixed(4)}`, run({}, amb, to, 35, dt, { surge: 10, flameout: 20 })));
+} else if (mode === 'sweep') {
+  const ambients: Record<string, object> = {
+    isa: ISA_SLS,
+    'isa+15': { ...ISA_SLS, temperatureK: 303.15 },
+    'isa+30': ISA30,
+    'isa+40': { ...ISA_SLS, temperatureK: 328.15 },
+    'isa-40': { ...ISA_SLS, temperatureK: 248.15 },
+    '3000m': { pressurePa: 70121, temperatureK: 268.65, machNumber: 0 },
+  };
+  const slam: Plan = (t) => ({ throttleLever: t < 3 ? 0 : t < 15 ? 1 : t < 25 ? 0 : 1 });
+  const ramp1s: Plan = (t) => ({ throttleLever: t < 3 ? 0 : Math.max(0.01, Math.min(1, t - 3)) });
+  const cutRelight: Plan = (t) => ({ throttleLever: t < 3 ? 0 : 1, fuelLever: t >= 10 && t < 10.5 ? 'cutoff' : 'run' });
+  const bleed: Plan = (t) => ({ throttleLever: t < 3 ? 0 : t < 15 ? 1 : 0, customerBleedFraction: 0.08, powerExtractionW: 150e3 });
+  for (const dt of [1 / 60, 0.02, 1 / 30, 0.05]) {
+    for (const [an, amb] of Object.entries(ambients)) {
+      const d = dt.toFixed(4);
+      console.log(line(`slam/chop/reslam ${an} dt ${d}`, run({}, amb, slam, 35, dt)));
+      console.log(line(`ramp1s ${an} dt ${d}`, run({}, amb, ramp1s, 20, dt)));
+      console.log(line(`TO surge10 flameout20 ${an} dt ${d}`, run({}, amb, to, 35, dt, { surge: 10, flameout: 20 })));
+      console.log(line(`idle flameout5 ${an} dt ${d}`, run({}, amb, (t) => ({ throttleLever: t < 10 ? 0 : 1 }), 25, dt, { flameout: 5 })));
+      console.log(line(`TO fuel cut/relight ${an} dt ${d}`, run({}, amb, cutRelight, 30, dt)));
+      console.log(line(`bleed+PX slam/chop ${an} dt ${d}`, run({}, amb, bleed, 25, dt)));
+    }
+  }
+} else {
+  const fit = withCalibration(referenceEngine(), PART_POWER_FIT_CALIBRATION);
+  const ramp = (len: number): Plan => (t) => ({ throttleLever: t < 3 ? 0 : Math.max(0.01, Math.min(1, (t - 3) / len)) });
+  console.log(line('fit ramp 1 s, 60 Hz, 23 s (heldFrame)', run({ engine: fit }, ISA_SLS, ramp(1), 23, 1 / 60)));
+  for (const dt of [1 / 120, 0.02, 1 / 30])
+    console.log(line(`fit ramp 1 s, dt ${dt.toFixed(4)}, 23 s`, run({ engine: fit }, ISA_SLS, ramp(1), 23, dt)));
+  for (const len of [0.5, 2, 5, 10])
+    console.log(line(`fit ramp ${len} s, 60 Hz, ${20 + len} s`, run({ engine: fit }, ISA_SLS, ramp(len), 20 + len, 1 / 60)));
+  for (const [an, amb] of [['isa+15', { ...ISA_SLS, temperatureK: 303.15 }], ['isa+30', ISA30], ['isa-20', { ...ISA_SLS, temperatureK: 268.15 }]] as const)
+    console.log(line(`fit ramp 1 s, 60 Hz, ${an}`, run({ engine: fit }, amb, ramp(1), 23, 1 / 60)));
+  console.log(line('fit TO surge10 flameout20, 60 Hz', run({ engine: fit }, ISA_SLS, to, 35, 1 / 60, { surge: 10, flameout: 20 })));
+  console.log(line('fit slam/chop, 60 Hz', run({ engine: fit }, ISA_SLS, (t) => ({ throttleLever: t < 3 ? 0 : t < 15 ? 1 : t < 25 ? 0 : 1 }), 35, 1 / 60)));
+}

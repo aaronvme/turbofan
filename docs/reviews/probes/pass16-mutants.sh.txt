@@ -1,0 +1,74 @@
+# Critic pass 16: the hand mutants on trial16 (main 10b78ad + w2/kernel @be07478 + w2/cycle-hold @7f3fb22 + w2/flowviz @7dac273).
+# Three parts: rep.mjs (a literal one-occurrence replacement; no sed -i, a hook blocks it), mutants.sh (K2-K5 unit, BH1-BH8 the cycle fast set),
+# mutants-gpu.sh (K1 on Dawn, V1 in Chrome). Run from the worktree root with Git Bash, one at a time, nothing else on the GPU for K1/V1.
+
+# ===== rep.mjs =====
+// rep.mjs <file> <old> <new>: replaces the one literal occurrence of <old>; exits 2 if not exactly one
+import { readFileSync, writeFileSync } from 'node:fs';
+const [file, from, to] = process.argv.slice(2);
+const s = readFileSync(file, 'utf8');
+const n = s.split(from).length - 1;
+if (n !== 1) { console.error(`rep: ${n} occurrences in ${file}`); process.exit(2); }
+writeFileSync(file, s.replace(from, to));
+
+# ===== mutants.sh =====
+#!/usr/bin/env bash
+# Critic pass 16: hand mutants on trial16 (main 10b78ad + w2/kernel @be07478 + w2/cycle-hold @7f3fb22
+# + w2/flowviz @7dac273). Each is one literal replacement (rep.mjs) in one src file, run against the
+# named tests, then the file restored from a copy (no sed -i, no git checkout: a hook blocks them).
+# KILLED = the tests fail. Usage: mutants.sh K|B
+set -u
+cd /c/Users/Aaron/projects/turbofan/.claude/worktrees/critic
+D=reports/scratch/c16; T=$D/mut; mkdir -p $T
+run() { # id file old new tests...
+  local id=$1 f=$2 old=$3 new=$4; shift 4
+  cp "$f" $T/mut.bak
+  if ! node $D/rep.mjs "$f" "$old" "$new"; then echo "$id: DID NOT APPLY"; return; fi
+  if npx vitest run "$@" > $T/mut-$id.log 2>&1; then echo "$id: SURVIVED"; else echo "$id: KILLED ($(grep -cE '(×|FAIL) ' $T/mut-$id.log) failing lines)"; fi
+  cp $T/mut.bak "$f"
+}
+if [ "${1:-B}" = K ]; then
+  P=src/flow/gpu/params.ts
+  U=tests/unit/flow/gpu/machCut.test.ts
+  run K2 $P 'return { minMach: Math.max(pre.minMach, cut), machCut: Math.max(machCut, cut) };' 'return { minMach: Math.max(pre.minMach, cut), machCut };' $U
+  run K3 $P 'return given === undefined ? enginePreconditioning(machCut) : given;' 'return given === undefined ? enginePreconditioning() : given;' $U
+  run K4 $P "      opts.cfl ?? (pre !== undefined && pre.minMach < 1 ? DEFAULT_CFL_PRECONDITIONED : DEFAULT_CFL)," "      opts.cfl ?? (opts.lowMachPreconditioning !== undefined && opts.lowMachPreconditioning.minMach < 1 ? DEFAULT_CFL_PRECONDITIONED : DEFAULT_CFL)," $U tests/unit/flow/gpu/host.test.ts
+  run K5 $P "          farFieldBeta2: Math.min(1, Math.max(mInf2, pre.minMach * pre.minMach))," "          farFieldBeta2: Math.min(1, Math.max(mInf2, (opts.lowMachPreconditioning?.minMach ?? 1) ** 2))," $U tests/unit/flow/gpu/host.test.ts
+fi
+if [ "${1:-B}" = B ]; then
+  FAST="tests/unit/cycle/heldRetry.test.ts tests/unit/cycle/heldModel.test.ts tests/unit/cycle/matchedSolve.test.ts tests/unit/cycle/gasPathHold.test.ts tests/unit/cycle/lostSolveCause.test.ts tests/unit/cycle/surge.test.ts"
+  M=src/cycle/model.ts
+  run BH1 src/cycle/matchedSolve.ts '    if (refusal(r.solution) === null) return r.solution;' '' $FAST
+  run BH2 $M '      this.retry = { walk: null, walkStartedS: this.t };' '' $FAST
+  run BH3 $M '      this.heldSinceS = this.t;' '' $FAST
+  run BH4 $M 'this.t - this.heldSinceS >= this.escalateAfterS' 'this.t - this.heldSinceS >= 2 * this.escalateAfterS' $FAST
+  run BH5 src/cycle/surgeSystem.ts '  if (!(h > 0)) {' '  if (h < -1) {' $FAST
+  run BH6 src/cycle/matchedSolve.ts "  ['booster', '21', '24']," "  ['booster', '2', '24']," $FAST
+  run BH7 $M "    const surgeWaits = this.pending === 'surge' && prev.solve === 'held';" "    const surgeWaits = false;" $FAST
+  run BH8 $M '      this.n1 = Math.min(this.n1, lim.n1MaxRpm);' '      this.n1 = Math.min(this.n1, 1.01 * lim.n1MaxRpm);' $FAST
+fi
+echo "MUTANTS DONE"
+
+# ===== mutants-gpu.sh =====
+#!/usr/bin/env bash
+# Critic pass 16: GPU and browser hand mutants on trial16 (run alone, nothing else on the GPU).
+# K1: the WGSL mass flux off by 2e-6 relative on faces with a radial normal component (not a uniform
+#     scaling, which would cancel in the residual sum): the tightened flux-scale rows E-L5 / E-L9a must
+#     fail it, where D4-48's 1e-3 could not.
+# V1: the cut plane's temperature floor about 0 K instead of T_inf (the shader only): the suite's
+#     W2V-I7 case reads Mach only, so it should survive; the critic probe's T row shows it.
+set -u
+cd /c/Users/Aaron/projects/turbofan/.claude/worktrees/critic
+D=reports/scratch/c16; T=$D/mut; mkdir -p $T
+run() { # id file old new config tests...
+  local id=$1 f=$2 old=$3 new=$4 cfg=$5; shift 5
+  cp "$f" $T/mut.bak
+  if ! node $D/rep.mjs "$f" "$old" "$new"; then echo "$id: DID NOT APPLY"; return; fi
+  if npx vitest run -c "$cfg" "$@" > $T/mut-$id.log 2>&1; then echo "$id: SURVIVED"; else echo "$id: KILLED ($(grep -cE '(×|FAIL) ' $T/mut-$id.log) failing lines)"; fi
+  cp $T/mut.bak "$f"
+}
+case "${1:-K1}" in
+K1) run K1 src/flow/gpu/wgsl/flux.ts '  let fa4 = vec4f(gm, gm * P.uInf' '  let fa4 = vec4f(gm * (1.0 + 2e-6 * abs(n.y)), gm * P.uInf' vitest.gpu.config.ts tests/gpu/oracle.test.ts ;;
+V1) run V1 src/render/flowViz.ts "      const amb = id === 't' ? tInf : float(0);" "      const amb = float(0);" vitest.browser.config.ts tests/browser/flowViz.test.ts -t W2V-I7 ;;
+esac
+echo "GPU MUTANT DONE"
