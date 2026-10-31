@@ -1,0 +1,74 @@
+// @vitest-environment happy-dom
+// D4-91: a switch into a mode whose pipelines are still compiling shows a visible "preparing"
+// state over the view (the previous view keeps running: never a freeze), and it goes once the
+// worker shows the mode. W2A-N15: SIM STOPPED says what restarts it. W2A-N17: the slow-boot
+// message is not carried into the next boot.
+import { act, cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { faultAnnunciations } from '../../../src/hud/annunciators';
+import { BOOT_SLOW_MS, Overlay, Status } from '../../../src/ui/App';
+import { useApp } from '../../../src/ui/store';
+import { diagnosticsOf, mount, snapshotOf } from './fixtures';
+
+const initial = useApp.getState();
+beforeEach(() => {
+  useApp.setState(initial, true);
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+// each snapshot builds the real model at ground idle: a test runtime limit, not a threshold
+const TIMEOUT_MS = 120_000;
+
+describe('the preparing view (D4-91)', { timeout: TIMEOUT_MS }, () => {
+  it('says which view is being prepared while its pipelines compile', () => {
+    const base = diagnosticsOf();
+    mount(
+      snapshotOf(),
+      diagnosticsOf({ view: { mode: 'cutaway', settledFrames: 0, preparing: 'cutaway' } }),
+    );
+    render(<Overlay />);
+    expect(screen.getByRole('status', { name: /preparing the cutaway view/i })).toBeTruthy();
+    act(() => {
+      useApp.setState({ diagnostics: { ...base, view: { ...base.view, mode: 'cutaway' } } });
+    });
+    expect(screen.queryByRole('status', { name: /preparing/i })).toBeNull();
+  });
+
+  it('shows nothing when the asked view is shown', () => {
+    mount(snapshotOf());
+    render(<Overlay />);
+    expect(screen.queryByRole('status', { name: /preparing/i })).toBeNull();
+  });
+});
+
+describe('W2A-N15 and N17', { timeout: TIMEOUT_MS }, () => {
+  it('SIM STOPPED says a reload restarts it (a reset does not)', () => {
+    const [a] = faultAnnunciations({
+      simStopped: 'cycle step failed: x',
+      gpuErrors: 0,
+      raster: { onFrame: false, lastError: null },
+      refused: 0,
+    });
+    expect(a?.detail).toMatch(/reload/i);
+    expect(a?.detail).not.toMatch(/reset/i);
+  });
+
+  it('a new boot starts without the last boot’s slow message', () => {
+    vi.useFakeTimers();
+    render(<Status />);
+    act(() => {
+      vi.advanceTimersByTime(BOOT_SLOW_MS + 1);
+    });
+    expect(screen.getByRole('status').textContent).toMatch(/longer than usual/);
+    act(() => {
+      useApp.getState().receive({ type: 'ready', adapter: 'test' });
+    });
+    act(() => {
+      useApp.setState({ connection: { state: 'booting' } });
+    });
+    expect(screen.getByRole('status').textContent).not.toMatch(/longer than usual/);
+  });
+});
