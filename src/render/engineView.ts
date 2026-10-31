@@ -310,6 +310,8 @@ export interface DebugFlags {
   readonly noHaze?: boolean;
   /** The flow layers with TRAA's per-frame jitter (W2V-I5's negative control). */
   readonly jitterFlow?: boolean;
+  /** The cut plane draws the ambient air too (W2V-I7's negative control: the old look). */
+  readonly noFlowFloor?: boolean;
 }
 
 const FPS = 60;
@@ -709,6 +711,7 @@ async function assemble(
       flowViz.setParticlesHidden(f.noFlowParticles === true);
       flowViz.setHazeOff(f.noHaze === true);
       post.setFlowJitter(f.jitterFlow === true);
+      flowViz.setFloorOff(f.noFlowFloor === true);
       hidden = [];
       if (f.hide !== undefined && f.hide !== '') {
         // matched against "main:<name>" / "rotors:<name>", so a pattern can pick one pass

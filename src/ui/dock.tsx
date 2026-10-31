@@ -62,7 +62,17 @@ export function FlowLegend({
         <span>{legend.title}</span>
         <span className="legend-unit">{legend.unit}</span>
       </div>
-      <div className="legend-bar" style={{ background: `linear-gradient(90deg, ${grad})` }} />
+      <div className="legend-bar" style={{ background: `linear-gradient(90deg, ${grad})` }}>
+        {legend.floor === null ? null : (
+          <span
+            className="legend-floor"
+            style={{
+              left: `${(100 * legend.floor.from).toFixed(2)}%`,
+              width: `${(100 * (legend.floor.to - legend.floor.from)).toFixed(2)}%`,
+            }}
+          />
+        )}
+      </div>
       <div className="legend-ticks" aria-hidden="true">
         {legend.ticks.map((t) => (
           <span
@@ -74,6 +84,7 @@ export function FlowLegend({
           </span>
         ))}
       </div>
+      {legend.floor === null ? null : <p className="legend-floor-note">{legend.floor.label}</p>}
       <p className="legend-badge" data-coupling={coupling} data-fallback={fallback !== null}>
         <span className="dot" aria-hidden="true" />
         <span>{provenanceLabel(coupling, fallback)}</span>

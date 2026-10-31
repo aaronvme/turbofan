@@ -110,7 +110,7 @@ describe('flowModeNote and dilationLabel', () => {
     expect(t).toMatch(/0\.25 s exposures, at most 45 cm/);
     expect(t).toMatch(/heat haze/);
     expect(flowModeNote('data', 1 / 100)).toMatch(
-      /^Cut plane: mach number of the field; laser-sheet/,
+      /^Cut plane: mach number of the field \(air within 2\.5 % of the scale of the ambient is not drawn\); laser-sheet/,
     );
     expect(flowModeNote('data', 1 / 100, undefined, false)).not.toMatch(/laser-sheet/);
     expect(flowModeNote('cutaway', 1 / 100, 't')).toMatch(/static temperature/);

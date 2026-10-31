@@ -3,9 +3,16 @@
 // it as DOM, and the colour bar's stops come from the very LUT the cut plane samples, so the
 // legend matches the pixels (D4-76: those colours composite after the tone map, unchanged).
 
+import { ISA_SLS } from '../../contracts/ambient';
 import type { FlowCoupling } from '../../contracts/flow';
 import { bakeLut, niceTicks } from './colormaps';
-import { FIELD_QUANTITIES, type FieldQuantityId } from './fields';
+import {
+  AMBIENT_FLOOR_FRACTION,
+  ambientFloor,
+  ambientValue,
+  FIELD_QUANTITIES,
+  type FieldQuantityId,
+} from './fields';
 import { FLOW_VIZ_MODES, STREAK_EXPOSURE_S, STREAK_MAX_M, type FlowVizModeId } from './modes';
 
 export interface LegendTick {
@@ -21,6 +28,19 @@ export interface LegendStop {
   readonly rgb: readonly [number, number, number];
 }
 
+/**
+ * W2V-I7 (D4-86): the band of the bar the cut plane does not draw (the ambient air, within
+ * AMBIENT_FLOOR_FRACTION of the scale of its value), so the legend is honest about what the
+ * floor hides: the bar marks it and the label says it.
+ */
+export interface LegendFloor {
+  /** The band's ends along the bar, 0..1. */
+  readonly from: number;
+  readonly to: number;
+  /** "Not drawn: 0 to 0.04 M (the ambient ± 2.5 % of the scale)". */
+  readonly label: string;
+}
+
 export interface Legend {
   readonly title: string;
   readonly unit: string;
@@ -28,6 +48,8 @@ export interface Legend {
   readonly stops: readonly LegendStop[];
   /** D4-82: how far the drawn field is the engine's answer (the badge under the bar). */
   readonly coupling: FlowCoupling;
+  /** W2V-I7: what the cut plane leaves undrawn (null: the mode draws the whole scale). */
+  readonly floor: LegendFloor | null;
 }
 
 const STOPS = 16;
@@ -52,11 +74,17 @@ function ratioLabel(k: number): string {
 
 const RATIO_UNIT: Partial<Record<FieldQuantityId, string>> = { p: 'p / p∞', rho: 'ρ / ρ∞' };
 
-/** The legend of a flow mode (null: the mode draws no colour), for `quantity` or the mode's own. */
+const FLOOR_PERCENT = `${String(100 * AMBIENT_FLOOR_FRACTION)} %`;
+
+/**
+ * The legend of a flow mode (null: the mode draws no colour), for `quantity` or the mode's own.
+ * `tInfK` places the temperature's ambient floor (the static ISA day unless given).
+ */
 export function legendFor(
   mode: FlowVizModeId,
   coupling: FlowCoupling,
   quantity?: FieldQuantityId,
+  tInfK: number = ISA_SLS.temperatureK,
 ): Legend | null {
   const m = FLOW_VIZ_MODES[mode];
   if (!m.legend) return null;
@@ -77,6 +105,7 @@ export function legendFor(
       ticks,
       stops,
       coupling,
+      floor: null,
     };
   }
   const id = quantity ?? m.quantity;
@@ -92,7 +121,16 @@ export function legendFor(
     const k = 4 * Math.round((255 * i) / STOPS);
     return { at: i / STOPS, rgb: [lut[k] ?? 0, lut[k + 1] ?? 0, lut[k + 2] ?? 0] as const };
   });
-  return { title: spec.label, unit: ratio ?? spec.unit, ticks, stops, coupling };
+  const amb = ambientValue(id, { pInfPa: 1, rhoInfKgPerM3: 1, tInfK });
+  const lo = Math.max(spec.min, amb - ambientFloor(id));
+  const hi = Math.min(spec.max, amb + ambientFloor(id));
+  const shown = (v: number) => numberLabel(ratio === undefined ? v : 2 ** v);
+  const floor: LegendFloor = {
+    from: (lo - spec.min) / (spec.max - spec.min),
+    to: (hi - spec.min) / (spec.max - spec.min),
+    label: `Not drawn: ${shown(lo)} to ${shown(hi)} ${ratio ?? spec.unit} (the ambient ± ${FLOOR_PERCENT} of the scale)`,
+  };
+  return { title: spec.label, unit: ratio ?? spec.unit, ticks, stops, coupling, floor };
 }
 
 /**
@@ -134,7 +172,7 @@ export function flowModeNote(
   const parts: string[] = [];
   if (m.cutPlane)
     parts.push(
-      `Cut plane: ${FIELD_QUANTITIES[quantity ?? m.quantity].label.toLowerCase()} of the field`,
+      `Cut plane: ${FIELD_QUANTITIES[quantity ?? m.quantity].label.toLowerCase()} of the field (air within ${FLOOR_PERCENT} of the scale of the ambient is not drawn)`,
     );
   if (m.particleOpacity > 0 && (tracers ?? m.tracersByDefault))
     parts.push(
