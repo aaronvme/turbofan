@@ -31,6 +31,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium, type Page } from '@playwright/test';
 import type { PowerSource } from '../../spikes/lib/system.ts';
+import { focusValidity, pageHasFocus, realFocus } from '../../spikes/lib/focus.ts';
 import { combineValidity, displayIntervalMs, type Validity } from '../../spikes/lib/validity.ts';
 import { THRESHOLDS } from '../../src/contracts/thresholds.ts';
 import { summarizeRun, type FrameSample, type RunSummary } from '../../src/gpu/passTimings.ts';
@@ -160,10 +161,14 @@ async function main(): Promise<void> {
   });
   const results: Record<string, unknown> = {};
   try {
-    const page = await browser.newPage({
+    // a context of its own (not browser.newPage): realFocus opens a second tab in it (D4-73)
+    const context = await browser.newContext({
       viewport: { width: 1920, height: 1080 },
       deviceScaleFactor: 1,
     });
+    const page = await context.newPage();
+    const cdp = await context.newCDPSession(page);
+    const openOther = () => context.newPage();
     page.on('console', (m) => {
       if (m.type() === 'error' || m.type() === 'warning') log(`[page ${m.type()}] ${m.text()}`);
     });
@@ -216,6 +221,8 @@ async function main(): Promise<void> {
     }
     if (timing) {
       const t = parseTimingArgs(args);
+      // D4-73: D3-6's blur rule sees the OS focus (the page is not navigated again)
+      await realFocus(page, cdp, openOther);
       const configs = withPacings(t.diagnostics ? DIAGNOSTIC_CONFIGS : OFFICIAL_CONFIGS, t.pacings);
       const order = runOrder(configs, t.reps, t.seed);
       const atStart = await conditions(page, browser.version());
@@ -256,6 +263,7 @@ async function main(): Promise<void> {
           if (c === undefined) throw new Error(`no config ${id}`);
           const saturate = c.pacing === 'backToBack';
           const powerBefore = osPowerSource();
+          const focusStart = await pageHasFocus(page);
           const run = await page.evaluate(
             async ([preset, flags, profile, warmMs, runMs, sat]) => {
               const l = (window as LookdevPage).lookdev;
@@ -281,6 +289,7 @@ async function main(): Promise<void> {
             ] as const,
           );
           const powerAfter = osPowerSource();
+          const focusEnd = await pageHasFocus(page);
           power.push(powerBefore, powerAfter);
           const summary = summarizeRun(run.frames);
           const validity = combineValidity([
@@ -296,6 +305,7 @@ async function main(): Promise<void> {
               displayMs,
             ),
             powerValidity([powerBefore, powerAfter], protocol),
+            focusValidity(focusStart, focusEnd),
           ]);
           const load = backToBackLoad(run.frames, run.rafDeltas);
           const e = perConfig.get(id) ?? {

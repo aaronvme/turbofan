@@ -6,11 +6,11 @@
 // make a run INVALID when the page did not have the focus at its start or its end.
 import { describe, expect, it } from 'vitest';
 import {
-  FOCUS_EMULATION_OFF,
   focusValidity,
   realFocus,
-  type FocusContext,
+  type CdpSender,
   type FocusPage,
+  type OpenOtherTab,
 } from '../../../spikes/lib/focus';
 
 /** A page whose hasFocus() follows the fake browser: the front tab has focus unless emulated. */
@@ -24,10 +24,9 @@ function fakeBrowser(opts: {
   const pages: FocusPage[] = [];
   const page = (name: string): FocusPage & { close(): Promise<void> } => {
     const p: FocusPage & { close(): Promise<void> } = {
-      evaluate: (fn) => {
+      // document.hasFocus() as Chrome answers it: always true under the emulation
+      evaluate: () => {
         calls.push(`${name}.evaluate`);
-        // document.hasFocus() as Chrome answers it: always true under emulation
-        void fn;
         const focused = emulated.has(p) || (front === p && opts.windowFocused !== false);
         return Promise.resolve(focused);
       },
@@ -48,29 +47,25 @@ function fakeBrowser(opts: {
   };
   const measured = page('measured');
   front = measured;
-  const context: FocusContext = {
-    newCDPSession: (target) =>
-      Promise.resolve({
-        send: (method, params) => {
-          calls.push(`cdp ${method} ${JSON.stringify(params)}`);
-          if (!opts.ignoresOverride && method === FOCUS_EMULATION_OFF.method && !params.enabled)
-            emulated.delete(target);
-          return Promise.resolve({});
-        },
-      }),
-    newPage: () => {
-      calls.push('newPage');
-      const p = page('other');
-      return Promise.resolve(p);
+  // the measured page's CDP session (Playwright: context.newCDPSession(page))
+  const cdp: CdpSender = {
+    send: (method, params) => {
+      calls.push(`cdp ${method} ${JSON.stringify(params)}`);
+      if (!opts.ignoresOverride && !params.enabled) emulated.delete(measured);
+      return Promise.resolve({});
     },
   };
-  return { calls, measured, context, front: () => front };
+  const openOther: OpenOtherTab = () => {
+    calls.push('newPage');
+    return Promise.resolve(page('other'));
+  };
+  return { calls, measured, cdp, openOther, front: () => front };
 }
 
 describe('D4-73: the real OS focus for D3-6', () => {
   it('switches the emulation off, checks it with another tab in front, and gives the front back', async () => {
     const b = fakeBrowser({});
-    await realFocus(b.context, b.measured);
+    await realFocus(b.measured, b.cdp, b.openOther);
     expect(b.calls).toEqual([
       'cdp Emulation.setFocusEmulationEnabled {"enabled":false}',
       'newPage',
@@ -84,7 +79,7 @@ describe('D4-73: the real OS focus for D3-6', () => {
 
   it('refuses to run when the page still reports the focus behind another tab (emulation on)', async () => {
     const b = fakeBrowser({ ignoresOverride: true });
-    await expect(realFocus(b.context, b.measured)).rejects.toThrow(/focus emulation/);
+    await expect(realFocus(b.measured, b.cdp, b.openOther)).rejects.toThrow(/focus emulation/);
     // the other tab is closed and the measured page brought back either way
     expect(b.calls.slice(-2)).toEqual(['other.close', 'measured.bringToFront']);
   });
@@ -102,7 +97,7 @@ describe('D4-73: the real OS focus for D3-6', () => {
 
   it('a page in an unfocused window has no focus once the emulation is off (D0-1: Chrome in front)', async () => {
     const b = fakeBrowser({ windowFocused: false });
-    await realFocus(b.context, b.measured);
+    await realFocus(b.measured, b.cdp, b.openOther);
     expect(await b.measured.evaluate(() => document.hasFocus())).toBe(false);
   });
 });

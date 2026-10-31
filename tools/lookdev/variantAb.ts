@@ -9,7 +9,8 @@
 
 import { writeFileSync } from 'node:fs';
 import { chromium } from '@playwright/test';
-import { displayIntervalMs } from '../../spikes/lib/validity.ts';
+import { focusValidity, pageHasFocus, realFocus } from '../../spikes/lib/focus.ts';
+import { combineValidity, displayIntervalMs } from '../../spikes/lib/validity.ts';
 import { summarizeRun, type FrameSample, type RunSummary } from '../../src/gpu/passTimings.ts';
 import { abOrder, abSummary, backToBackLoad, pacedValidity, parseTimingArgs } from './timing.ts';
 
@@ -60,15 +61,21 @@ async function main(): Promise<void> {
     args: ['--enable-unsafe-webgpu'],
   });
   try {
-    const page = await browser.newPage({
+    // a context of its own (not browser.newPage): realFocus opens a second tab in it (D4-73)
+    const context = await browser.newContext({
       viewport: { width: 1920, height: 1080 },
       deviceScaleFactor: 1,
     });
+    const page = await context.newPage();
+    const cdp = await context.newCDPSession(page);
+    const openOther = () => context.newPage();
     const open = async (q: string) => {
       await page.goto(`http://localhost:${port}/lookdev.html?clean=1&preset=${preset}&${q}`);
       await page.waitForFunction(() => (window as Api).lookdev?.ready === true, null, {
         timeout: 120_000,
       });
+      // D4-73: D3-6's blur rule sees the OS focus (after every navigation)
+      await realFocus(page, cdp, openOther);
     };
     await open(query.a);
     const probe = await page.evaluate(async () => {
@@ -94,6 +101,7 @@ async function main(): Promise<void> {
     for (const r of abOrder(['a', 'b'], t.pacings, t.reps)) {
       await open(r.ref === 'a' ? query.a : query.b);
       const sat = r.pacing === 'backToBack';
+      const focusStart = await pageHasFocus(page);
       const run = await page.evaluate(
         async ([p, w, ms, s]) => {
           const l = (window as Api).lookdev;
@@ -104,18 +112,22 @@ async function main(): Promise<void> {
         },
         [preset, t.warmupS * 1000, t.runS * 1000, sat] as const,
       );
+      const focusEnd = await pageHasFocus(page);
       const summary = summarizeRun(run.frames);
-      const v = pacedValidity(
-        r.pacing,
-        {
-          intervalsMs: run.rafDeltas,
-          hiddenMs: run.hiddenMs,
-          blurs: run.blurs ?? 0,
-          frames: run.frames,
-          vsyncDeltasMs: run.vsyncDeltas ?? [],
-        },
-        displayMs,
-      );
+      const v = combineValidity([
+        pacedValidity(
+          r.pacing,
+          {
+            intervalsMs: run.rafDeltas,
+            hiddenMs: run.hiddenMs,
+            blurs: run.blurs ?? 0,
+            frames: run.frames,
+            vsyncDeltasMs: run.vsyncDeltas ?? [],
+          },
+          displayMs,
+        ),
+        focusValidity(focusStart, focusEnd),
+      ]);
       const busy = backToBackLoad(run.frames, run.rafDeltas).gpuBusy;
       runs.push({ ...r, summary, valid: v.valid && run.errors === 0, busy });
       log(

@@ -49,10 +49,10 @@ The summary ends with `P1 of record (D4-64: >= 150 it/s ...): PASS|FAIL at N it/
 1. Records the conditions: power source, power plan and Windows power mode, GPU name, driver and current refresh rate, CPU load and other processes' GPU use before (and after), git HEAD and whether tracked files are dirty, Chrome's version, full command line (Playwright's default switches included) and chrome://gpu backend.
 2. Measures the display interval with an idle rAF probe on a blank page. It **refuses to start** if the probe is throttled (Chrome not in the foreground) or sees fewer than 10 frames.
 3. Runs **3 repetitions** of the sweep (`spikes/lib/order.ts`). Configurations that are compared (the tiles of one grid; main vs worker at one load) stay together and rotate between repetitions, a Latin square for groups of 3. A seeded shuffle picks the base order. Each configuration gets its own warm-up, then one run. This answers W0G-I2: the fixed order confounded the tile ranking.
-4. Brings Chrome to the front (CDP `Page.bringToFront`) before every run.
+4. Brings Chrome to the front (CDP `Page.bringToFront`) before every run, and after every navigation switches Playwright's focus emulation off and checks that it took (`spikes/lib/focus.ts` realFocus, D4-73): Playwright makes every page it opens report the focus, so without this a blur could never fire (W2L-I7; the override does not survive a navigation, GPU_FACTS M56). `node spikes/bench/focusProbe.ts` shows both in a headless Chrome.
 5. Judges every run against the display interval (`spikes/lib/validity.ts`, D2-11 as amended by D3-6). A run is INVALID only when:
    - it shows the occlusion signature: rAF intervals of 500 ms or more, sustained (consecutive ones spanning at least 1 s), which is Chrome's ~1 Hz throttle of an occluded or background window;
-   - or the page was hidden, or lost focus (a window `blur` event) during the run;
+   - or the page was hidden, or lost focus (a window `blur` event) during the run, or did not have the OS focus at its start or its end (`document.hasFocus()` false, D4-73: Chrome not in the foreground);
    - or it stalled: no result within its warm-up + run + 30 s (`spikes/lib/timeout.ts`, W0G-N6; P1 adds 60 s for its fresh page's load). The page is then reloaded before the sweep goes on;
    - or the solver was not healthy (`spikes/lib/p1.ts` solverValidity, W2I-I2): the device reported any GPU error (a rejected three timestamp resolve counts), the solver state is non-finite after the run, a frame's density residual read back non-finite (production runs, whose timing state is reset every 100 iterations, `RESET_ITERATIONS`), or the production solver is not `running` at the end.
 
@@ -74,7 +74,8 @@ Before:
 - [ ] AC power. Plan **and** power mode set: Balanced first (D0-3), Best performance only on the orchestrator's call. The AC power mode is a separate overlay that can differ from the plan.
 - [ ] No other agents, builds, installs, tests, games or video. A game on the GPU inflated timings 1.2-2.5x (M31).
 - [ ] Display sleep and the screen saver off for longer than the run (~35 min): a display that turns off stops rAF.
-- [ ] Notifications off (Do not disturb), so no toast takes focus. No other window over Chrome. Don't touch the machine until the summary prints.
+$1
+- [ ] D4-73: Chrome must hold the OS focus. If the Chrome window the harness opens does not come to the foreground by itself (Windows may refuse a background process the foreground), click into it once before the first run; a run whose page lacks the focus at its start or end, or blurs, is INVALID. The look-dev capture, ab and variantAb tools apply the same rule.
 
 After:
 - [ ] Look for INVALID rows, rerun lines and WARNING notes in the summary; `rejectedAttempts` should be empty or explained. A "below display rate" warning on a configuration that should hold 60 fps points to a 30 Hz throttle (energy saver): check the power source and rerun.

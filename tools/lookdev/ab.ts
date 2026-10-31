@@ -36,6 +36,7 @@ import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { chromium } from '@playwright/test';
 import type { PowerSource } from '../../spikes/lib/system.ts';
+import { focusValidity, pageHasFocus, realFocus } from '../../spikes/lib/focus.ts';
 import { combineValidity, displayIntervalMs } from '../../spikes/lib/validity.ts';
 import { summarizeRun, type FrameSample, type RunSummary } from '../../src/gpu/passTimings.ts';
 import { osPowerSource } from './os.ts';
@@ -184,10 +185,14 @@ async function main(): Promise<void> {
     sides.push(checkout(refsArg[0] ?? '', basePort), checkout(refsArg[1] ?? '', basePort + 1));
     for (const s of sides) await startServer(s);
     const [a, b] = sides as [Side, Side];
-    const page = await browser.newPage({
+    // a context of its own (not browser.newPage): realFocus opens a second tab in it (D4-73)
+    const context = await browser.newContext({
       viewport: { width: 1920, height: 1080 },
       deviceScaleFactor: 1,
     });
+    const page = await context.newPage();
+    const cdp = await context.newCDPSession(page);
+    const openOther = () => context.newPage();
     page.on('console', (m) => {
       if (m.type() === 'error') log(`[page error] ${m.text()}`);
     });
@@ -210,6 +215,8 @@ async function main(): Promise<void> {
         if (tries > 5) throw new Error(`the ${s.ref} page does not settle`);
       }
     await open(a);
+    // D4-73: D3-6's blur rule sees the OS focus (again after every navigation, below)
+    await realFocus(page, cdp, openOther);
     const atStart = await page.evaluate(async () => {
       const l = (window as LookdevPage).lookdev;
       return l ? await l.conditions() : {};
@@ -245,8 +252,10 @@ async function main(): Promise<void> {
     for (const r of order) {
       const s = r.ref === a.short ? a : b;
       await open(s);
+      await realFocus(page, cdp, openOther);
       const sat = r.pacing === 'backToBack';
       const powerBefore = osPowerSource();
+      const focusStart = await pageHasFocus(page);
       const run = await page.evaluate(
         async ([p, prof, warmMs, runMs, saturate]) => {
           const l = (window as LookdevPage).lookdev;
@@ -261,6 +270,7 @@ async function main(): Promise<void> {
       );
       const powerAfter = osPowerSource();
       power.push(powerBefore, powerAfter);
+      const focusEnd = await pageHasFocus(page);
       const summary = summarizeRun(run.frames);
       const v = combineValidity([
         pacedValidity(
@@ -275,6 +285,7 @@ async function main(): Promise<void> {
           displayMs,
         ),
         powerValidity([powerBefore, powerAfter], protocol),
+        focusValidity(focusStart, focusEnd),
       ]);
       const load = backToBackLoad(run.frames, run.rafDeltas);
       runs.push({
