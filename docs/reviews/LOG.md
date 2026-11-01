@@ -4916,3 +4916,256 @@ Power: on battery (status 1, 73 %) at the start, then **on AC (status 2) from th
 2. **W2A-I8:** for the 1366 cut views, should the camera dolly out to make room for the label rows (as Schlieren's framing does, at a stated minimum scale), or should that size show fewer labels by priority?
 3. **W2A-I10:** confirm that W2A-I6 stays open. The signature would move to the canvas alone, with each bar given its own failing control (S1 standing, plus Cutaway and Data), per D4-96's rule.
 4. **The builder's question 2:** accept Cutaway's own warm frames as measured (47 frames, ≤ 41 ms, ~2 s, once), and add the background warm's own indicative row beside U2/U3 (its longest gap and its frames over 16.7 ms)?
+
+## Critic pass 18: w2/followups-2 @d2750c5, w2/app-ui @be852f4 (rounds 6-7)
+
+**Scope.**
+- A, w2/followups-2 (`664203f..d2750c5`): D4-96's follow-ups: W2K-I1 (the README's D0-1 line), W2L-I9 (the cut-face band as the cap pixels, a `legacyTraa` control in every banded pose), N3 (P5's window, a flagged contract text edit), the indicative flow timing row gated only under `VITE_UI_QUIET=1` (`src/flow/viz/timingRow.ts`), W2V-I8 (the GPU floor per quantity), the inferno ΔE comment, K4 (a GPU global M_cut ≥ 1) with its CPU twin W2R-N31. The builder's question (the default pose's control fails by 1.00 tile) is judged below.
+- B, w2/app-ui rounds 6-7 (`b5ae7ef..be852f4`, main merged at 6bf986f): D4-97 and D4-98: W2A-I9 (`src/render/viewProjRoll.ts`, a flagged `post.ts` edit), W2A-I7's cold-switch bound (30 frames, then a slot every frame; U4), W2A-I8 (the cut views framed for their rows; U5, the priority hiding), W2A-I10 (the Schlieren signature on the canvas, a failing control per bar, the 0.7 grey share), U6/U7, N21-N28, and round 7: W2H-I5's fixed-dt held-frame test (`src/shell/simSteps.ts`, the test-only `debug` message), N23, Schlieren and Exploded framed above the dock, the dashed crop outline with the 440 px legend, the 1366 drawer's leader. The handoff's open points (U4, Exploded's grey share, the 1366 slack, the UI choices beyond the brief) are judged below.
+
+**Setup** (2026-10-31, the critic worktree):
+- `critic` merged main b5ae7ef (a fast-forward from 8ddcd87). A throwaway local branch `trial18` took two `--no-ff` merges, both clean: w2/followups-2 (ba0bc3c), then w2/app-ui (badaa3a). Nothing conflicted: A's P5 text and B's §3.5 rows sit in different parts of `docs/PHYSICS.md`, and both are in the merged file.
+- Every gate ran alone and detached (`Start-Process`, one script, a status line per step with the power state, the charge and the free memory), on trial18. **Power: on battery for every gate** (status 1, 70 % → 44 %); AC never returned during the pass.
+- **The first coverage run was void.** The laptop entered Modern Standby at 21:14:45 and left it at 21:52:36 (Kernel-Power 506/507), with the display off on battery. The run's workers froze for those 38 minutes, and two synchronous tests failed on vitest's 5 s timeout with 2293 s and 2300 s on the clock (`model.test.ts` "no light-off", `heldRecovery.test.ts` P5b at dt 1/30). I stopped it, started a keep-awake process (`SetThreadExecutionState` with the system and display required: an execution-state request released when it exits, no power setting changed), and re-ran coverage and every later gate under it. typecheck and lint had finished before the standby.
+- Unit mutants ran on a `git archive` copy of trial18 (`reports/scratch/c18/tree`), so no gate read a mutated `src`. The Chrome mutants ran there too, after the browser gate.
+- The builders' worktrees were only read.
+- Probes: `docs/reviews/probes/w2a-exploded-frame.probe.ts.txt`, `w2a-abandoned-cold.probe.ts.txt`, `pass18-mutants.mjs.txt`.
+- `critic` is checked out again. The local branch `trial18` (badaa3a, unpushed) is left in place, because the PreToolUse hook blocked `git branch -D`: the orchestrator can delete it. The keep-awake is stopped, and no detached run or Chrome of mine is left going.
+
+### A. w2/followups-2 @d2750c5
+
+**What holds (read, then the gates and mutants):**
+- **W2K-I1: the line is right.** `spikes/README.md:77` is `184680f^`'s line word for word ("Notifications off (Do not disturb), so no toast takes focus. No other window over Chrome. Don't touch the machine until the summary prints."), plus "(apart from the one click into Chrome that the D4-73 item below may need)". That clause reconciles it with D4-73's item below it, which can need one click into Chrome; it adds no new rule. No other `$N` artefact is in the tracked text.
+- **W2L-I9: the band follows D4-96 as written and stays principled (D4-74).**
+  - It is the cap pixels only: the pixels where the TRAA-off still with the caps differs from one without, computed at the pose before any sample. There is no tile and no ring. A band pixel never counts as changed, and a tile's 25 % rule stays of the whole tile, so a tile mostly under caps can no longer reach 25 %. That is a stricter rule near the caps, stated in the test. MARGIN is unchanged.
+  - Every banded pose runs its own `legacyTraa` control and asserts it fails (`rotorMotion.test.ts:226-240`). The failure direction is loud: if a later change made either control pass, the suite would go red.
+  - A band that grew to hide everything would zero both rows, and then the controls would pass, so the suite fails. A band that came out empty would leave the default pose unbanded, and then the shipped row fails (6.88 against 6). Either way the controls guard the band.
+  - On trial18, with app-ui merged in, every rotor row and both controls repeat the builder's run to the digit, sample by sample (Gates).
+- **N3: the wording matches D4-96 item 3.** P5's text (`thresholds.ts:434`, the PHYSICS.md row) states "the window is 23 s from ground idle: 3 s at idle, the 1 s ramp, then the take-off lever". `windowS` and `idleS` are typed, and `heldFrame.test.ts` derives its 3 s and 20 s from them, with the same values as before. No bar changed.
+- **The timing row can still fail when quiet.** `flowTimingProblems` gates a reading over 2 ms only when `quiet`, and it fails a non-finite or negative reading on every run. `quietRun` is exactly `VITE_UI_QUIET === "1"`, app-ui's reader.
+  - All four mutants are killed by the unit tests: T1 (gated every run), T2 (any value counts as quiet), T3 (gated only when not quiet) and T4 (an infinite reading accepted).
+  - The builder showed the Chrome side failing under the flag with a forced slow reading. My run was not quiet, so the row only recorded (Gates).
+- **W2V-I8 holds on the GPU for every quantity** (my run, Gates), and its bar was stated before it ran. One-sided, though (W2V-N26).
+- **K4 and its CPU twin are killed.** K4 (the CFL switch read from the given minMach, `params.ts:259-260`) is killed by `machCut.test.ts`. A4 (the same in `reference/solver.ts:176-177`) is killed by `precondition.test.ts:308`. C-cut on Dawn on trial18 is 4.84e-7 / 1.90e-6 / 3.18e-6, equal to row C.
+- **The inferno comment** (`fields.ts`) now says what critic 16 measured: viridis and the diverging map are 1.5-1.8 JND, and inferno at T∞ is a visible band (CIEDE2000 6.6-8.3) that T's floor hides as a display choice.
+
+**The builder's question: is a 1.00-tile control margin in the default cutaway pose enough power?** Yes for the merge, with a stated fallback (W2L-N16).
+- It meets D4-96's rule: the control fails and the shipped pipeline passes. In the builder's run the shipped excess is 2.38, the control's 7.00, against a bound of 6.
+- The measurement is deterministic within its protocol. On trial18, with app-ui's `post.ts` edits merged in, every row and both controls repeat it to the digit, sample by sample.
+- But the margin is thin against the frames' own spread. The control's moving samples are [20 18 16 19 12 19 15 16] (sd 2.6) and its rest samples [11 10 10 12 9 9 8 10] (sd 1.3), so 1.00 tile is about one standard error of the mean difference. The shipped row sits 3.1 standard errors under the bound.
+- So the default pose's row can see ghosting about as strong as `legacyTraa`'s, and nothing much weaker. Pipeline-wide ghosting is still caught in the close-up, where the control fails by 15.38 tiles.
+- An innocuous change could flip the default control to a pass: a three upgrade, or a cap or hatch shader edit. The suite goes red then, which is the safe direction. The risk is the fix chosen afterwards.
+
+#### Blocking
+None.
+
+#### Important
+None.
+
+#### Nits
+- **W2L-N16: state now what happens if the default pose's control ever passes** (`tests/browser/rotorMotion.test.ts:52-56`, `:232`).
+  - Its margin is one standard error (above), and the numbers depend on the measurement order (GOTCHA 1), so a later unrelated change can flip it.
+  - Fix: add to the comment, before that happens, that a passing default-pose control takes D4-96's fallback (the pose out of the moving bound, with the reason), never a re-tuned band.
+  - Write the per-sample counts to `test-results/rotorMotion.txt` beside the means (already there), and keep the order (shipped poses, then the controls in POSES order).
+- **W2V-N26: W2V-I8 bounds the ambient band from above only, so a floor that is too wide passes** (`tests/browser/flowViz.test.ts:622-623`).
+  - Mutant V2 is the shader's T floor at four times its width (`flowViz.ts:430`), which hides about 153-423 K while the legend says 243-333 K. **It passes the suite in Chrome:** T in the band with the floor is 0.2 %, and T drawn falls only from 9.4 to 8.3 %, because the MOCK at idle has few samples between 333 and 423 K.
+  - Fix: also compare each quantity's GPU drawn share with the TS mirror's (`drawnOnPlane` over the same MOCK samples), at idle and at take-off, within a stated tolerance. At take-off the bypass air lies at 330-350 K, so a widened T floor shows there. That checks both edges of the floor.
+- **W2H-N10 (a cross-branch nit; app-ui's test, A's text): the browser record beside P5 runs 24 s, while P5 now states 23 s** (`tests/browser/app.test.tsx:590`, `:604-605`).
+  - It steps 180 frames at idle, the 60-frame ramp, then 1200 frames, which is 20 s after the ramp *ends*. That matches the old wall-clock loop.
+  - P5's window, which `heldFrame.test.ts` reads, is 20 s from the ramp's *start*.
+  - Fix: step `P5.windowS - P5.idleS` seconds from the ramp's start (1140 frames after it), read from the contract as `heldFrame.test.ts` does.
+
+#### Verdict A: **MERGE**
+- B 0, I 0, N 3 (W2L-N16, W2V-N26, W2H-N10).
+- D4-96's items are in as decided:
+  - the README line is restored;
+  - the band is principled, with a failing control in every banded pose;
+  - P5 states its window;
+  - the timing row gates only quiet runs and can still fail there;
+  - the floor is checked on the GPU for p, ρ, T and Mach;
+  - K4 and A4 are killed.
+
+### B. w2/app-ui @be852f4 (rounds 6-7)
+
+Checklists: react-reviewer, typescript-reviewer, silent-failure-hunter and pr-test-analyzer, applied by hand as one review. D4-74, D4-90, D4-93 and D4-95..D4-98 were checked against both branches: nothing here contradicts them.
+
+**What holds:**
+- **The view-projection roll is right in every mode** (`viewProjRoll.ts`; `post.ts:390-395`, `:656-658`, `:742-750`).
+  - `roll` is round 5's code, moved unchanged.
+  - `save` captures all three matrices and `havePrev`, and the warm path restores them in a `finally`, so a throwing warm frame still puts them back.
+  - The roll runs before the debug and linear branch, as before, so every path rolls once per real frame.
+  - No mode has a camera of its own: Schlieren's composite reads the same `prevViewProj`, `currViewProj` and `currViewProjInv`, and `flowCamera` is a clone used only for the unjittered flow passes.
+  - Mutants R1 (`curr` not restored, the old bug) and R2 (`havePrev` not restored) are killed. R3 (`currInv` not restored) survives, but it is an equivalent mutant: every roll recomputes `currInv` from `curr` before any draw reads it.
+- **The cold-switch scheduler** (`warmUp.ts:182-208`) cannot loop or starve.
+  - Every call returns at most one slot.
+  - Past 30 frames waited the asked view takes the frame's slot before the CPU, SLOT_EVERY and quiet checks. That is D4-98's rule, and the background keeps all three.
+  - A view that never finishes is given up at 800 frames waited, then marked warm and shown.
+  - A new asked view restarts the wait (`preparing.id !== asked`). The view already shown is never "preparing": N23's clause in `shownView`, with the unfinished boot view warmed first.
+  - The one leftover is W2A-N29.
+  - Mutants W1-W7 are killed (Mutants).
+- **The fixed-dt path is test-only, and a production build drops it.** The app never sends `debug`. The worker's handler starts with `if (import.meta.env.PROD) return;` (`simWorker.ts:590-592`), and `debug` is not an input for the quiet rule. In my production build (`vite build` of trial18, `reports/scratch/c18/dist`), the worker's handler is ``case`debug`:return;``. The frame-CPU, knife-edge and fixed-step handling is gone.
+  - Left in the bundle, and harmless: the stepper's real-time path (`fixed` is null, so `next` returns the frame's dt) and the padding loop, whose bound `debugFrameCpuMs` stays 0.
+  - `held` now needs a stepped frame (`simDtS > 0`), so a paused or held-between-batches frame is no longer tagged held. That is a change to W2F-N5's record only.
+- **The fixed-dt case is deterministic.**
+  - The commands are posted before each batch, so the worker applies them in order before the batch's first step. `fixedSteps.frames` is checked against the frames asked for.
+  - My run repeated the builder's two runs: 1440 fixed frames, 1005 lost solves, 168 held snapshots, sim time 24.15 s.
+  - It no longer reaches the fit's throw. D4-98 accepted that: the cause belongs to the part-power round, and SIM STOPPED stays visible.
+- **The Schlieren check's controls all fail their named bars** (my run and both of the builder's):
+  - S1 fails the jet bar (jet spread 0.011 / 0.006 at 1366 / 1920);
+  - Cutaway and Data fail the grey share (0.554 / 0.556 at 1366, 0.499 / 0.500 at 1920; at 1366 their jet spread, 0.064-0.070, is under 0.08 too);
+  - Realistic and Exploded fail the silhouette bar (1.17-1.18 and 0.65-0.67 against 0.5). Schlieren passes with a grey share of 0.95, silhouette 0.25 and jet 0.13-0.15.
+  - The signature is taken from a second screenshot with `.overlay` hidden, so no label sits in the jet box.
+  - The margin question:
+    - Exploded's control is the silhouette bar (0.66-0.67 against 0.5, unchanged by its framing), so its rising grey share (0.24 → 0.48-0.50) does not carry any control.
+    - The grey bar's own margin is thin for a reason, though (W2A-N30).
+- **The callouts.**
+  - N21: the crossing places are tried fewest first.
+  - The rows drop a place pushed onto the engine, and in the cut views only row places are offered, so a label is hidden by priority and never placed on the section (D4-98 item 5).
+  - An empty reserved box reserves nothing.
+  - Equal layouts prefer shorter leaders.
+  - Mutants C1-C6, P1 and the drawer case are killed.
+- **The framings.**
+  - `fitOrbit` carries the minimum scale across its passes (`orbit.ts:186`: what is left of 0.6 after the passes so far); mutant O1, a fresh 0.6 each pass, is killed.
+  - An orbit in a framed view cancels the restore, and so does a camera preset (N24).
+  - A `viewArea` change re-frames from the saved orbit only while the viewer has not moved the camera.
+- **N23's report** is per configuration and only `done` boot configurations are marked warm. Diagnostics counts the unfinished, and warmStall asserts both boot configurations finished. The engine view's `done` is never false in Chrome on this machine, so only the unit tests reach that branch (no finding: the scheduler side is pinned).
+- **React and TypeScript.**
+  - The new Diagnostics rows render text only.
+  - The legend's dashed swatch is `aria-hidden`.
+  - `viewArea` gains `rows` from the same layout effect.
+  - The `debug` message is typed in `protocol.ts`, and a rejected step request is pushed as an error, not dropped.
+  - The new modules (`viewProjRoll`, `simSteps`) are pure and unit-tested.
+  - N26's guard reads `updateBefore`'s assignments and six mutator methods. A write through another mutator (`premultiply`, `applyMatrix4`) or through a local alias would still escape it. That is the residual of a pin by pattern, and acceptable as N26's fix.
+
+**U4 (the cold switch shown within 2 s): on AC, still owed.** AC never returned during the pass.
+- My gate run, on battery (status 1, 56 %, the keep-awake on, not quiet; `reports/ui/first-switch-data-cold*.json`):
+  - light frame CPU 1.42 s;
+  - a steady 8.4 ms 1.74 s;
+  - a steady 11.2 ms 1.79 s.
+  - Each case took 45-47 warm frames, gave nothing up, and its longest snapshot gap while preparing was 88-95 ms.
+- The builder's, also on battery: t1 1.61 / 1.93 / 1.83 s, gate run 1.45 / 2.16 / 2.20 s.
+- So the battery numbers straddle the bar by ±0.2 s. They decide nothing either way, and none of them is called a regression.
+- The mechanism's floor is 30 + 45-47 frames, about 1.3 s at 60 Hz. The rest is frames lengthened by the warm frames' node builds, so U4's margin on AC is a few tenths of a second at best.
+- `firstSwitch.test.tsx` gates U4 only in a quiet run, so the suite is green either way.
+
+**The handoff's open points:**
+1. **U4:** above. Not called a regression from battery numbers.
+2. **Exploded's grey share 0.48-0.50 against 0.7:** not load-bearing, since its control is the silhouette bar. Part of the rise is W2A-I11: the view is framed smaller than it needs to be.
+3. **The 1366 cut views' ~8 px of spare room:** acceptable. A taller dock costs labels by D4-97's priority, never puts one on the section, and the layout bar now fails a wrapped floor note. A fallback reason in the badge would cost the lowest-priority labels first (HPC, booster, bypass duct), which is the stated order.
+4. **The UI changes beyond the brief:** keep all three.
+   - The 440 px legend keeps the note on one line at both sizes and stays inside the centre column.
+   - Schlieren framed above the dock fixes pass 17's note 2: 100 px of margin at 1920, 48 px at 1366, the nacelle clear of the legend.
+   - Exploded framed fixes the run under the right column, but its box is wrong (W2A-I11).
+
+#### Blocking
+None.
+
+#### Important
+- **W2A-I11 (visual): Exploded is framed on parts it does not draw, so it sits off-centre and smaller than it needs to be** (`src/hud/anchors.ts:194-212`; `src/app/simWorker.ts:111`; pinned as intended at `tests/unit/hud/calloutLayout.test.ts:498`).
+  - `explodedRings` takes the intake at the nacelle's *outside* over the inlet's whole length, and the bypass duct at the nacelle's inside over its length. In the exploded view every skin is hidden (`engineView.ts:773-777`): the inlet lip, the nacelle skin, the inlet barrel, the bypass liner, the nacelle trailing edge and the core cowl (`geometry/parts.ts`, the sixth argument). Of the intake only the fan case is drawn.
+  - So the framed box runs about 100 px left of the visible fan case at 1366. My probe (`w2a-exploded-frame.probe.ts.txt`) frames the parts the view draws (every non-skin part's profile, slid by its module's offset) at the unit test's rows:
+
+    | size | shipped: scale, gaps to the area (left / right / top / bottom) | framed on the drawn parts |
+    |---|---|---|
+    | 1366 | 0.602 (at the 0.6 floor), 111 / 13 / 60 / 64 px | 0.723, 0 / -2 / 24 / 27 px |
+    | 1920 | 0.702, 231 / 74 / 84 / 92 px | 0.888, 32 / 32 / 6 / 13 px |
+
+  - The shots show it:
+    - at 1366 the intake ring starts 135 px right of the left column and the last module ends 32 px short of the right one;
+    - at 1920 it is 235 against 62 px.
+  - The handoff's reading ("left-light because the intake ring is the nearest and largest part") is not the cause. The box's left edge is an inlet lip that is not drawn.
+  - The engine is also drawn 17-21 % smaller than the area allows, and Exploded is the view where the parts are meant to read.
+  - Fix:
+    - build Exploded's content from what the view draws: the fan case for the intake, and no skins (for example the non-skin parts' profiles, as the probe does);
+    - test that the drawn parts' box is centred in the area (|left - right| within a few px at both sizes), not only inside it.
+
+#### Nits
+- **W2A-N29: a cold view the viewer leaves keeps its every-frame slots against the background's 400-slot cap** (`src/shell/warmUp.ts:176-180`, `:201-205`).
+  - Past the 30-frame wait the asked view takes a slot every frame. `frames` keeps counting them, and when the viewer switches away the view rejoins the queue with that count.
+  - My probe (`w2a-abandoned-cold.probe.ts.txt`):
+    - after 300 or 420 frames as the asked view, the view is warmed in the background as usual;
+    - after 500 frames (470 slots), it is given up at its first background slot, with no further warm frame.
+  - On this machine every view warms in 2-47 frames, so this cannot happen here. It needs a machine whose compiles take over about 7 s, as round 3's 6.9-14.5 s for Cutaway did. On such a machine, a viewer who waits 8 s and goes back gets the view given up, and the next switch into it compiles on first use. It is shown as "given up" in Diagnostics, so it is not silent.
+  - Fix: count only background slots toward MAX_WARM_FRAMES, or reset the count when the view stops being asked for.
+- **W2A-N30: the Schlieren grey band contains the studio's own grey, so the grey-share bar measures how much studio shows, not the knife-edge field** (`tests/browser/lib/schlierenCheck.ts:22-32`).
+  - The band is 0.4-0.6, and the controls' grey means are 0.479-0.485: the studio, whose grey is about 0.47. Schlieren's is 0.501 and S1's 0.502.
+  - A frame passes the bar when enough of the free area outside the engine is studio. Framing alone doubled Exploded's share (0.24 → 0.50), and the cut views sit at 0.55, 0.15 under the bar.
+  - The ±0.1 rationale ("for the JPEG") no longer applies: the signature is computed on the canvas PNG since W2A-I10.
+  - The jet bar still fails a studio-backed Schlieren, so no wrong frame passes today.
+  - Fix: a band about the knife-edge's 0.5 narrow enough to leave the studio out (for example ±0.015, measured on HEAD and stated before the run), or a studio-only control frame for the grey bar.
+- **W2A-N31: no Chrome check that Schlieren and Exploded are framed inside the area** (`tests/browser/app.test.tsx:391-470`).
+  - The cut views have `axialRowProblems`. Schlieren and Exploded have only the pure `fitOrbit` unit test.
+  - The worker's `framingOf` dropping Exploded (or Schlieren) passes every test, by reading: Exploded's control fails the silhouette bar framed or not, and no label shows in it.
+  - Fix: assert in the modes loop that the snapshot's engine box (or the drawn content's, after W2A-I11) lies inside the posted rows less FRAME_MARGIN_PX.
+
+#### Verdict B: **MERGE**
+- B 0, I 1 (W2A-I11, visual), N 3 (W2A-N29..N31).
+- D4-97 and D4-98 are in as decided:
+  - the roll restores all three matrices;
+  - a cold switch waits 30 frames and then warms every frame, with nothing that loops or starves;
+  - the cut views hold their axial rows at both sizes;
+  - the Schlieren signature is computed on the canvas, with a failing control per bar;
+  - the fixed-dt case is deterministic and test-only, and a production bundle drops it.
+- The round-7 visual notes are fixed: the drawer's leader, the dashed outline, Schlieren's margin. Exploded is better than before, though off-centre (W2A-I11).
+- W2A-I11 is a framing input, not a regression from main, where Exploded ran under the right column.
+- U4 is met on battery in my run (1.42-1.79 s). The AC measure is still owed.
+
+### Visual review (all 13 shots in `docs/look-dev/ui/` at be852f4, against round 6's at d267488)
+**Fixed and at the bar:**
+- **The crop outline (W2V-N25)** is now a light dashed frame, named by the legend's dashed swatch. It no longer reads as a stray leader beside the callouts, and its top edge passes under the 1920 top row without touching a label.
+- **The 1366 drawer:** Fan sits in the row above, left of the drawer, with a ~110 px straight leader. Before, it took the row below with a 265 px leader across the section.
+- **Schlieren:** framed above the dock, with about 100 px to the left column at 1920 and 48 px at 1366. The nacelle clears the legend, and the jet fades before the right column.
+- **The cut views** keep eight labels in two axial rows at both sizes, as in round 6. At 1366 the top row now sits under the top bar, and Fan is centred over its anchor.
+- **Exploded** lies wholly in the free area; before, it ran under the right column. But it is off-centre and smaller than it needs to be (W2A-I11).
+
+**Short of "ultra high level":**
+1. **Exploded's framing** (W2A-I11): 135 px of studio left of the intake ring and 32 px right of the last module at 1366, and 235 against 62 px at 1920.
+2. **In Schlieren the Core exhaust label sits on the jet**, at both sizes. At 1366 its box covers the start of the upper bright band, and at 1920 the jet's core behind the nozzle. The signature is computed without the overlay now, but the viewer sees it. Place that label below or left of the nozzle in Schlieren.
+3. **Entering a framed view jumps the camera.** Schlieren, Exploded and the cut views set the dollied and panned orbit in one frame (`simWorker.ts:488-489` applies `a.orbit` directly), and leaving puts it back the same way. A short eased move, for example over the cut views' own 1.4 s transition, would read as one continuous motion.
+4. Round 5's small notes are still open: "Preparing the Data view…" for a quantity change, the T-s "45" on its line, the idle fan's smear in Realistic, and no labels in Exploded.
+
+### Gates (trial18: main b5ae7ef + w2/followups-2 @d2750c5 + w2/app-ui @be852f4)
+Power: **on battery for every gate** (status 1; 70 % at the start, 44 % at the end; AC never returned). A keep-awake was on from coverage onward (Setup).
+
+| gate | result |
+|---|---|
+| `npm run typecheck` | clean, 18 s (1/70 %) |
+| `npm run lint` (ESLint + Prettier) | clean, 66 s (1/69 %) |
+| `npm run coverage` (own reportsDirectory) | first run void (Modern Standby, Setup). Re-run: **138 files, 2372 passed + 11 expected fail (2383)**, exit 0 (the per-directory thresholds hold), 800 s (1/64 → 1/59 %). Statements 98.56 %, branches 87.98 %, functions 99.55 %, lines 99.54 %. Core lines: thermo 100 %, cycle 99.62 %, flow/reference 100 %, geometry 99.59 %, src/flow 99.50 %. New modules: timingRow and simSteps 100 / 100, warmUp 100 / 96.4, callouts 100 / 88.2, anchors 100 / 85.2, orbit 100 / 78.4 (lines / branches) |
+| `npm run test:mesh` | 2 files, 29 passed |
+| `npm run test:gpu` | **12 files, 71 passed** (70 + C-cut), 47 s. C-cut 4.84e-7 / 1.90e-6 / 3.18e-6 (row C's), C-pre 5.13e-7 / 3.77e-7 / 1.05e-6 |
+| `npm run test:gpu-ladder` | 3 files, 13 passed + 1 expected fail, 305 s. D4-63 on the GPU (a) 0.7779, (b) 0.4913 / 0.2111; L7 1.779. Equal to pass 16's |
+| `npm run test:browser` | **14 files: 43 passed, 4 failed, all four on their 120 s timeouts** (`rotorMotion` "in motion", `culling`, `fanBlur`, `flowSolver`), 1206 s against the builders' 438-454 s, on battery (1/56 → 1/48 %), 5.9 GB free, no other vitest browser run. The early files ran at their usual pace and the slowdown came later in the run; I could not attribute it. 0 WebGPU errors in the passing files. `docs/` stayed clean |
+| the four files re-run alone, unchanged | **4 files, 5 passed**, 175 s (1/46 → 1/45 %). So the full gate on trial18 is 47 of 47 across the two runs; the four failures were the battery run's timeouts, not the code |
+
+**The browser run's records** (battery, keep-awake on, shared machine, not quiet):
+- **The rotor rows** (the rerun): every row and both controls equal the builder's run to the digit, sample by sample. Default cutaway shipped 9.75 / 12.13, control 9.88 / 16.88 (fails, excess 7.00). Close-up shipped 1.75 / 4.63, control 1.38 / 22.75.
+- **W2V-I8**, floor off → on: p 98.0 → 0.1 %, ρ 90.5 → 0.5 %, T 91.0 → 1.0 %, Mach 46.8 → 6.7 % (|u| 54.5 → 13.0 %). App-ui's dashed outline moves p and ρ by a few tenths.
+- **The flow timing row:** not quiet, so recorded only. Visuals 0.54 ms, tracers 0.91 ms, problems [].
+- **U4:** above. U3 (boot) 2.98-3.08 s.
+- **The fixed-dt W2F-N5:** 1440 frames, 1005 lost solves, 168 held snapshots, the builder's to the digit.
+- **The Schlieren signatures:** in B's "What holds".
+
+### Mutants (by hand on a copy of trial18; `pass18-mutants.mjs.txt`; each file restored after)
+| set | killed | survived |
+|---|---|---|
+| A, unit (`machCut`, `precondition`, `timingRow`) | K4 (the GPU CFL switch from the given minMach), A4 (its CPU twin), T1 (gated every run), T2 (any VITE_UI_QUIET is quiet), T3 (gated only when not quiet), T4 (an infinite reading accepted) | none |
+| A, Chrome (`flowViz` W2V-I8) | (V1 shown killed by the builder, not re-run) | **V2 (T's floor four times as wide: W2V-N26)** |
+| B, scheduler and stepper (`warmUp`, `preparing`, `simSteps`) | W1 (60-frame wait), W2 (every second frame), W4 (the give-up counts slots), W5 (`bootWarmed` ignores `done`), W6 (the shown view "preparing"), W7 (the asked view's slots wait for the quiet), S1u (no hold with no steps left), S2u (any dt accepted), S3u (a batch replaces the frames left) | W3 (the asked view's early return dropped): equivalent, except after W2A-N29's carry-over |
+| B, roll (`viewProjRoll`) | R1 (`curr` not restored: the old bug), R2 (`havePrev` not restored) | R3 (`currInv` not restored): equivalent, since every roll recomputes it |
+| B, callouts and framing (`calloutLayout`, `uiLevels`, `schlierenCheck`) | C1 (empty boxes reserve), C2 (only bars at y ≤ 1 limit the top row), C3 (no shorter-leader tiebreak), C4 (a row pushed onto the engine kept), C5 (only the first crossing place), C6 (the cut views offered offsets), P1 (exhaust and HPC swapped in priority), G1 (grey share 0.3), G2 (the jet bar never fails), U1 (U4 at 2.5 s) | **O1** (`fitOrbit`'s floor reset each pass: no unit case where the floor binds before the last pass), **O2** (FRAME_MARGIN_PX 0: the test reads the constant), **E1** (the intake ring at the nacelle's inside: the test pins the box's points, not what the view draws; W2A-I11) |
+| B, Chrome (`app.test` modes, both sizes) | K (the knife-edge uniform ignored: S1 passes, so the control's assertion fails at both sizes) | none |
+
+**Totals:** A 6/7 (unit 6/6, Chrome 0/1); B 22/27 (unit 21/26 with 2 equivalent, Chrome 1/1). The probes are not mutants: the Exploded framing (W2A-I11) and the abandoned cold view (W2A-N29).
+
+### Verdicts
+- **A. w2/followups-2 @d2750c5: MERGE.** B 0, I 0, N 3 (W2L-N16, W2V-N26, W2H-N10). The default pose's 1.00-tile control margin is enough for D4-96's rule, because the measurement is deterministic (repeated to the digit on trial18). State the fallback before anything flips it (W2L-N16).
+- **B. w2/app-ui @be852f4: MERGE.** B 0, I 1 (W2A-I11, Exploded's framing box), N 3 (W2A-N29..N31). U4 on AC is still owed. My battery run met it (1.42-1.79 s), the builder's gate run did not (2.16-2.20 s), and none of these numbers is a verdict.
+
+**Merge order:** w2/followups-2, then w2/app-ui (trial18's order). Both merge cleanly in that order. They meet only in `docs/PHYSICS.md`, in different sections (A's P5 text, B's U4-U7 rows), and in W2H-N10's cross-branch nit. After the merge, U4 on AC is the one measurement owed: `tests/browser/firstSwitch.test.tsx` alone, quiet (`VITE_UI_QUIET=1`), at light, 8.4 and 11.2 ms.
+
+### Questions for the orchestrator
+1. **U4 on AC:** who runs it, and when? My battery runs straddle the bar (1.42-2.20 s across three runs). The mechanism's floor is about 1.3 s, plus the warm frames' own node builds, so the AC margin may be a few tenths of a second.
+2. **U4's "at any steady frame CPU":** the test pins 8.4 and 11.2 ms. At a frame CPU over about 16 ms, below 60 fps, the 30 + 45-47 frames alone take over 2 s, so "any" cannot hold there. D4-98 kept the text. Should the check text say "up to 11.2 ms (a 60 fps frame)", or is that out of U4's scope?
+3. **W2A-I11:** Exploded's framing goes to app-ui's next round, with W2A-N29..N31 and the Schlieren label on the jet (visual note 2)? An eased camera move into framed views (visual note 3) is a suggestion for the same round.
+4. **W2L-N16:** confirm in advance that if the default cutaway pose's control ever passes, D4-96's fallback applies (the pose out of the moving bound, with the reason), not a re-tuned band.
