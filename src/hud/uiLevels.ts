@@ -22,7 +22,7 @@ export const UI_ROWS = {
   },
   U4: {
     checkText:
-      "An unwarmed switch (D4-97 item 1, W2A-I7): from the click into a view mode whose configuration is not yet warm to that view shown (`preparing` cleared), at a steady frame CPU of any value. The asked view takes its warm slots under the frame-CPU rule, and after 60 frames of preparing whatever the last frame's CPU, one every 2 frames; its give-up counts the frames waited (`src/shell/warmUp.ts`; `tests/browser/firstSwitch.test.tsx`, 1366 x 768)",
+      "An unwarmed switch (D4-97 item 1, W2A-I7): from the click into a view mode whose configuration is not yet warm to that view shown (`preparing` cleared), at a steady frame CPU of any value. The asked view takes its warm slots under the frame-CPU rule, and after 30 frames of preparing one every frame whatever the last frame's CPU (D4-98 item 1); its give-up counts the frames waited (`src/shell/warmUp.ts`; `tests/browser/firstSwitch.test.tsx`, 1366 x 768)",
     passText: '≤ 2 s; indicative on the shared machine, official only in a quiet run (D0-1)',
   },
   U5: {
