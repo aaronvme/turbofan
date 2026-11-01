@@ -722,3 +722,18 @@ The reference does not edit this section (like §14-15). The rule it adds is §5
 | the app's start (rest): every state word exactly 0 at 5000 / 10000 / 15000 / 20000 | bitwise | pass | pass |
 
 The kernel follows the oracle on the backflow branch: `tests/gpu/oracle.test.ts`'s backflow row (an inflow/outflow duct with hot, fuelled, swirling gas flowing back in through the outflow, preconditioned at the cut) checks the outflow ghosts (no swirl or fuel enters, the rest within 1e-5 of the oracle's) and row C's tolerances after 1 / 10 / 100 iterations.
+
+**D4-63's contract case with the backflow branch (GPU, `tests/gpu-ladder/d463.test.ts`, the same run of test:gpu-ladder, 2026-11-01).** The rest state's outflow faces carry tiny velocities of either sign, so the branch fires there too. D4-79's rows still pass, by more, and the slow late decay that D4-89 recorded (and 15.2 measured: flat over 15000-20000) is gone:
+
+| | GPU at 0.02 before (15.2) | GPU at 0.02 with the backflow branch |
+|---|---|---|
+| (a) L2(p′)/first, max over 1000-2000 (≤ 2) | 0.778 | **0.445** |
+| (a) L2(p′)/first at 20000 (≤ 2) | 0.486 | **0.0090** |
+| (b) weighted residual 20000 / 10000 (≤ 1) | 0.491 | **0.163** |
+| (b) weighted residual 20000 / 100 (≤ 1) | 0.211 | **0.0325** |
+| signature: peak max \|p′\|/first (< 100) | 4.21 | 4.21 |
+| weighted residual at 100 / 1000 / 2000 | 1.809 / 2.272 / 2.595 | 1.809 / 2.122 / 2.234 |
+| weighted residual at 10000 / 15000 / 20000 | 0.777 / 0.358 / 0.382 | 0.360 / 0.160 / 0.0588 |
+| its log-linear trend over 15000-20000, per 1000 iterations | 0.994 | **0.820** |
+
+So part of what D4-89 recorded as the contract case's slow late decay was the outflow feeding its own state back in. The rows without an outflow face are unchanged in the same run (L1, B, L7: iteration ratio 1.779, L8: 0.754 %).
