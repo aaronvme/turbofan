@@ -576,6 +576,8 @@ function handle(a: App, m: ToWorker) {
     case 'init':
       return;
     case 'debug':
+      // D4-98 item 4: the browser suite's controls only; a production build ignores them
+      if (import.meta.env.PROD) return;
       if (m.frameCpuMs !== undefined) a.debugFrameCpuMs = Math.max(0, m.frameCpuMs);
       if (m.knifeEdge !== undefined) a.view.setDebugFlags({ noKnifeEdge: !m.knifeEdge });
       if (m.simSteps === null) a.simSteps.realTime();
