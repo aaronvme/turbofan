@@ -545,6 +545,10 @@ describe('flow visuals', () => {
   // when its floor-on alpha is at least half its floor-off alpha (the anti-aliased edge's middle is
   // the floor's edge). At most MAX_MISMATCH of the compared pixels may disagree with the mirror,
   // for each of p, rho, T and Mach at both levers, over at least MIN_COMPARED of the footprint.
+  // MAX_MISMATCH was stated at 2 % before the first run, which showed the shipped floor at 0.0 % at
+  // both levers and V2 under it (T 0.6 % at idle, 1.1 % at take-off): looser than the comparison
+  // needs, since the mirror is the shader's own rule and EDGE leaves the entries' rounding out. It
+  // is 0.2 % now, a stricter bar set after that run (reports/scratch/polish/floor-*.txt).
   it('W2V-I8 / W2V-N26: every Data quantity leaves its ambient band undrawn at idle, and its floor is the TS mirror at idle and take-off (p, rho, T, Mach; nearest LUT entry)', async ({
     annotate,
   }) => {
@@ -562,7 +566,7 @@ describe('flow visuals', () => {
     const MIN_IN_BAND_FLOOR_OFF = 0.3;
     const AMBIENT_BAND = 0.05 * 255;
     /** W2V-N26: the mirror's bar, the colour distance to the map and the floor edge's margin. */
-    const MAX_MISMATCH = 0.02;
+    const MAX_MISMATCH = 0.002;
     const MIN_COMPARED = 0.3;
     const ON_CURVE = 4;
     const EDGE = 1.5;
@@ -663,7 +667,7 @@ describe('flow visuals', () => {
         const on = bandOn / footprint;
         const pct = (x: number, of: number) => `${((100 * x) / of).toFixed(1)} %`;
         rows.push(
-          `${at} ${q}: ${String(footprint)} px; in the ambient band ${pct(bandOff, footprint)} floor off, ${pct(bandOn, footprint)} with the floor; drawn ${pct(drawn, footprint)}; against the mirror over ${pct(compared, footprint)} of it: drawn ${pct(gpuDrawn, compared)} (mirror ${pct(mirrorDrawn, compared)}), ${pct(mismatch, compared)} disagree${gated ? '' : ' (reported, not gated)'}`,
+          `${at} ${q}: ${String(footprint)} px; in the ambient band ${pct(bandOff, footprint)} floor off, ${pct(bandOn, footprint)} with the floor; drawn ${pct(drawn, footprint)}; against the mirror over ${pct(compared, footprint)} of it: drawn ${pct(gpuDrawn, compared)} (mirror ${pct(mirrorDrawn, compared)}), ${String(mismatch)} px (${((100 * mismatch) / compared).toFixed(2)} %) disagree${gated ? '' : ' (reported, not gated)'}`,
         );
         if (!gated) continue;
         if (
