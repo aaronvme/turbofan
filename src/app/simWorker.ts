@@ -360,11 +360,11 @@ const framingOf = (m: ViewMode): Framing =>
  * D4-92 (zz): Schlieren's plume clear of the panels: entering it frames the engine and its jet in
  * the free area (an orbit, dollied out and panned). Round 7: Schlieren and Exploded (the modules
  * slid apart, which ran under the right column) frame in the free area above the dock less
- * FRAME_MARGIN_PX on every side (Schlieren touched the left column at 1920). D4-97 item 2 (W2A-I8): the cut views frame
- * the engine for their label rows, a row above and below it in the free area over the dock, at
- * no less than the minimum engine scale (U5). Leaving a framed view puts the orbit back, unless
- * the viewer moved the camera in it (W2A-N24). `again`: the area changed (the dock's legend, a
- * resize), so the same framing is redone from the orbit before it.
+ * FRAME_MARGIN_PX on every side (Schlieren touched the left column at 1920). D4-97 item 2
+ * (W2A-I8): the cut views frame the engine for their label rows, a row above and below it in the
+ * free area over the dock, at no less than the minimum engine scale (U5). Leaving a framed view
+ * puts the orbit back, unless the viewer moved the camera in it (W2A-N24). `again`: the area
+ * changed (the dock's legend, a resize), so the same framing is redone from the orbit before it.
  */
 function frameView(a: App, to: Framing, again = false) {
   if (to === a.framing && !again) return;
