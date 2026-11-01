@@ -24,6 +24,12 @@ export function easeInOut(t: number): number {
  */
 export const INTAKE_LEAD = 0.75;
 
+/**
+ * The exploded view's gap per rank, m (the view's own; round 7 moved it here from engineView.ts,
+ * unchanged, so the worker frames Exploded on the same offsets).
+ */
+export const EXPLODE_GAP = 0.22;
+
 /** Axial offset per module, m, at explode amount t in [0, 1] (eased) and `gap` per rank. */
 export function explodeOffsets(
   def: EngineDefinition,

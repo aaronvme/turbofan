@@ -149,6 +149,52 @@ export function framedOrbit(
 
 type Box = { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
 
+/**
+ * Round 7 (critic 17's visual notes): the margin left round Schlieren's and Exploded's framed
+ * content inside the free area above the dock, CSS px (Schlieren's nacelle touched the left column
+ * at 1920; Exploded, unframed, ran under the right column).
+ */
+export const FRAME_MARGIN_PX = 24;
+/** Schlieren's and Exploded's framing zooms out at most this much (the engine stays the subject). */
+export const FRAMED_MIN_SCALE = 0.6;
+
+/** A box less a margin on every side (at least 1 px left). */
+export function inset(b: Box, px: number): Box {
+  return { x: b.x + px, y: b.y + px, w: Math.max(1, b.w - 2 * px), h: Math.max(1, b.h - 2 * px) };
+}
+
+/**
+ * An orbit whose content (`project` gives its screen box at an orbit) lies inside `area`, by
+ * framedOrbit, re-projected after each pass (a dolly shrinks the near parts more than the far
+ * ones, so one pass leaves a residual). Never below `minScale` of the starting orbit's size, never
+ * zoomed in.
+ */
+export function fitOrbit(
+  s: OrbitState,
+  project: (o: OrbitState) => Box | null,
+  canvas: { readonly w: number; readonly h: number },
+  area: Box,
+  fovDeg: number,
+  minScale: number,
+  passes = 3,
+): OrbitState {
+  let o = s;
+  for (let k = 0; k < passes; k++) {
+    const box = project(o);
+    if (box === null) return o;
+    // what is left of the minimum scale after the passes so far
+    o = framedOrbit(
+      o,
+      box,
+      canvas,
+      area,
+      fovDeg,
+      Math.min(1, (minScale * o.distance) / s.distance),
+    );
+  }
+  return o;
+}
+
 /** D4-97 item 2: the area the engine may fill in a cut view: the free area less a label row above and below. */
 export function rowsInset(free: Box, rowPx: number): Box {
   return { x: free.x, y: free.y + rowPx, w: free.w, h: Math.max(1, free.h - 2 * rowPx) };
@@ -170,13 +216,5 @@ export function cutViewOrbit(
   passes = 3,
 ): OrbitState {
   const area = rowsInset(rows, UI_LEVELS.calloutRowPx);
-  let o = s;
-  for (let k = 0; k < passes; k++) {
-    const box = project(o);
-    if (box === null) return o;
-    // what is left of the minimum scale after the passes so far
-    const minScale = Math.min(1, (UI_LEVELS.cutViewMinScale * o.distance) / s.distance);
-    o = framedOrbit(o, box, canvas, area, fovDeg, minScale);
-  }
-  return o;
+  return fitOrbit(s, project, canvas, area, fovDeg, UI_LEVELS.cutViewMinScale, passes);
 }

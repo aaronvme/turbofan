@@ -3,6 +3,7 @@
 // the cutaway wedge opens), and projected to CSS pixels with the camera's view-projection matrix.
 
 import { radiusAt, type ComponentId, type EngineDefinition } from '../contracts/engine';
+import { explodeOffsets } from '../geometry/explode';
 import type { ViewMode } from '../contracts/ui';
 
 export interface WorldAnchor {
@@ -180,6 +181,31 @@ export function engineRings(def: EngineDefinition, xEnd: number): [number, numbe
     for (let j = 0; j < 16; j++) {
       const t = (2 * Math.PI * j) / 16;
       out.push([x, r * Math.cos(t), r * Math.sin(t)]);
+    }
+  }
+  return out;
+}
+
+/**
+ * Round 7 (Exploded's framing): points round the exploded engine's outside, each module's casing
+ * over its length, slid by its explode offset at full explode (geometry/explode.ts); the intake at
+ * the nacelle's outside, the ring it shows. Rings of 16 for its screen box.
+ */
+export function explodedRings(def: EngineDefinition, gap: number): [number, number, number][] {
+  const off = explodeOffsets(def, 1, gap);
+  const curves = def.flowpath.curves;
+  const out: [number, number, number][] = [];
+  for (const c of def.flowpath.components) {
+    for (let k = 0; k <= 4; k++) {
+      const x = c.xStart + ((c.xEnd - c.xStart) * k) / 4;
+      const casing = radiusAt(curves[c.casing], x);
+      const outer = c.id === 'inlet' ? radiusAt(curves.nacelleOuter, x) : null;
+      const r = Math.max(casing ?? 0, outer ?? 0);
+      if (r <= 0) continue;
+      for (let j = 0; j < 16; j++) {
+        const t = (2 * Math.PI * j) / 16;
+        out.push([x + off[c.id], r * Math.cos(t), r * Math.sin(t)]);
+      }
     }
   }
   return out;

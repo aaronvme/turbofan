@@ -35,7 +35,7 @@ import {
   type EngineGeometry,
 } from '../geometry/engineGeometry';
 import { cutawayWedge, wrapAngle } from '../geometry/cutaway';
-import { easeInOut, explodeOffsets } from '../geometry/explode';
+import { EXPLODE_GAP, easeInOut, explodeOffsets } from '../geometry/explode';
 import {
   advanceAngle,
   fanTimeCopies,
@@ -362,7 +362,6 @@ export interface DebugFlags {
 
 const FPS = 60;
 const CUT_WIDTH = (100 * Math.PI) / 180;
-const EXPLODE_GAP = 0.22;
 const TRANSITION_S = 1.4;
 
 /** The fan blades' axis-aligned box over every angle (a cylinder about x), m. */

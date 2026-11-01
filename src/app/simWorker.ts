@@ -30,10 +30,12 @@ import {
   calloutShownIn,
   componentAnchors,
   engineRings,
+  explodedRings,
   projectPoint,
   screenBox,
 } from '../hud/anchors';
 import { FIELD_EXTENTS } from '../contracts/flow';
+import { EXPLODE_GAP } from '../geometry/explode';
 import { createMockFlowField } from '../mocks/mockFlowField';
 import { createEngineView, type EngineView } from '../render/engineView';
 import { LOOK_PRESETS } from '../render/presets';
@@ -59,9 +61,12 @@ import {
 } from '../shell/warmUp';
 import type { RasterReply, RasterRequest } from './mockRasterWorker';
 import {
+  FRAME_MARGIN_PX,
+  FRAMED_MIN_SCALE,
   applyOrbit,
   cutViewOrbit,
-  framedOrbit,
+  fitOrbit,
+  inset,
   orbitFromPose,
   orbitPose,
   type OrbitState,
@@ -102,8 +107,8 @@ const calloutGeo = calloutGeometry(ENGINE_DEFINITION);
 const ENGINE_RINGS = engineRings(ENGINE_DEFINITION, 2.75);
 /** Schlieren's content: the engine and the near field's jet (its framing, D4-92 zz). */
 const SCHLIEREN_RINGS = engineRings(ENGINE_DEFINITION, FIELD_EXTENTS.near.xMax);
-/** Schlieren's framing zooms out at most this much (the engine stays the subject). */
-const SCHLIEREN_MIN_SCALE = 0.6;
+/** Exploded's content: the modules slid apart (its framing, round 7). */
+const EXPLODED_RINGS = explodedRings(ENGINE_DEFINITION, EXPLODE_GAP);
 
 const median = (xs: readonly number[]): number | null => {
   if (xs.length === 0) return null;
@@ -342,15 +347,20 @@ function projectAnchors(a: App): AxialAnchor[] {
   });
 }
 
-type Framing = 'schlieren' | 'cut' | null;
+type Framing = 'schlieren' | 'exploded' | 'cut' | null;
 
-/** The framing a view mode has: Schlieren's (D4-92 zz), the cut views' rows (D4-97 item 2). */
+/**
+ * The framing a view mode has: Schlieren's (D4-92 zz), Exploded's (round 7), the cut views' rows
+ * (D4-97 item 2). Realistic keeps the viewer's camera.
+ */
 const framingOf = (m: ViewMode): Framing =>
-  m === 'schlieren' ? 'schlieren' : m === 'cutaway' || m === 'data' ? 'cut' : null;
+  m === 'schlieren' || m === 'exploded' ? m : m === 'cutaway' || m === 'data' ? 'cut' : null;
 
 /**
  * D4-92 (zz): Schlieren's plume clear of the panels: entering it frames the engine and its jet in
- * the free area (an orbit, dollied out and panned). D4-97 item 2 (W2A-I8): the cut views frame
+ * the free area (an orbit, dollied out and panned). Round 7: Schlieren and Exploded (the modules
+ * slid apart, which ran under the right column) frame in the free area above the dock less
+ * FRAME_MARGIN_PX on every side (Schlieren touched the left column at 1920). D4-97 item 2 (W2A-I8): the cut views frame
  * the engine for their label rows, a row above and below it in the free area over the dock, at
  * no less than the minimum engine scale (U5). Leaving a framed view puts the orbit back, unless
  * the viewer moved the camera in it (W2A-N24). `again`: the area changed (the dock's legend, a
@@ -362,22 +372,23 @@ function frameView(a: App, to: Framing, again = false) {
   if (a.orbitBeforeFraming !== null) a.orbit = a.orbitBeforeFraming;
   a.orbitBeforeFraming = null;
   a.framing = to;
-  const area = to === 'schlieren' ? a.free : to === 'cut' ? (a.rows ?? a.free) : null;
+  // the cut views and (round 7) Schlieren and Exploded frame in the free area above the dock
+  const area = a.rows ?? a.free;
   if (to === null || area === null) return;
   const start = a.orbit;
   const canvas = { w: a.size.width, h: a.size.height };
-  const rings = to === 'schlieren' ? SCHLIEREN_RINGS : ENGINE_RINGS;
+  const rings =
+    to === 'schlieren' ? SCHLIEREN_RINGS : to === 'exploded' ? EXPLODED_RINGS : ENGINE_RINGS;
   const project = (o: OrbitState) => {
     const pose = orbitPose(o);
     a.view.setCameraPose(pose.position, pose.target);
     return screenBox(viewProjection(a), rings, canvas.w, canvas.h);
   };
-  if (to === 'cut') a.orbit = cutViewOrbit(start, project, canvas, area, a.view.camera.fov);
-  else {
-    const box = project(start);
-    if (box === null) return;
-    a.orbit = framedOrbit(start, box, canvas, area, a.view.camera.fov, SCHLIEREN_MIN_SCALE);
-  }
+  const fov = a.view.camera.fov;
+  a.orbit =
+    to === 'cut'
+      ? cutViewOrbit(start, project, canvas, area, fov)
+      : fitOrbit(start, project, canvas, inset(area, FRAME_MARGIN_PX), fov, FRAMED_MIN_SCALE);
   a.orbitBeforeFraming = start;
 }
 
