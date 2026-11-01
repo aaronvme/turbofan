@@ -1066,7 +1066,8 @@ svg text {
   background: #fff;
 }
 .legend {
-  width: min(380px, 100%);
+  /* round 7: 440 px keeps the floor note, which names the dashed frame, on one line */
+  width: min(440px, 100%);
   padding: 7px 12px 6px;
   background: var(--panel);
   backdrop-filter: blur(14px);

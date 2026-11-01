@@ -64,6 +64,9 @@ function callable(a: Anchor, reserved: readonly Rect[]): boolean {
   return !reserved.some((r) => a.x >= r.x && a.x <= r.x + r.w && a.y >= r.y && a.y <= r.y + r.h);
 }
 
+/** Round 7: an empty reserved box (an annunciator strip with nothing lit) reserves nothing. */
+const solid = (reserved: readonly Rect[]): Rect[] => reserved.filter((r) => r.w > 0 && r.h > 0);
+
 export const overlaps = (a: Rect, b: Rect, gap = 0): boolean =>
   a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
 
@@ -121,12 +124,13 @@ export function layoutCallouts(
   anchors: readonly Anchor[],
   size: (id: string) => { readonly w: number; readonly h: number },
   viewport: { readonly w: number; readonly h: number },
-  reserved: readonly Rect[] = [],
+  reservedIn: readonly Rect[] = [],
   /** Places tried before the offsets (D4-92 zz: the cut views' row places). */
   preferred: (id: string) => readonly Rect[] = () => [],
   /** D4-97 item 2: only the preferred places (the cut views' rows), no offsets. */
   preferredOnly = false,
 ): PlacedCallout[] {
+  const reserved = solid(reservedIn);
   const order = anchors
     .filter((a) => callable(a, reserved))
     .sort((a, b) => b.priority - a.priority || (a.id < b.id ? -1 : 1));
@@ -281,18 +285,24 @@ export function layoutAxial(
   anchors: readonly AxialAnchor[],
   size: (id: string) => { readonly w: number; readonly h: number },
   viewport: { readonly w: number; readonly h: number },
-  reserved: readonly Rect[],
+  reservedIn: readonly Rect[],
   band: Rect,
 ): PlacedCallout[] {
+  const reserved = solid(reservedIn);
   const vis = anchors
     .filter((a) => callable(a, reserved))
     .sort((a, b) => a.axial - b.axial || (a.id < b.id ? -1 : 1));
-  // the rows' limits: under the full-width bar at the top, over the one at the bottom
+  // the rows' limits: under the full-width bar at the top, over the one at the bottom (round 7:
+  // a bar inset from the screen's edge counts too, the app's top bar at y = 8 among them; a row
+  // pushed into it was hidden whole at 1366)
   const wide = reserved.filter((r) => r.w > viewport.w / 2);
-  const topLimit = Math.max(0, ...wide.filter((r) => r.y <= 1).map((r) => r.y + r.h + GAP));
+  const topLimit = Math.max(
+    0,
+    ...wide.filter((r) => r.y + r.h <= viewport.h / 4).map((r) => r.y + r.h + GAP),
+  );
   const bottomLimit = Math.min(
     viewport.h,
-    ...wide.filter((r) => r.y + r.h >= viewport.h - 1).map((r) => r.y - GAP),
+    ...wide.filter((r) => r.y >= (3 * viewport.h) / 4).map((r) => r.y - GAP),
   );
   const rows = (parity: number): Map<string, Rect> => {
     const out = new Map<string, Rect>();
@@ -328,7 +338,10 @@ export function layoutAxial(
         if (b === undefined) continue;
         b.x = Math.min(b.x, hi - b.w, next === undefined ? Infinity : next.x - b.w - GAP);
       }
-      for (const b of boxes) out.set(b.a.id, { x: b.x, y: b.y, w: b.w, h: b.h });
+      // a row the limits pushed onto the engine has no room: never on the section (D4-97 item 2)
+      for (const b of boxes)
+        if (above ? b.y + b.h <= band.y : b.y >= band.y + band.h)
+          out.set(b.a.id, { x: b.x, y: b.y, w: b.w, h: b.h });
     }
     return out;
   };
@@ -348,7 +361,14 @@ export function layoutAxial(
       true,
     );
   };
-  // the shown labels by priority rank, then their count, then fewer crossings
+  // the shown labels by priority rank, then their count, then fewer crossings, then (round 7)
+  // shorter leaders: of two equal layouts, the nearer row (a lone label at 1366 with the drawer
+  // open took the far row, a 265 px leader across the section)
+  const leaders = (p: readonly PlacedCallout[]) =>
+    p.reduce((sum, q) => {
+      const e = leaderEnd(q.anchor, q.box);
+      return sum + Math.hypot(e.x - q.anchor.x, e.y - q.anchor.y);
+    }, 0);
   const rank = (p: readonly PlacedCallout[]) =>
     [...vis]
       .sort((a, b) => b.priority - a.priority)
@@ -358,7 +378,8 @@ export function layoutAxial(
   tries.sort(
     (p, q) =>
       (rank(q) > rank(p) ? 1 : rank(q) < rank(p) ? -1 : 0) ||
-      leaderCrossings(p) - leaderCrossings(q),
+      leaderCrossings(p) - leaderCrossings(q) ||
+      leaders(p) - leaders(q),
   );
   return tries[0] ?? [];
 }
