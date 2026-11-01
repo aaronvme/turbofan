@@ -398,7 +398,7 @@ describe('the app in Chrome', () => {
           const note = document.querySelector('.overlay .legend-floor-note');
           const lineH = note === null ? 0 : parseFloat(getComputedStyle(note).lineHeight);
           if (note !== null && note.getBoundingClientRect().height > 1.5 * lineH)
-            layout.push(`${mode}: the legend's floor note wraps (${note.textContent ?? ''})`);
+            layout.push(`${mode}: the legend's floor note wraps (${note.textContent})`);
           const shownIds = [...document.querySelectorAll<HTMLElement>('.overlay .callout[data-id]')]
             .filter(visible)
             .map((el) => el.dataset.id);
