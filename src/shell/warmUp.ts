@@ -189,8 +189,7 @@ export function createWarmScheduler(): WarmScheduler {
         preparing = null;
       }
       // the asked view's own bound: past it, a slot every frame whatever the last frame's CPU
-      const bound = preparing !== null && waited >= COLD_SWITCH_WAIT_FRAMES;
-      if (bound) return slot(preparing.id, frame);
+      if (preparing !== null && waited >= COLD_SWITCH_WAIT_FRAMES) return slot(preparing.id, frame);
       if (frame - lastSlot < SLOT_EVERY || cpuMs > SLOT_FRAME_CPU_MS) return null;
       const suspended = clock.nowMs < quietUntil;
       for (;;) {

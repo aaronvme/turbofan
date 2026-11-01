@@ -41,6 +41,7 @@ import { sanitizeFlowStatus, type FlowStatus } from '../contracts/sim';
 import type { RenderState } from '../contracts/ui';
 import type { CycleState } from '../contracts/cycle';
 import { createSimCore, type SimCore } from '../shell/simCore';
+import { createSimStepper, type SimStepper } from '../shell/simSteps';
 import { createFieldSwitch, type FieldSwitch } from '../shell/fieldSwitch';
 import { cutPlaneQuantity, flowModeFor } from '../shell/viewState';
 import { createRasterScheduler, type RasterScheduler } from '../shell/mockRaster';
@@ -156,6 +157,8 @@ interface App {
   rows: Rect | null;
   /** The browser suite's steady frame CPU (the `debug` message; 0: none), ms. */
   debugFrameCpuMs: number;
+  /** D4-98 item 2: the sim's wall step, the frame time or the browser suite's fixed steps. */
+  simSteps: SimStepper;
   size: { width: number; height: number };
   /** The device pixel ratio from the main thread, and the one rendered at (D4-85's cap). */
   dpr: number;
@@ -449,15 +452,18 @@ function loop(a: App) {
       const c0 = performance.now();
       // a throwing model is a bug: stop the sim, keep rendering, say so (never silent): the
       // overlay annunciates SIM STOPPED with this message (W2A-I1; src/shell/faults.ts)
+      let simDtS = 0;
       const fault = stepFault(() => {
-        a.core.advance(dt);
+        simDtS = a.core.advance(a.simSteps.next(dt));
       });
       if (fault !== null) {
         a.simFailed = true;
         pushError(a, fault);
         post({ type: 'sim-stopped', message: fault });
       }
-      held = a.core.state().gasPathSolve.status === 'held';
+      // a frame that did not step the sim (paused, or held between the suite's fixed batches)
+      // is not a held step (W2F-N5's held frame cost)
+      held = simDtS > 0 && a.core.state().gasPathSolve.status === 'held';
       cycleMs.push(performance.now() - c0, held);
     }
     const state = a.core.state();
@@ -530,6 +536,7 @@ function loop(a: App) {
         warmUpMs: a.warmUpMs,
         warmUpSteps: a.warmUpSteps,
         lostSolveCause: a.cycle.lostSolveCause(),
+        fixedSteps: a.simSteps.state(),
         errors: [...a.errors],
         adapter: `${a.view.device.info.vendor} ${a.view.device.info.architecture}`.trim(),
         triangles: stats.triangles,
@@ -571,6 +578,9 @@ function handle(a: App, m: ToWorker) {
     case 'debug':
       if (m.frameCpuMs !== undefined) a.debugFrameCpuMs = Math.max(0, m.frameCpuMs);
       if (m.knifeEdge !== undefined) a.view.setDebugFlags({ noKnifeEdge: !m.knifeEdge });
+      if (m.simSteps === null) a.simSteps.realTime();
+      else if (m.simSteps !== undefined && !a.simSteps.add(m.simSteps.dtS, m.simSteps.frames))
+        pushError(a, `debug: fixed sim steps ${JSON.stringify(m.simSteps)} cannot be stepped`);
       return;
     case 'resize':
       a.size = { width: m.width, height: m.height };
@@ -679,6 +689,7 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     free: null,
     rows: null,
     debugFrameCpuMs: 0,
+    simSteps: createSimStepper(),
     size: { width: m.width, height: m.height },
     dpr: m.dpr,
     renderDpr,

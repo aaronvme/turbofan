@@ -47,10 +47,17 @@ export type ToWorker =
   | { readonly type: 'field'; readonly source: FieldChoice }
   /**
    * The browser suite's controls, never sent by the app: a steady frame CPU (the worker pads each
-   * frame's CPU to at least this many ms: U4's cold switch at any frame CPU, W2A-I7) and the knife
-   * edge off (W2A-I10's S1 control, EngineView's noKnifeEdge).
+   * frame's CPU to at least this many ms: U4's cold switch at any frame CPU, W2A-I7), the knife
+   * edge off (W2A-I10's S1 control, EngineView's noKnifeEdge) and (D4-98 item 2, W2H-I5) the sim
+   * on fixed steps: `frames` more frames of `dtS` each, the sim held when none are left (null: back
+   * to the real frame time; src/shell/simSteps.ts).
    */
-  | { readonly type: 'debug'; readonly frameCpuMs?: number; readonly knifeEdge?: boolean };
+  | {
+      readonly type: 'debug';
+      readonly frameCpuMs?: number;
+      readonly knifeEdge?: boolean;
+      readonly simSteps?: { readonly dtS: number; readonly frames: number } | null;
+    };
 
 export type CameraPresetId = 'threeQuarterFront' | 'side' | 'hero' | 'hotSection';
 
@@ -140,6 +147,11 @@ export interface AppDiagnostics {
   }[];
   /** W2F-I1: why the last matched solve was lost (null: none lost since the reset). */
   readonly lostSolveCause: string | null;
+  /**
+   * D4-98 item 2: the browser suite's fixed sim steps, the frames stepped so far and those left
+   * (null: the sim steps the real frame time, as the app does).
+   */
+  readonly fixedSteps: { readonly frames: number; readonly left: number } | null;
   /** The worker's own errors so far (GPU errors, a throwing step), newest last, at most 8. */
   readonly errors: readonly string[];
   readonly adapter: string;
