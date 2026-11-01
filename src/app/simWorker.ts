@@ -56,6 +56,7 @@ import {
   bootWarmed,
   configFor,
   createWarmScheduler,
+  nextWarmBudget,
   shownView,
   type WarmScheduler,
 } from '../shell/warmUp';
@@ -94,13 +95,6 @@ const COST_WINDOW = 120;
 const MAX_ERRORS = 8;
 /** Snapshot posts that may fail in a row before the overlay is told the app cannot go on. */
 const MAX_FAILED_POSTS = 3;
-/**
- * D4-91: the CPU a warm frame may spend on objects not drawn before (three's node builds), ms.
- * With the warm frame's draws and the real frame it stays inside a 16.7 ms frame; one object is
- * always let through, so a single slow build (a large material) can exceed it once.
- */
-const WARM_BUDGET_MS = 4;
-
 const anchors = componentAnchors(ENGINE_DEFINITION);
 const calloutGeo = calloutGeometry(ENGINE_DEFINITION);
 /** The engine's outside to the core nozzle (the cut views' label rows). */
@@ -181,6 +175,9 @@ interface App {
   warmCpuMaxMs: number;
   /** The slowest warm frame's configuration and its slowest object (where a hitch comes from). */
   warmSlowest: string;
+  /** D4-100: the warm frames' CPU so far, and the most one frame's warm frames took, ms. */
+  warmCpuMs: number;
+  warmSlotCpuMaxMs: number;
   /** D4-95: the background waited in the last frame (an input or a switch less than 1 s ago). */
   warmSuspended: boolean;
   appliedView: RenderState | null;
@@ -411,31 +408,43 @@ async function startSolver(a: App): Promise<GpuFlowSolver> {
 }
 
 /**
- * D4-91: one warm frame in this frame's slot, if it has one (src/shell/warmUp.ts): the asked
- * view's configuration first, then the background order. A warm frame that throws is an error,
- * said, and its configuration is given up on (shown anyway), never a stuck "preparing". D4-95:
- * the background waits while a switch is pending (the asked view not shown yet, or its transition
- * not settled) and for a second after it and after any input (handle()).
+ * D4-91: the warm frames in this frame's slot, if it has one (src/shell/warmUp.ts): the asked
+ * view's configuration first, then the background order; one warm frame, or (D4-100: the asked
+ * view past its wait) several, until their CPU reaches the slot's cap (nextWarmBudget). A warm
+ * frame that throws is an error, said, and its configuration is given up on (shown anyway), never
+ * a stuck "preparing". D4-95: the background waits while a switch is pending (the asked view not
+ * shown yet, or its transition not settled) and for a second after it and after any input
+ * (handle()).
  */
 function warmSlot(a: App, frame: number, lastFrameMs: number) {
   const nowMs = performance.now();
   const switchPending = a.preparing !== null || a.settledFrames === 0;
-  const id = a.warm.next(frame, lastFrameMs, configFor(a.core.view), { nowMs, switchPending });
+  const slot = a.warm.slot(frame, lastFrameMs, configFor(a.core.view), { nowMs, switchPending });
   a.warmSuspended = a.warm.suspended(nowMs);
-  if (id === null) return;
+  if (slot === null) return;
+  const { id } = slot;
+  let spent = 0;
   try {
-    const r = a.view.warmFrame(WARM_CONFIGS[id], { cpuMs: WARM_BUDGET_MS });
-    a.warmFrames++;
-    if (r.cpuMs > a.warmCpuMaxMs) {
-      a.warmCpuMaxMs = r.cpuMs;
-      a.warmSlowest = `${id}: ${r.slowest.name} ${r.slowest.ms.toFixed(0)} ms, outside the draws ${r.outsideMs.toFixed(0)} ms`;
+    let budget = nextWarmBudget(slot, 0, null);
+    while (budget > 0) {
+      const r = a.view.warmFrame(WARM_CONFIGS[id], { cpuMs: budget });
+      a.warmFrames++;
+      spent += r.cpuMs;
+      if (r.cpuMs > a.warmCpuMaxMs) {
+        a.warmCpuMaxMs = r.cpuMs;
+        a.warmSlowest = `${id}: ${r.slowest.name} ${r.slowest.ms.toFixed(0)} ms, outside the draws ${r.outsideMs.toFixed(0)} ms`;
+      }
+      if (r.done) a.warm.done(id);
+      budget = nextWarmBudget(slot, spent, r);
     }
-    if (r.done) a.warm.done(id);
   } catch (e) {
     a.warm.done(id);
     const msg = `warm-up ${id}: ${e instanceof Error ? e.message : String(e)}`;
     pushError(a, msg);
     console.warn(msg);
+  } finally {
+    a.warmCpuMs += spent;
+    a.warmSlotCpuMaxMs = Math.max(a.warmSlotCpuMaxMs, spent);
   }
 }
 
@@ -537,6 +546,8 @@ function loop(a: App) {
           ...a.warm.state(),
           frames: a.warmFrames,
           cpuMaxMs: a.warmCpuMaxMs,
+          cpuMs: a.warmCpuMs,
+          slotCpuMaxMs: a.warmSlotCpuMaxMs,
           slowest: a.warmSlowest,
           gaveUp: a.warm.gaveUp(),
           suspended: a.warmSuspended,
@@ -716,6 +727,8 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     warmFrames: 0,
     warmCpuMaxMs: 0,
     warmSlowest: '',
+    warmCpuMs: 0,
+    warmSlotCpuMaxMs: 0,
     warmSuspended: false,
     appliedView: null,
     errors: [],

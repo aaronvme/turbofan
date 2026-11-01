@@ -131,6 +131,9 @@ export interface AppDiagnostics {
     readonly queue: readonly string[];
     readonly frames: number;
     readonly cpuMaxMs: number;
+    /** D4-100: the warm frames' CPU so far, and the most one frame's warm frames took, ms. */
+    readonly cpuMs: number;
+    readonly slotCpuMaxMs: number;
     /** The slowest warm frame's configuration and its slowest new object, with its own ms. */
     readonly slowest: string;
     readonly gaveUp: readonly string[];

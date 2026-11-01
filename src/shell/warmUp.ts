@@ -17,6 +17,12 @@
 // already waits on "Preparing", so the frame budget is the cheaper thing to spend (D4-97's 60
 // frames and every second frame showed Data in 3.1-3.2 s at a steady 8.4-11.2 ms, over U4's 2 s).
 // The background keeps the CPU rule and SLOT_EVERY (D4-95 item 3).
+// D4-100 (U4 on AC: 2.46-2.56 s with 56-57 warm frames, each lengthening its frame past a vsync;
+// the longest gap while preparing 108-145 ms): past its wait the asked view's frame takes warm
+// frames until their CPU reaches PREPARE_FRAME_CPU_MS (nextWarmBudget), so the view's builds take a
+// few frames instead of one a frame. W2A-N29: only background slots count toward MAX_WARM_FRAMES
+// (the asked view's own give-up is its frames waited), so a cold view the viewer leaves joins the
+// queue with its background slots only.
 
 import type { RenderState, ViewMode } from '../contracts/ui';
 import type { FieldQuantityId } from '../flow/viz/fields';
@@ -73,6 +79,20 @@ export const BACKGROUND_ORDER: readonly WarmConfigId[] = [
   'data:t+tracers',
 ];
 
+/**
+ * D4-91: a warm frame's budget for objects not drawn before (three's node builds), ms: one slot's
+ * (the background's, and the asked view's in its wait). With the warm frame's draws and the real
+ * frame it stays inside a 16.7 ms frame; one object is always let through, so a single slow build
+ * (a large material) can exceed it once.
+ */
+export const WARM_BUDGET_MS = 4;
+/**
+ * D4-100: past its wait, the warm CPU the asked view's frame may take, over several warm frames,
+ * ms (one object always let through, so one slow build, 24-26 ms in the official run, can pass it).
+ * The viewer already waits on "Preparing" (D4-98), and the frame stays far inside the 1 s freeze
+ * bar (firstSwitch.test.tsx FREEZE_MS; the official run's longest gap was 108-145 ms).
+ */
+export const PREPARE_FRAME_CPU_MS = 200;
 /** A warm slot at most every this many frames (the warm frame's GPU time joins its frame's). */
 export const SLOT_EVERY = 2;
 /**
@@ -99,6 +119,31 @@ export const COLD_SWITCH_WAIT_FRAMES = 30;
 export const MAX_PREPARE_FRAMES = 800;
 /** D4-95: no background slot for this long after any input or switch, ms. */
 export const QUIET_AFTER_INPUT_MS = 1000;
+
+/** A frame's warm-up: the configuration, the warm CPU it may take, and in one or several warm frames. */
+export interface WarmSlot {
+  readonly id: WarmConfigId;
+  /** ms: WARM_BUDGET_MS (one warm frame), or PREPARE_FRAME_CPU_MS (the asked view past its wait). */
+  readonly capMs: number;
+  /** D4-100: warm frames follow one another in the frame while under the cap (nextWarmBudget). */
+  readonly several: boolean;
+}
+
+/**
+ * D4-100: the next warm frame's budget in this frame (0: no more this frame). The first takes the
+ * slot's cap; with `several`, another follows while the frame's warm CPU is under the cap and the
+ * last one drew something new without finishing (what is left then is the GPU compiling, which
+ * another warm frame in the same frame cannot hurry).
+ */
+export function nextWarmBudget(
+  slot: WarmSlot,
+  spentMs: number,
+  last: { readonly done: boolean; readonly newObjects: number } | null,
+): number {
+  if (last === null) return slot.capMs;
+  if (!slot.several || last.done || last.newObjects === 0) return 0;
+  return Math.max(0, slot.capMs - spentMs);
+}
 
 /** D4-95: the frame's time and whether a mode switch is pending, for the quiet rule. */
 export interface WarmClock {
@@ -128,9 +173,17 @@ export function configFor(view: RenderState): WarmConfigId {
 
 export interface WarmScheduler {
   /**
-   * The configuration to warm in this frame (null: no slot, or all warm): the asked view's first,
-   * then the background order, which waits while the clock says suspended (D4-95).
+   * This frame's warm-up (null: no slot, or all warm): the asked view's first, then the background
+   * order, which waits while the clock says suspended (D4-95). Past its wait the asked view's slot
+   * is several warm frames up to PREPARE_FRAME_CPU_MS (D4-100); any other, one at WARM_BUDGET_MS.
    */
+  slot(
+    frame: number,
+    lastFrameCpuMs: number,
+    asked: WarmConfigId,
+    clock: WarmClock,
+  ): WarmSlot | null;
+  /** slot()'s configuration. */
   next(
     frame: number,
     lastFrameCpuMs: number,
@@ -145,8 +198,8 @@ export interface WarmScheduler {
   done(id: WarmConfigId): void;
   isWarm(id: WarmConfigId): boolean;
   /**
-   * The configurations given up on after MAX_WARM_FRAMES slots (the background), or (the asked
-   * view) after MAX_PREPARE_FRAMES frames waited (shown anyway).
+   * The configurations given up on after MAX_WARM_FRAMES background slots, or (the asked view)
+   * after MAX_PREPARE_FRAMES frames waited (shown anyway).
    */
   gaveUp(): readonly WarmConfigId[];
   state(): { readonly warm: readonly WarmConfigId[]; readonly queue: readonly WarmConfigId[] };
@@ -173,39 +226,54 @@ export function createWarmScheduler(): WarmScheduler {
     if (!isWarm(id)) warm.push(id);
   };
   const queue = () => [...BOOT_CONFIGS, ...BACKGROUND_ORDER].filter((id) => !isWarm(id));
-  const slot = (id: WarmConfigId, frame: number) => {
-    frames.set(id, (frames.get(id) ?? 0) + 1);
+  const one = (id: WarmConfigId, frame: number): WarmSlot => {
     lastSlot = frame;
-    return id;
+    return { id, capMs: WARM_BUDGET_MS, several: false };
+  };
+  // W2A-N29: only a background slot counts toward MAX_WARM_FRAMES
+  const background = (id: WarmConfigId, frame: number): WarmSlot => {
+    frames.set(id, (frames.get(id) ?? 0) + 1);
+    return one(id, frame);
+  };
+  const slot = (
+    frame: number,
+    cpuMs: number,
+    asked: WarmConfigId,
+    clock: WarmClock,
+  ): WarmSlot | null => {
+    if (clock.switchPending) quiet(clock.nowMs + QUIET_AFTER_INPUT_MS);
+    if (isWarm(asked)) preparing = null;
+    else if (preparing?.id !== asked) preparing = { id: asked, since: frame };
+    const waited = preparing === null ? 0 : frame - preparing.since;
+    if (preparing !== null && waited >= MAX_PREPARE_FRAMES) {
+      giveUp(preparing.id);
+      preparing = null;
+    }
+    // the asked view's own bound: past it, a slot every frame whatever the last frame's CPU,
+    // several warm frames up to the cap (D4-100)
+    if (preparing !== null && waited >= COLD_SWITCH_WAIT_FRAMES) {
+      lastSlot = frame;
+      return { id: preparing.id, capMs: PREPARE_FRAME_CPU_MS, several: true };
+    }
+    if (frame - lastSlot < SLOT_EVERY || cpuMs > SLOT_FRAME_CPU_MS) return null;
+    const suspended = clock.nowMs < quietUntil;
+    for (;;) {
+      // while suspended only a cold switch's own view (the one the viewer waits for)
+      const id = !isWarm(asked) ? asked : suspended ? undefined : queue()[0];
+      if (id === undefined) return null;
+      // the asked view's give-up is its frames waited (MAX_PREPARE_FRAMES), not its slots
+      if (id === asked) return one(id, frame);
+      const n = frames.get(id) ?? 0;
+      if (n >= MAX_WARM_FRAMES) {
+        giveUp(id);
+        continue;
+      }
+      return background(id, frame);
+    }
   };
   return {
-    next(frame, cpuMs, asked, clock) {
-      if (clock.switchPending) quiet(clock.nowMs + QUIET_AFTER_INPUT_MS);
-      if (isWarm(asked)) preparing = null;
-      else if (preparing?.id !== asked) preparing = { id: asked, since: frame };
-      const waited = preparing === null ? 0 : frame - preparing.since;
-      if (preparing !== null && waited >= MAX_PREPARE_FRAMES) {
-        giveUp(preparing.id);
-        preparing = null;
-      }
-      // the asked view's own bound: past it, a slot every frame whatever the last frame's CPU
-      if (preparing !== null && waited >= COLD_SWITCH_WAIT_FRAMES) return slot(preparing.id, frame);
-      if (frame - lastSlot < SLOT_EVERY || cpuMs > SLOT_FRAME_CPU_MS) return null;
-      const suspended = clock.nowMs < quietUntil;
-      for (;;) {
-        // while suspended only a cold switch's own view (the one the viewer waits for)
-        const id = !isWarm(asked) ? asked : suspended ? undefined : queue()[0];
-        if (id === undefined) return null;
-        // the asked view's give-up is its frames waited (MAX_PREPARE_FRAMES), not its slots
-        if (id === asked) return slot(id, frame);
-        const n = frames.get(id) ?? 0;
-        if (n >= MAX_WARM_FRAMES) {
-          giveUp(id);
-          continue;
-        }
-        return slot(id, frame);
-      }
-    },
+    slot,
+    next: (frame, cpuMs, asked, clock) => slot(frame, cpuMs, asked, clock)?.id ?? null,
     input(nowMs) {
       quiet(nowMs + QUIET_AFTER_INPUT_MS);
     },
