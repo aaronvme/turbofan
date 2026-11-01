@@ -1,0 +1,68 @@
+// Critic pass 18: hand mutants on a copy of trial18 (git archive, reports/scratch/c18/tree), each
+// applied alone (an exact, unique string replacement), the named test files run, the file restored.
+// Usage: node mutants.mjs [id,id,...]   (run from anywhere; writes mutants.log beside it)
+import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const tree = join(here, 'tree');
+const log = join(here, 'mutants.log');
+const M = [
+  // A. w2/followups-2
+  { id: 'K4', file: 'src/flow/gpu/params.ts', from: 'opts.cfl ?? (pre !== undefined && pre.minMach < 1 ? DEFAULT_CFL_PRECONDITIONED : DEFAULT_CFL)', to: 'opts.cfl ?? (opts.lowMachPreconditioning !== undefined && opts.lowMachPreconditioning.minMach < 1 ? DEFAULT_CFL_PRECONDITIONED : DEFAULT_CFL)', tests: ['tests/unit/flow/gpu/machCut.test.ts'] },
+  { id: 'A4', file: 'src/flow/reference/solver.ts', from: 'opts.cfl ?? (pre !== undefined && pre.minMach < 1 ? DEFAULT_CFL_PRECONDITIONED : DEFAULT_CFL)', to: 'opts.cfl ?? (given !== undefined && given.minMach < 1 ? DEFAULT_CFL_PRECONDITIONED : DEFAULT_CFL)', tests: ['tests/unit/flow/precondition.test.ts'] },
+  { id: 'T1', file: 'src/flow/viz/timingRow.ts', from: 'else if (quiet && ms > FLOW_VISUALS_BUDGET_MS)', to: 'else if (ms > FLOW_VISUALS_BUDGET_MS)', tests: ['tests/unit/flow/viz/timingRow.test.ts'] },
+  { id: 'T2', file: 'src/flow/viz/timingRow.ts', from: "return env?.VITE_UI_QUIET === '1';", to: 'return env?.VITE_UI_QUIET !== undefined;', tests: ['tests/unit/flow/viz/timingRow.test.ts'] },
+  { id: 'T3', file: 'src/flow/viz/timingRow.ts', from: 'else if (quiet && ms > FLOW_VISUALS_BUDGET_MS)', to: 'else if (!quiet && ms > FLOW_VISUALS_BUDGET_MS)', tests: ['tests/unit/flow/viz/timingRow.test.ts'] },
+  { id: 'T4', file: 'src/flow/viz/timingRow.ts', from: 'if (!(Number.isFinite(ms) && ms >= 0))', to: 'if (Number.isNaN(ms))', tests: ['tests/unit/flow/viz/timingRow.test.ts'] },
+  // B. w2/app-ui rounds 6-7
+  { id: 'W1', file: 'src/shell/warmUp.ts', from: 'export const COLD_SWITCH_WAIT_FRAMES = 30;', to: 'export const COLD_SWITCH_WAIT_FRAMES = 60;', tests: ['tests/unit/shell/warmUp.test.ts'] },
+  { id: 'W2', file: 'src/shell/warmUp.ts', from: 'if (preparing !== null && waited >= COLD_SWITCH_WAIT_FRAMES) return slot(preparing.id, frame);', to: 'if (preparing !== null && waited >= COLD_SWITCH_WAIT_FRAMES && frame - lastSlot >= SLOT_EVERY) return slot(preparing.id, frame);', tests: ['tests/unit/shell/warmUp.test.ts'] },
+  { id: 'W3', file: 'src/shell/warmUp.ts', from: '        if (id === asked) return slot(id, frame);\n', to: '', tests: ['tests/unit/shell/warmUp.test.ts'] },
+  { id: 'W4', file: 'src/shell/warmUp.ts', from: 'if (preparing !== null && waited >= MAX_PREPARE_FRAMES) {', to: 'if (preparing !== null && (frames.get(preparing.id) ?? 0) >= MAX_PREPARE_FRAMES) {', tests: ['tests/unit/shell/warmUp.test.ts'] },
+  { id: 'W5', file: 'src/shell/warmUp.ts', from: "return ids.filter((_, i) => report[i]?.done === true);", to: 'return ids.filter((_, i) => report[i] !== undefined);', tests: ['tests/unit/shell/warmUp.test.ts'] },
+  { id: 'W6', file: 'src/shell/warmUp.ts', from: 'if (shown === null || isWarm(configFor(asked)) || configFor(shown) === configFor(asked))', to: 'if (shown === null || isWarm(configFor(asked)))', tests: ['tests/unit/shell/warmUp.test.ts', 'tests/unit/ui/preparing.test.tsx'] },
+  { id: 'W7', file: 'src/shell/warmUp.ts', from: 'if (preparing !== null && waited >= COLD_SWITCH_WAIT_FRAMES) return slot(preparing.id, frame);', to: 'if (preparing !== null && waited >= COLD_SWITCH_WAIT_FRAMES && clock.nowMs >= quietUntil) return slot(preparing.id, frame);', tests: ['tests/unit/shell/warmUp.test.ts'] },
+  { id: 'S1u', file: 'src/shell/simSteps.ts', from: 'if (fixed.left === 0) return 0;', to: 'if (fixed.left === 0) return frameDtS;', tests: ['tests/unit/shell/simSteps.test.ts'] },
+  { id: 'S2u', file: 'src/shell/simSteps.ts', from: 'const okDt = dtS > 0 && dtS <= MAX_WALL_STEP_S;', to: 'const okDt = dtS > 0;', tests: ['tests/unit/shell/simSteps.test.ts'] },
+  { id: 'S3u', file: 'src/shell/simSteps.ts', from: 'left: (fixed?.left ?? 0) + frames', to: 'left: frames', tests: ['tests/unit/shell/simSteps.test.ts'] },
+  { id: 'R1', file: 'src/render/viewProjRoll.ts', from: '        curr.copy(c);\n', to: '', tests: ['tests/unit/render/viewProjRoll.test.ts'] },
+  { id: 'R2', file: 'src/render/viewProjRoll.ts', from: '        havePrev = had;\n', to: '', tests: ['tests/unit/render/viewProjRoll.test.ts'] },
+  { id: 'R3', file: 'src/render/viewProjRoll.ts', from: '        currInv.copy(ci);\n', to: '', tests: ['tests/unit/render/viewProjRoll.test.ts'] },
+  { id: 'O1', file: 'src/shell/orbit.ts', from: 'Math.min(1, (minScale * o.distance) / s.distance),', to: 'minScale,', tests: ['tests/unit/hud/calloutLayout.test.ts'] },
+  { id: 'O2', file: 'src/shell/orbit.ts', from: 'export const FRAME_MARGIN_PX = 24;', to: 'export const FRAME_MARGIN_PX = 0;', tests: ['tests/unit/hud/calloutLayout.test.ts'] },
+  { id: 'C1', file: 'src/hud/callouts.ts', from: 'reserved.filter((r) => r.w > 0 && r.h > 0);', to: 'reserved.filter(() => true);', tests: ['tests/unit/hud/calloutLayout.test.ts'] },
+  { id: 'C2', file: 'src/hud/callouts.ts', from: '...wide.filter((r) => r.y + r.h <= viewport.h / 4).map((r) => r.y + r.h + GAP),', to: '...wide.filter((r) => r.y <= 1).map((r) => r.y + r.h + GAP),', tests: ['tests/unit/hud/calloutLayout.test.ts'] },
+  { id: 'C3', file: 'src/hud/callouts.ts', from: '      leaderCrossings(p) - leaderCrossings(q) ||\n      leaders(p) - leaders(q),', to: '      leaderCrossings(p) - leaderCrossings(q),', tests: ['tests/unit/hud/calloutLayout.test.ts'] },
+  { id: 'C4', file: 'src/hud/callouts.ts', from: 'if (above ? b.y + b.h <= band.y : b.y >= band.y + band.h)', to: 'if (true)', tests: ['tests/unit/hud/calloutLayout.test.ts'] },
+  { id: 'C5', file: 'src/hud/callouts.ts', from: 'const crossing = free.filter((f) => f.t > 0).sort((p, q) => p.t - q.t);', to: 'const crossing = free.filter((f) => f.t > 0).slice(0, 1);', tests: ['tests/unit/hud/calloutLayout.test.ts'] },
+  { id: 'C6', file: 'src/hud/callouts.ts', from: '      true,\n    );\n  };', to: '      false,\n    );\n  };', tests: ['tests/unit/hud/calloutLayout.test.ts'] },
+  { id: 'D1', file: 'src/flow/viz/modes.ts', from: '? 1 : 0;', to: '? 0 : 1;', tests: ['tests/unit/flow/viz/colormaps.test.ts'] },
+  { id: 'G1', file: 'tests/browser/lib/schlierenCheck.ts', from: 'greyShareMin: 0.7,', to: 'greyShareMin: 0.3,', tests: ['tests/unit/ui/schlierenCheck.test.ts'] },
+  { id: 'G2', file: 'tests/browser/lib/schlierenCheck.ts', from: "if (!(s.jetStd >= B.jetStdMin)) out.push('jet');", to: '', tests: ['tests/unit/ui/schlierenCheck.test.ts'] },
+  { id: 'U1', file: 'src/hud/uiLevels.ts', from: 'coldSwitchMaxMs: 2000,', to: 'coldSwitchMaxMs: 2500,', tests: ['tests/unit/hud/uiLevels.test.ts'] },
+  { id: 'P1', file: 'src/hud/anchors.ts', from: '  hpt: 7,\n  lpt: 6,\n  exhaust: 5,\n  hpc: 4,', to: '  hpt: 7,\n  lpt: 6,\n  exhaust: 4,\n  hpc: 5,', tests: ['tests/unit/hud/calloutLayout.test.ts', 'tests/unit/hud/uiLevels.test.ts'] },
+  { id: 'E1', file: 'src/hud/anchors.ts', from: "const outer = c.id === 'inlet' ? radiusAt(curves.nacelleOuter, x) : null;", to: 'const outer = null;', tests: ['tests/unit/hud/calloutLayout.test.ts'] },
+];
+const want = process.argv[2]?.split(',');
+for (const m of M) {
+  if (want !== undefined && !want.includes(m.id)) continue;
+  const path = join(tree, m.file);
+  const orig = readFileSync(path, 'utf8');
+  const n = orig.split(m.from).length - 1;
+  if (n !== 1) {
+    appendFileSync(log, `${m.id} SKIP: the pattern occurs ${n} times in ${m.file}\n`);
+    continue;
+  }
+  writeFileSync(path, orig.replace(m.from, m.to));
+  const t0 = Date.now();
+  const r = spawnSync('npx', ['vitest', 'run', ...m.tests], { cwd: tree, shell: true, encoding: 'utf8' });
+  writeFileSync(path, orig);
+  const out = `${r.stdout}\n${r.stderr}`;
+  const failed = (out.match(/(\d+) failed/) ?? [])[1] ?? '0';
+  const passed = (out.match(/Tests\s+.*?(\d+) passed/) ?? [])[1] ?? '?';
+  appendFileSync(log, `${m.id} ${r.status === 0 ? 'SURVIVED' : 'KILLED'} (exit ${String(r.status)}, ${failed} failed, ${passed} passed, ${String(Math.round((Date.now() - t0) / 1000))} s) ${m.file}\n`);
+}
+appendFileSync(log, `DONE ${new Date().toISOString()}\n`);

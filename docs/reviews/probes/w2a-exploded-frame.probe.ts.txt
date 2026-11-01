@@ -1,0 +1,71 @@
+// Critic pass 18 probe (W2A-I11): Exploded's framing box (hud/anchors.ts explodedRings) against
+// what the exploded view draws (geometry/parts.ts: every part that is not a skin, slid by its
+// module's explode offset; skins are hidden at explode >= 0.02, engineView.ts:773-777). The app's
+// default orbit (the 3/4 front preset), the rows the unit test uses, FRAME_MARGIN_PX, fitOrbit.
+// Run: node --import ./tools/mesh/ts-resolve.mjs <this file as .ts>
+import { Matrix4, PerspectiveCamera, Vector3 } from 'three/webgpu';
+import { ENGINE_DEFINITION as def } from '../../../../src/engine/definition';
+import { explodedRings, screenBox } from '../../../../src/hud/anchors';
+import { EXPLODE_GAP, explodeOffsets } from '../../../../src/geometry/explode';
+import { engineWalls } from '../../../../src/geometry/walls';
+import { engineParts } from '../../../../src/geometry/parts';
+import { LOOK_PRESETS } from '../../../../src/render/presets';
+import {
+  FRAME_MARGIN_PX,
+  FRAMED_MIN_SCALE,
+  fitOrbit,
+  inset,
+  orbitFromPose,
+  orbitPose,
+  type OrbitState,
+} from '../../../../src/shell/orbit';
+
+type P3 = [number, number, number];
+const preset = LOOK_PRESETS.threeQuarterFront;
+const start = orbitFromPose(preset.camera, preset.target);
+const off = explodeOffsets(def, 1, EXPLODE_GAP);
+const walls = engineWalls(def, 3);
+const parts = engineParts(def, walls);
+const revolve = (x: number, r: number, out: P3[]) => {
+  for (let j = 0; j < 16; j++) {
+    const t = (2 * Math.PI * j) / 16;
+    out.push([x, r * Math.cos(t), r * Math.sin(t)]);
+  }
+};
+const drawn: P3[] = [];
+const skinsOnly: P3[] = [];
+for (const p of parts) {
+  const dx = p.module === null ? 0 : off[p.module];
+  const target = p.skin ? skinsOnly : drawn;
+  for (const q of p.loop) revolve(q.x + dx, Math.abs(q.r), target);
+}
+const rings = explodedRings(def, EXPLODE_GAP);
+const sizes = [
+  { canvas: { w: 1366, h: 768 }, rows: { x: 288, y: 60, w: 766, h: 470 } },
+  { canvas: { w: 1920, h: 1001 }, rows: { x: 333, y: 60, w: 1234, h: 690 } },
+];
+const boxAt = (o: OrbitState, canvas: { w: number; h: number }, pts: readonly P3[]) => {
+  const cam = new PerspectiveCamera(preset.fovDeg, canvas.w / canvas.h, 0.05, 200);
+  const pose = orbitPose(o);
+  cam.position.set(...pose.position);
+  cam.lookAt(new Vector3(...pose.target));
+  cam.updateMatrixWorld();
+  const m = new Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+  return screenBox(m.elements, pts, canvas.w, canvas.h);
+};
+const gaps = (b: { x: number; y: number; w: number; h: number } | null, a: typeof sizes[0]['rows']) =>
+  b === null
+    ? 'off screen'
+    : `left ${(b.x - a.x).toFixed(0)} right ${(a.x + a.w - b.x - b.w).toFixed(0)} top ${(b.y - a.y).toFixed(0)} bottom ${(a.y + a.h - b.y - b.h).toFixed(0)} px (box ${b.x.toFixed(0)}-${(b.x + b.w).toFixed(0)} x ${b.y.toFixed(0)}-${(b.y + b.h).toFixed(0)})`;
+console.log(`parts drawn in Exploded ${String(parts.filter((p) => !p.skin).length)}, skins hidden ${String(parts.filter((p) => p.skin).length)}: ${parts.filter((p) => p.skin).map((p) => `${p.id}(${String(p.module)})`).join(' ')}`);
+for (const { canvas, rows } of sizes) {
+  const area = inset(rows, FRAME_MARGIN_PX);
+  const shipped = fitOrbit(start, (q) => boxAt(q, canvas, rings), canvas, area, preset.fovDeg, FRAMED_MIN_SCALE);
+  const fixed = fitOrbit(start, (q) => boxAt(q, canvas, drawn), canvas, area, preset.fovDeg, FRAMED_MIN_SCALE);
+  console.log(`${String(canvas.w)}x${String(canvas.h)} area (rows less ${String(FRAME_MARGIN_PX)}) ${JSON.stringify(area)}`);
+  console.log(`  shipped (explodedRings), scale ${(start.distance / shipped.distance).toFixed(3)}:`);
+  console.log(`    its own box:        ${gaps(boxAt(shipped, canvas, rings), area)}`);
+  console.log(`    the drawn parts:    ${gaps(boxAt(shipped, canvas, drawn), area)}`);
+  console.log(`  framed on the drawn parts, scale ${(start.distance / fixed.distance).toFixed(3)}:`);
+  console.log(`    the drawn parts:    ${gaps(boxAt(fixed, canvas, drawn), area)}`);
+}

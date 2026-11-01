@@ -1,0 +1,22 @@
+// Critic pass 18 probe (W2A-N29): a cold view the viewer leaves before it is warm keeps the slots it
+// took every frame past COLD_SWITCH_WAIT_FRAMES, and the background's MAX_WARM_FRAMES cap counts
+// them: on a machine where the view's compiles take longer than ~7 s, it is given up (marked warm,
+// compiling on first use) at its first background slot, without one more warm frame.
+import { createWarmScheduler, MAX_WARM_FRAMES } from '../../../../src/shell/warmUp';
+
+for (const waitedFrames of [300, 420, 500]) {
+  const s = createWarmScheduler();
+  for (const id of ['realistic', 'realistic+tracers', 'cutaway+tracers', 'schlieren'] as const) s.done(id);
+  const calm = (f: number) => ({ nowMs: f * 16.7, switchPending: false });
+  // the viewer asks for Data and waits; its compiles never finish in that time
+  let slots = 0;
+  for (let f = 0; f < waitedFrames; f++) if (s.next(f, 11.2, 'data:mach+tracers', calm(f)) !== null) slots++;
+  // then goes back to Realistic (warm); the background reaches Data next (calm clock, light CPU)
+  let f = waitedFrames;
+  let got: string | null = null;
+  for (; f < waitedFrames + 5000 && got === null; f++) {
+    const id = s.next(f, 4, 'realistic', { nowMs: f * 16.7 + 5000, switchPending: false });
+    if (id === 'data:mach+tracers' || s.gaveUp().includes('data:mach+tracers')) got = id ?? 'none';
+  }
+  console.log(`waited ${waitedFrames} frames as the asked view (${slots} slots); back in the background: ${s.gaveUp().includes('data:mach+tracers') ? `GIVEN UP at frame ${f - 1} with no further warm frame` : `warmed (slot ${got})`}; cap ${MAX_WARM_FRAMES}`);
+}
