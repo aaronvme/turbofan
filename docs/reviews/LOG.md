@@ -3535,6 +3535,20 @@ None.
     - N23.
 
     Then critic pass 18 reviews w2/followups-2 and app-ui rounds 6-7 together.
+- **D4-99 (critic pass 18's questions; w2/followups-2 and w2/app-ui rounds 6-7 merged on main ca4f870, src and tests equal to the critic's trial18).**
+  1. **U4 on AC is measured in the quiet window,** together with the official P4flow and the P1 rerun: `firstSwitch.test.tsx` alone, quiet, at light, 8.4 and 11.2 ms, with the D0-1 conditions (AC, no agents, nothing else on the GPU, display awake, Chrome focused). The orchestrator runs it with Aaron. Until then U4 is recorded as unproven on AC. On battery it measured 1.42-2.20 s, straddling the bar, so it's called neither a pass nor a regression.
+  2. **U4's condition is scoped to frames within the budget:** "at any steady frame CPU up to 11.2 ms (tested)". A frame over 16.7 ms already breaks P4 and D4-2, so a 2 s cold switch can't be promised there. Above about 16 ms the frame count alone exceeds 2 s. The bar stays 2 s, and the scope names the envelope the app is built for, not a looser bar.
+  3. **A final W2 polish round** (w2/polish from main):
+     - W2A-I11: Exploded is framed on skins it doesn't draw (the inlet lip's outside and the bypass duct in `explodedRings`), so it sits off-centre and 17-21 % smaller than the area allows. Frame it on the drawn parts, and add a Chrome check that the framed views land inside the free area (that is N31);
+     - N29: a cold view's carry-over;
+     - N30: the Schlieren grey band contains the studio grey. Note that the grey share isn't load-bearing for Exploded, or narrow the band;
+     - the Schlieren Core exhaust label sits on the jet;
+     - W2V-N26: bound the W2V-I8 floor from below too, so mutant V2 dies;
+     - W2H-N10: the fixed-dt record runs 24 s against P5's stated 23 s window, so align it.
+
+     **Camera easing** into framed views goes to W4's motion polish, not W2.
+  4. **W2L-N16's fallback, confirmed in advance:** if the default cutaway pose's legacyTraa control ever passes, that pose leaves the moving bound with the reason stated. The band is never re-tuned to make it fail again (D4-74).
+  - The three UI changes beyond the brief are kept: the legend at 440 px, and Schlieren and Exploded framed above the dock. The 1366 cut views' ~8 px of slack is accepted, since a taller dock only hides labels by priority.
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
