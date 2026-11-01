@@ -303,6 +303,7 @@ export function FidelityPanel() {
 function BudgetBar({ d }: { readonly d: AppDiagnostics }) {
   const b = d.budget;
   const frame = SOLVER_BUDGET.frameMs;
+  const unfinished = d.warmUpSteps.filter((s) => !s.done).length;
   // `shown` null: not measured (an undrawn solver shows a dash, not 0.00 ms; W2A-N8)
   const parts = [
     { id: 'render', label: 'Render', ms: b.renderGpuMs ?? 0, shown: b.renderGpuMs },
@@ -381,8 +382,24 @@ function BudgetBar({ d }: { readonly d: AppDiagnostics }) {
           </dd>
         </div>
         <div>
-          <dt>Pipeline warm-up (D4-88)</dt>
-          <dd>{fmt.ms(d.warmUpMs)} ms at boot</dd>
+          <dt>Boot warm-up (D4-91)</dt>
+          <dd>
+            {fmt.ms(d.warmUpMs)} ms
+            {/* W2A-N23: a boot configuration it did not finish warms in the background */}
+            {unfinished > 0
+              ? ` · ${String(unfinished)} unfinished (warming in the background)`
+              : ''}
+          </dd>
+        </div>
+        <div>
+          {/* W2A-N22: the background warm-up's state (a given-up one compiles on first use) */}
+          <dt>Background warm-up</dt>
+          <dd>
+            {d.warm.warm.length} of {d.warm.warm.length + d.warm.queue.length} warm
+            {d.warm.queue[0] === undefined ? '' : ` · next ${d.warm.queue[0]}`}
+            {d.warm.suspended ? ' · paused (input)' : ''}
+            {d.warm.gaveUp.length > 0 ? ` · given up: ${d.warm.gaveUp.join(', ')}` : ''}
+          </dd>
         </div>
       </dl>
     </div>
@@ -549,13 +566,15 @@ export function Callouts({ snapshot }: { readonly snapshot: SimSnapshot }) {
           return { x: b.left - r.left, y: b.top - r.top, w: b.width, h: b.height };
         }),
       );
-      // D4-92 (zz): the view's free area (the centre column), for Schlieren's framing
+      // D4-92 (zz): the view's free area (the centre column), for Schlieren's framing, and
+      // (D4-97 item 2) its part above the dock, for the cut views' label rows
       const c = document.querySelector('.center')?.getBoundingClientRect();
-      if (c !== undefined)
-        post({
-          type: 'viewArea',
-          free: { x: c.left - r.left, y: c.top - r.top, w: c.width, h: c.height },
-        });
+      const dock = document.querySelector('.center .dock')?.getBoundingClientRect();
+      if (c !== undefined) {
+        const free = { x: c.left - r.left, y: c.top - r.top, w: c.width, h: c.height };
+        const bottom = dock === undefined ? c.bottom : Math.min(c.bottom, dock.top - 8);
+        post({ type: 'viewArea', free, rows: { ...free, h: Math.max(1, bottom - c.top) } });
+      }
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;

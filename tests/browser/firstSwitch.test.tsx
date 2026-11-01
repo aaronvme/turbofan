@@ -33,6 +33,8 @@ const env = (import.meta as { env?: Record<string, string | undefined> }).env;
 const QUIET = env?.VITE_UI_QUIET === '1';
 const MAX_GAP_MS = UI_LEVELS.firstSwitchMaxGapMs;
 const MAX_BOOT_MS = UI_LEVELS.bootToReadyMaxMs;
+/** U4 (D4-97 item 1): an unwarmed switch is shown within this, at any steady frame CPU. */
+const MAX_COLD_MS = UI_LEVELS.coldSwitchMaxMs;
 /**
  * A freeze, on any machine: four times the first-switch bar (round 3's stalls were 1.3-2.8 s).
  * Test-local, so a regression to a stalling switch fails a loaded run too.
@@ -195,6 +197,7 @@ describe('the progressive warm-up (D4-91)', () => {
       () => (useApp.getState().diagnostics?.warm.queue.length ?? 1) === 0,
       120_000,
     );
+    // U7 (D4-97 item 4): the background warm-up's own row, all nine warm, s after ready (recorded)
     const allWarmMs = Math.round(performance.now() - ready);
     rec.unsubscribe();
     const after = rec.list.filter((a) => a.t >= click);
@@ -240,46 +243,68 @@ describe('the progressive warm-up (D4-91)', () => {
     if (QUIET) expect(r.longestGapMs, JSON.stringify(r)).toBeLessThanOrEqual(MAX_GAP_MS);
   });
 
-  it('a switch into a mode not yet warmed shows "preparing" over the running view, then the mode', async () => {
-    const { bootMs, rec } = await boot();
-    // at once after ready: the background warm-up has not reached the Data view yet (Cutaway and
-    // Schlieren come first), so the view asked for is prepared first
-    const mode: ViewMode = 'data';
-    expect(isWarm(mode)).toBe(false);
-    const click = performance.now();
-    await page.getByRole('radio', { name: /^data/i }).click();
-    await until(
-      'the preparing state',
-      () => useApp.getState().diagnostics?.view.preparing === mode,
-    );
-    const preparingMs = Math.round(performance.now() - click);
-    const chip = page.getByRole('status', { name: /preparing the data view/i });
-    await expect.element(chip).toBeVisible();
-    await until(
-      'data shown',
-      () => {
-        const d = useApp.getState().diagnostics;
-        return d !== null && d.view.preparing === null && d.view.mode === mode;
-      },
-      120_000,
-    );
-    const shownMs = Math.round(performance.now() - click);
-    await until('data settled', () => (useApp.getState().diagnostics?.view.settledFrames ?? 0) > 0);
-    rec.unsubscribe();
-    const r = {
-      case: 'data (cold: preparing)',
-      mode,
-      bootMs,
-      preparingMs,
-      shownMs,
-      longestGapMs: rec.longestGap(click, click + shownMs),
-      snapshotsWhilePreparing: rec.list.filter((a) => a.preparing === mode).length,
-    };
-    await record('data-cold', r);
-    expect(problems(), JSON.stringify(r)).toEqual([]);
-    await expect.element(chip).not.toBeInTheDocument();
-    // the view kept running while it prepared the mode: snapshots, and no freeze
-    expect(r.snapshotsWhilePreparing).toBeGreaterThan(2);
-    expect(r.longestGapMs, JSON.stringify(r)).toBeLessThanOrEqual(FREEZE_MS);
-  });
+  // U4 (D4-97 item 1, W2A-I7): also at a steady frame CPU over the slot rule's bar (critic pass
+  // 17's probe: 8.4 ms, and 11.2 ms, critic 15's held frame), which before held the switch in
+  // "Preparing" for good. The worker pads each frame's CPU to it (the `debug` message)
+  for (const frameCpuMs of [null, 8.4, 11.2] as const)
+    it(`a switch into a mode not yet warmed shows "preparing" over the running view, then the mode${frameCpuMs === null ? '' : ` (a steady ${String(frameCpuMs)} ms frame CPU)`}`, async () => {
+      const { bootMs, rec } = await boot();
+      if (frameCpuMs !== null) {
+        useApp.getState().post({ type: 'debug', frameCpuMs });
+        await until('the steady frame CPU', () => {
+          const b = useApp.getState().diagnostics?.budget;
+          return b !== undefined && b.frameCpuMs >= frameCpuMs;
+        });
+      }
+      // at once after ready: the background warm-up has not reached the Data view yet (Cutaway and
+      // Schlieren come first), so the view asked for is prepared first
+      const mode: ViewMode = 'data';
+      expect(isWarm(mode)).toBe(false);
+      const click = performance.now();
+      await page.getByRole('radio', { name: /^data/i }).click();
+      await until(
+        'the preparing state',
+        () => useApp.getState().diagnostics?.view.preparing === mode,
+      );
+      const preparingMs = Math.round(performance.now() - click);
+      const chip = page.getByRole('status', { name: /preparing the data view/i });
+      await expect.element(chip).toBeVisible();
+      await until(
+        'data shown',
+        () => {
+          const d = useApp.getState().diagnostics;
+          return d !== null && d.view.preparing === null && d.view.mode === mode;
+        },
+        120_000,
+      );
+      const shownMs = Math.round(performance.now() - click);
+      await until(
+        'data settled',
+        () => (useApp.getState().diagnostics?.view.settledFrames ?? 0) > 0,
+      );
+      rec.unsubscribe();
+      const d = useApp.getState().diagnostics;
+      const r = {
+        case: `data (cold: preparing)${frameCpuMs === null ? '' : ` at a steady ${String(frameCpuMs)} ms frame CPU`}`,
+        mode,
+        frameCpuMs,
+        bootMs,
+        preparingMs,
+        shownMs,
+        u4MaxMs: MAX_COLD_MS,
+        longestGapMs: rec.longestGap(click, click + shownMs),
+        snapshotsWhilePreparing: rec.list.filter((a) => a.preparing === mode).length,
+        warmFramesWhilePreparing: d?.warm.frames ?? null,
+        gaveUp: d?.warm.gaveUp ?? null,
+      };
+      await record(frameCpuMs === null ? 'data-cold' : `data-cold-${String(frameCpuMs)}ms`, r);
+      expect(problems(), JSON.stringify(r)).toEqual([]);
+      await expect.element(chip).not.toBeInTheDocument();
+      // the view kept running while it prepared the mode: snapshots, and no freeze
+      expect(r.snapshotsWhilePreparing).toBeGreaterThan(2);
+      expect(r.longestGapMs, JSON.stringify(r)).toBeLessThanOrEqual(FREEZE_MS);
+      // shown by its warm frames, not by the give-up
+      expect(r.gaveUp, JSON.stringify(r)).toEqual([]);
+      if (QUIET) expect(r.shownMs, JSON.stringify(r)).toBeLessThanOrEqual(MAX_COLD_MS);
+    });
 });

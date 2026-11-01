@@ -7,6 +7,9 @@
 // - the jet behind the nozzle is in light and dark bands: its luminance spread is large.
 // A Realistic or an Exploded frame (a lit engine), a Schlieren whose knife edge composites
 // nothing (a bandless jet) or a studio background fails it. Pure, on a luminance image.
+// W2A-I10 (D4-97 item 3): computed on the canvas alone (a label over the jet passes for bands),
+// and each bar has its own failing control: S1 (the knife edge off) the jet bar, the cut views
+// (the studio round a near-field plane) the grey share, a lit engine the silhouette.
 
 export interface Box {
   readonly x: number;
@@ -20,8 +23,13 @@ export const SCHLIEREN_BARS = {
   /** The knife-edge grey band (0.5 at zero deflection, +-0.1 for the JPEG and the faint far field). */
   greyMin: 0.4,
   greyMax: 0.6,
-  /** At least this share of the free area outside the engine is that grey. */
-  greyShareMin: 0.3,
+  /**
+   * At least this share of the free area outside the engine is that grey. W2A-I10: midway
+   * between Schlieren on the canvas (0.84-0.90) and its controls (<= 0.55: the cut views framed
+   * for their rows, D4-97 item 2, show more of the studio, whose own grey, about 0.47, is in the
+   * band; round 5's 0.3 passed the 1920 cut views once flowviz's floor showed the studio).
+   */
+  greyShareMin: 0.7,
   /** The silhouette's mean over the field's grey mean (0.22 x the beauty by design). */
   silhouetteRatioMax: 0.5,
   /** The jet's luminance spread (bands of +-1000 urad span most of 0..1). */
@@ -34,6 +42,16 @@ export interface SchlierenSignature {
   readonly silhouetteRatio: number;
   readonly jetStd: number;
   readonly pass: boolean;
+}
+
+/** W2A-I10: the bars a signature fails ('grey' share, 'silhouette', 'jet'), in that order. */
+export function failedBars(s: SchlierenSignature): ('grey' | 'silhouette' | 'jet')[] {
+  const B = SCHLIEREN_BARS;
+  const out: ('grey' | 'silhouette' | 'jet')[] = [];
+  if (!(s.greyShare >= B.greyShareMin)) out.push('grey');
+  if (!(s.silhouetteRatio <= B.silhouetteRatioMax)) out.push('silhouette');
+  if (!(s.jetStd >= B.jetStdMin)) out.push('jet');
+  return out;
 }
 
 /**
@@ -114,9 +132,6 @@ export function schlierenSignature(
     greyMean,
     silhouetteRatio,
     jetStd,
-    pass:
-      greyShare >= B.greyShareMin &&
-      silhouetteRatio <= B.silhouetteRatioMax &&
-      jetStd >= B.jetStdMin,
+    pass: failedBars({ greyShare, greyMean, silhouetteRatio, jetStd, pass: false }).length === 0,
   };
 }

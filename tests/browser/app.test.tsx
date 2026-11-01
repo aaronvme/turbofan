@@ -4,7 +4,8 @@
 // 1366 x 768 (the screenshots go to reports/ui/, ignored; VITE_UI_LOOKDEV=1 writes them to
 // docs/look-dev/ui/ instead, as flowviz's W2V-N8). D4-82: the solver's field is labelled
 // "solver (uncoupled until W3)" on the badge and the legend. W2F-N5: the worker's frame cost is
-// recorded while the gas path is held (the W1K-I2 part-power fit's slam), to reports/ui/.
+// recorded while the gas path is held (the W1K-I2 part-power fit's slam), to reports/ui/, the sim
+// stepped on a fixed dt so the case is the same every run (D4-98 item 2, W2H-I5).
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { commands, page, userEvent } from 'vitest/browser';
@@ -14,7 +15,7 @@ import { BACKING_STORE_MAX_PX } from '../../src/shell/pixelCap';
 import { SETTLED_FRAMES } from '../../src/shell/settle';
 import { App } from '../../src/ui/App';
 import { useApp } from '../../src/ui/store';
-import { schlierenSignature, type SchlierenSignature } from './lib/schlierenCheck';
+import { failedBars, schlierenSignature, type SchlierenSignature } from './lib/schlierenCheck';
 import '../../src/ui/global.css';
 
 const env = (import.meta as { env?: Record<string, string | undefined> }).env;
@@ -65,16 +66,33 @@ interface Shot {
   /** The luminance spread and the lit fraction of the centre of the view (the engine). */
   readonly centreStd: number;
   readonly centreLit: number;
-  /** W2A-I6: the frame's knife-edge Schlieren signature (null: no engine box on screen). */
+  /**
+   * W2A-I6: the frame's knife-edge Schlieren signature (null: no engine box on screen), on the
+   * canvas alone (W2A-I10: the overlay hidden for that screenshot, so no label or legend in it).
+   */
   readonly schlieren: SchlierenSignature | null;
   readonly jpeg: string;
 }
 
+const bitmapOf = async (png: string) =>
+  createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob());
+
+/** The worker's canvas alone: a screenshot with the overlay hidden (W2A-I10). */
+async function canvasAlone(): Promise<ImageBitmap> {
+  const overlay = document.querySelector<HTMLElement>('.overlay');
+  const was = overlay?.style.visibility ?? '';
+  if (overlay !== null) overlay.style.visibility = 'hidden';
+  try {
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    return await bitmapOf(await page.screenshot({ save: false }));
+  } finally {
+    if (overlay !== null) overlay.style.visibility = was;
+  }
+}
+
 /** A screenshot of the page (the worker's canvas composited with the overlay), as a JPEG. */
 async function shoot(): Promise<Shot> {
-  const png = await page.screenshot({ save: false });
-  const blob = await (await fetch(`data:image/png;base64,${png}`)).blob();
-  const bmp = await createImageBitmap(blob);
+  const bmp = await bitmapOf(await page.screenshot({ save: false }));
   const c = document.createElement('canvas');
   c.width = bmp.width;
   c.height = bmp.height;
@@ -106,9 +124,14 @@ async function shoot(): Promise<Shot> {
   out.height = window.innerHeight;
   out.getContext('2d')?.drawImage(bmp, 0, 0, out.width, out.height);
   const jpeg = out.toDataURL('image/jpeg', 0.9).slice('data:image/jpeg;base64,'.length);
-  // the luminance at the CSS size, for the Schlieren signature (the engine box and the free area
-  // are in CSS px)
-  const cpx = out.getContext('2d')?.getImageData(0, 0, out.width, out.height).data;
+  // the canvas's luminance at the CSS size, for the Schlieren signature (the engine box and the
+  // free area are in CSS px)
+  const raw = await canvasAlone();
+  const cv = document.createElement('canvas');
+  cv.width = window.innerWidth;
+  cv.height = window.innerHeight;
+  cv.getContext('2d')?.drawImage(raw, 0, 0, cv.width, cv.height);
+  const cpx = cv.getContext('2d')?.getImageData(0, 0, cv.width, cv.height).data;
   const lum = new Float32Array(out.width * out.height);
   if (cpx !== undefined)
     for (let i = 0; i < lum.length; i++)
@@ -122,7 +145,7 @@ async function shoot(): Promise<Shot> {
   const schlieren =
     engineBox === null || view === undefined
       ? null
-      : schlierenSignature(lum, out.width, out.height, engineBox, {
+      : schlierenSignature(lum, cv.width, cv.height, engineBox, {
           x: view.left,
           y: view.top,
           w: view.width,
@@ -224,6 +247,15 @@ function calloutProblems(): string[] {
     };
   });
   leaders.forEach((a, i) => {
+    // W2A-N28: round 5's rule as drawn: no anchor under a panel, and no leader through one
+    for (const r of reserved) {
+      const b = shown(r);
+      const [ax, ay] = a.seg;
+      if (ax > b.left && ax < b.right && ay > b.top && ay < b.bottom)
+        out.push(`callout ${a.id}'s anchor is under ${nameOf(r)}`);
+      else if (edges(b).some((e) => segmentsCross(a.seg, e)))
+        out.push(`leader ${a.id} runs through ${nameOf(r)}`);
+    }
     for (const b of leaders.slice(i + 1))
       if (segmentsCross(a.seg, b.seg)) out.push(`leader ${a.id} crosses leader ${b.id}`);
     for (const l of labels)
@@ -289,6 +321,42 @@ function layoutProblems(): string[] {
   return out;
 }
 
+/**
+ * D4-97 item 2 (W2A-I8): in the cut views (Cutaway, Data) the axial rows hold, at both sizes:
+ * every label shown sits in a row above or below the engine's screen box, clear of it, and each
+ * row keeps the parts' axial order left to right (D4-92 zz). The camera is framed for the rows,
+ * and a label with no room in its row is hidden by priority, never placed on the section.
+ */
+function axialRowProblems(): string[] {
+  const out: string[] = [];
+  const host = document.querySelector('.overlay .callouts');
+  const box = useApp.getState().engineBox;
+  if (host === null || box === null) return ['no callouts or no engine box'];
+  const h = host.getBoundingClientRect();
+  const axial = new Map(useApp.getState().anchors.map((a) => [a.id, a.axial]));
+  const labels = [...host.querySelectorAll<HTMLElement>('.callout[data-id]')]
+    .filter(visible)
+    .map((el) => {
+      const r = el.getBoundingClientRect();
+      return { id: el.dataset.id ?? '', x: r.left - h.left, y: r.top - h.top, b: r.bottom - h.top };
+    });
+  if (labels.length === 0) out.push('no label shown');
+  for (const above of [true, false]) {
+    const row = labels.filter((l) => (above ? l.b <= box.y + 0.5 : l.y >= box.y + box.h - 0.5));
+    const order = [...row].sort((p, q) => p.x - q.x).map((l) => axial.get(l.id) ?? NaN);
+    if (order.some((v, k) => k > 0 && v < (order[k - 1] ?? -Infinity)))
+      out.push(
+        `the ${above ? 'top' : 'bottom'} row is out of axial order: ${row.map((l) => l.id).join(', ')}`,
+      );
+  }
+  for (const l of labels)
+    if (!(l.b <= box.y + 0.5 || l.y >= box.y + box.h - 0.5))
+      out.push(
+        `callout ${l.id} is on the engine (${l.y.toFixed(0)}-${l.b.toFixed(0)} in ${box.y.toFixed(0)}-${(box.y + box.h).toFixed(0)}), not in a row`,
+      );
+  return out;
+}
+
 /** D4-88: the worker says the view has settled in `mode` (its transition done, TRAA converged). */
 function settledIn(mode: ViewMode): boolean {
   const s = useApp.getState();
@@ -323,6 +391,21 @@ describe('the app in Chrome', () => {
       for (const [i, mode] of VIEW_MODES.entries()) {
         await toMode(mode);
         layout.push(...layoutProblems().map((p) => `${mode}: ${p}`));
+        if (mode === 'cutaway' || mode === 'data') {
+          layout.push(...axialRowProblems().map((p) => `${mode}: ${p}`));
+          // round 7: the legend's floor note on one line (a second made the dock taller and the
+          // label rows smaller at 1366)
+          const note = document.querySelector('.overlay .legend-floor-note');
+          const lineH = note === null ? 0 : parseFloat(getComputedStyle(note).lineHeight);
+          if (note !== null && note.getBoundingClientRect().height > 1.5 * lineH)
+            layout.push(`${mode}: the legend's floor note wraps (${note.textContent})`);
+          const shownIds = [...document.querySelectorAll<HTMLElement>('.overlay .callout[data-id]')]
+            .filter(visible)
+            .map((el) => el.dataset.id);
+          rows.push(
+            `  ${mode} callouts shown (${String(shownIds.length)}): ${shownIds.join(', ')}`,
+          );
+        }
         const shot = await shoot();
         await commands.writeFile(
           `${OUT}/${size.id}-${String(i + 1)}-${mode}.jpg`,
@@ -345,13 +428,37 @@ describe('the app in Chrome', () => {
         // shots passed this only because they showed the exploded engine (W2A-I4).
         if (mode !== 'schlieren')
           expect(shot.centreLit, `${mode}: lit fraction of the centre`).toBeGreaterThan(0.02);
-        // W2A-I6: Schlieren's own check (the grey field, the dim silhouette, the banded jet); the
-        // Realistic and Exploded frames are its controls, and must fail it
+        // W2A-I6: Schlieren's own check (the grey field, the dim silhouette, the banded jet), on
+        // the canvas alone. W2A-I10: each bar has its own failing control, stated before the run:
+        // Realistic and Exploded (a lit engine) fail the silhouette bar, Cutaway and Data (the
+        // studio round a near-field plane) the grey-share bar, and S1 (the knife edge off, below)
+        // the jet bar
         const sig = JSON.stringify(shot.schlieren);
         rows.push(`  ${mode} schlieren signature ${sig}`);
-        if (mode === 'schlieren') expect(shot.schlieren?.pass, `schlieren: ${sig}`).toBe(true);
-        if (mode === 'realistic' || mode === 'exploded')
+        const fails = shot.schlieren === null ? null : failedBars(shot.schlieren);
+        if (mode === 'schlieren') {
+          expect(shot.schlieren?.pass, `schlieren: ${sig}`).toBe(true);
+          // S1: the same view with the knife edge compositing no deflection (the bandless jet)
+          useApp.getState().post({ type: 'debug', knifeEdge: false });
+          const v = useApp.getState().snapshot?.version ?? 0;
+          await until('S1 drawn', () => (useApp.getState().snapshot?.version ?? 0) >= v + 10);
+          const s1 = await shoot();
+          useApp.getState().post({ type: 'debug', knifeEdge: true });
+          const s1sig = JSON.stringify(s1.schlieren);
+          rows.push(`  schlieren S1 (knife edge off, control) schlieren signature ${s1sig}`);
+          expect(s1.schlieren?.pass, `S1 (control): ${s1sig}`).toBe(false);
+          expect(s1.schlieren === null ? null : failedBars(s1.schlieren), s1sig).toContain('jet');
+          const v1 = useApp.getState().snapshot?.version ?? 0;
+          await until(
+            'knife edge back',
+            () => (useApp.getState().snapshot?.version ?? 0) >= v1 + 10,
+          );
+        } else {
           expect(shot.schlieren?.pass, `${mode} (control): ${sig}`).toBe(false);
+          expect(fails, `${mode} (control): ${sig}`).toContain(
+            mode === 'realistic' || mode === 'exploded' ? 'silhouette' : 'grey',
+          );
+        }
         expect(problems(), mode).toEqual([]);
       }
       // the drawer (Diagnostics and What's simulated) opens without covering the other panels
@@ -442,7 +549,7 @@ describe('the app in Chrome', () => {
     expect(problems()).toEqual([]);
   });
 
-  it('W2F-N5: records the worker frame cost while the gas path is held (the part-power fit slam)', async () => {
+  it('W2F-N5: records the worker frame cost while the gas path is held (the part-power fit slam, on a fixed dt: W2H-I5)', async () => {
     await page.viewport(1366, 768);
     await boot('partPowerFit');
     // W2A-I5: five quick ArrowUp presses on the focused lever land at 0.05 (the lever shows what
@@ -462,14 +569,29 @@ describe('the app in Chrome', () => {
       5000,
     );
     expect(lever.value).toBe('0.05');
-    await sleep(3000);
+    // D4-98 item 2 (W2H-I5): the case steps the sim on a fixed dt, so it is the same every run
+    // (with the real frame times the fit's sub-idle throw was intermittent; its cause is the
+    // part-power round's). The sim holds, resets to ground idle, and steps counted frames of
+    // FIXED_DT; each lever change is sent while it holds, so the inputs meet the same steps every
+    // run. The app itself keeps the real frame time.
+    const FIXED_DT = 1 / 60;
+    let asked = 0;
+    const step = async (frames: number, what: string) => {
+      asked += frames;
+      useApp.getState().post({ type: 'debug', simSteps: { dtS: FIXED_DT, frames } });
+      await until(what, () => (useApp.getState().diagnostics?.fixedSteps?.frames ?? -1) >= asked);
+      expect(useApp.getState().diagnostics?.fixedSteps?.left, what).toBe(0);
+    };
+    await step(0, 'the sim held on the fixed steps');
+    useApp.getState().send({ type: 'reset', initial: 'groundIdle' });
+    useApp.getState().send({ type: 'setThrottle', lever: 0.05 });
+    // 3 s at 0.05, then the w2f-c12 probe's case: the lever ramped from idle to take-off over 1 s
+    // of sim time, in 20 steps of 0.05 every 3 frames
+    await step(180, 'the idle hold');
     const before = useApp.getState().diagnostics?.budget;
-    // the w2f-c12 probe's case: the lever ramped from idle to take-off over 1 s of sim time
-    const t0sim = useApp.getState().snapshot?.clock.simTimeS ?? 0;
-    for (let lever = 0; lever < 1;) {
-      lever = Math.min(1, (useApp.getState().snapshot?.clock.simTimeS ?? t0sim) - t0sim);
-      useApp.getState().send({ type: 'setThrottle', lever: Math.max(0.01, lever) });
-      await sleep(50);
+    for (let k = 1; k <= 20; k++) {
+      useApp.getState().send({ type: 'setThrottle', lever: 0.05 * k });
+      await step(3, `the ramp at ${String(0.05 * k)}`);
     }
     const worst: Record<string, number> = {};
     const keep = (k: keyof FrameBudget, v: number | null) => {
@@ -478,8 +600,13 @@ describe('the app in Chrome', () => {
     let heldSnapshots = 0;
     let snapshots = 0;
     let lastVersion = -1;
+    // then 20 s of sim time at take-off, stepped as one batch (the frame cost is the worker's)
+    asked += 1200;
+    useApp.getState().post({ type: 'debug', simSteps: { dtS: FIXED_DT, frames: 1200 } });
     const t0 = performance.now();
-    while (performance.now() - t0 < 20_000) {
+    while ((useApp.getState().diagnostics?.fixedSteps?.frames ?? -1) < asked) {
+      if (performance.now() - t0 > 90_000)
+        throw new Error('the 1200 fixed frames: not within 90 s');
       const s = useApp.getState();
       if (s.snapshot !== null && s.snapshot.version !== lastVersion && s.diagnostics !== null) {
         lastVersion = s.snapshot.version;
@@ -503,6 +630,9 @@ describe('the app in Chrome', () => {
     const end = s.diagnostics?.budget;
     const record = {
       viewport: '1366x768',
+      fixedDtS: FIXED_DT,
+      fixedFrames: s.diagnostics?.fixedSteps?.frames ?? null,
+      simTimeS: s.snapshot?.clock.simTimeS ?? null,
       lostSolves: s.snapshot?.cycle.gasPathSolve.lostSolves ?? 0,
       heldSnapshots,
       snapshots,
@@ -527,6 +657,8 @@ describe('the app in Chrome', () => {
       n1End: s.snapshot?.cycle.n1Percent ?? null,
     };
     await commands.writeFile('reports/ui/frame-cost.json', `${JSON.stringify(record, null, 2)}\n`);
+    // every frame asked for was stepped on the fixed dt (W2H-I5: the same case every run)
+    expect(record.fixedFrames).toBe(asked);
     // the case exercises a held gas path, or its numbers would not answer W2F-N5
     expect(record.lostSolves).toBeGreaterThan(0);
     expect(problems()).toEqual([]);

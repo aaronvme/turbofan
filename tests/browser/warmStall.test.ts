@@ -116,6 +116,7 @@ describe('the background warm frames (D4-95 item 2)', () => {
       let done = false;
       let n = 0;
       let maxCpu = 0;
+      let over = 0;
       let maxGap = 0;
       let maxPing = 0;
       let created = 0;
@@ -131,6 +132,7 @@ describe('the background warm frames (D4-95 item 2)', () => {
           const r = view.warmFrame(WARM_CONFIGS[id], { cpuMs: WARM_BUDGET_MS });
           n++;
           maxCpu = Math.max(maxCpu, r.cpuMs);
+          if (r.cpuMs > 1000 / 60) over++;
           created += r.created;
           // a pipeline is created only while drawing an object the budget let through as new
           // (one new object may build two: a double-sided transparent plane draws both faces)
@@ -157,6 +159,7 @@ describe('the background warm frames (D4-95 item 2)', () => {
         wallMs: Math.round(performance.now() - w0),
         pipelines: created,
         maxWarmCpuMs: Math.round(maxCpu),
+        warmFramesOver16_7Ms: over,
         maxFrameGapMs: Math.round(maxGap),
         maxGpuPingMs: Math.round(maxPing),
       });
@@ -238,9 +241,12 @@ describe('the background warm frames (D4-95 item 2)', () => {
       viewport: `${String(W)}x${String(H)} (main thread)`,
       bootMs: Math.round(bootMs),
       bootSteps: boot.configurations.map(
-        (s) => `${s.name} ${s.ms.toFixed(0)} ms (CPU ${s.cpuMs.toFixed(0)} ms)`,
+        (s) =>
+          `${s.name} ${s.ms.toFixed(0)} ms (CPU ${s.cpuMs.toFixed(0)} ms)${s.done ? '' : ' UNFINISHED'}`,
       ),
       configs,
+      // U6 (D4-97 item 4, PHYSICS.md 3.5): Cutaway's own warm frames, recorded, indicative, no bar
+      u6Cutaway: configs.find((c) => c.id === 'cutaway+tracers') ?? null,
       overBudget,
       recompiledCount: recompiled.length,
       recompiled: recompiled.slice(0, 40),
@@ -249,6 +255,8 @@ describe('the background warm frames (D4-95 item 2)', () => {
     };
     await commands.writeFile('reports/ui/warm-stall.json', `${JSON.stringify(out, null, 2)}\n`);
     expect(errors).toEqual([]);
+    // W2A-N23: the boot warm-up says it finished each of its configurations
+    expect(boot.configurations.filter((x) => !x.done).map((x) => x.name)).toEqual([]);
     expect(configs.filter((x) => x.done !== true).map((x) => x.id)).toEqual([]);
     expect(overBudget).toEqual([]);
     expect(recompiled).toEqual([]);

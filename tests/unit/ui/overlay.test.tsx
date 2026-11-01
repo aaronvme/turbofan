@@ -241,6 +241,17 @@ describe('the drawn field in the overlay (D4-82)', { timeout: TIMEOUT_MS }, () =
     expect(within(legend).getByText(/^MOCK fallback/).textContent).toContain(why);
   });
 
+  it('W2V-N25: the legend shows the dashed frame beside what is not drawn in it (the cut views)', () => {
+    mount(snapshotOf({ mode: 'cutaway' }));
+    render(<Overlay />);
+    const legend = screen.getByRole('region', { name: 'Flow legend' });
+    const note = within(legend).getByText(/^Not drawn in the dashed frame: /);
+    // the swatch: a dashed line in the outline's colour, decorative (the words say it)
+    const swatch = note.parentElement?.querySelector('.legend-frame');
+    expect(swatch).toBeTruthy();
+    expect(swatch?.getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('the asked-for MOCK is labelled MOCK, with no fallback annunciated', () => {
     mount(snapshotOf({ mode: 'cutaway' }));
     render(<Overlay />);

@@ -64,6 +64,9 @@ function callable(a: Anchor, reserved: readonly Rect[]): boolean {
   return !reserved.some((r) => a.x >= r.x && a.x <= r.x + r.w && a.y >= r.y && a.y <= r.y + r.h);
 }
 
+/** Round 7: an empty reserved box (an annunciator strip with nothing lit) reserves nothing. */
+const solid = (reserved: readonly Rect[]): Rect[] => reserved.filter((r) => r.w > 0 && r.h > 0);
+
 export const overlaps = (a: Rect, b: Rect, gap = 0): boolean =>
   a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
 
@@ -113,17 +116,21 @@ export function leaderCrossings(placed: readonly PlacedCallout[]): number {
 /**
  * Places the labels in priority order, each at the first candidate offset that is on screen,
  * clear of the reserved panels, the placed labels and the other anchors' dots, and (W2A-I3) whose
- * leader crosses no placed leader or label; failing that, at the first clear one (a crossing is
- * better than a hidden label); failing that, hidden.
+ * leader crosses no placed leader or label; failing that, at a clear one with the fewest crossings
+ * (a crossing is better than a hidden label; W2A-N21: any of them, not only the first); failing
+ * that, hidden.
  */
 export function layoutCallouts(
   anchors: readonly Anchor[],
   size: (id: string) => { readonly w: number; readonly h: number },
   viewport: { readonly w: number; readonly h: number },
-  reserved: readonly Rect[] = [],
+  reservedIn: readonly Rect[] = [],
   /** Places tried before the offsets (D4-92 zz: the cut views' row places). */
   preferred: (id: string) => readonly Rect[] = () => [],
+  /** D4-97 item 2: only the preferred places (the cut views' rows), no offsets. */
+  preferredOnly = false,
 ): PlacedCallout[] {
+  const reserved = solid(reservedIn);
   const order = anchors
     .filter((a) => callable(a, reserved))
     .sort((a, b) => b.priority - a.priority || (a.id < b.id ? -1 : 1));
@@ -133,7 +140,12 @@ export function layoutCallouts(
     const out: PlacedCallout[] = [];
     const boxes: Rect[] = [
       ...preferred(a.id),
-      ...OFFSETS.map(([dx, dy]) => ({ x: dx >= 0 ? a.x + dx : a.x + dx - w, y: a.y + dy, w, h })),
+      ...(preferredOnly ? [] : OFFSETS).map(([dx, dy]) => ({
+        x: dx >= 0 ? a.x + dx : a.x + dx - w,
+        y: a.y + dy,
+        w,
+        h,
+      })),
     ];
     for (const box of boxes) {
       const onScreen =
@@ -217,11 +229,10 @@ export function layoutCallouts(
       }
       if (ok) free.push({ g, t });
     }
-    const crossing = free.find((f) => f.t > 0);
-    for (const f of [
-      ...free.filter((f) => f.t === 0),
-      ...(crossing === undefined ? [] : [crossing]),
-    ]) {
+    // W2A-N21: every crossing place too, the fewest crossings first (the bound above prunes
+    // them): the first one can block a later label that another would let through
+    const crossing = free.filter((f) => f.t > 0).sort((p, q) => p.t - q.t);
+    for (const f of [...free.filter((f) => f.t === 0), ...crossing]) {
       chosen.push(f.g);
       const done = search(i + 1, crossings + f.t);
       chosen.pop();
@@ -264,27 +275,34 @@ const ROW_GAP = 12;
  * D4-92 (zz): the cut views' labels go outward, in a row above the engine's screen box and one
  * below it, the parts alternating between them in axial order (fan first), each label as near
  * above (or below) its anchor as the row allows, the row's order kept left to right, so the
- * leaders fan out from the parts instead of running along the shaft. A label its row has no room
- * for (a panel, the screen's edge) is placed by the general search among the placed ones, or
- * hidden. Of the two ways to start the alternation, the one that places more labels with fewer
- * leader crossings wins.
+ * leaders fan out from the parts instead of running along the shaft. D4-97 item 2: the camera is
+ * framed for the rows (the worker's cut-view framing), and a label its row has no room for (a
+ * panel, the screen's edge, the rows' own width) is hidden, by priority, never placed on the
+ * section it names. Of the two ways to start the alternation, the one that places more labels
+ * (by priority) with fewer leader crossings wins.
  */
 export function layoutAxial(
   anchors: readonly AxialAnchor[],
   size: (id: string) => { readonly w: number; readonly h: number },
   viewport: { readonly w: number; readonly h: number },
-  reserved: readonly Rect[],
+  reservedIn: readonly Rect[],
   band: Rect,
 ): PlacedCallout[] {
+  const reserved = solid(reservedIn);
   const vis = anchors
     .filter((a) => callable(a, reserved))
     .sort((a, b) => a.axial - b.axial || (a.id < b.id ? -1 : 1));
-  // the rows' limits: under the full-width bar at the top, over the one at the bottom
+  // the rows' limits: under the full-width bar at the top, over the one at the bottom (round 7:
+  // a bar inset from the screen's edge counts too, the app's top bar at y = 8 among them; a row
+  // pushed into it was hidden whole at 1366)
   const wide = reserved.filter((r) => r.w > viewport.w / 2);
-  const topLimit = Math.max(0, ...wide.filter((r) => r.y <= 1).map((r) => r.y + r.h + GAP));
+  const topLimit = Math.max(
+    0,
+    ...wide.filter((r) => r.y + r.h <= viewport.h / 4).map((r) => r.y + r.h + GAP),
+  );
   const bottomLimit = Math.min(
     viewport.h,
-    ...wide.filter((r) => r.y + r.h >= viewport.h - 1).map((r) => r.y - GAP),
+    ...wide.filter((r) => r.y >= (3 * viewport.h) / 4).map((r) => r.y - GAP),
   );
   const rows = (parity: number): Map<string, Rect> => {
     const out = new Map<string, Rect>();
@@ -320,7 +338,10 @@ export function layoutAxial(
         if (b === undefined) continue;
         b.x = Math.min(b.x, hi - b.w, next === undefined ? Infinity : next.x - b.w - GAP);
       }
-      for (const b of boxes) out.set(b.a.id, { x: b.x, y: b.y, w: b.w, h: b.h });
+      // a row the limits pushed onto the engine has no room: never on the section (D4-97 item 2)
+      for (const b of boxes)
+        if (above ? b.y + b.h <= band.y : b.y >= band.y + band.h)
+          out.set(b.a.id, { x: b.x, y: b.y, w: b.w, h: b.h });
     }
     return out;
   };
@@ -328,36 +349,37 @@ export function layoutAxial(
   // panel, the fewest leader crossings) and its offsets for a label its row has no room for
   const attempt = (parity: number) => {
     const r = rows(parity);
-    return layoutCallouts(vis, size, viewport, reserved, (id) => {
-      const box = r.get(id);
-      return box === undefined ? [] : [box];
-    });
+    return layoutCallouts(
+      vis,
+      size,
+      viewport,
+      reserved,
+      (id) => {
+        const box = r.get(id);
+        return box === undefined ? [] : [box];
+      },
+      true,
+    );
   };
+  // the shown labels by priority rank, then their count, then fewer crossings, then (round 7)
+  // shorter leaders: of two equal layouts, the nearer row (a lone label at 1366 with the drawer
+  // open took the far row, a 265 px leader across the section)
+  const leaders = (p: readonly PlacedCallout[]) =>
+    p.reduce((sum, q) => {
+      const e = leaderEnd(q.anchor, q.box);
+      return sum + Math.hypot(e.x - q.anchor.x, e.y - q.anchor.y);
+    }, 0);
+  const rank = (p: readonly PlacedCallout[]) =>
+    [...vis]
+      .sort((a, b) => b.priority - a.priority)
+      .map((a) => (p.some((q) => q.id === a.id) ? '1' : '0'))
+      .join('');
   const tries = [attempt(0), attempt(1)];
-  tries.sort((p, q) => q.length - p.length || leaderCrossings(p) - leaderCrossings(q));
+  tries.sort(
+    (p, q) =>
+      (rank(q) > rank(p) ? 1 : rank(q) < rank(p) ? -1 : 0) ||
+      leaderCrossings(p) - leaderCrossings(q) ||
+      leaders(p) - leaders(q),
+  );
   return tries[0] ?? [];
-}
-
-/**
- * D4-92 (zz): a camera view offset (three's setViewOffset) that fits a screen box (the content,
- * at the view without an offset) into the free area between the panels: centred in it, zoomed out
- * if the box is larger than the area (never below `minScale`), never zoomed in.
- */
-export function fitViewOffset(
-  box: Rect,
-  canvas: { readonly w: number; readonly h: number },
-  free: Rect,
-  minScale: number,
-): { fullW: number; fullH: number; x: number; y: number; w: number; h: number } {
-  const s = Math.max(minScale, Math.min(1, free.w / box.w, free.h / box.h));
-  const cx = box.x + box.w / 2;
-  const cy = box.y + box.h / 2;
-  return {
-    fullW: canvas.w,
-    fullH: canvas.h,
-    x: cx - (free.x + free.w / 2) / s,
-    y: cy - (free.y + free.h / 2) / s,
-    w: canvas.w / s,
-    h: canvas.h / s,
-  };
 }

@@ -6,27 +6,47 @@
 //   labels go outward, above and below the engine, in the parts' axial order, with no leader
 //   crossing another.
 // - Schlieren's framing: the content box fitted into the free area between the panels.
+// - Round 7 (critic 17's visual notes): Schlieren and Exploded framed with a margin inside the
+//   free area above the dock (Schlieren touched the left column at 1920; Exploded, unframed, ran
+//   under the right column).
 import { describe, expect, it } from 'vitest';
 import { radiusAt } from '../../../src/contracts/engine';
+import { FIELD_EXTENTS } from '../../../src/contracts/flow';
 import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 import {
   calloutGeometry,
   calloutPoint,
   componentAnchors,
   engineRings,
+  explodedRings,
   screenBox,
   seenThroughIntake,
   type CalloutView,
 } from '../../../src/hud/anchors';
 import {
-  fitViewOffset,
   layoutAxial,
   layoutCallouts,
   leaderCrossings,
+  leaderEnd,
   overlaps,
   type Rect,
 } from '../../../src/hud/callouts';
-import { framedOrbit } from '../../../src/shell/orbit';
+import { Matrix4, PerspectiveCamera, Vector3 } from 'three/webgpu';
+import { UI_LEVELS } from '../../../src/hud/uiLevels';
+import { LOOK_PRESETS } from '../../../src/render/presets';
+import { EXPLODE_GAP, explodeOffsets } from '../../../src/geometry/explode';
+import {
+  FRAME_MARGIN_PX,
+  FRAMED_MIN_SCALE,
+  cutViewOrbit,
+  fitOrbit,
+  framedOrbit,
+  inset,
+  orbitFromPose,
+  orbitPose,
+  rowsInset,
+  type OrbitState,
+} from '../../../src/shell/orbit';
 
 const OFFSETS = [
   [18, -34],
@@ -50,6 +70,29 @@ const OFFSETS = [
 ] as const;
 
 describe('W2A-N13: the search places the most labels', () => {
+  it('W2A-N21: a label with no crossing-free place may take any crossing place, not only the first (critic 17 probe, a dense case)', () => {
+    // 5 anchors in 360 x 280, 140 x 36 labels: all five fit, but only with a label at a crossing
+    // place other than its first (the first blocks a later label)
+    const pts = [
+      [244, 143],
+      [133, 153],
+      [247, 80],
+      [66, 87],
+      [181, 93],
+    ] as const;
+    const anchors = pts.map(([x, y], i) => ({
+      id: `a${String(i)}`,
+      x,
+      y,
+      visible: true,
+      priority: pts.length - i,
+    }));
+    const got = layoutCallouts(anchors, () => ({ w: 140, h: 36 }), { w: 360, h: 280 });
+    expect(got.map((p) => p.id).sort()).toEqual(['a0', 'a1', 'a2', 'a3', 'a4']);
+    for (const p of got)
+      for (const q of got) if (p !== q) expect(overlaps(p.box, q.box, 4)).toBe(false);
+  });
+
   it('never shows fewer labels than a brute force over the same places (critic 15 probe, 400 seeded cases)', () => {
     let seed = 12345;
     const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
@@ -194,12 +237,40 @@ describe('the cut views: labels outward in axial order (D4-92 zz)', () => {
     }
   });
 
-  it('a label with no room in its row is placed by the general search, or hidden, never on a panel', () => {
+  it('D4-97 item 2: a label with no room in its row is hidden, by priority (fan, combustor, HPT, LPT, exhaust first), never placed off its row', () => {
+    // the top row's room taken by a panel: only the bottom row is left
     const tight: Rect[] = [...reserved, { x: 290, y: 46, w: 776, h: 120 }];
-    const placed = layoutAxial(cut, size, vp, tight, band);
-    for (const p of placed) for (const r of tight) expect(overlaps(p.box, r)).toBe(false);
+    const prio = componentAnchors(def);
+    const ranked = cut.map((c) => ({
+      ...c,
+      priority: prio.find((a) => a.id === c.id)?.priority ?? 0,
+    }));
+    const placed = layoutAxial(ranked, size, vp, tight, band);
+    expect(placed.length).toBeGreaterThan(0);
+    expect(placed.length).toBeLessThan(cut.length);
+    for (const p of placed) {
+      for (const r of tight) expect(overlaps(p.box, r)).toBe(false);
+      // in a row: clear of the engine's box, above or below it
+      expect(p.box.y + p.box.h <= band.y || p.box.y >= band.y + band.h, p.id).toBe(true);
+    }
     for (const p of placed)
       for (const q of placed) if (q !== p) expect(overlaps(p.box, q.box, 4)).toBe(false);
+  });
+
+  it('D4-97 item 2: the stated priority is fan, combustor, HPT, LPT, exhaust, then HPC, booster, bypass duct', () => {
+    const byPriority = [...componentAnchors(def)]
+      .sort((a, b) => b.priority - a.priority)
+      .map((a) => a.id);
+    expect(byPriority).toEqual([
+      'fan',
+      'combustor',
+      'hpt',
+      'lpt',
+      'exhaust',
+      'hpc',
+      'booster',
+      'bypassDuct',
+    ]);
   });
 
   it('round 5: a part under a panel (the open drawer) is not called out, in either layout', () => {
@@ -219,35 +290,222 @@ describe('the cut views: labels outward in axial order (D4-92 zz)', () => {
   });
 });
 
-describe('Schlieren framing: the content fitted into the free area (D4-92 zz)', () => {
-  const canvas = { w: 1920, h: 1001 };
-  const free: Rect = { x: 330, y: 60, w: 1240, h: 820 };
-  const map = (o: ReturnType<typeof fitViewOffset>, u: number, v: number): [number, number] => [
-    ((u - o.x) * canvas.w) / o.w,
-    ((v - o.y) * canvas.h) / o.h,
+describe('round 7: the cut views at 1366, the drawer open or not (critic 17: the long leader)', () => {
+  // the app's own layout inputs, measured in Chrome (Data at 1366 x 768, round 7's diagnostic):
+  // the engine box at the minimum scale, the eight anchors, the labels as drawn, the panels
+  const vp = { w: 1366, h: 768 };
+  const band = { x: 440.1, y: 100.9, w: 461.8, h: 352.2 };
+  const at: [string, number, number, number, number][] = [
+    ['fan', 676, 205, 9, 0.13],
+    ['bypassDuct', 756, 190, 2, 0.9],
+    ['booster', 696, 225, 3, 0.45],
+    ['hpc', 753, 235, 4, 1.16],
+    ['combustor', 792, 229, 8, 1.6],
+    ['hpt', 809, 226, 7, 1.81],
+    ['lpt', 840, 218, 6, 2.17],
+    ['exhaust', 867, 217, 5, 2.56],
   ];
+  const anchors = at.map(([id, x, y, priority, axial]) => ({
+    id,
+    x,
+    y,
+    priority,
+    axial,
+    visible: true,
+  }));
+  const widths: Record<string, number> = {
+    fan: 71,
+    bypassDuct: 93,
+    booster: 91,
+    hpc: 139,
+    combustor: 67,
+    hpt: 119,
+    lpt: 115,
+    exhaust: 76,
+  };
+  const size = (id: string) => ({ w: widths[id] ?? 128, h: 37 });
+  const topbar = { x: 8, y: 8, w: 1350, h: 44 };
+  const dock = { x: 411, y: 517, w: 520, h: 133 };
+  const reserved: Rect[] = [
+    topbar,
+    { x: 8, y: 60, w: 272, h: 229 },
+    { x: 8, y: 297, w: 272, h: 276 },
+    // the annunciators with none lit: an empty box
+    { x: 671, y: 60, w: 0, h: 0 },
+    dock,
+    { x: 1062, y: 60, w: 296, h: 31 },
+    { x: 1062, y: 99, w: 296, h: 391 },
+    { x: 1062, y: 498, w: 296, h: 194 },
+    { x: 8, y: 658, w: 1046, h: 102 },
+  ];
+  const drawer: Rect[] = [
+    { x: 694, y: 68, w: 350, h: 665 },
+    { x: 694, y: 741, w: 350, h: 584 },
+  ];
+  const leader = (p: { anchor: { x: number; y: number }; box: Rect }) => {
+    const e = leaderEnd(p.anchor, p.box);
+    return Math.hypot(e.x - p.anchor.x, e.y - p.anchor.y);
+  };
+  const inRow = (b: Rect) => b.y + b.h <= band.y || b.y >= band.y + band.h;
 
-  it('moves and, if it must, zooms out the view so the box (the engine and its plume) is inside the free area', () => {
-    const box: Rect = { x: 370, y: 110, w: 1400, h: 760 };
-    const o = fitViewOffset(box, canvas, free, 0.6);
-    expect(o.fullW).toBe(canvas.w);
-    expect(o.fullH).toBe(canvas.h);
-    const [x0, y0] = map(o, box.x, box.y);
-    const [x1, y1] = map(o, box.x + box.w, box.y + box.h);
-    expect(x0).toBeGreaterThanOrEqual(free.x - 1e-9);
-    expect(x1).toBeLessThanOrEqual(free.x + free.w + 1e-9);
-    expect(y0).toBeGreaterThanOrEqual(free.y - 1e-9);
-    expect(y1).toBeLessThanOrEqual(free.y + free.h + 1e-9);
-    // centred in the free area
-    expect((x0 + x1) / 2).toBeCloseTo(free.x + free.w / 2, 6);
+  it('closed: all eight labelled in their rows, under the top bar (inset 8 px from the edge) and over the dock', () => {
+    const placed = layoutAxial(anchors, size, vp, reserved, band);
+    expect(placed.map((p) => p.id).sort()).toEqual(at.map((a) => a[0]).sort());
+    for (const p of placed) {
+      expect(inRow(p.box), p.id).toBe(true);
+      for (const r of reserved.filter((q) => q.w > 0 && q.h > 0))
+        expect(overlaps(p.box, r), `${p.id} on ${JSON.stringify(r)}`).toBe(false);
+    }
+    expect(leaderCrossings(placed)).toBe(0);
   });
 
-  it('does not zoom in a box that fits, and stops zooming out at the limit', () => {
-    const small: Rect = { x: 600, y: 300, w: 400, h: 200 };
-    const o = fitViewOffset(small, canvas, free, 0.6);
-    expect(o.w).toBeCloseTo(canvas.w, 9);
-    const huge: Rect = { x: -2000, y: -1000, w: 6000, h: 3000 };
-    expect(fitViewOffset(huge, canvas, free, 0.6).w).toBeCloseTo(canvas.w / 0.6, 9);
+  it('the drawer open: the fan, the one part left of it, labelled in the row above with a short leader', () => {
+    const placed = layoutAxial(anchors, size, vp, [...reserved, ...drawer], band);
+    expect(placed.map((p) => p.id)).toEqual(['fan']);
+    const fan = placed[0];
+    if (fan === undefined) throw new Error('no fan');
+    expect(fan.box.y + fan.box.h).toBeLessThanOrEqual(band.y);
+    for (const r of [...reserved, ...drawer].filter((q) => q.w > 0 && q.h > 0))
+      expect(overlaps(fan.box, r), JSON.stringify(r)).toBe(false);
+    // round 6's shot: in the row below, a 265 px leader across the section
+    expect(leader(fan)).toBeLessThan(130);
+  });
+
+  it('an empty reserved box (an annunciator strip with nothing lit) constrains nothing', () => {
+    const without = reserved.filter((r) => r.w > 0 && r.h > 0);
+    expect(layoutAxial(anchors, size, vp, reserved, band)).toEqual(
+      layoutAxial(anchors, size, vp, without, band),
+    );
+    // the fan's label over its anchor, not pushed right of the empty box at x = 671
+    const fan = layoutAxial(anchors, size, vp, reserved, band).find((p) => p.id === 'fan');
+    expect(fan?.box.x ?? Infinity).toBeLessThan(671 - 10);
+  });
+
+  it('two equal layouts: the one with the shorter leaders wins (the nearer row)', () => {
+    const one = [{ id: 'fan', x: 600, y: 470, priority: 9, axial: 0.1, visible: true }];
+    const b = { x: 400, y: 200, w: 400, h: 300 };
+    const placed = layoutAxial(one, size, vp, [], b);
+    expect(placed).toHaveLength(1);
+    // the anchor is near the box's bottom: the row below
+    expect(placed[0]?.box.y).toBeGreaterThanOrEqual(b.y + b.h);
+  });
+});
+
+describe('D4-97 item 2 (W2A-I8) and W2A-N25: the framings, checked by projecting the engine after the orbit', () => {
+  // the app's default view (the ¾ front preset), its camera as the worker poses it
+  const preset = LOOK_PRESETS.threeQuarterFront;
+  const ringsBoxAt = (
+    o: OrbitState,
+    canvas: { w: number; h: number },
+    rings: readonly (readonly [number, number, number])[],
+  ) => {
+    const cam = new PerspectiveCamera(preset.fovDeg, canvas.w / canvas.h, 0.05, 200);
+    const pose = orbitPose(o);
+    cam.position.set(...pose.position);
+    cam.lookAt(new Vector3(...pose.target));
+    cam.updateMatrixWorld();
+    const m = new Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    return screenBox(m.elements, rings, canvas.w, canvas.h);
+  };
+  const boxAt = (o: OrbitState, canvas: { w: number; h: number }, xEnd: number) =>
+    ringsBoxAt(o, canvas, engineRings(def, xEnd));
+  // the free area above the dock, as the app's overlay posts it (its centre column at both sizes)
+  const sizes = [
+    { canvas: { w: 1366, h: 768 }, rows: { x: 288, y: 60, w: 766, h: 470 } },
+    { canvas: { w: 1920, h: 1001 }, rows: { x: 333, y: 60, w: 1234, h: 690 } },
+  ];
+  const start = orbitFromPose(preset.camera, preset.target);
+
+  for (const { canvas, rows } of sizes)
+    it(`at ${String(canvas.w)} x ${String(canvas.h)} the cut views leave a label row above and below the engine (or stop at the minimum scale)`, () => {
+      const o = cutViewOrbit(start, (q) => boxAt(q, canvas, 2.75), canvas, rows, preset.fovDeg);
+      const box = boxAt(o, canvas, 2.75);
+      if (box === null) throw new Error('the engine is off screen');
+      const scale = start.distance / o.distance;
+      expect(scale).toBeLessThanOrEqual(1);
+      expect(scale).toBeGreaterThanOrEqual(UI_LEVELS.cutViewMinScale - 1e-9);
+      const inset = rowsInset(rows, UI_LEVELS.calloutRowPx);
+      // inside the area less a row above and below (2 px for the re-projection's residual)
+      const fits =
+        box.y >= inset.y - 2 &&
+        box.y + box.h <= inset.y + inset.h + 2 &&
+        box.x >= inset.x - 2 &&
+        box.x + box.w <= inset.x + inset.w + 2;
+      expect(
+        fits || scale <= UI_LEVELS.cutViewMinScale + 1e-9,
+        JSON.stringify({ box, inset, scale }),
+      ).toBe(true);
+    });
+
+  // round 7: Schlieren (the engine and its near-field jet) and Exploded (the modules slid apart)
+  // inside the free area above the dock less FRAME_MARGIN_PX on every side, at both sizes
+  for (const [name, rings] of [
+    ['Schlieren', engineRings(def, FIELD_EXTENTS.near.xMax)],
+    ['Exploded', explodedRings(def, EXPLODE_GAP)],
+  ] as const)
+    for (const { canvas, rows } of sizes)
+      it(`${name} at ${String(canvas.w)} x ${String(canvas.h)}: framed inside the area above the dock with a ${String(FRAME_MARGIN_PX)} px margin`, () => {
+        const area = inset(rows, FRAME_MARGIN_PX);
+        const project = (q: OrbitState) => ringsBoxAt(q, canvas, rings);
+        const o = fitOrbit(start, project, canvas, area, preset.fovDeg, FRAMED_MIN_SCALE);
+        const box = project(o);
+        if (box === null) throw new Error('off screen');
+        const scale = start.distance / o.distance;
+        expect(scale).toBeLessThanOrEqual(1);
+        expect(scale).toBeGreaterThanOrEqual(FRAMED_MIN_SCALE - 1e-9);
+        // inside the area (2 px for the re-projection's residual): the margin to every panel
+        const r = { box, area, scale };
+        expect(box.x, JSON.stringify(r)).toBeGreaterThanOrEqual(area.x - 2);
+        expect(box.x + box.w, JSON.stringify(r)).toBeLessThanOrEqual(area.x + area.w + 2);
+        expect(box.y, JSON.stringify(r)).toBeGreaterThanOrEqual(area.y - 2);
+        expect(box.y + box.h, JSON.stringify(r)).toBeLessThanOrEqual(area.y + area.h + 2);
+        // and fills it one way (framed, not shrunk past it): at least 0.9 of it across or down (each
+        // pass's dolly estimate overshoots a little, and the fit never zooms back in)
+        expect(box.w >= 0.9 * area.w || box.h >= 0.9 * area.h, JSON.stringify(r)).toBe(true);
+      });
+
+  it('inset takes a margin off every side', () => {
+    expect(inset({ x: 100, y: 50, w: 400, h: 300 }, 24)).toEqual({ x: 124, y: 74, w: 352, h: 252 });
+    expect(inset({ x: 0, y: 0, w: 30, h: 30 }, 24)).toEqual({ x: 24, y: 24, w: 1, h: 1 });
+  });
+
+  it('Schlieren: framedOrbit brings the engine and its jet into the free area (W2A-N25)', () => {
+    const canvas = { w: 1366, h: 768 };
+    const free = { x: 288, y: 60, w: 766, h: 590 };
+    const box0 = boxAt(start, canvas, 6);
+    if (box0 === null) throw new Error('the engine is off screen');
+    const o = framedOrbit(start, box0, canvas, free, preset.fovDeg, 0.6);
+    const box = boxAt(o, canvas, 6);
+    if (box === null) throw new Error('the engine is off screen');
+    // centred in the free area to within a tenth of its size (one pass, perspective's residual)
+    expect(Math.abs(box.x + box.w / 2 - (free.x + free.w / 2))).toBeLessThan(0.1 * free.w);
+    expect(Math.abs(box.y + box.h / 2 - (free.y + free.h / 2))).toBeLessThan(0.1 * free.h);
+    expect(box.w).toBeLessThan(box0.w);
+  });
+});
+
+describe('round 7: the exploded engine on screen (Exploded framing)', () => {
+  it('explodedRings span the intake slid forward to the exhaust slid aft, at each module casing', () => {
+    const off = explodeOffsets(def, 1, EXPLODE_GAP);
+    const rings = explodedRings(def, EXPLODE_GAP);
+    const xs = rings.map((p) => p[0]);
+    const comps = def.flowpath.components;
+    const inlet = comps.find((c) => c.id === 'inlet');
+    const exhaust = comps.find((c) => c.id === 'exhaust');
+    if (inlet === undefined || exhaust === undefined) throw new Error('no inlet or exhaust');
+    expect(Math.min(...xs)).toBeCloseTo(inlet.xStart + off.inlet, 9);
+    expect(Math.max(...xs)).toBeCloseTo(exhaust.xEnd + off.exhaust, 9);
+    // every module is in it, at its casing (the intake at the nacelle's outside: its ring)
+    for (const c of comps) {
+      const x = 0.5 * (c.xStart + c.xEnd);
+      const casing = radiusAt(def.flowpath.curves[c.casing], x) ?? 0;
+      const near = rings.filter((p) => Math.abs(p[0] - (x + off[c.id])) < 1e-9);
+      expect(near.length, c.id).toBeGreaterThan(0);
+      const r = Math.max(...near.map((p) => Math.hypot(p[1], p[2])));
+      expect(r, c.id).toBeGreaterThanOrEqual(casing - 1e-9);
+    }
+    // the gap is geometry/explode's, the one the view uses
+    expect(EXPLODE_GAP).toBe(0.22);
   });
 });
 

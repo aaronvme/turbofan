@@ -39,9 +39,25 @@ export type ToWorker =
   | { readonly type: 'command'; readonly message: SimCommandMessage }
   | { readonly type: 'orbit'; readonly input: OrbitInput }
   | { readonly type: 'camera'; readonly preset: CameraPresetId }
-  /** D4-92 (zz): the view's free area between the panels, CSS px (Schlieren's framing). */
-  | { readonly type: 'viewArea'; readonly free: Rect }
-  | { readonly type: 'field'; readonly source: FieldChoice };
+  /**
+   * D4-92 (zz): the view's free area between the panels, CSS px (Schlieren's framing), and
+   * (D4-97 item 2) the part of it above the dock (the cut views' framing for their label rows).
+   */
+  | { readonly type: 'viewArea'; readonly free: Rect; readonly rows: Rect }
+  | { readonly type: 'field'; readonly source: FieldChoice }
+  /**
+   * The browser suite's controls, never sent by the app: a steady frame CPU (the worker pads each
+   * frame's CPU to at least this many ms: U4's cold switch at any frame CPU, W2A-I7), the knife
+   * edge off (W2A-I10's S1 control, EngineView's noKnifeEdge) and (D4-98 item 2, W2H-I5) the sim
+   * on fixed steps: `frames` more frames of `dtS` each, the sim held when none are left (null: back
+   * to the real frame time; src/shell/simSteps.ts).
+   */
+  | {
+      readonly type: 'debug';
+      readonly frameCpuMs?: number;
+      readonly knifeEdge?: boolean;
+      readonly simSteps?: { readonly dtS: number; readonly frames: number } | null;
+    };
 
 export type CameraPresetId = 'threeQuarterFront' | 'side' | 'hero' | 'hotSection';
 
@@ -122,15 +138,24 @@ export interface AppDiagnostics {
   };
   /** D4-85: the canvas's backing store, px, and the pixel ratio it renders at. */
   readonly backingStore: { readonly width: number; readonly height: number; readonly dpr: number };
-  /** D4-91: what the boot's warm-up (the boot configurations) took, wall ms, and each one's. */
+  /**
+   * D4-91: what the boot's warm-up (the boot configurations) took, wall ms, and each one's;
+   * W2A-N23: whether it finished each (an unfinished one warms in the background).
+   */
   readonly warmUpMs: number;
   readonly warmUpSteps: readonly {
     readonly name: string;
     readonly ms: number;
     readonly cpuMs: number;
+    readonly done: boolean;
   }[];
   /** W2F-I1: why the last matched solve was lost (null: none lost since the reset). */
   readonly lostSolveCause: string | null;
+  /**
+   * D4-98 item 2: the browser suite's fixed sim steps, the frames stepped so far and those left
+   * (null: the sim steps the real frame time, as the app does).
+   */
+  readonly fixedSteps: { readonly frames: number; readonly left: number } | null;
   /** The worker's own errors so far (GPU errors, a throwing step), newest last, at most 8. */
   readonly errors: readonly string[];
   readonly adapter: string;

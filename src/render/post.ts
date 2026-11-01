@@ -85,6 +85,7 @@ import { dof } from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { installTraaResolve } from './traaResolve';
 import { TRAA_MATRICES, checkTraaInternals } from './threeInternals';
+import { createViewProjRoll } from './viewProjRoll';
 import type { FlowPostDeps } from './flowViz';
 import { fromHalfBits } from '../contracts/half';
 
@@ -162,6 +163,11 @@ export interface LookPipeline {
    * round 2 did), false (the default) with the unjittered camera.
    */
   setFlowJitter(on: boolean): void;
+  /**
+   * W2A-I10's S1 control (tests): false composites a zero knife-edge deflection in Schlieren (the
+   * grey field without its bands), true (the default) the deflection.
+   */
+  setKnifeEdge(on: boolean): void;
   /** The last frame's flow target, decoded (tests: W2V-I3 and W2V-I5). */
   readFlowTarget(id: FlowTargetId): Promise<FlowTargetPixels>;
   /**
@@ -173,7 +179,8 @@ export interface LookPipeline {
    * Renders a frame. Tests and debugging: `traa` false skips TRAA (and depth of field);
    * `linear` writes half the linear radiance, with no tone map or sRGB encoding (and no DoF).
    * `warm` (D4-91, a warm frame the caller's real frame overwrites): TRAA's history and the
-   * rotor motion's previous view-projection are left as they were.
+   * motion vectors' view-projections (previous, current and its inverse: W2A-I9) are left as
+   * they were.
    */
   render(traa?: boolean, linear?: boolean, warm?: boolean): void;
   dispose(): void;
@@ -380,7 +387,12 @@ export function createPipeline(
   const prevViewProj = uniform(new Matrix4());
   const currViewProj = uniform(new Matrix4());
   const currViewProjInv = uniform(new Matrix4());
-  let havePrev = false;
+  const viewProjs = createViewProjRoll(
+    prevViewProj.value,
+    currViewProj.value,
+    currViewProjInv.value,
+  );
+  const frameViewProj = new Matrix4();
   if (motion !== undefined) {
     const velocityNode = sceneVelocity as unknown as {
       load(texel: Node<'vec2'>): Node<'vec4'>;
@@ -556,6 +568,8 @@ export function createPipeline(
   // scene depth moves only the occlusion edges, by that half pixel.)
   const flowCamera = camera.clone();
   let flowJitter = false;
+  // W2A-I10: the knife edge's control (a uniform: no new pipeline)
+  const knifeEdge = uniform(1);
   const flowDeps: FlowPostDeps = {
     sceneDepth: sceneDepth,
     rotorDepth: rotorDepth,
@@ -602,10 +616,10 @@ export function createPipeline(
       // the other composites, so TRAA's chain renders the scene passes before anything below
       // reads their depth (the same image: the passes render once a frame). Reading the depth
       // first rendered the scene pass a call level up, and three keys its render contexts by the
-      // call depth (GPU_FACTS M56): every engine object got a second render object, node build
+      // call depth (GPU_FACTS M57): every engine object got a second render object, node build
       // (~15 ms each) and pipeline on Schlieren's first frame
       const dim = display().rgb.mul(0.22).toVar();
-      const eps = schTex.sample(screenUV).x;
+      const eps = schTex.sample(screenUV).x.mul(knifeEdge);
       const grey = float(0.5).add(eps.mul(0.5).div(h.schlierenRangeRad)).clamp(0, 1);
       const suv = screenUV;
       const ndc = vec2(suv.x.mul(2).sub(1), float(1).sub(suv.y.mul(2)));
@@ -639,11 +653,9 @@ export function createPipeline(
     // the rotor motion vectors' view-projections, unjittered (TRAA jitters the camera only
     // inside the pipeline's render)
     camera.updateMatrixWorld();
-    if (havePrev) prevViewProj.value.copy(currViewProj.value);
-    currViewProj.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    currViewProjInv.value.copy(currViewProj.value).invert();
-    if (!havePrev) prevViewProj.value.copy(currViewProj.value);
-    havePrev = true;
+    viewProjs.roll(
+      frameViewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse),
+    );
     if (!withTraa || linear) {
       debugPipeline(withTraa, linear).render();
       return;
@@ -687,6 +699,9 @@ export function createPipeline(
     setFlowJitter: (on) => {
       flowJitter = on;
     },
+    setKnifeEdge: (on) => {
+      knifeEdge.value = on ? 1 : 0;
+    },
     readFlowTarget: async (id) => {
       if (flow === null) throw new Error('post: readFlowTarget before attachFlow');
       const rt = (id === 'overlay' ? flow.pass : id === 'haze' ? flow.haze : flow.schlieren)
@@ -725,16 +740,13 @@ export function createPipeline(
       applyFlowScale();
     },
     render: (withTraa = true, linear = false, warm = false) => {
-      const prev = warm ? { p: prevViewProj.value.clone(), had: havePrev } : null;
+      const restore = warm ? viewProjs.save() : null;
       warming = warm;
       try {
         renderFrame(withTraa, linear);
       } finally {
         warming = false;
-        if (prev !== null) {
-          prevViewProj.value.copy(prev.p);
-          havePrev = prev.had;
-        }
+        restore?.();
       }
     },
     dispose: () => {

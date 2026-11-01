@@ -30,10 +30,12 @@ import {
   calloutShownIn,
   componentAnchors,
   engineRings,
+  explodedRings,
   projectPoint,
   screenBox,
 } from '../hud/anchors';
 import { FIELD_EXTENTS } from '../contracts/flow';
+import { EXPLODE_GAP } from '../geometry/explode';
 import { createMockFlowField } from '../mocks/mockFlowField';
 import { createEngineView, type EngineView } from '../render/engineView';
 import { LOOK_PRESETS } from '../render/presets';
@@ -41,6 +43,7 @@ import { sanitizeFlowStatus, type FlowStatus } from '../contracts/sim';
 import type { RenderState } from '../contracts/ui';
 import type { CycleState } from '../contracts/cycle';
 import { createSimCore, type SimCore } from '../shell/simCore';
+import { createSimStepper, type SimStepper } from '../shell/simSteps';
 import { createFieldSwitch, type FieldSwitch } from '../shell/fieldSwitch';
 import { cutPlaneQuantity, flowModeFor } from '../shell/viewState';
 import { createRasterScheduler, type RasterScheduler } from '../shell/mockRaster';
@@ -50,13 +53,24 @@ import { createPostFaults, stepFault } from '../shell/faults';
 import {
   BOOT_CONFIGS,
   WARM_CONFIGS,
+  bootWarmed,
   configFor,
   createWarmScheduler,
   shownView,
   type WarmScheduler,
 } from '../shell/warmUp';
 import type { RasterReply, RasterRequest } from './mockRasterWorker';
-import { applyOrbit, framedOrbit, orbitFromPose, orbitPose, type OrbitState } from '../shell/orbit';
+import {
+  FRAME_MARGIN_PX,
+  FRAMED_MIN_SCALE,
+  applyOrbit,
+  cutViewOrbit,
+  fitOrbit,
+  inset,
+  orbitFromPose,
+  orbitPose,
+  type OrbitState,
+} from '../shell/orbit';
 import type { AppDiagnostics, CycleChoice, FromWorker, ToWorker } from '../shell/protocol';
 import type { ViewMode } from '../contracts/ui';
 import type { AxialAnchor, Rect } from '../hud/callouts';
@@ -93,8 +107,8 @@ const calloutGeo = calloutGeometry(ENGINE_DEFINITION);
 const ENGINE_RINGS = engineRings(ENGINE_DEFINITION, 2.75);
 /** Schlieren's content: the engine and the near field's jet (its framing, D4-92 zz). */
 const SCHLIEREN_RINGS = engineRings(ENGINE_DEFINITION, FIELD_EXTENTS.near.xMax);
-/** Schlieren's framing zooms out at most this much (the engine stays the subject). */
-const SCHLIEREN_MIN_SCALE = 0.6;
+/** Exploded's content: the modules slid apart (its framing, round 7). */
+const EXPLODED_RINGS = explodedRings(ENGINE_DEFINITION, EXPLODE_GAP);
 
 const median = (xs: readonly number[]): number | null => {
   if (xs.length === 0) return null;
@@ -138,9 +152,19 @@ interface App {
   mockRasterMs: number | null;
   mockRasters: number;
   orbit: OrbitState;
-  /** D4-92 (zz): the orbit before Schlieren's framing (restored on leaving it), and the free area. */
-  orbitBeforeSchlieren: OrbitState | null;
+  /**
+   * D4-92 (zz), D4-97 item 2: the framing the shown view has (Schlieren's, the cut views' for
+   * their label rows), the orbit before it (restored on leaving it; null once the viewer moves
+   * the camera, W2A-N24), the free area and the part of it above the dock (the cut views' rows).
+   */
+  framing: Framing;
+  orbitBeforeFraming: OrbitState | null;
   free: Rect | null;
+  rows: Rect | null;
+  /** The browser suite's steady frame CPU (the `debug` message; 0: none), ms. */
+  debugFrameCpuMs: number;
+  /** D4-98 item 2: the sim's wall step, the frame time or the browser suite's fixed steps. */
+  simSteps: SimStepper;
   size: { width: number; height: number };
   /** The device pixel ratio from the main thread, and the one rendered at (D4-85's cap). */
   dpr: number;
@@ -149,7 +173,7 @@ interface App {
   settle: SettleTracker;
   settledFrames: number;
   warmUpMs: number;
-  warmUpSteps: readonly { readonly name: string; readonly ms: number; readonly cpuMs: number }[];
+  warmUpSteps: AppDiagnostics['warmUpSteps'];
   /** D4-91: the background warm-up, the mode being prepared (null: the asked view is shown). */
   warm: WarmScheduler;
   preparing: ViewMode | null;
@@ -194,8 +218,7 @@ function applyView(a: App) {
   a.appliedView = v;
   if (was !== null && was.quality !== v.quality) applySize(a);
   if (was?.viewMode !== v.viewMode) {
-    if (v.viewMode === 'schlieren' || was?.viewMode === 'schlieren')
-      frameSchlieren(a, v.viewMode === 'schlieren');
+    frameView(a, framingOf(v.viewMode));
     // D4-83: Realistic draws its haze and schlieren always, its tracers only when asked
     const fm = flowModeFor(v.viewMode);
     a.view.setFlowMode(fm);
@@ -324,30 +347,49 @@ function projectAnchors(a: App): AxialAnchor[] {
   });
 }
 
+type Framing = 'schlieren' | 'exploded' | 'cut' | null;
+
+/**
+ * The framing a view mode has: Schlieren's (D4-92 zz), Exploded's (round 7), the cut views' rows
+ * (D4-97 item 2). Realistic keeps the viewer's camera.
+ */
+const framingOf = (m: ViewMode): Framing =>
+  m === 'schlieren' || m === 'exploded' ? m : m === 'cutaway' || m === 'data' ? 'cut' : null;
+
 /**
  * D4-92 (zz): Schlieren's plume clear of the panels: entering it frames the engine and its jet in
- * the free area (an orbit, dollied out and panned), and leaving it puts the orbit back.
+ * the free area (an orbit, dollied out and panned). Round 7: Schlieren and Exploded (the modules
+ * slid apart, which ran under the right column) frame in the free area above the dock less
+ * FRAME_MARGIN_PX on every side (Schlieren touched the left column at 1920). D4-97 item 2
+ * (W2A-I8): the cut views frame the engine for their label rows, a row above and below it in the
+ * free area over the dock, at no less than the minimum engine scale (U5). Leaving a framed view
+ * puts the orbit back, unless the viewer moved the camera in it (W2A-N24). `again`: the area
+ * changed (the dock's legend, a resize), so the same framing is redone from the orbit before it.
  */
-function frameSchlieren(a: App, entering: boolean) {
-  if (!entering) {
-    if (a.orbitBeforeSchlieren !== null) a.orbit = a.orbitBeforeSchlieren;
-    a.orbitBeforeSchlieren = null;
-    return;
-  }
-  if (a.free === null) return;
-  const pose = orbitPose(a.orbit);
-  a.view.setCameraPose(pose.position, pose.target);
-  const box = screenBox(viewProjection(a), SCHLIEREN_RINGS, a.size.width, a.size.height);
-  if (box === null) return;
-  a.orbitBeforeSchlieren = a.orbit;
-  a.orbit = framedOrbit(
-    a.orbit,
-    box,
-    { w: a.size.width, h: a.size.height },
-    a.free,
-    a.view.camera.fov,
-    SCHLIEREN_MIN_SCALE,
-  );
+function frameView(a: App, to: Framing, again = false) {
+  if (to === a.framing && !again) return;
+  if (again && a.orbitBeforeFraming === null) return;
+  if (a.orbitBeforeFraming !== null) a.orbit = a.orbitBeforeFraming;
+  a.orbitBeforeFraming = null;
+  a.framing = to;
+  // the cut views and (round 7) Schlieren and Exploded frame in the free area above the dock
+  const area = a.rows ?? a.free;
+  if (to === null || area === null) return;
+  const start = a.orbit;
+  const canvas = { w: a.size.width, h: a.size.height };
+  const rings =
+    to === 'schlieren' ? SCHLIEREN_RINGS : to === 'exploded' ? EXPLODED_RINGS : ENGINE_RINGS;
+  const project = (o: OrbitState) => {
+    const pose = orbitPose(o);
+    a.view.setCameraPose(pose.position, pose.target);
+    return screenBox(viewProjection(a), rings, canvas.w, canvas.h);
+  };
+  const fov = a.view.camera.fov;
+  a.orbit =
+    to === 'cut'
+      ? cutViewOrbit(start, project, canvas, area, fov)
+      : fitOrbit(start, project, canvas, inset(area, FRAME_MARGIN_PX), fov, FRAMED_MIN_SCALE);
+  a.orbitBeforeFraming = start;
 }
 
 /** Starts the solver at boot (its status shows in the diagnostics); rejects with why it failed. */
@@ -422,15 +464,18 @@ function loop(a: App) {
       const c0 = performance.now();
       // a throwing model is a bug: stop the sim, keep rendering, say so (never silent): the
       // overlay annunciates SIM STOPPED with this message (W2A-I1; src/shell/faults.ts)
+      let simDtS = 0;
       const fault = stepFault(() => {
-        a.core.advance(dt);
+        simDtS = a.core.advance(a.simSteps.next(dt));
       });
       if (fault !== null) {
         a.simFailed = true;
         pushError(a, fault);
         post({ type: 'sim-stopped', message: fault });
       }
-      held = a.core.state().gasPathSolve.status === 'held';
+      // a frame that did not step the sim (paused, or held between the suite's fixed batches)
+      // is not a held step (W2F-N5's held frame cost)
+      held = simDtS > 0 && a.core.state().gasPathSolve.status === 'held';
       cycleMs.push(performance.now() - c0, held);
     }
     const state = a.core.state();
@@ -453,6 +498,10 @@ function loop(a: App) {
       const m = stats.timings;
       renderMs = m.frames > 0 && Number.isFinite(m.gpuTotal) ? m.gpuTotal : null;
       flowVisualsMs = stats.flow.mode === null ? null : stats.flow.visualsMs;
+    }
+    // the browser suite's steady frame CPU (U4 at any frame CPU): this frame padded to it
+    while (performance.now() - t0 < a.debugFrameCpuMs) {
+      // spin: a steady CPU, as a heavier frame would take
     }
     lastFrameMs = performance.now() - t0;
     frameMs.push(lastFrameMs, held);
@@ -499,6 +548,7 @@ function loop(a: App) {
         warmUpMs: a.warmUpMs,
         warmUpSteps: a.warmUpSteps,
         lostSolveCause: a.cycle.lostSolveCause(),
+        fixedSteps: a.simSteps.state(),
         errors: [...a.errors],
         adapter: `${a.view.device.info.vendor} ${a.view.device.info.architecture}`.trim(),
         triangles: stats.triangles,
@@ -530,10 +580,21 @@ function loop(a: App) {
 
 function handle(a: App, m: ToWorker) {
   // D4-95: the viewer's input suspends the background warm-up for a second (the overlay's own
-  // layout report, viewArea, is not an input: it follows the panels and the window)
-  if (m.type !== 'init' && m.type !== 'viewArea') a.warm.input(performance.now());
+  // layout report, viewArea, is not an input: it follows the panels and the window; nor are the
+  // browser suite's controls)
+  if (m.type !== 'init' && m.type !== 'viewArea' && m.type !== 'debug')
+    a.warm.input(performance.now());
   switch (m.type) {
     case 'init':
+      return;
+    case 'debug':
+      // D4-98 item 4: the browser suite's controls only; a production build ignores them
+      if (import.meta.env.PROD) return;
+      if (m.frameCpuMs !== undefined) a.debugFrameCpuMs = Math.max(0, m.frameCpuMs);
+      if (m.knifeEdge !== undefined) a.view.setDebugFlags({ noKnifeEdge: !m.knifeEdge });
+      if (m.simSteps === null) a.simSteps.realTime();
+      else if (m.simSteps !== undefined && !a.simSteps.add(m.simSteps.dtS, m.simSteps.frames))
+        pushError(a, `debug: fixed sim steps ${JSON.stringify(m.simSteps)} cannot be stepped`);
       return;
     case 'resize':
       a.size = { width: m.width, height: m.height };
@@ -548,12 +609,26 @@ function handle(a: App, m: ToWorker) {
     }
     case 'orbit':
       a.orbit = applyOrbit(a.orbit, m.input);
+      // W2A-N24: the viewer's own camera is kept on leaving a framed view
+      a.orbitBeforeFraming = null;
       return;
-    case 'viewArea':
+    case 'viewArea': {
+      const moved = (p: Rect | null, q: Rect) =>
+        p === null ||
+        Math.max(
+          Math.abs(p.x - q.x),
+          Math.abs(p.y - q.y),
+          Math.abs(p.w - q.w),
+          Math.abs(p.h - q.h),
+        ) > 1;
+      const changed = moved(a.free, m.free) || moved(a.rows, m.rows);
       a.free = m.free;
+      a.rows = m.rows;
+      if (changed) frameView(a, a.framing, true);
       return;
+    }
     case 'camera': {
-      a.orbitBeforeSchlieren = null;
+      a.orbitBeforeFraming = null;
       const p = LOOK_PRESETS[m.preset];
       a.view.camera.fov = p.fovDeg;
       a.view.camera.updateProjectionMatrix();
@@ -623,8 +698,12 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     mockRasterMs: null,
     mockRasters: 0,
     orbit: orbitFromPose(preset.camera, preset.target),
-    orbitBeforeSchlieren: null,
+    framing: null,
+    orbitBeforeFraming: null,
     free: null,
+    rows: null,
+    debugFrameCpuMs: 0,
+    simSteps: createSimStepper(),
     size: { width: m.width, height: m.height },
     dpr: m.dpr,
     renderDpr,
@@ -668,7 +747,8 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
   // D4-91: the boot view's pipelines compiled behind the boot spinner (the MOCK is bound, so the
   // flow layers draw); the other modes warm in the background once the app runs
   const warm = await view.warmUp(BOOT_CONFIGS.map((id) => WARM_CONFIGS[id]));
-  for (const id of BOOT_CONFIGS) a.warm.done(id);
+  // W2A-N23: only what the boot finished is warm; the scheduler warms the rest first
+  for (const id of bootWarmed(BOOT_CONFIGS, warm.configurations)) a.warm.done(id);
   a.warmUpMs = warm.ms;
   a.warmUpSteps = warm.configurations;
   // messages wait in `pending` until the field is bound (a 'field' choice needs the switch)

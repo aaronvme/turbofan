@@ -20,6 +20,7 @@ import {
 import {
   CROP_OUTLINE,
   cropAlpha,
+  cropDash,
   FLOW_VIZ_MODES,
   FLOW_VIZ_MODE_IDS,
   lookModeFor,
@@ -242,6 +243,31 @@ describe('modes', () => {
     expect(CROP_OUTLINE.widthPx).toBeLessThanOrEqual(2);
     expect(CROP_OUTLINE.alpha).toBeGreaterThan(0.3);
     expect(CROP_OUTLINE.alpha).toBeLessThanOrEqual(0.8);
+  });
+
+  // W2V-N25 (app-ui round 7): with the floor the outline crossed the empty studio, a solid thin
+  // light line, and read as a stray leader beside the callouts' own. Dashed and lighter, it reads
+  // as the field's frame (the legend says so: "Not drawn in the dashed frame")
+  it('W2V-N25: the outline is dashed and lighter than a leader (the field frame)', () => {
+    const { dashM, gapM, alpha } = CROP_OUTLINE;
+    // lighter than round 6's 0.55, still over the old floor of 0.3
+    expect(alpha).toBeLessThanOrEqual(0.45);
+    // a dash of 4-12 px at the app's 90-140 px per metre on the cut plane, more line than gap
+    expect(dashM).toBeGreaterThanOrEqual(0.04);
+    expect(dashM).toBeLessThanOrEqual(0.09);
+    expect(gapM).toBeGreaterThan(0);
+    expect(gapM).toBeLessThan(dashM);
+    const period = dashM + gapM;
+    expect(cropDash(0.5 * dashM)).toBe(1);
+    expect(cropDash(dashM + 0.5 * gapM)).toBe(0);
+    // periodic along the edge, either side of 0 (the crop starts ahead of the intake, x < 0)
+    expect(cropDash(-period + 0.5 * dashM)).toBe(1);
+    expect(cropDash(3 * period + dashM + 0.5 * gapM)).toBe(0);
+    // over a whole number of periods along an edge, the share drawn is the dash's
+    let on = 0;
+    const n = 10_000;
+    for (let i = 0; i < n; i++) on += cropDash(-2 + (40 * period * i) / n);
+    expect(on / n).toBeCloseTo(dashM / period, 2);
   });
 
   it('states the schlieren sensitivity (knife-edge cut-off a/f, rad)', () => {

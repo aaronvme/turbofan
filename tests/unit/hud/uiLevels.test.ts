@@ -24,8 +24,9 @@ function physicsUiRows(): { id: string; check: string; pass: string }[] {
 describe('the UI levels mirror docs/PHYSICS.md 3.5 (D4-91)', () => {
   const rows = physicsUiRows();
 
-  it('has U1-U3, verbatim', () => {
-    expect(rows.map((r) => r.id)).toEqual(['U1', 'U2', 'U3']);
+  it('has U1-U5, verbatim (and any recorded rows after them)', () => {
+    expect(rows.map((r) => r.id).slice(0, 5)).toEqual(['U1', 'U2', 'U3', 'U4', 'U5']);
+    expect(rows.map((r) => r.id).sort()).toEqual(Object.keys(UI_ROWS).sort());
     for (const r of rows) {
       const m = UI_ROWS[r.id as keyof typeof UI_ROWS];
       expect(m.checkText).toBe(r.check);
@@ -42,6 +43,25 @@ describe('the UI levels mirror docs/PHYSICS.md 3.5 (D4-91)', () => {
     expect(rows[1]?.pass).toContain('≤ 250 ms');
     expect(UI_LEVELS.bootToReadyMaxMs).toBe(5000);
     expect(rows[2]?.pass).toContain('≤ 5 s');
+    // D4-97 item 1 (W2A-I7): an unwarmed switch is shown within 2 s at any steady frame CPU
+    expect(UI_LEVELS.coldSwitchMaxMs).toBe(2000);
+    expect(rows[3]?.pass).toContain('≤ 2 s');
+    // D4-98 item 1: the mechanism, not the bar: 30 frames of preparing, then a slot every frame
+    expect(rows[3]?.check).toContain('after 30 frames of preparing');
+    expect(rows[3]?.check).toContain('one every frame');
+    expect(rows[3]?.check).not.toContain('60 frames');
+    // D4-97 item 2 (W2A-I8): the cut views' framing, its minimum engine scale and the row
+    expect(UI_LEVELS.cutViewMinScale).toBe(0.6);
+    expect(rows[4]?.check).toContain('0.6 of');
+    expect(UI_LEVELS.calloutRowPx).toBe(52);
+    expect(rows[4]?.check).toContain('52 px');
+    expect(rows[4]?.check).toContain('fan, combustor, HPT, LPT, exhaust');
+    // D4-97 item 4: Cutaway's own warm frames and the background warm-up, recorded, no bar
+    expect(rows.slice(5).map((r) => r.id)).toEqual(['U6', 'U7']);
+    for (const r of rows.slice(5))
+      expect(r.pass).toMatch(/^recorded on every run, indicative, no bar/);
+    expect(rows[5]?.pass).toContain('47 warm frames at ≤ 41 ms');
+    expect(rows[6]?.pass).toContain('7.0 s after ready');
   });
 
   it('the map annunciates at U1: amber below 5 %, normal at exactly 5 % (W2A-N19), red at 0', () => {

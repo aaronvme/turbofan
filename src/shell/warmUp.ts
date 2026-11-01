@@ -9,6 +9,14 @@
 // frame that lands in a switch's window shows as a hitch in it, U2): no background slot while a
 // switch is pending, nor for QUIET_AFTER_INPUT_MS after any input or switch. A cold switch still
 // prepares its own view in that time, since the viewer waits for that one.
+// D4-97 item 1 (W2A-I7): a cold switch has a bound. The asked view takes its slots under the same
+// rule, but once it has waited COLD_SWITCH_WAIT_FRAMES frames it takes them whatever the last
+// frame's CPU, and its give-up counts the frames waited, so a steady frame CPU over the bar can no
+// longer hold the switch in "Preparing" for good (U4, PHYSICS.md 3.5). D4-98 item 1: the wait is
+// 30 frames, and after it the asked view takes a slot every frame, not every SLOT_EVERY: the viewer
+// already waits on "Preparing", so the frame budget is the cheaper thing to spend (D4-97's 60
+// frames and every second frame showed Data in 3.1-3.2 s at a steady 8.4-11.2 ms, over U4's 2 s).
+// The background keeps the CPU rule and SLOT_EVERY (D4-95 item 3).
 
 import type { RenderState, ViewMode } from '../contracts/ui';
 import type { FieldQuantityId } from '../flow/viz/fields';
@@ -78,6 +86,17 @@ export const SLOT_FRAME_CPU_MS = 8.3;
  * slowest, Cutaway, took 6.9-14.5 s to compile in one frame at boot (round 3).
  */
 export const MAX_WARM_FRAMES = 400;
+/**
+ * D4-97 item 1, D4-98 item 1: after this many frames of preparing, the asked view takes a slot
+ * every frame, whatever the last frame's CPU. 0.5 s at 60 fps.
+ */
+export const COLD_SWITCH_WAIT_FRAMES = 30;
+/**
+ * D4-97 item 1: the asked view is given up on (shown anyway, its last pipelines compiling on first
+ * use, and said so) after this many frames waited, not slots taken: about 13 s at 60 fps (the
+ * background's give-up, MAX_WARM_FRAMES slots at SLOT_EVERY).
+ */
+export const MAX_PREPARE_FRAMES = 800;
 /** D4-95: no background slot for this long after any input or switch, ms. */
 export const QUIET_AFTER_INPUT_MS = 1000;
 
@@ -125,7 +144,10 @@ export interface WarmScheduler {
   /** The configuration is compiled (its warm frame drew it whole, nothing pending). */
   done(id: WarmConfigId): void;
   isWarm(id: WarmConfigId): boolean;
-  /** The configurations given up on after MAX_WARM_FRAMES (shown anyway). */
+  /**
+   * The configurations given up on after MAX_WARM_FRAMES slots (the background), or (the asked
+   * view) after MAX_PREPARE_FRAMES frames waited (shown anyway).
+   */
   gaveUp(): readonly WarmConfigId[];
   state(): { readonly warm: readonly WarmConfigId[]; readonly queue: readonly WarmConfigId[] };
 }
@@ -135,6 +157,12 @@ export function createWarmScheduler(): WarmScheduler {
   const frames = new Map<WarmConfigId, number>();
   const given: WarmConfigId[] = [];
   let lastSlot = -Infinity;
+  // D4-97 item 1: the cold view the viewer asked for, and the frame its wait began
+  let preparing: { readonly id: WarmConfigId; readonly since: number } | null = null;
+  const giveUp = (id: WarmConfigId) => {
+    given.push(id);
+    done(id);
+  };
   // the background waits until then: QUIET_AFTER_INPUT_MS after the last input or pending switch
   let quietUntil = -Infinity;
   const quiet = (untilMs: number) => {
@@ -145,24 +173,37 @@ export function createWarmScheduler(): WarmScheduler {
     if (!isWarm(id)) warm.push(id);
   };
   const queue = () => [...BOOT_CONFIGS, ...BACKGROUND_ORDER].filter((id) => !isWarm(id));
+  const slot = (id: WarmConfigId, frame: number) => {
+    frames.set(id, (frames.get(id) ?? 0) + 1);
+    lastSlot = frame;
+    return id;
+  };
   return {
     next(frame, cpuMs, asked, clock) {
       if (clock.switchPending) quiet(clock.nowMs + QUIET_AFTER_INPUT_MS);
-      if (frame - lastSlot < SLOT_EVERY || !(cpuMs <= SLOT_FRAME_CPU_MS)) return null;
+      if (isWarm(asked)) preparing = null;
+      else if (preparing?.id !== asked) preparing = { id: asked, since: frame };
+      const waited = preparing === null ? 0 : frame - preparing.since;
+      if (preparing !== null && waited >= MAX_PREPARE_FRAMES) {
+        giveUp(preparing.id);
+        preparing = null;
+      }
+      // the asked view's own bound: past it, a slot every frame whatever the last frame's CPU
+      if (preparing !== null && waited >= COLD_SWITCH_WAIT_FRAMES) return slot(preparing.id, frame);
+      if (frame - lastSlot < SLOT_EVERY || cpuMs > SLOT_FRAME_CPU_MS) return null;
       const suspended = clock.nowMs < quietUntil;
       for (;;) {
         // while suspended only a cold switch's own view (the one the viewer waits for)
         const id = !isWarm(asked) ? asked : suspended ? undefined : queue()[0];
         if (id === undefined) return null;
+        // the asked view's give-up is its frames waited (MAX_PREPARE_FRAMES), not its slots
+        if (id === asked) return slot(id, frame);
         const n = frames.get(id) ?? 0;
         if (n >= MAX_WARM_FRAMES) {
-          given.push(id);
-          done(id);
+          giveUp(id);
           continue;
         }
-        frames.set(id, n + 1);
-        lastSlot = frame;
-        return id;
+        return slot(id, frame);
       }
     },
     input(nowMs) {
@@ -177,14 +218,28 @@ export function createWarmScheduler(): WarmScheduler {
 }
 
 /**
+ * W2A-N23: the boot configurations the boot's warm-up finished (its report, in the same order).
+ * Only these are marked warm; an unfinished one is left to the scheduler, which warms it first
+ * (the asked view's, or the queue's head), instead of its first frames compiling it unseen.
+ */
+export function bootWarmed(
+  ids: readonly WarmConfigId[],
+  report: readonly { readonly done: boolean }[],
+): WarmConfigId[] {
+  return ids.filter((_, i) => report[i]?.done === true);
+}
+
+/**
  * The view to show (D4-91): the asked one once its configuration is warm (or at boot, when nothing
- * is shown yet), otherwise the one shown so far, with the mode being prepared.
+ * is shown yet, or when it needs the configuration already shown: W2A-N23's unfinished boot view),
+ * otherwise the one shown so far, with the mode being prepared.
  */
 export function shownView(
   asked: RenderState,
   shown: RenderState | null,
   isWarm: (id: WarmConfigId) => boolean,
 ): { readonly view: RenderState; readonly preparing: ViewMode | null } {
-  if (shown === null || isWarm(configFor(asked))) return { view: asked, preparing: null };
+  if (shown === null || isWarm(configFor(asked)) || configFor(shown) === configFor(asked))
+    return { view: asked, preparing: null };
   return { view: shown, preparing: asked.viewMode };
 }
