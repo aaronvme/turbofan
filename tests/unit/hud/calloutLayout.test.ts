@@ -6,14 +6,19 @@
 //   labels go outward, above and below the engine, in the parts' axial order, with no leader
 //   crossing another.
 // - Schlieren's framing: the content box fitted into the free area between the panels.
+// - Round 7 (critic 17's visual notes): Schlieren and Exploded framed with a margin inside the
+//   free area above the dock (Schlieren touched the left column at 1920; Exploded, unframed, ran
+//   under the right column).
 import { describe, expect, it } from 'vitest';
 import { radiusAt } from '../../../src/contracts/engine';
+import { FIELD_EXTENTS } from '../../../src/contracts/flow';
 import { ENGINE_DEFINITION } from '../../../src/engine/definition';
 import {
   calloutGeometry,
   calloutPoint,
   componentAnchors,
   engineRings,
+  explodedRings,
   screenBox,
   seenThroughIntake,
   type CalloutView,
@@ -28,9 +33,14 @@ import {
 import { Matrix4, PerspectiveCamera, Vector3 } from 'three/webgpu';
 import { UI_LEVELS } from '../../../src/hud/uiLevels';
 import { LOOK_PRESETS } from '../../../src/render/presets';
+import { EXPLODE_GAP, explodeOffsets } from '../../../src/geometry/explode';
 import {
+  FRAME_MARGIN_PX,
+  FRAMED_MIN_SCALE,
   cutViewOrbit,
+  fitOrbit,
   framedOrbit,
+  inset,
   orbitFromPose,
   orbitPose,
   rowsInset,
@@ -282,15 +292,21 @@ describe('the cut views: labels outward in axial order (D4-92 zz)', () => {
 describe('D4-97 item 2 (W2A-I8) and W2A-N25: the framings, checked by projecting the engine after the orbit', () => {
   // the app's default view (the ¾ front preset), its camera as the worker poses it
   const preset = LOOK_PRESETS.threeQuarterFront;
-  const boxAt = (o: OrbitState, canvas: { w: number; h: number }, xEnd: number) => {
+  const ringsBoxAt = (
+    o: OrbitState,
+    canvas: { w: number; h: number },
+    rings: readonly (readonly [number, number, number])[],
+  ) => {
     const cam = new PerspectiveCamera(preset.fovDeg, canvas.w / canvas.h, 0.05, 200);
     const pose = orbitPose(o);
     cam.position.set(...pose.position);
     cam.lookAt(new Vector3(...pose.target));
     cam.updateMatrixWorld();
     const m = new Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
-    return screenBox(m.elements, engineRings(def, xEnd), canvas.w, canvas.h);
+    return screenBox(m.elements, rings, canvas.w, canvas.h);
   };
+  const boxAt = (o: OrbitState, canvas: { w: number; h: number }, xEnd: number) =>
+    ringsBoxAt(o, canvas, engineRings(def, xEnd));
   // the free area above the dock, as the app's overlay posts it (its centre column at both sizes)
   const sizes = [
     { canvas: { w: 1366, h: 768 }, rows: { x: 288, y: 60, w: 766, h: 470 } },
@@ -319,6 +335,37 @@ describe('D4-97 item 2 (W2A-I8) and W2A-N25: the framings, checked by projecting
       ).toBe(true);
     });
 
+  // round 7: Schlieren (the engine and its near-field jet) and Exploded (the modules slid apart)
+  // inside the free area above the dock less FRAME_MARGIN_PX on every side, at both sizes
+  for (const [name, rings] of [
+    ['Schlieren', engineRings(def, FIELD_EXTENTS.near.xMax)],
+    ['Exploded', explodedRings(def, EXPLODE_GAP)],
+  ] as const)
+    for (const { canvas, rows } of sizes)
+      it(`${name} at ${String(canvas.w)} x ${String(canvas.h)}: framed inside the area above the dock with a ${String(FRAME_MARGIN_PX)} px margin`, () => {
+        const area = inset(rows, FRAME_MARGIN_PX);
+        const project = (q: OrbitState) => ringsBoxAt(q, canvas, rings);
+        const o = fitOrbit(start, project, canvas, area, preset.fovDeg, FRAMED_MIN_SCALE);
+        const box = project(o);
+        if (box === null) throw new Error('off screen');
+        const scale = start.distance / o.distance;
+        expect(scale).toBeLessThanOrEqual(1);
+        expect(scale).toBeGreaterThanOrEqual(FRAMED_MIN_SCALE - 1e-9);
+        // inside the area (2 px for the re-projection's residual): the margin to every panel
+        const r = { box, area, scale };
+        expect(box.x, JSON.stringify(r)).toBeGreaterThanOrEqual(area.x - 2);
+        expect(box.x + box.w, JSON.stringify(r)).toBeLessThanOrEqual(area.x + area.w + 2);
+        expect(box.y, JSON.stringify(r)).toBeGreaterThanOrEqual(area.y - 2);
+        expect(box.y + box.h, JSON.stringify(r)).toBeLessThanOrEqual(area.y + area.h + 2);
+        // and it fills the area one way (framed, not shrunk past it): within 8 px across or down
+        expect(box.w >= area.w - 8 || box.h >= area.h - 8, JSON.stringify(r)).toBe(true);
+      });
+
+  it('inset takes a margin off every side', () => {
+    expect(inset({ x: 100, y: 50, w: 400, h: 300 }, 24)).toEqual({ x: 124, y: 74, w: 352, h: 252 });
+    expect(inset({ x: 0, y: 0, w: 30, h: 30 }, 24)).toEqual({ x: 24, y: 24, w: 1, h: 1 });
+  });
+
   it('Schlieren: framedOrbit brings the engine and its jet into the free area (W2A-N25)', () => {
     const canvas = { w: 1366, h: 768 };
     const free = { x: 288, y: 60, w: 766, h: 590 };
@@ -331,6 +378,31 @@ describe('D4-97 item 2 (W2A-I8) and W2A-N25: the framings, checked by projecting
     expect(Math.abs(box.x + box.w / 2 - (free.x + free.w / 2))).toBeLessThan(0.1 * free.w);
     expect(Math.abs(box.y + box.h / 2 - (free.y + free.h / 2))).toBeLessThan(0.1 * free.h);
     expect(box.w).toBeLessThan(box0.w);
+  });
+});
+
+describe('round 7: the exploded engine on screen (Exploded framing)', () => {
+  it('explodedRings span the intake slid forward to the exhaust slid aft, at each module casing', () => {
+    const off = explodeOffsets(def, 1, EXPLODE_GAP);
+    const rings = explodedRings(def, EXPLODE_GAP);
+    const xs = rings.map((p) => p[0]);
+    const comps = def.flowpath.components;
+    const inlet = comps.find((c) => c.id === 'inlet');
+    const exhaust = comps.find((c) => c.id === 'exhaust');
+    if (inlet === undefined || exhaust === undefined) throw new Error('no inlet or exhaust');
+    expect(Math.min(...xs)).toBeCloseTo(inlet.xStart + off.inlet, 9);
+    expect(Math.max(...xs)).toBeCloseTo(exhaust.xEnd + off.exhaust, 9);
+    // every module is in it, at its casing (the intake at the nacelle's outside: its ring)
+    for (const c of comps) {
+      const x = 0.5 * (c.xStart + c.xEnd);
+      const casing = radiusAt(def.flowpath.curves[c.casing], x) ?? 0;
+      const near = rings.filter((p) => Math.abs(p[0] - (x + off[c.id])) < 1e-9);
+      expect(near.length, c.id).toBeGreaterThan(0);
+      const r = Math.max(...near.map((p) => Math.hypot(p[1], p[2])));
+      expect(r, c.id).toBeGreaterThanOrEqual(casing - 1e-9);
+    }
+    // the gap is geometry/explode's, the one the view uses
+    expect(EXPLODE_GAP).toBe(0.22);
   });
 });
 
