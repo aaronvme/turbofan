@@ -1,15 +1,15 @@
-realistic: 2049x1152 centre std 0.209 lit 0.918 · backing 1920x1079 · render 6.5 ms · flow 0.5 ms · 57 fps
-  realistic schlieren signature {"greyShare":0.23507672357899287,"greyMean":0.47350971095919486,"silhouetteRatio":1.1731511020503864,"jetStd":0.11276207160977572,"pass":false}
+realistic: 2049x1152 centre std 0.206 lit 0.922 · backing 1920x1079 · render 6.5 ms · flow 0.5 ms · 53 fps
+  realistic schlieren signature {"greyShare":0.2348822130970391,"greyMean":0.4734458354276728,"silhouetteRatio":1.1719100112014946,"jetStd":0.11276554844734743,"pass":false}
   cutaway callouts shown (8): fan, combustor, hpt, lpt, exhaust, hpc, booster, bypassDuct
-cutaway: 2049x1152 centre std 0.195 lit 0.342 · backing 1920x1079 · render 6.8 ms · flow 0.2 ms · 61 fps
-  cutaway schlieren signature {"greyShare":0.552694809229877,"greyMean":0.4794668605308127,"silhouetteRatio":0.4057015847357619,"jetStd":0.06692816157420055,"pass":false}
-exploded: 2049x1152 centre std 0.223 lit 0.633 · backing 1920x1079 · render 6.6 ms · flow 0.0 ms · 60 fps
-  exploded schlieren signature {"greyShare":0.24370002161227577,"greyMean":0.4816706832861723,"silhouetteRatio":0.6735648504804533,"jetStd":0.14347161692771665,"pass":false}
-schlieren: 2049x1152 centre std 0.092 lit 0.045 · backing 1920x1079 · render 6.5 ms · flow 1.1 ms · 61 fps
-  schlieren schlieren signature {"greyShare":0.8971644436153344,"greyMean":0.5010248979786318,"silhouetteRatio":0.2493338392069704,"jetStd":0.16122984216958416,"pass":true}
-  schlieren S1 (knife edge off, control) schlieren signature {"greyShare":0.9928722445045549,"greyMean":0.5019273107696355,"silhouetteRatio":0.24954395565664234,"jetStd":0.0012164406587148733,"pass":false}
+cutaway: 2049x1152 centre std 0.194 lit 0.334 · backing 1920x1079 · render 6.1 ms · flow 0.2 ms · 61 fps
+  cutaway schlieren signature {"greyShare":0.5515106950025547,"greyMean":0.47944826348496283,"silhouetteRatio":0.40908286992408877,"jetStd":0.06316507446452975,"pass":false}
+exploded: 2049x1152 centre std 0.185 lit 0.635 · backing 1920x1079 · render 5.2 ms · flow 0.0 ms · 61 fps
+  exploded schlieren signature {"greyShare":0.5049454971102495,"greyMean":0.4852029720152874,"silhouetteRatio":0.6595717469932378,"jetStd":0.13395485534440826,"pass":false}
+schlieren: 2049x1152 centre std 0.187 lit 0.329 · backing 1920x1079 · render 7.2 ms · flow 1.0 ms · 61 fps
+  schlieren schlieren signature {"greyShare":0.9543810940889934,"greyMean":0.5010586398574459,"silhouetteRatio":0.2541361470867546,"jetStd":0.1510856524403915,"pass":true}
+  schlieren S1 (knife edge off, control) schlieren signature {"greyShare":0.9974065053490827,"greyMean":0.5019368528223186,"silhouetteRatio":0.25375383489547854,"jetStd":0.012018146371444738,"pass":false}
   data callouts shown (8): fan, combustor, hpt, lpt, exhaust, hpc, booster, bypassDuct
-data: 2049x1152 centre std 0.189 lit 0.325 · backing 1920x1079 · render 8.0 ms · flow 0.3 ms · 61 fps
-  data schlieren signature {"greyShare":0.5542189504403421,"greyMean":0.4793277814610965,"silhouetteRatio":0.41883846779099065,"jetStd":0.06551929093892078,"pass":false}
-realistic again (a full window): render 7.9 ms · flow 0.7 ms · 61 fps at dpr 1.5
+data: 2049x1152 centre std 0.188 lit 0.324 · backing 1920x1079 · render 7.3 ms · flow 0.3 ms · 61 fps
+  data schlieren signature {"greyShare":0.5530364064493598,"greyMean":0.47931985664127086,"silhouetteRatio":0.4172182415861018,"jetStd":0.06001469031067849,"pass":false}
+realistic again (a full window): render 6.7 ms · flow 0.6 ms · 61 fps at dpr 1.5
 ultra: backing 2049x1152 at dpr 1.5 (high: 1.405906802923504)
