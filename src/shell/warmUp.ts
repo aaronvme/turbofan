@@ -18,9 +18,13 @@
 // frames and every second frame showed Data in 3.1-3.2 s at a steady 8.4-11.2 ms, over U4's 2 s).
 // The background keeps the CPU rule and SLOT_EVERY (D4-95 item 3).
 // D4-100 (U4 on AC: 2.46-2.56 s with 56-57 warm frames, each lengthening its frame past a vsync;
-// the longest gap while preparing 108-145 ms): past its wait the asked view's frame takes warm
-// frames until their CPU reaches PREPARE_FRAME_CPU_MS (nextWarmBudget), so the view's builds take a
-// few frames instead of one a frame. W2A-N29: only background slots count toward MAX_WARM_FRAMES
+// the longest gap while preparing 108-145 ms): while it prepares, the asked view's frame takes
+// warm frames until their CPU reaches PREPARE_FRAME_CPU_MS (nextWarmBudget), so the view's builds
+// take a few frames instead of one a frame. From the first frame of preparing: with D4-98's 30-frame
+// wait kept it showed in 2.24-2.42 s in Chrome (3d5f543, AC, another builder's jobs running), and
+// without it in 1.89-2.15 s (b0544d5): the wait was half a second of U4's 2 s in which a frame over
+// the slot rule warmed nothing. (D4-97 had kept a wait so the frame budget stays the default; the
+// viewer waits on "Preparing" either way. COLD_SWITCH_WAIT_FRAMES = 30 restores it.) W2A-N29: only background slots count toward MAX_WARM_FRAMES
 // (the asked view's own give-up is its frames waited), so a cold view the viewer leaves joins the
 // queue with its background slots only.
 
@@ -108,9 +112,10 @@ export const SLOT_FRAME_CPU_MS = 8.3;
 export const MAX_WARM_FRAMES = 400;
 /**
  * D4-97 item 1, D4-98 item 1: after this many frames of preparing, the asked view takes a slot
- * every frame, whatever the last frame's CPU. 0.5 s at 60 fps.
+ * every frame, whatever the last frame's CPU (D4-98: 30, 0.5 s at 60 fps). D4-100: 0, so the asked
+ * view warms several frames' worth a frame from its first frame of preparing (the header).
  */
-export const COLD_SWITCH_WAIT_FRAMES = 30;
+export const COLD_SWITCH_WAIT_FRAMES = 0;
 /**
  * D4-97 item 1: the asked view is given up on (shown anyway, its last pipelines compiling on first
  * use, and said so) after this many frames waited, not slots taken: about 13 s at 60 fps (the
