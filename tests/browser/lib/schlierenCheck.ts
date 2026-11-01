@@ -20,14 +20,21 @@ export interface Box {
 
 /** The bars, stated before the run (W2A-I6; display-space luminance 0..1). */
 export const SCHLIEREN_BARS = {
-  /** The knife-edge grey band (0.5 at zero deflection, +-0.1 for the JPEG and the faint far field). */
-  greyMin: 0.4,
-  greyMax: 0.6,
+  /**
+   * The knife-edge grey band: 0.5 at zero deflection. W2A-N30 (critic pass 18): it was +-0.1 (for
+   * the JPEG and the faint far field), which held the studio's own grey (about 0.47), so the grey
+   * share measured how much studio showed. Since W2A-I10 the signature is on the canvas PNG, and on
+   * HEAD (310c301, the polish round's TDD run on AC, 2026-11-01, both sizes) Schlieren had 0.914-0.917 of
+   * its field within +-0.01 and 0.904-0.907 within +-0.005 (the 8-bit neutral, 127-128 of 255),
+   * the studio-backed controls 0.01-0.29 within +-0.01 (0.08-0.11 the cut views). Stated before the
+   * run that gates it: +-0.01, two 8-bit levels either side of the neutral.
+   */
+  greyMin: 0.49,
+  greyMax: 0.51,
   /**
    * At least this share of the free area outside the engine is that grey. W2A-I10: midway
-   * between Schlieren on the canvas (0.84-0.90) and its controls (<= 0.55: the cut views framed
-   * for their rows, D4-97 item 2, show more of the studio, whose own grey, about 0.47, is in the
-   * band; round 5's 0.3 passed the 1920 cut views once flowviz's floor showed the studio).
+   * between Schlieren on the canvas (0.84-0.90) and its controls (<= 0.55, the studio's grey then
+   * in the band). Unchanged by W2A-N30's band: Schlieren 0.91-0.92, the controls <= 0.29.
    */
   greyShareMin: 0.7,
   /** The silhouette's mean over the field's grey mean (0.22 x the beauty by design). */
