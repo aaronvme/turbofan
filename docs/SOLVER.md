@@ -680,3 +680,45 @@ The reference does not edit this section (like §14), so the two branches' SOLVE
 
 - The three flux-scale numbers are §12.2's measurements of record (2.67e-8, 1.27e-11, 2.46e-12, critic pass 10 and w2-solver-int) to their figures: the mirror changed no WGSL (15.1), so the kernel's f32 arithmetic is the one the rows were set from, and D4-62's rule (re-measure and restate only after a change to it) does not fire.
 - The suites in that run: test:gpu 70 passed (12 files), test:gpu-ladder 13 passed + 1 expected fail (L9a's D4-45 steadiness, `it.fails`, KNOWN-FAIL D4-57).
+
+## 16. W2S-B1: the look-dev page's divergence and the outflow's backflow (w2/solver-diverge; D4-100)
+
+The reference does not edit this section (like §14-15). The rule it adds is §5's backflow branch, in the oracle and the kernel alike.
+
+**The finding (D4-100).** In the official P4flow capture the look-dev page's solver went NaN: "the density residual is NaN after 6759 iterations". The page (`src/lookdev/flowPanel.ts`) runs `GpuFlowSolver`'s default (the app's: thermally perfect, ISA SLS at rest, preconditioned tracking at minMach = M_cut = 0.02, CFL 0.8) but starts it from the timing state `perfState` (an axial jet of 60 m/s, swirl, a 2 % pressure wave and a hot fuel-air plume, T′ 300 K, Z 0.025; not a solution), and steps it at about 2 iterations per frame indefinitely. The app itself (`src/app/simWorker.ts`) starts the same solver from the ambient at rest, which, uncoupled, is an exact zero of every flux and source and stays bitwise ambient (20000 iterations, `tests/gpu-ladder/app-longrun.test.ts`).
+
+**The reproduction (Dawn, 2026-11-01; scratch `reports/scratch/diverge/repro.ts`, `probe.ts`, `oracle.ts`).** Headless, the same configuration (the app's device limits, `step()` frames of 2 iterations with their resample) gives its first non-finite state at **iteration 6756** (the page read it back a few frames late). The run is deterministic: replayed from a saved state it repeats bitwise.
+- *Where it broke:* the core duct's outer-wall row (block 5 `core`, i 510 of 534, j 15 of 16, x 2.53 m, r 0.43 m, near the core nozzle's exit). T′ there went 1077 → 1100 K at 6743, then grew 1.12-1.2× per iteration to 18,700 K at 6754, T′ −2600 K (T < 0) at 6755, and at 6756 the speed of sound (√ of a negative T) was NaN in 33 cells. The gas there was hot plume gas (T′ 300-1265 K, Z 0.010-0.017) flowing upstream (u′ −40 to −57 m/s) into the core nozzle.
+- *Before it:* no jump from rest, a drift. The GPU's cell-mean residual never decayed (173 at 100, 362 at 1000, 536 at 2500, 250-340 from 4500). At the outflow (plume-core i 815-822, x 33.7 m) the jet **reversed between iterations 1000 and 2000** (u′ +43..+58 → −61..−231 m/s), and the axis cell at the outflow corner then ran back at −385 (3000), −550 (5000), −643 m/s (6700), Mach 0.90, while its T′ rose 321 → 519 → 814 → 1072 K. By 6000 backflowing hot gas (T′ 270-285 K, u′ −100 to −130 m/s) filled the plume-bypass, plume-outer and farfield blocks from x ≈ 8 m to the outflow. The initial maximum T′ was 300 K and nothing in the uncoupled field adds heat.
+
+**The bisection.**
+
+| run (GPU unless named; look-dev start unless named) | result |
+|---|---|
+| M_cut 0.02 (the app's default, D4-89), CFL 0.8 | non-finite at 6756 |
+| M_cut 0.003 (D4-40) | non-finite between 6000 and 6100 (13,774 cells at 6100): **not D4-89's mirror** |
+| the plain scheme (CFL 1.5) | finite to 12000; the residual falls 87 (1000) → 5.4 (12000); the jet keeps leaving through the outflow (+60 → +30 m/s), and the plume leaves by 8000 (max T′ 7.9 K at 12000) |
+| M_cut 0.02 at CFL 0.4 | finite to 16000 but on the same pseudo-time path (max T′ 840 K at 10000 against 814 K at 5000 at CFL 0.8; 1388 K and Mach 1.12 at 16000): **semi-discrete, not a step limit** |
+| the f64 oracle (pre-fix), from the GPU's state at 6700 | the same runaway to 4-5 digits (the wall cell's T′ 1100.4 / 1236.6 / 1392.1 K at 6743-6745, the GPU's 1100.4 / 1236.7 / 1392.2), non-finite at 6755 (16 cells): **the scheme, not f32** |
+| the commits since w2/solver-int | the kernel's WGSL is solver-int's except the bitwise-equal solver-fix refactor; D4-89 changed only uniforms (15.1). The 0.003 row is that kernel, and it diverges too |
+| the app's start (rest) | bitwise ambient to 20000, before and after the fix |
+| with §5's backflow branch | finite to 20000 and D4-79's rule met (below) |
+
+**The cause: the outflow's copy under backflow.** An outflow face whose flow reverses (vn < 0) is an inflow face, and a subsonic inflow takes four of its characteristics from outside. The copy specified all four from the cell itself (velocity, entropy, swirl, fuel), with only the static pressure fixed: the face fed the cell's own state back in, at a total pressure p_out + ½ρvn² that grows with the backflow and a total enthalpy that carries its kinetic energy in as heat. That is a positive feedback with no physical source: the reversed jet accelerated, and the plume gas it recycled grew hotter at every pass. The plain scheme never reversed its jet, so it never entered the loop; the preconditioned pseudo-time transient did (its pressure at the outflow fell 100-670 Pa below p_out at 1000-2000 while the jet decayed), at either cut. The final local runaway at the core nozzle's wall is where the recycled hot gas, now upstream, failed first; it is reproduced by the f64 oracle, so it is the scheme's response to that state, not f32.
+
+**The fix (§5).** A backflow face takes the inflow ghost at the ambient's totals beyond it, (p0, T0) = (p_out, T∞), with no swirl and Z = 0, at the speed set by the cell's outgoing characteristic. The rationale is in §5. A face with vn ≥ 0 is bitwise unchanged.
+
+**The long-run test** (`tests/gpu-ladder/app-longrun.test.ts`; D4-79's rule as `d463.test.ts` applies it, the norms in f64 through an oracle shell of the GPU's state; Dawn, 2026-11-01):
+
+| row (the look-dev start, 20000 iterations, checkpoints every 100) | must hold | before (36fd594) | after (3513e28) |
+|---|---|---|---|
+| signature: finite to 20000, peak max \|p′\| / first | finite, < 100 | non-finite at the 6800 checkpoint | finite; 21.0 |
+| (a) volume-weighted L2 of p′ / first, max over 1000-2000 | ≤ 2 | 0.793 (then NaN) | 0.659 |
+| (a) the same at 20000 | ≤ 2 | NaN | 5.09e-4 |
+| (b) volume-weighted residual 20000 / 10000 | ≤ 1 | NaN | 0.108 |
+| (b) volume-weighted residual 20000 / 100 | ≤ 1 | NaN | 7.28e-3 |
+| reported: max T′ over the run (start 299.9 K) | | 1072 K by 6700 | 303.8 K; 0.94 K at 20000 |
+| reported: the GPU's cell-mean residual 20000 / 100 | | NaN | 0.0228 |
+| the app's start (rest): every state word exactly 0 at 5000 / 10000 / 15000 / 20000 | bitwise | pass | pass |
+
+The kernel follows the oracle on the backflow branch: `tests/gpu/oracle.test.ts`'s backflow row (an inflow/outflow duct with hot, fuelled, swirling gas flowing back in through the outflow, preconditioned at the cut) checks the outflow ghosts (no swirl or fuel enters, the rest within 1e-5 of the oracle's) and row C's tolerances after 1 / 10 / 100 iterations.
