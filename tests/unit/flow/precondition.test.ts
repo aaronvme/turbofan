@@ -303,6 +303,9 @@ describe('preconditioned tracking mode', () => {
       run({ minMach: 0.1, machCut: 1 }),
     );
     expect(run({ minMach: 1, globalMachCut: 0.1 })).toEqual(run());
+    // a cut >= 1 is itself the plain scheme, at the plain CFL (W2R-N31; its GPU twin, W2K-N1, is
+    // tests/gpu/oracle.test.ts's C-cut row)
+    expect(run({ minMach: 0.01, globalMachCut: 1 })).toEqual(run());
     expect(() => run({ minMach: 0.01, globalMachCut: -0.01 })).toThrow(RangeError);
     expect(() => run({ minMach: 0.01, globalMachCut: Number.NaN })).toThrow(RangeError);
   });

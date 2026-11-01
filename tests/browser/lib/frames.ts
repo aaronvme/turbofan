@@ -59,27 +59,23 @@ export interface Diff {
 }
 
 /**
- * Tile-wise difference; `skip` (tile column, tile row) leaves a tile out of every count (the
- * rotor test's band at the cut faces, D4-93).
+ * Tile-wise difference. `masked` (one byte per pixel, 1 = masked) marks pixels that never count
+ * as changed, while a tile's 25 % rule stays of the whole tile (the rotor test's band at the cut
+ * faces: D4-96's cap pixels, which replaced D4-93's tiles with a ring).
  */
-export function diff(
-  a: Grab,
-  b: Grab,
-  threshold: number,
-  skip?: (tileX: number, tileY: number) => boolean,
-): Diff {
+export function diff(a: Grab, b: Grab, threshold: number, masked?: Uint8Array): Diff {
   const { w, h } = a;
   let changed = 0;
   let worst = 0;
   let over = 0;
   for (let ty = 0; ty < h; ty += TILE)
     for (let tx = 0; tx < w; tx += TILE) {
-      if (skip?.(tx / TILE, ty / TILE) === true) continue;
       let n = 0;
       let m = 0;
       for (let y = ty; y < Math.min(h, ty + TILE); y++)
         for (let x = tx; x < Math.min(w, tx + TILE); x++) {
           m++;
+          if (masked?.[y * w + x] === 1) continue;
           if (Math.abs((a.lum[y * w + x] ?? 0) - (b.lum[y * w + x] ?? 0)) > threshold) n++;
         }
       changed += n;

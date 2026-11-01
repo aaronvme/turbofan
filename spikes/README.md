@@ -74,7 +74,7 @@ Before:
 - [ ] AC power. Plan **and** power mode set: Balanced first (D0-3), Best performance only on the orchestrator's call. The AC power mode is a separate overlay that can differ from the plan.
 - [ ] No other agents, builds, installs, tests, games or video. A game on the GPU inflated timings 1.2-2.5x (M31).
 - [ ] Display sleep and the screen saver off for longer than the run (~35 min): a display that turns off stops rAF.
-$1
+- [ ] Notifications off (Do not disturb), so no toast takes focus. No other window over Chrome. Don't touch the machine until the summary prints (apart from the one click into Chrome that the D4-73 item below may need).
 - [ ] D4-73: Chrome must hold the OS focus. If the Chrome window the harness opens does not come to the foreground by itself (Windows may refuse a background process the foreground), click into it once before the first run; a run whose page lacks the focus at its start or end, or blurs, is INVALID. The look-dev capture, ab and variantAb tools apply the same rule.
 
 After:

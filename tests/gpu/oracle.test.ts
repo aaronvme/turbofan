@@ -182,6 +182,24 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     await trackingRows(p, 'C-pre tracking');
   });
 
+  // W2K-N1 (critic pass 16's mutant K4; the CPU's twin is precondition.test.ts's global M_cut
+  // case, W2R-N31): a global M_cut >= 1 raises minMach to 1, which is the plain scheme (beta = 1,
+  // f_a = 1) at the plain default CFL 1.5. The GPU, given the cut beside minMach 0.003 and no CFL,
+  // runs row C's oracle (plain tracking, its own default CFL) within row C's tolerances. The CFL
+  // switch read from the given minMach picks 0.8 and is off by the step's whole increment.
+  it('C-cut: a global M_cut >= 1 is plain tracking (CFL 1.5) on the GPU', async () => {
+    const p = await pair(
+      closedBoxMesh('f32'),
+      closedBoxOptions('tracking'),
+      { lowMachPreconditioning: { minMach: 0.003, globalMachCut: 1 } },
+      (s) => {
+        s.setState(smoothPerturbation);
+      },
+    );
+    expect(p.gpu.params.tracking[0]?.cfl).toBe(p.ref.trackingCfl);
+    await trackingRows(p, 'C-cut tracking');
+  });
+
   it('C: physical time (SSP-RK3 at the oracle dt)', async () => {
     const p = await pair(closedBoxMesh('f32'), closedBoxOptions('physical'), {}, (s) => {
       s.setState(smoothPerturbation);

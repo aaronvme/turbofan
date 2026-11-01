@@ -141,14 +141,15 @@ export function quantityValue(id: FieldQuantityId, s: FieldSample, ref: FieldRef
  * near-white centre for p and rho, inferno's near-black for T) over most of the plane: at ground
  * idle that was 44-98 % of it, a heavy board that carried no information. Why 2.5 %: the maps are
  * perceptually uniform, so a fixed fraction of the scale is a fixed colour difference from the
- * ambient's colour: 2.5 % is CIE76 Delta E 3.6 on viridis from its end and 3.8 on the diverging
- * map from its centre, under two just-noticeable differences (2.3), which no eye reads as a value
- * off the bar. (Inferno's near-blacks at T_inf turn faster, Delta E 12, which CIE76 overstates
- * between near-blacks; +-45 K is still under the fan's take-off temperature rise, so the plane
- * keeps the core and the hot jet.) So the floor hides about what the map could not show anyway,
- * the ambient band is a thin fringe of the drawn flow, and the scale stays fixed: idle and
- * take-off read on one legend (a range taken from the field would move it, and would still put
- * the ambient at the map's end).
+ * ambient's colour. On viridis (from its end) and the diverging map (from its centre) 2.5 % is
+ * CIE76 Delta E 3.4-4.1, 1.5-1.8 just-noticeable differences (2.3), CIEDE2000 2.0-4.4 (critic
+ * pass 16, docs/reviews/probes/w2v-floor-deltae.probe.ts.txt): a faint step, so there the floor
+ * hides little the map showed. Inferno is the exception: its near-blacks at T_inf turn fast, and
+ * +-2.5 % (+-45 K) is CIE76 Delta E 12.0-13.6, CIEDE2000 6.6-8.3, a band an eye can see. So T's
+ * floor is a display choice that hides a visible band: at ground idle the T view draws about a
+ * tenth of the plane, the hot core, and the bypass and booster air (within 45 K of T_inf) go. The
+ * scale stays fixed either way: idle and take-off read on one legend (a range taken from the field
+ * would move it, and would still put the ambient at the map's end).
  * The legend draws the band and says "Not drawn: ...".
  */
 export const AMBIENT_FLOOR_FRACTION = 0.025;
