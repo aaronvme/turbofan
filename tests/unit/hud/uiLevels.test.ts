@@ -48,7 +48,8 @@ describe('the UI levels mirror docs/PHYSICS.md 3.5 (D4-91)', () => {
     expect(UI_LEVELS.coldSwitchMaxMs).toBe(2000);
     expect(rows[3]?.pass).toContain('≤ 2 s');
     // D4-98 item 1: the mechanism, not the bar: 30 frames of preparing, then a slot every frame
-    expect(rows[3]?.check).toContain('after 30 frames of preparing');
+    // D4-100: from the first frame of preparing (D4-98 waited 30 frames)
+    expect(rows[3]?.check).toContain('From its first frame of preparing');
     expect(rows[3]?.check).toContain('a slot every frame');
     expect(rows[3]?.check).not.toContain('60 frames');
     // D4-100: each such slot several warm frames up to the scheduler's own cap (the mechanism)
