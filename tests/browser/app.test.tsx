@@ -4,7 +4,8 @@
 // 1366 x 768 (the screenshots go to reports/ui/, ignored; VITE_UI_LOOKDEV=1 writes them to
 // docs/look-dev/ui/ instead, as flowviz's W2V-N8). D4-82: the solver's field is labelled
 // "solver (uncoupled until W3)" on the badge and the legend. W2F-N5: the worker's frame cost is
-// recorded while the gas path is held (the W1K-I2 part-power fit's slam), to reports/ui/.
+// recorded while the gas path is held (the W1K-I2 part-power fit's slam), to reports/ui/, the sim
+// stepped on a fixed dt so the case is the same every run (D4-98 item 2, W2H-I5).
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { commands, page, userEvent } from 'vitest/browser';
@@ -542,7 +543,7 @@ describe('the app in Chrome', () => {
     expect(problems()).toEqual([]);
   });
 
-  it('W2F-N5: records the worker frame cost while the gas path is held (the part-power fit slam)', async () => {
+  it('W2F-N5: records the worker frame cost while the gas path is held (the part-power fit slam, on a fixed dt: W2H-I5)', async () => {
     await page.viewport(1366, 768);
     await boot('partPowerFit');
     // W2A-I5: five quick ArrowUp presses on the focused lever land at 0.05 (the lever shows what
@@ -562,14 +563,29 @@ describe('the app in Chrome', () => {
       5000,
     );
     expect(lever.value).toBe('0.05');
-    await sleep(3000);
+    // D4-98 item 2 (W2H-I5): the case steps the sim on a fixed dt, so it is the same every run
+    // (with the real frame times the fit's sub-idle throw was intermittent; its cause is the
+    // part-power round's). The sim holds, resets to ground idle, and steps counted frames of
+    // FIXED_DT; each lever change is sent while it holds, so the inputs meet the same steps every
+    // run. The app itself keeps the real frame time.
+    const FIXED_DT = 1 / 60;
+    let asked = 0;
+    const step = async (frames: number, what: string) => {
+      asked += frames;
+      useApp.getState().post({ type: 'debug', simSteps: { dtS: FIXED_DT, frames } });
+      await until(what, () => (useApp.getState().diagnostics?.fixedSteps?.frames ?? -1) >= asked);
+      expect(useApp.getState().diagnostics?.fixedSteps?.left, what).toBe(0);
+    };
+    await step(0, 'the sim held on the fixed steps');
+    useApp.getState().send({ type: 'reset', initial: 'groundIdle' });
+    useApp.getState().send({ type: 'setThrottle', lever: 0.05 });
+    // 3 s at 0.05, then the w2f-c12 probe's case: the lever ramped from idle to take-off over 1 s
+    // of sim time, in 20 steps of 0.05 every 3 frames
+    await step(180, 'the idle hold');
     const before = useApp.getState().diagnostics?.budget;
-    // the w2f-c12 probe's case: the lever ramped from idle to take-off over 1 s of sim time
-    const t0sim = useApp.getState().snapshot?.clock.simTimeS ?? 0;
-    for (let lever = 0; lever < 1;) {
-      lever = Math.min(1, (useApp.getState().snapshot?.clock.simTimeS ?? t0sim) - t0sim);
-      useApp.getState().send({ type: 'setThrottle', lever: Math.max(0.01, lever) });
-      await sleep(50);
+    for (let k = 1; k <= 20; k++) {
+      useApp.getState().send({ type: 'setThrottle', lever: 0.05 * k });
+      await step(3, `the ramp at ${String(0.05 * k)}`);
     }
     const worst: Record<string, number> = {};
     const keep = (k: keyof FrameBudget, v: number | null) => {
@@ -578,8 +594,13 @@ describe('the app in Chrome', () => {
     let heldSnapshots = 0;
     let snapshots = 0;
     let lastVersion = -1;
+    // then 20 s of sim time at take-off, stepped as one batch (the frame cost is the worker's)
+    asked += 1200;
+    useApp.getState().post({ type: 'debug', simSteps: { dtS: FIXED_DT, frames: 1200 } });
     const t0 = performance.now();
-    while (performance.now() - t0 < 20_000) {
+    while ((useApp.getState().diagnostics?.fixedSteps?.frames ?? -1) < asked) {
+      if (performance.now() - t0 > 90_000)
+        throw new Error('the 1200 fixed frames: not within 90 s');
       const s = useApp.getState();
       if (s.snapshot !== null && s.snapshot.version !== lastVersion && s.diagnostics !== null) {
         lastVersion = s.snapshot.version;
@@ -603,6 +624,9 @@ describe('the app in Chrome', () => {
     const end = s.diagnostics?.budget;
     const record = {
       viewport: '1366x768',
+      fixedDtS: FIXED_DT,
+      fixedFrames: s.diagnostics?.fixedSteps?.frames ?? null,
+      simTimeS: s.snapshot?.clock.simTimeS ?? null,
       lostSolves: s.snapshot?.cycle.gasPathSolve.lostSolves ?? 0,
       heldSnapshots,
       snapshots,
@@ -627,6 +651,8 @@ describe('the app in Chrome', () => {
       n1End: s.snapshot?.cycle.n1Percent ?? null,
     };
     await commands.writeFile('reports/ui/frame-cost.json', `${JSON.stringify(record, null, 2)}\n`);
+    // every frame asked for was stepped on the fixed dt (W2H-I5: the same case every run)
+    expect(record.fixedFrames).toBe(asked);
     // the case exercises a held gas path, or its numbers would not answer W2F-N5
     expect(record.lostSolves).toBeGreaterThan(0);
     expect(problems()).toEqual([]);
