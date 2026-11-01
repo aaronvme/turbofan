@@ -218,14 +218,28 @@ export function createWarmScheduler(): WarmScheduler {
 }
 
 /**
+ * W2A-N23: the boot configurations the boot's warm-up finished (its report, in the same order).
+ * Only these are marked warm; an unfinished one is left to the scheduler, which warms it first
+ * (the asked view's, or the queue's head), instead of its first frames compiling it unseen.
+ */
+export function bootWarmed(
+  ids: readonly WarmConfigId[],
+  report: readonly { readonly done: boolean }[],
+): WarmConfigId[] {
+  return ids.filter((_, i) => report[i]?.done === true);
+}
+
+/**
  * The view to show (D4-91): the asked one once its configuration is warm (or at boot, when nothing
- * is shown yet), otherwise the one shown so far, with the mode being prepared.
+ * is shown yet, or when it needs the configuration already shown: W2A-N23's unfinished boot view),
+ * otherwise the one shown so far, with the mode being prepared.
  */
 export function shownView(
   asked: RenderState,
   shown: RenderState | null,
   isWarm: (id: WarmConfigId) => boolean,
 ): { readonly view: RenderState; readonly preparing: ViewMode | null } {
-  if (shown === null || isWarm(configFor(asked))) return { view: asked, preparing: null };
+  if (shown === null || isWarm(configFor(asked)) || configFor(shown) === configFor(asked))
+    return { view: asked, preparing: null };
   return { view: shown, preparing: asked.viewMode };
 }

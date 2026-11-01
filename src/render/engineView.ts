@@ -204,7 +204,8 @@ export interface EngineView {
   /**
    * w2/app-ui round 4 (flagged edit, D4-91; D4-88's boot warm-up made progressive): compiles the
    * given configurations before first use and waits until they are (the app's boot view, behind
-   * the boot spinner), by warm frames (warmFrame) with no budget. The view's state is put back.
+   * the boot spinner), by warm frames (warmFrame) with no budget, at most 8 each; each one says
+   * whether it finished (W2A-N23). The view's state is put back.
    */
   warmUp(configs: readonly WarmConfig[]): Promise<WarmUpReport>;
   /**
@@ -295,11 +296,14 @@ export interface WarmUpReport {
   /**
    * The configurations warmed, in order (e.g. "data:mach+tracers"): each one's wall ms, and of
    * it the CPU ms of its warm frames (three's node builds; the rest is the GPU's compiles).
+   * W2A-N23: `done`, a warm frame drew it whole with nothing compiling (false: it stopped after
+   * its warm frames with work left, so it is not warm).
    */
   readonly configurations: readonly {
     readonly name: string;
     readonly ms: number;
     readonly cpuMs: number;
+    readonly done: boolean;
   }[];
 }
 
@@ -842,17 +846,19 @@ async function assemble(
     },
     async warmUp(configs) {
       const t0 = performance.now();
-      const configurations: { name: string; ms: number; cpuMs: number }[] = [];
+      const configurations: { name: string; ms: number; cpuMs: number; done: boolean }[] = [];
       for (const c of configs) {
         const s0 = performance.now();
         let cpuMs = 0;
         let slowest = { name: '', ms: 0 };
+        let done = false;
         // every pipeline of the configuration created at once, compiled in parallel, waited on
         for (let k = 0; k < 8; k++) {
           const r = view.warmFrame(c, { cpuMs: Infinity });
           cpuMs += r.cpuMs;
           if (r.slowest.ms > slowest.ms) slowest = r.slowest;
-          if (r.done) break;
+          done = r.done;
+          if (done) break;
           await Promise.all([...pendingPipelines]);
           await device.device.queue.onSubmittedWorkDone();
         }
@@ -860,6 +866,7 @@ async function assemble(
           name: `${warmName(c)} (slowest ${slowest.name} ${slowest.ms.toFixed(0)} ms)`,
           ms: performance.now() - s0,
           cpuMs,
+          done,
         });
       }
       return { ms: performance.now() - t0, configurations };

@@ -51,6 +51,7 @@ import { createPostFaults, stepFault } from '../shell/faults';
 import {
   BOOT_CONFIGS,
   WARM_CONFIGS,
+  bootWarmed,
   configFor,
   createWarmScheduler,
   shownView,
@@ -167,7 +168,7 @@ interface App {
   settle: SettleTracker;
   settledFrames: number;
   warmUpMs: number;
-  warmUpSteps: readonly { readonly name: string; readonly ms: number; readonly cpuMs: number }[];
+  warmUpSteps: AppDiagnostics['warmUpSteps'];
   /** D4-91: the background warm-up, the mode being prepared (null: the asked view is shown). */
   warm: WarmScheduler;
   preparing: ViewMode | null;
@@ -735,7 +736,8 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
   // D4-91: the boot view's pipelines compiled behind the boot spinner (the MOCK is bound, so the
   // flow layers draw); the other modes warm in the background once the app runs
   const warm = await view.warmUp(BOOT_CONFIGS.map((id) => WARM_CONFIGS[id]));
-  for (const id of BOOT_CONFIGS) a.warm.done(id);
+  // W2A-N23: only what the boot finished is warm; the scheduler warms the rest first
+  for (const id of bootWarmed(BOOT_CONFIGS, warm.configurations)) a.warm.done(id);
   a.warmUpMs = warm.ms;
   a.warmUpSteps = warm.configurations;
   // messages wait in `pending` until the field is bound (a 'field' choice needs the switch)

@@ -138,12 +138,16 @@ export interface AppDiagnostics {
   };
   /** D4-85: the canvas's backing store, px, and the pixel ratio it renders at. */
   readonly backingStore: { readonly width: number; readonly height: number; readonly dpr: number };
-  /** D4-91: what the boot's warm-up (the boot configurations) took, wall ms, and each one's. */
+  /**
+   * D4-91: what the boot's warm-up (the boot configurations) took, wall ms, and each one's;
+   * W2A-N23: whether it finished each (an unfinished one warms in the background).
+   */
   readonly warmUpMs: number;
   readonly warmUpSteps: readonly {
     readonly name: string;
     readonly ms: number;
     readonly cpuMs: number;
+    readonly done: boolean;
   }[];
   /** W2F-I1: why the last matched solve was lost (null: none lost since the reset). */
   readonly lostSolveCause: string | null;

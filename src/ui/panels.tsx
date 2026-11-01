@@ -303,6 +303,7 @@ export function FidelityPanel() {
 function BudgetBar({ d }: { readonly d: AppDiagnostics }) {
   const b = d.budget;
   const frame = SOLVER_BUDGET.frameMs;
+  const unfinished = d.warmUpSteps.filter((s) => !s.done).length;
   // `shown` null: not measured (an undrawn solver shows a dash, not 0.00 ms; W2A-N8)
   const parts = [
     { id: 'render', label: 'Render', ms: b.renderGpuMs ?? 0, shown: b.renderGpuMs },
@@ -382,7 +383,13 @@ function BudgetBar({ d }: { readonly d: AppDiagnostics }) {
         </div>
         <div>
           <dt>Boot warm-up (D4-91)</dt>
-          <dd>{fmt.ms(d.warmUpMs)} ms</dd>
+          <dd>
+            {fmt.ms(d.warmUpMs)} ms
+            {/* W2A-N23: a boot configuration it did not finish warms in the background */}
+            {unfinished > 0
+              ? ` · ${String(unfinished)} unfinished (warming in the background)`
+              : ''}
+          </dd>
         </div>
         <div>
           {/* W2A-N22: the background warm-up's state (a given-up one compiles on first use) */}
