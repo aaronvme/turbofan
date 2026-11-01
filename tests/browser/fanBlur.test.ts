@@ -101,8 +101,9 @@ function error(est: Float32Array, ref: Float32Array, mask: Uint8Array): Err {
 // official window's full suite with every assertion passing (a slowdown of at least 4.6x, cause
 // unknown; the critic's battery run was 2.3-2.7x slower overall). Test plumbing, not a bar (D4-95's
 // precedent): one test per shot, in the same order on the same view (the same frames), each with
-// SHOT_TIMEOUT_MS, over 13x a shot's measured 9 s.
-const SHOT_TIMEOUT_MS = 120_000;
+// SHOT_TIMEOUT_MS: split, the shots took 23 s (the first, with the view's first compiles), 7 and 9 s
+// alone on AC (9d63da3), so 240 s is over 10x the longest.
+const SHOT_TIMEOUT_MS = 240_000;
 /** The view's creation (its boot compile, about 1 s here), with the same margin. */
 const SETUP_TIMEOUT_MS = 60_000;
 

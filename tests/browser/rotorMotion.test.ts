@@ -101,9 +101,10 @@ const mean = (xs: readonly number[]): number => xs.reduce((a, b) => a + b, 0) / 
 // timed out at 120 s in the official window's full suite with every assertion passing (the
 // critic's battery run was 2.3-2.7x slower overall). Test plumbing, not a bar (D4-95's
 // precedent): one test per pose and per control, in the same order on the same views (the same
-// frames, so the same numbers: GOTCHA 1 of w2-followups-2), each with POSE_TIMEOUT_MS, over 9x a
-// pose's measured 12-13 s.
-const POSE_TIMEOUT_MS = 120_000;
+// frames, so the same numbers: GOTCHA 1 of w2-followups-2; the rows repeated to the digit), each
+// with POSE_TIMEOUT_MS: split, they took 9-27 s alone on AC (9d63da3; 27 s the first control, which
+// opens its view), so 240 s is over 8x the longest.
+const POSE_TIMEOUT_MS = 240_000;
 /** A view's creation (its boot compile, about 1 s here), with the same margin. */
 const SETUP_TIMEOUT_MS = 60_000;
 

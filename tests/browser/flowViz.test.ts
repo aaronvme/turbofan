@@ -30,7 +30,9 @@ import { loadMeshAsset, parseMeshManifest } from '../../src/flow/mesh/loader';
 import { bakeLut, lightnessL } from '../../src/flow/viz/colormaps';
 import {
   airGammaR,
+  ambientFloor,
   ambientValue,
+  drawnOnPlane,
   FIELD_QUANTITIES,
   normalizeQuantity,
   type FieldQuantityId,
@@ -532,7 +534,18 @@ describe('flow visuals', () => {
   // floor; with it off (noFlowFloor) it is > 30 %, so the measure sees the band it checks (the
   // critic's probe: p 98.0 -> 0.5 %, rho 90.5 -> 0.9 %, T 90.5 -> 1.0 %, Mach 46.2 -> 6.6 %; T
   // 90.5 -> 90.5 % under V1). |u| is Cutaway's quantity: reported, not gated.
-  it('W2V-I8: at ground idle every Data quantity leaves its ambient band undrawn (p, rho, T, Mach; nearest LUT entry)', async ({
+  // W2V-N26 (critic pass 18): that bounds the floor from above only: the T floor four times as wide
+  // (mutant V2, hiding 153-423 K under a legend that says 243-333 K) passed it, since the MOCK at
+  // idle has few samples between 333 and 423 K. So the GPU's floor is also compared with its TS
+  // mirror (fields.ts drawnOnPlane) pixel by pixel, at ground idle and at take-off (the bypass air
+  // at 330-350 K), which checks both of its edges. The bar, stated before it runs: a footprint
+  // pixel's value is its floor-off colour's nearest LUT entry (only pixels within ON_CURVE of the
+  // map: a contour line or the crop's outline mixes the colour off it), the pixels within EDGE
+  // entries of the floor's edge are left out (the entry's own rounding), and the GPU draws a pixel
+  // when its floor-on alpha is at least half its floor-off alpha (the anti-aliased edge's middle is
+  // the floor's edge). At most MAX_MISMATCH of the compared pixels may disagree with the mirror,
+  // for each of p, rho, T and Mach at both levers, over at least MIN_COMPARED of the footprint.
+  it('W2V-I8 / W2V-N26: every Data quantity leaves its ambient band undrawn at idle, and its floor is the TS mirror at idle and take-off (p, rho, T, Mach; nearest LUT entry)', async ({
     annotate,
   }) => {
     const c = canvas();
@@ -548,85 +561,125 @@ describe('flow visuals', () => {
     const MAX_IN_BAND = 0.1;
     const MIN_IN_BAND_FLOOR_OFF = 0.3;
     const AMBIENT_BAND = 0.05 * 255;
+    /** W2V-N26: the mirror's bar, the colour distance to the map and the floor edge's margin. */
+    const MAX_MISMATCH = 0.02;
+    const MIN_COMPARED = 0.3;
+    const ON_CURVE = 4;
+    const EDGE = 1.5;
     const ref = fieldReferenceFromAmbient(ISA_SLS);
     v.setPreset('cutaway');
     v.setMode('cutaway', true);
     v.setFlowMode('data');
-    v.setThrottle(0, true);
-    v.setFlowField(
-      createMockFlowField(ENGINE_DEFINITION, mockSteadyState(ENGINE_DEFINITION, 0), ISA_SLS),
-    );
     const rows: string[] = [];
     const failures: string[] = [];
     const quantities: readonly FieldQuantityId[] = ['p', 'rho', 't', 'mach', 'speed'];
-    for (const q of quantities) {
-      v.setFlowQuantity(q);
-      const read = async (floorOff: boolean) => {
-        v.setDebugFlags({
-          hide: '.',
-          noFlowParticles: true,
-          ...(floorOff ? { noFlowFloor: true } : {}),
-        });
-        for (let k = 0; k < 30; k++) v.frame(1 / 60);
-        return (await v.readFlowTarget('overlay')).rgba;
-      };
-      const old = await read(true);
-      const now = await read(false);
-      const lut = bakeLut(FIELD_QUANTITIES[q].colormap);
-      const ambient = 255 * normalizeQuantity(q, ambientValue(q, ref));
-      // the nearest LUT entry of a pixel's (un-premultiplied) 8-bit colour, cached per colour
-      const cache = new Map<number, number>();
-      const inBand = (o: Float32Array, k: number) => {
-        const a = o[k + 3] ?? 0;
-        const [r, g, b] = [0, 1, 2].map((ch) =>
-          Math.min(255, Math.round((255 * (o[k + ch] ?? 0)) / a)),
-        ) as [number, number, number];
-        const key = (r << 16) | (g << 8) | b;
-        let best = cache.get(key);
-        if (best === undefined) {
-          let bd = Infinity;
-          best = 0;
-          for (let i = 0; i < 256; i++) {
-            const d =
-              (r - (lut[4 * i] ?? 0)) ** 2 +
-              (g - (lut[4 * i + 1] ?? 0)) ** 2 +
-              (b - (lut[4 * i + 2] ?? 0)) ** 2;
-            if (d < bd) {
-              bd = d;
-              best = i;
-            }
-          }
-          cache.set(key, best);
-        }
-        return Math.abs(best - ambient) <= AMBIENT_BAND;
-      };
-      let footprint = 0;
-      let bandOff = 0;
-      let bandOn = 0;
-      let drawn = 0;
-      for (let k = 0; k < old.length; k += 4) {
-        if ((old[k + 3] ?? 0) < 0.5) continue;
-        footprint++;
-        if (inBand(old, k)) bandOff++;
-        if ((now[k + 3] ?? 0) >= 0.5) {
-          drawn++;
-          if (inBand(now, k)) bandOn++;
-        }
-      }
-      const gated = q !== 'speed';
-      const off = bandOff / footprint;
-      const on = bandOn / footprint;
-      rows.push(
-        `${q}: ${String(footprint)} px; in the ambient band ${(100 * off).toFixed(1)} % floor off, ${(100 * on).toFixed(1)} % with the floor; drawn ${((100 * drawn) / footprint).toFixed(1)} %${gated ? '' : ' (reported, not gated)'}`,
+    for (const [lever, at] of [
+      [0, 'idle'],
+      [1, 'take-off'],
+    ] as const) {
+      v.setThrottle(lever, true);
+      v.setFlowField(
+        createMockFlowField(ENGINE_DEFINITION, mockSteadyState(ENGINE_DEFINITION, lever), ISA_SLS),
       );
-      if (gated && !(footprint > 20_000 && off > MIN_IN_BAND_FLOOR_OFF && on <= MAX_IN_BAND))
-        failures.push(q);
+      for (const q of quantities) {
+        v.setFlowQuantity(q);
+        const read = async (floorOff: boolean) => {
+          v.setDebugFlags({
+            hide: '.',
+            noFlowParticles: true,
+            ...(floorOff ? { noFlowFloor: true } : {}),
+          });
+          for (let k = 0; k < 30; k++) v.frame(1 / 60);
+          return (await v.readFlowTarget('overlay')).rgba;
+        };
+        const old = await read(true);
+        const now = await read(false);
+        const spec = FIELD_QUANTITIES[q];
+        const lut = bakeLut(spec.colormap);
+        const ambient = 255 * normalizeQuantity(q, ambientValue(q, ref));
+        const floorEntries = (255 * ambientFloor(q)) / (spec.max - spec.min);
+        // the nearest LUT entry of a pixel's (un-premultiplied) 8-bit colour and its distance,
+        // cached per colour
+        const cache = new Map<number, { entry: number; distance: number }>();
+        const nearest = (o: Float32Array, k: number) => {
+          const a = o[k + 3] ?? 0;
+          const [r, g, b] = [0, 1, 2].map((ch) =>
+            Math.min(255, Math.round((255 * (o[k + ch] ?? 0)) / a)),
+          ) as [number, number, number];
+          const key = (r << 16) | (g << 8) | b;
+          let hit = cache.get(key);
+          if (hit === undefined) {
+            let bd = Infinity;
+            let best = 0;
+            for (let i = 0; i < 256; i++) {
+              const d =
+                (r - (lut[4 * i] ?? 0)) ** 2 +
+                (g - (lut[4 * i + 1] ?? 0)) ** 2 +
+                (b - (lut[4 * i + 2] ?? 0)) ** 2;
+              if (d < bd) {
+                bd = d;
+                best = i;
+              }
+            }
+            hit = { entry: best, distance: Math.sqrt(bd) };
+            cache.set(key, hit);
+          }
+          return hit;
+        };
+        const inBand = (o: Float32Array, k: number) =>
+          Math.abs(nearest(o, k).entry - ambient) <= AMBIENT_BAND;
+        let footprint = 0;
+        let bandOff = 0;
+        let bandOn = 0;
+        let drawn = 0;
+        let compared = 0;
+        let mirrorDrawn = 0;
+        let gpuDrawn = 0;
+        let mismatch = 0;
+        for (let k = 0; k < old.length; k += 4) {
+          const a = old[k + 3] ?? 0;
+          if (a < 0.5) continue;
+          footprint++;
+          const shown = (now[k + 3] ?? 0) >= 0.5;
+          if (inBand(old, k)) bandOff++;
+          if (shown) {
+            drawn++;
+            if (inBand(now, k)) bandOn++;
+          }
+          // W2V-N26: the pixel's own value against the mirror's floor
+          const n = nearest(old, k);
+          if (n.distance > ON_CURVE || Math.abs(Math.abs(n.entry - ambient) - floorEntries) < EDGE)
+            continue;
+          compared++;
+          const value = spec.min + (n.entry / 255) * (spec.max - spec.min);
+          const mirror = drawnOnPlane(q, value, ref);
+          const gpu = (now[k + 3] ?? 0) >= 0.5 * a;
+          if (mirror) mirrorDrawn++;
+          if (gpu) gpuDrawn++;
+          if (mirror !== gpu) mismatch++;
+        }
+        const gated = q !== 'speed';
+        const off = bandOff / footprint;
+        const on = bandOn / footprint;
+        const pct = (x: number, of: number) => `${((100 * x) / of).toFixed(1)} %`;
+        rows.push(
+          `${at} ${q}: ${String(footprint)} px; in the ambient band ${pct(bandOff, footprint)} floor off, ${pct(bandOn, footprint)} with the floor; drawn ${pct(drawn, footprint)}; against the mirror over ${pct(compared, footprint)} of it: drawn ${pct(gpuDrawn, compared)} (mirror ${pct(mirrorDrawn, compared)}), ${pct(mismatch, compared)} disagree${gated ? '' : ' (reported, not gated)'}`,
+        );
+        if (!gated) continue;
+        if (
+          at === 'idle' &&
+          !(footprint > 20_000 && off > MIN_IN_BAND_FLOOR_OFF && on <= MAX_IN_BAND)
+        )
+          failures.push(`${at} ${q}: the ambient band`);
+        if (!(compared >= MIN_COMPARED * footprint && mismatch <= MAX_MISMATCH * compared))
+          failures.push(`${at} ${q}: the TS mirror`);
+      }
     }
     v.setDebugFlags({});
     console.warn(
-      `W2V-I8 the floor for every Data quantity (MOCK, ground idle)\n${rows.join('\n')}`,
+      `W2V-I8 / W2V-N26 the floor for every Data quantity (MOCK, ground idle and take-off)\n${rows.join('\n')}`,
     );
-    await annotate(`[look] W2V-I8: ${rows.join('; ')}`);
+    await annotate(`[look] W2V-I8 / W2V-N26: ${rows.join('; ')}`);
     await commands.writeFile(`${OUT}/floor-quantities.txt`, `${rows.join('\n')}\n`);
     await v.device.device.queue.onSubmittedWorkDone();
     expect(v.stats().errors).toEqual([]);
