@@ -46,7 +46,10 @@ describe('the UI levels mirror docs/PHYSICS.md 3.5 (D4-91)', () => {
     // D4-97 item 1 (W2A-I7): an unwarmed switch is shown within 2 s at any steady frame CPU
     expect(UI_LEVELS.coldSwitchMaxMs).toBe(2000);
     expect(rows[3]?.pass).toContain('≤ 2 s');
-    expect(rows[3]?.check).toContain('60 frames');
+    // D4-98 item 1: the mechanism, not the bar: 30 frames of preparing, then a slot every frame
+    expect(rows[3]?.check).toContain('after 30 frames of preparing');
+    expect(rows[3]?.check).toContain('one every frame');
+    expect(rows[3]?.check).not.toContain('60 frames');
     // D4-97 item 2 (W2A-I8): the cut views' framing, its minimum engine scale and the row
     expect(UI_LEVELS.cutViewMinScale).toBe(0.6);
     expect(rows[4]?.check).toContain('0.6 of');
