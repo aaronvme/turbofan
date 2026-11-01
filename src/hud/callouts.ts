@@ -115,7 +115,8 @@ export function leaderCrossings(placed: readonly PlacedCallout[]): number {
 
 /**
  * Places the labels in priority order, each at the first candidate offset that is on screen,
- * clear of the reserved panels, the placed labels and the other anchors' dots, and (W2A-I3) whose
+ * clear of the reserved panels, the content to avoid, the placed labels and the other anchors'
+ * dots, and (W2A-I3) whose
  * leader crosses no placed leader or label; failing that, at a clear one with the fewest crossings
  * (a crossing is better than a hidden label; W2A-N21: any of them, not only the first); failing
  * that, hidden.
@@ -129,8 +130,14 @@ export function layoutCallouts(
   preferred: (id: string) => readonly Rect[] = () => [],
   /** D4-97 item 2: only the preferred places (the cut views' rows), no offsets. */
   preferredOnly = false,
+  /**
+   * Content no label may cover (Schlieren's jet, critic pass 18's visual note 2): unlike a
+   * reserved panel, an anchor inside it is still called out.
+   */
+  avoidIn: readonly Rect[] = [],
 ): PlacedCallout[] {
   const reserved = solid(reservedIn);
+  const avoid = solid(avoidIn);
   const order = anchors
     .filter((a) => callable(a, reserved))
     .sort((a, b) => b.priority - a.priority || (a.id < b.id ? -1 : 1));
@@ -154,7 +161,8 @@ export function layoutCallouts(
       const coversAnchor = order.some(
         (o) => o !== a && overlaps(box, { x: o.x - 3, y: o.y - 3, w: 6, h: 6 }),
       );
-      if (onScreen && !coversAnchor && !reserved.some((t) => overlaps(box, t, GAP)))
+      const blocked = [...reserved, ...avoid].some((t) => overlaps(box, t, GAP));
+      if (onScreen && !coversAnchor && !blocked)
         out.push({ id: a.id, anchor: { x: a.x, y: a.y }, box });
     }
     return out;

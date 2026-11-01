@@ -19,6 +19,7 @@ import {
   componentAnchors,
   engineRings,
   explodedRings,
+  jetBox,
   jetRings,
   projectPoint,
   screenBox,
@@ -527,8 +528,9 @@ describe('D4-97 item 2 (W2A-I8) and W2A-N25: the framings, checked by projecting
     });
 
   // Critic pass 18's visual note 2: in Schlieren the Core exhaust label sat on the jet. The jet
-  // (jetRings: the core jet's tube from the nozzle to the near field's end) is a box the labels
-  // keep clear of; its anchor stays callable. At both sizes, framed as the worker frames Schlieren
+  // (jetBox: the core jet's tube from the nozzle to the near field's end, behind the nozzle's exit)
+  // is a box the labels keep clear of; its anchor stays callable. At both sizes, framed as the
+  // worker frames Schlieren
   for (const { canvas, rows } of sizes)
     it(`Schlieren at ${String(canvas.w)} x ${String(canvas.h)}: the Core exhaust label is placed off the jet`, () => {
       const area = inset(rows, FRAME_MARGIN_PX);
@@ -547,7 +549,7 @@ describe('D4-97 item 2 (W2A-I8) and W2A-N25: the framings, checked by projecting
       cam.lookAt(new Vector3(...pose.target));
       cam.updateMatrixWorld();
       const m = new Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
-      const jet = screenBox(m.elements, jetRings(def, FIELD_EXTENTS.near.xMax), canvas.w, canvas.h);
+      const jet = jetBox(m.elements, def, FIELD_EXTENTS.near.xMax, canvas.w, canvas.h);
       if (jet === null) throw new Error('the jet is off screen');
       const view: CalloutView = { eye: pose.position, cutCenter: 0, cutHalf: 0 };
       const anchors = componentAnchors(def)
@@ -641,6 +643,16 @@ describe('W2A-I11: the exploded engine on screen is what the view draws (Explode
     expect(radius(rings)).toBeLessThan(Math.max(...skin.loop.map((q) => q.r)) - 0.1);
     // the gap is geometry/explode's, the one the view uses
     expect(EXPLODE_GAP).toBe(0.22);
+  });
+
+  it("jetRings: the core jet's tube, the nozzle exit's radius from the exit to the given end", () => {
+    const exit = def.flowpath.curves.coreCowl.points.at(-1);
+    if (exit === undefined) throw new Error('no core nozzle');
+    const rings = jetRings(def, FIELD_EXTENTS.near.xMax);
+    const xs = rings.map((p) => p[0]);
+    expect(Math.min(...xs)).toBeCloseTo(exit.x, 9);
+    expect(Math.max(...xs)).toBeCloseTo(FIELD_EXTENTS.near.xMax, 9);
+    for (const p of rings) expect(Math.hypot(p[1], p[2])).toBeCloseTo(exit.r, 9);
   });
 });
 
