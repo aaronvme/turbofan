@@ -19,6 +19,8 @@ import {
   componentAnchors,
   engineRings,
   explodedRings,
+  jetRings,
+  projectPoint,
   screenBox,
   seenThroughIntake,
   type CalloutView,
@@ -35,6 +37,8 @@ import { Matrix4, PerspectiveCamera, Vector3 } from 'three/webgpu';
 import { UI_LEVELS } from '../../../src/hud/uiLevels';
 import { LOOK_PRESETS } from '../../../src/render/presets';
 import { EXPLODE_GAP, explodeOffsets } from '../../../src/geometry/explode';
+import { engineParts } from '../../../src/geometry/parts';
+import { engineWalls } from '../../../src/geometry/walls';
 import {
   FRAME_MARGIN_PX,
   FRAMED_MIN_SCALE,
@@ -147,6 +151,31 @@ describe('W2A-N13: the search places the most labels', () => {
 
 const def = ENGINE_DEFINITION;
 const geo = calloutGeometry(def);
+/**
+ * W2A-I11: what the exploded view draws (engineView.ts hides the skins and the stand from explode
+ * 0.02): every part that is not a skin and every blade row's edges, slid by its module's offset at
+ * full explode, revolved (rings of 16).
+ */
+const EXPLODED_DRAWN: [number, number, number][] = (() => {
+  const off = explodeOffsets(def, 1, EXPLODE_GAP);
+  const out: [number, number, number][] = [];
+  const ring = (x: number, r: number) => {
+    for (let j = 0; j < 16; j++) {
+      const t = (2 * Math.PI * j) / 16;
+      out.push([x, r * Math.cos(t), r * Math.sin(t)]);
+    }
+  };
+  for (const p of engineParts(def, engineWalls(def, 3))) {
+    if (p.skin) continue;
+    const dx = p.module === null ? 0 : off[p.module];
+    for (const q of p.loop) ring(q.x + dx, Math.abs(q.r));
+  }
+  for (const row of def.bladeRows)
+    for (const e of [row.leadingEdge, row.trailingEdge])
+      for (const q of [e.hub, e.tip]) ring(q.x + off[row.component], q.r);
+  return out;
+})();
+
 const anchors = componentAnchors(def);
 const fan = anchors.find((a) => a.id === 'fan');
 const duct = anchors.find((a) => a.id === 'bypassDuct');
@@ -464,6 +493,105 @@ describe('D4-97 item 2 (W2A-I8) and W2A-N25: the framings, checked by projecting
         expect(box.w >= 0.9 * area.w || box.h >= 0.9 * area.h, JSON.stringify(r)).toBe(true);
       });
 
+  // W2A-I11 (critic pass 18): Exploded's content is what the exploded view draws (every part that
+  // is not a skin, every blade row, each slid by its module's offset). Framed on it, the drawn
+  // parts' box is centred in the area: within 8 px each way at both sizes (the 3 re-projected
+  // passes leave a few px; round 7's rings, the hidden inlet lip and bypass duct among them, left
+  // 111 px on the left and 13 px on the right at 1366). Not only inside it: filling it one way.
+  for (const { canvas, rows } of sizes)
+    it(`W2A-I11: Exploded at ${String(canvas.w)} x ${String(canvas.h)}: the drawn parts' box is centred in the area and fills it one way`, () => {
+      const area = inset(rows, FRAME_MARGIN_PX);
+      const rings = explodedRings(def, EXPLODE_GAP);
+      const o = fitOrbit(
+        start,
+        (q) => ringsBoxAt(q, canvas, rings),
+        canvas,
+        area,
+        preset.fovDeg,
+        FRAMED_MIN_SCALE,
+      );
+      const box = ringsBoxAt(o, canvas, EXPLODED_DRAWN);
+      if (box === null) throw new Error('off screen');
+      const gaps = {
+        left: box.x - area.x,
+        right: area.x + area.w - (box.x + box.w),
+        top: box.y - area.y,
+        bottom: area.y + area.h - (box.y + box.h),
+        scale: start.distance / o.distance,
+      };
+      const r = JSON.stringify(gaps);
+      expect(Math.abs(gaps.left - gaps.right), r).toBeLessThanOrEqual(8);
+      expect(Math.abs(gaps.top - gaps.bottom), r).toBeLessThanOrEqual(8);
+      expect(Math.min(gaps.left, gaps.right, gaps.top, gaps.bottom), r).toBeGreaterThanOrEqual(-2);
+      expect(box.w >= 0.9 * area.w || box.h >= 0.9 * area.h, r).toBe(true);
+    });
+
+  // Critic pass 18's visual note 2: in Schlieren the Core exhaust label sat on the jet. The jet
+  // (jetRings: the core jet's tube from the nozzle to the near field's end) is a box the labels
+  // keep clear of; its anchor stays callable. At both sizes, framed as the worker frames Schlieren
+  for (const { canvas, rows } of sizes)
+    it(`Schlieren at ${String(canvas.w)} x ${String(canvas.h)}: the Core exhaust label is placed off the jet`, () => {
+      const area = inset(rows, FRAME_MARGIN_PX);
+      const content = engineRings(def, FIELD_EXTENTS.near.xMax);
+      const o = fitOrbit(
+        start,
+        (q) => ringsBoxAt(q, canvas, content),
+        canvas,
+        area,
+        preset.fovDeg,
+        FRAMED_MIN_SCALE,
+      );
+      const cam = new PerspectiveCamera(preset.fovDeg, canvas.w / canvas.h, 0.05, 200);
+      const pose = orbitPose(o);
+      cam.position.set(...pose.position);
+      cam.lookAt(new Vector3(...pose.target));
+      cam.updateMatrixWorld();
+      const m = new Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+      const jet = screenBox(m.elements, jetRings(def, FIELD_EXTENTS.near.xMax), canvas.w, canvas.h);
+      if (jet === null) throw new Error('the jet is off screen');
+      const view: CalloutView = { eye: pose.position, cutCenter: 0, cutHalf: 0 };
+      const anchors = componentAnchors(def)
+        .filter((a) => a.id === 'fan' || a.id === 'exhaust')
+        .map((a) => {
+          const p = projectPoint(
+            m.elements,
+            calloutPoint(a, 'schlieren', view, geo),
+            canvas.w,
+            canvas.h,
+          );
+          return { id: a.id, x: p.x, y: p.y, visible: p.visible, priority: a.priority };
+        });
+      // the panels round the area (the top bar, the columns and the dock) are reserved
+      const panels: Rect[] = [
+        { x: 0, y: 0, w: canvas.w, h: rows.y - 8 },
+        { x: 0, y: rows.y, w: rows.x - 8, h: canvas.h - rows.y },
+        {
+          x: rows.x + rows.w + 8,
+          y: rows.y,
+          w: canvas.w - rows.x - rows.w - 8,
+          h: canvas.h - rows.y,
+        },
+        { x: rows.x, y: rows.y + rows.h + 8, w: rows.w, h: canvas.h - rows.y - rows.h - 8 },
+      ];
+      const placed = layoutCallouts(
+        anchors,
+        () => ({ w: 132, h: 34 }),
+        { w: canvas.w, h: canvas.h },
+        panels,
+        () => [],
+        false,
+        [jet],
+      );
+      const exhaust = placed.find((p) => p.id === 'exhaust');
+      const r = JSON.stringify({ jet, placed });
+      expect(exhaust, r).toBeDefined();
+      expect(overlaps(exhaust?.box ?? jet, jet), r).toBe(false);
+      expect(
+        placed.find((p) => p.id === 'fan'),
+        r,
+      ).toBeDefined();
+    });
+
   it('inset takes a margin off every side', () => {
     expect(inset({ x: 100, y: 50, w: 400, h: 300 }, 24)).toEqual({ x: 124, y: 74, w: 352, h: 252 });
     expect(inset({ x: 0, y: 0, w: 30, h: 30 }, 24)).toEqual({ x: 24, y: 24, w: 1, h: 1 });
@@ -484,26 +612,33 @@ describe('D4-97 item 2 (W2A-I8) and W2A-N25: the framings, checked by projecting
   });
 });
 
-describe('round 7: the exploded engine on screen (Exploded framing)', () => {
-  it('explodedRings span the intake slid forward to the exhaust slid aft, at each module casing', () => {
+describe('W2A-I11: the exploded engine on screen is what the view draws (Exploded framing)', () => {
+  it('explodedRings are the drawn parts slid apart: the fan case at the front, no skin', () => {
     const off = explodeOffsets(def, 1, EXPLODE_GAP);
     const rings = explodedRings(def, EXPLODE_GAP);
     const xs = rings.map((p) => p[0]);
-    const comps = def.flowpath.components;
-    const inlet = comps.find((c) => c.id === 'inlet');
-    const exhaust = comps.find((c) => c.id === 'exhaust');
-    if (inlet === undefined || exhaust === undefined) throw new Error('no inlet or exhaust');
-    expect(Math.min(...xs)).toBeCloseTo(inlet.xStart + off.inlet, 9);
-    expect(Math.max(...xs)).toBeCloseTo(exhaust.xEnd + off.exhaust, 9);
-    // every module is in it, at its casing (the intake at the nacelle's outside: its ring)
-    for (const c of comps) {
-      const x = 0.5 * (c.xStart + c.xEnd);
-      const casing = radiusAt(def.flowpath.curves[c.casing], x) ?? 0;
-      const near = rings.filter((p) => Math.abs(p[0] - (x + off[c.id])) < 1e-9);
-      expect(near.length, c.id).toBeGreaterThan(0);
-      const r = Math.max(...near.map((p) => Math.hypot(p[1], p[2])));
-      expect(r, c.id).toBeGreaterThanOrEqual(casing - 1e-9);
-    }
+    const drawnXs = EXPLODED_DRAWN.map((p) => p[0]);
+    const radius = (pts: readonly (readonly [number, number, number])[]) =>
+      Math.max(...pts.map((p) => Math.hypot(p[1], p[2])));
+    expect(Math.min(...xs)).toBeCloseTo(Math.min(...drawnXs), 9);
+    expect(Math.max(...xs)).toBeCloseTo(Math.max(...drawnXs), 9);
+    expect(radius(rings)).toBeCloseTo(radius(EXPLODED_DRAWN), 9);
+    // the intake's only drawn part is the fan case: its front, slid forward, is the engine's
+    // front, not the inlet lip's (a skin, hidden), 0.72 m ahead of it
+    const parts = engineParts(def, engineWalls(def, 3));
+    const fanCase = parts.find((p) => p.id === 'fan-case');
+    const lip = parts.find((p) => p.id === 'inlet-lip');
+    if (fanCase === undefined || lip === undefined) throw new Error('no fan case or inlet lip');
+    expect(fanCase.skin).toBe(false);
+    expect(lip.skin).toBe(true);
+    expect(Math.min(...xs)).toBeCloseTo(Math.min(...fanCase.loop.map((q) => q.x)) + off.inlet, 9);
+    expect(Math.min(...xs)).toBeGreaterThan(
+      Math.min(...lip.loop.map((q) => q.x)) + off.inlet + 0.5,
+    );
+    // no skin's radius: the nacelle skin (1.06 m) is hidden, the fan case (0.83 m) is the widest
+    const skin = parts.find((p) => p.id === 'nacelle-skin');
+    if (skin === undefined) throw new Error('no nacelle skin');
+    expect(radius(rings)).toBeLessThan(Math.max(...skin.loop.map((q) => q.r)) - 0.1);
     // the gap is geometry/explode's, the one the view uses
     expect(EXPLODE_GAP).toBe(0.22);
   });
