@@ -76,7 +76,15 @@ describe('the worker messages in the store (W2A-I1)', { timeout: TIMEOUT_MS }, (
   it('a snapshot replaces the snapshot and the diagnostics, extends the trails and keeps the refused', () => {
     const snapshot = snapshotOf();
     const diagnostics = diagnosticsOf();
-    const msg = { type: 'snapshot', snapshot, diagnostics, anchors: [], engineBox: null } as const;
+    const msg = {
+      type: 'snapshot',
+      snapshot,
+      diagnostics,
+      anchors: [],
+      engineBox: null,
+      framedBox: null,
+      jetBox: null,
+    } as const;
     receive({ ...msg, refused: ['seq 3 is not after the last applied seq 4'] });
     receive({ ...msg, refused: [] });
     const s = useApp.getState();

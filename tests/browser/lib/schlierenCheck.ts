@@ -55,6 +55,36 @@ export function failedBars(s: SchlierenSignature): ('grey' | 'silhouette' | 'jet
 }
 
 /**
+ * W2A-N30: the share of the free area outside the engine's box whose luminance lies in [lo, hi]
+ * (the signature's grey share, with its own band).
+ */
+export function greyShare(
+  lum: Float32Array,
+  w: number,
+  h: number,
+  engine: Box,
+  free: Box,
+  lo: number,
+  hi: number,
+): number {
+  const x0 = Math.max(0, Math.floor(free.x));
+  const y0 = Math.max(0, Math.floor(free.y));
+  const x1 = Math.min(w, free.x + free.w);
+  const y1 = Math.min(h, free.y + free.h);
+  let n = 0;
+  let k = 0;
+  for (let y = y0; y < y1; y++)
+    for (let x = x0; x < x1; x++) {
+      if (x >= engine.x && x < engine.x + engine.w && y >= engine.y && y < engine.y + engine.h)
+        continue;
+      n++;
+      const l = lum[y * w + x] ?? 0;
+      if (l >= lo && l <= hi) k++;
+    }
+  return n === 0 ? 0 : k / n;
+}
+
+/**
  * `lum` is the frame's luminance, row-major, w x h (CSS px); `engine` the engine's screen box
  * (the snapshot's engineBox), `free` the view between the panels (the overlay's centre column).
  */

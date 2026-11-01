@@ -572,6 +572,8 @@ function loop(a: App) {
           diagnostics,
           anchors: projectAnchors(a),
           engineBox: screenBox(viewProjection(a), ENGINE_RINGS, a.size.width, a.size.height),
+          framedBox: null,
+          jetBox: null,
           refused: a.refused.splice(0),
         });
         postFaults.posted();

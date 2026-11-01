@@ -34,6 +34,10 @@ export interface AppStore {
   anchors: readonly AxialAnchor[];
   /** D4-92 (zz): the engine's screen box, for the cut views' label rows. */
   engineBox: Rect | null;
+  /** W2A-N31: the framed view's content box (null: the view is not framed). */
+  framedBox: Rect | null;
+  /** Critic pass 18's visual note 2: Schlieren's jet box, which no label covers (null: none). */
+  jetBox: Rect | null;
   trails: { fan: MapPoint[]; hpc: MapPoint[] };
   /** The last 8 GPU errors the worker posted, and how many it posted in all. */
   gpuErrors: string[];
@@ -72,6 +76,8 @@ export const useApp = create<AppStore>((set, get) => ({
   diagnostics: null,
   anchors: [],
   engineBox: null,
+  framedBox: null,
+  jetBox: null,
   trails: { fan: [], hpc: [] },
   gpuErrors: [],
   gpuErrorCount: 0,
@@ -112,6 +118,8 @@ export const useApp = create<AppStore>((set, get) => ({
       diagnostics: null,
       anchors: [],
       engineBox: null,
+      framedBox: null,
+      jetBox: null,
       trails: { fan: [], hpc: [] },
       gpuErrors: [],
       gpuErrorCount: 0,
@@ -135,6 +143,8 @@ export const useApp = create<AppStore>((set, get) => ({
           diagnostics: m.diagnostics,
           anchors: m.anchors,
           engineBox: m.engineBox,
+          framedBox: m.framedBox,
+          jetBox: m.jetBox,
           trails: {
             fan: pushTrail(s.trails.fan, cycle.fan, TRAIL_POINTS),
             hpc: pushTrail(s.trails.hpc, cycle.hpc, TRAIL_POINTS),
