@@ -16,6 +16,7 @@ import {
   SLOT_EVERY,
   SLOT_FRAME_CPU_MS,
   WARM_CONFIGS,
+  bootWarmed,
   configFor,
   createWarmScheduler,
   shownView,
@@ -331,6 +332,39 @@ describe('D4-97 item 1 (W2A-I7), D4-98 item 1: a cold switch waits at most 30 fr
     expect(s.next(229, 11.2, 'schlieren', clock(229))).toBeNull();
     expect(s.next(230, 11.2, 'schlieren', clock(230))).toBe('schlieren');
     expect(s.next(231, 11.2, 'schlieren', clock(231))).toBe('schlieren');
+  });
+});
+
+describe('W2A-N23: the boot warm-up says whether it finished each configuration', () => {
+  it('marks warm only the boot configurations it finished', () => {
+    expect(bootWarmed(BOOT_CONFIGS, [{ done: true }, { done: true }])).toEqual(BOOT_CONFIGS);
+    expect(bootWarmed(BOOT_CONFIGS, [{ done: true }, { done: false }])).toEqual(['realistic']);
+    expect(bootWarmed(BOOT_CONFIGS, [{ done: false }, { done: true }])).toEqual([
+      'realistic+tracers',
+    ]);
+    // a report shorter than the list (a warm-up that stopped) finished nothing past its end
+    expect(bootWarmed(BOOT_CONFIGS, [{ done: true }])).toEqual(['realistic']);
+  });
+
+  it('an unfinished boot configuration is left to the scheduler, which warms it first', () => {
+    const s = createWarmScheduler();
+    for (const id of bootWarmed(BOOT_CONFIGS, [{ done: true }, { done: false }])) s.done(id);
+    expect(s.state().queue[0]).toBe('realistic+tracers');
+    expect(s.next(0, 4, 'realistic', calm(0))).toBe('realistic+tracers');
+  });
+
+  it('the boot view unfinished: shown (it is the view already on screen), never "preparing", and warmed first', () => {
+    const s = createWarmScheduler();
+    for (const id of bootWarmed(BOOT_CONFIGS, [{ done: false }, { done: true }])) s.done(id);
+    const boot = view('realistic');
+    const first = shownView(boot, null, (id) => s.isWarm(id));
+    expect(first).toEqual({ view: boot, preparing: null });
+    // the next frames: the same view asked and shown
+    expect(shownView(boot, first.view, (id) => s.isWarm(id))).toEqual({
+      view: boot,
+      preparing: null,
+    });
+    expect(s.next(0, 4, 'realistic', calm(0))).toBe('realistic');
   });
 });
 

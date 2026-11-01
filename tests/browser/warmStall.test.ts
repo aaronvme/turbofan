@@ -241,7 +241,8 @@ describe('the background warm frames (D4-95 item 2)', () => {
       viewport: `${String(W)}x${String(H)} (main thread)`,
       bootMs: Math.round(bootMs),
       bootSteps: boot.configurations.map(
-        (s) => `${s.name} ${s.ms.toFixed(0)} ms (CPU ${s.cpuMs.toFixed(0)} ms)`,
+        (s) =>
+          `${s.name} ${s.ms.toFixed(0)} ms (CPU ${s.cpuMs.toFixed(0)} ms)${s.done ? '' : ' UNFINISHED'}`,
       ),
       configs,
       // U6 (D4-97 item 4, PHYSICS.md 3.5): Cutaway's own warm frames, recorded, indicative, no bar
@@ -254,6 +255,8 @@ describe('the background warm frames (D4-95 item 2)', () => {
     };
     await commands.writeFile('reports/ui/warm-stall.json', `${JSON.stringify(out, null, 2)}\n`);
     expect(errors).toEqual([]);
+    // W2A-N23: the boot warm-up says it finished each of its configurations
+    expect(boot.configurations.filter((x) => !x.done).map((x) => x.name)).toEqual([]);
     expect(configs.filter((x) => x.done !== true).map((x) => x.id)).toEqual([]);
     expect(overBudget).toEqual([]);
     expect(recompiled).toEqual([]);

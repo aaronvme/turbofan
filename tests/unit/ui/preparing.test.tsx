@@ -79,6 +79,37 @@ describe('W2A-N22: the background warm-up on screen (Diagnostics)', { timeout: T
   });
 });
 
+describe('W2A-N23: the boot warm-up says what it did not finish', { timeout: TIMEOUT_MS }, () => {
+  it('counts the boot configurations left to the background', () => {
+    const step = (name: string, done: boolean) => ({ name, ms: 900, cpuMs: 300, done });
+    mount(
+      snapshotOf(),
+      diagnosticsOf({
+        warmUpSteps: [
+          step('realistic (slowest fan 40 ms)', true),
+          step('realistic+tracers', false),
+        ],
+      }),
+    );
+    useApp.setState({ panels: { ...useApp.getState().panels, diagnostics: true } });
+    render(<Overlay />);
+    const d = screen.getByRole('region', { name: 'Diagnostics' });
+    expect(d.textContent).toMatch(/1 unfinished \(warming in the background\)/);
+  });
+
+  it('says nothing more when the boot finished them all', () => {
+    mount(
+      snapshotOf(),
+      diagnosticsOf({ warmUpSteps: [{ name: 'realistic', ms: 900, cpuMs: 300, done: true }] }),
+    );
+    useApp.setState({ panels: { ...useApp.getState().panels, diagnostics: true } });
+    render(<Overlay />);
+    expect(screen.getByRole('region', { name: 'Diagnostics' }).textContent).not.toMatch(
+      /unfinished/,
+    );
+  });
+});
+
 describe('W2A-N15 and N17', { timeout: TIMEOUT_MS }, () => {
   it('SIM STOPPED says a reload restarts it (a reset does not)', () => {
     const [a] = faultAnnunciations({
