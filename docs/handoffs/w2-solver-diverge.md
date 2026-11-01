@@ -11,7 +11,7 @@ DONE
 
 NEXT
 1. **Decision (contract change):** SOLVER.md §5's outflow now has a backflow branch, in the oracle and the kernel alike. It is a boundary-condition rule, not a decided parameter (no M_cut, CFL or threshold changed), but it changes the scheme both implementations follow, so the critic reviews it and the orchestrator ratifies it. The backflow totals are (p_out, T∞) with Z = 0 (the standard pressure-outlet backflow: the outlet's static pressure as the backflow's total pressure, ambient total temperature). Flight cases (u∞ ≠ 0) inherit the same rule; W3 can revisit the backflow totals there if needed.
-2. The gates below; then P4flow and P1's field health are re-measured in the next quiet window (D4-100).
+2. Read the CPU d463 and coverage logs (GATES); if the CPU d463 numbers move like the GPU's, record them in SOLVER.md §16 beside the GPU's. Then P4flow and P1's field health are re-measured in the next quiet window (D4-100).
 3. **Watch item for W3 (not fixed here):** the final local runaway, hot product gas (T′ > 1000 K, ρ ≈ 0.15-0.35 kg/m³) in a wall cell growing 1.12-1.2× per iteration under preconditioning at the cut, is the scheme's response (the f64 oracle repeats it). Its trigger here was the recycled backflow gas, which the fix removes, but W3's combustor will put hot gas beside walls. A small hot-gas wall case (a slip-wall duct with a 1000 K pocket, preconditioned at 0.02) would show whether it needs a local step or positivity limit.
 4. Optional: `spikes/scene/productionRun.ts`'s RESET_ITERATIONS (100) can stay (P1 times the same field) or be dropped now that the timing state comes to rest; its comment's "nobody has soaked" is answered by the long-run test.
 
@@ -24,11 +24,11 @@ GOTCHAS
 6. A vitest file outside `tests/` is not picked up by the configs' include; copy a scratch test into `tests/gpu/` temporarily (and delete it).
 7. Mesh assets: `npm run mesh:assets` once per worktree. No dev server or Chrome was used.
 
-GATES @133a509 (code unchanged since 3513e28; 133a509 is docs and a comment)
+GATES @0303df9 (code unchanged since 3513e28; later commits are docs and a comment)
 - npm test: 138 files, 2373 passed + 11 expected fail (2384), 4 min 48 s.
 - npm run lint: clean. npm run typecheck: clean.
 - test:gpu: 12 files, 72 passed (the new backflow row included; E-L5 2.67e-8, E-L9a 2.46e-12 over the flux scale, as of record).
-- test:gpu-ladder: PENDING.
-- CPU ladder rows touching the outflow (l4a, l4b, l5, l9a, l9b, d463): PENDING.
-- coverage: PENDING.
+- test:gpu-ladder: 4 files, 15 passed + 1 expected fail (L9a steadiness, D4-57), 7 min. The new long run passes (rows above). **D4-63 on the GPU changes with the backflow branch and passes by more:** (a) 0.445 / 0.0090 (was 0.778 / 0.486), (b) 0.163 / 0.0325 (was 0.491 / 0.211), 15000-20000 trend 0.820 per 1000 (was 0.994); SOLVER.md §16. Rows without outflow faces unchanged: B 1.266e-11 and 1.95e-5 m/s, L1 2.13e-5 m/s, L7 ratio 1.779, L8 0.754 %.
+- CPU ladder rows touching the outflow: l4a, l4b, l5, l9a, l9b done, pass/fail as of record (L5 948 iterations and L9a 8.86e-6 / spread 1.062e-5 equal the record; L9a and L9b fail only their known rows; L4b shock 0.0164, steadiness 2.58e-4; L9b disk 0.008008; no record value in docs to compare L4b/L9b against). **CPU d463 (20000 iterations, about 75 min) was still RUNNING at hand-back** (`reports/scratch/diverge/run/gates.cmd`, log `run/g-ladder.log`, progress `run/gates.progress`); it should move as the GPU did (NEXT 2).
+- coverage: RUNNING at hand-back (log `reports/scratch/diverge/run/coverage.log`, report dir `reports/scratch/diverge/coverage`).
 - GPU sharing: the repro runs and the gates ran with no other GPU job of mine; a polish builder may have run browser tests on the same GPU (the runs are deterministic; no timing is gated here).
