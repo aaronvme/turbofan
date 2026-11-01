@@ -193,8 +193,10 @@ describe('boundary conditions', () => {
       const totals = boundaryParams(ambient, { inflowTotal: { p0: pOut, t0: ambient.t } });
       const asInflow = ghost(ambient, BC.INFLOW, back, 1, 0, totals);
       expect(Array.from(g)).toEqual(Array.from(asInflow));
-      // along the inward normal (-x here), no swirl, no fuel
-      expect(g[1]).toBeLessThan(0);
+      // along the inward normal (-x here), no swirl, no fuel; at p_out 9e4, below the cell's
+      // characteristic, the outside cannot push gas in: the ghost is at rest (sigma clamps at 0)
+      if (pOut === ambient.p) expect(g[1]).toBeLessThan(0);
+      else expect(g[1] === 0 && g[4] === pOut - ambient.p).toBe(true);
       expect(g[2] === 0 && g[3] === 0 && g[5] === 0).toBe(true);
       // the static temperature at most the ambient's (total T_inf)
       expect(g[6]).toBeLessThanOrEqual(0);

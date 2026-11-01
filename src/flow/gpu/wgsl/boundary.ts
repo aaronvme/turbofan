@@ -45,42 +45,64 @@ fn farField(s: Prim, n: vec2f) -> Prim {
     vec4f(pb, select(0.0, s.b.y, outflow), s.b.z, s.b.w));
 }
 
+// the total conditions (p0, t0) of a subsonic inflow ghost: the inflow BC's, or the ambient's
+// beyond an outflow face that the flow enters (section 5, W2S-B1). dp0 = p0 - p_inf and
+// dT0 = t0 - T_inf in f64 before rounding, cpa = cp of air at t0.
+struct Totals { p0: f32, dp0: f32, t0: f32, dT0: f32, cpa: f32 }
+
 // tau = T - t0 on the t0 isentrope at speed sigma: h(t0 + tau) - h(t0) = -sigma^2 / 2
-fn stagnationOffset(sigma: f32) -> f32 {
+fn stagnationOffset(sigma: f32, tt: Totals) -> f32 {
   let dh = -0.5 * sigma * sigma;
-  var tau = dh / P.cpaT0;
+  var tau = dh / tt.cpa;
   for (var k = 0u; k < NEWTON_STEPS; k++) {
-    tau -= (enthalpyDelta(P.t0, tau, 0.0) - dh) / cpMix(P.t0 + tau, 0.0);
+    tau -= (enthalpyDelta(tt.t0, tau, 0.0) - dh) / cpMix(tt.t0 + tau, 0.0);
   }
   return tau;
 }
 
 // the ghost's gauge pressure on the isentrope (exact zero at sigma = 0 with p0 = p_inf)
-fn isentropePressure(tau: f32) -> f32 {
-  return P.dp0 + P.p0 * expm1f(entropyDelta(P.t0, tau, 0.0) / R_AIR);
+fn isentropePressure(tau: f32, tt: Totals) -> f32 {
+  return tt.dp0 + tt.p0 * expm1f(entropyDelta(tt.t0, tau, 0.0) / R_AIR);
+}
+
+fn subsonicInflow(s: Prim, n: vec2f, tt: Totals) -> Prim {
+  let un = (P.uInf + s.a.y) * n.x + s.a.z * n.y;
+  let rc = (P.rhoInf + s.a.x) * s.b.w;
+  let w = s.b.x + rc * un;
+  var sigma = max(0.0, -un);
+  for (var k = 0u; k < NEWTON_STEPS; k++) {
+    let tau = stagnationOffset(sigma, tt);
+    let pb = isentropePressure(tau, tt);
+    let rhoB = (P.pInf + pb) / (R_AIR * (tt.t0 + tau));
+    sigma = max(0.0, sigma + (pb - rc * sigma - w) / (rhoB * sigma + rc));
+  }
+  let tau = stagnationOffset(sigma, tt);
+  let pP = isentropePressure(tau, tt);
+  let tb = tt.t0 + tau;
+  let dT = tt.dT0 + tau;
+  return Prim(vec4f((pP - P.rhoInf * R_AIR * dT) / (R_AIR * tb), -n.x * sigma - P.uInf,
+                    -n.y * sigma, 0.0),
+              vec4f(pP, 0.0, dT, soundSpeed(tb, 0.0)));
 }
 
 fn inflow(s: Prim, n: vec2f) -> Prim {
   if (P.supersonicInflow == 1u) {
     return Prim(vec4f(0.0), vec4f(0.0, 0.0, 0.0, P.cInf));
   }
-  let un = (P.uInf + s.a.y) * n.x + s.a.z * n.y;
-  let rc = (P.rhoInf + s.a.x) * s.b.w;
-  let w = s.b.x + rc * un;
-  var sigma = max(0.0, -un);
-  for (var k = 0u; k < NEWTON_STEPS; k++) {
-    let tau = stagnationOffset(sigma);
-    let pb = isentropePressure(tau);
-    let rhoB = (P.pInf + pb) / (R_AIR * (P.t0 + tau));
-    sigma = max(0.0, sigma + (pb - rc * sigma - w) / (rhoB * sigma + rc));
+  return subsonicInflow(s, n, Totals(P.p0, P.dp0, P.t0, P.dT0, P.cpaT0));
+}
+
+// outflow (section 5): the static p_out while subsonic, a copy when supersonic; a face the flow
+// enters (vn < 0) takes the inflow ghost at the ambient's totals beyond it, (p_out, T_inf), never
+// the cell's own state copied back in (W2S-B1)
+fn outflow(s: Prim, n: vec2f) -> Prim {
+  let vn = (P.uInf + s.a.y) * n.x + s.a.z * n.y;
+  if (vn < 0.0) {
+    return subsonicInflow(s, n, Totals(P.pOut, P.pOutGauge, P.tInf, 0.0, P.cpaInf));
   }
-  let tau = stagnationOffset(sigma);
-  let pP = isentropePressure(tau);
-  let tb = P.t0 + tau;
-  let dT = P.dT0 + tau;
-  return Prim(vec4f((pP - P.rhoInf * R_AIR * dT) / (R_AIR * tb), -n.x * sigma - P.uInf,
-                    -n.y * sigma, 0.0),
-              vec4f(pP, 0.0, dT, soundSpeed(tb, 0.0)));
+  var o = s;
+  if (vn < s.b.w) { o.b.x = P.pOutGauge; }
+  return o;
 }
 
 // slip-wall ghost of layer 1 or 2 from the wall cell q0 and the next cell inwards q1
@@ -109,7 +131,7 @@ fn ghostPrim(r0: vec4u, r1: vec4u, s: Prim, s1: Prim) -> Prim {
     case 2u: { o.a.z = -s.a.z; }
     case 3u: { o = farField(s, n); }
     case 4u: { o = inflow(s, n); }
-    case 5u: { if ((P.uInf + s.a.y) * n.x + s.a.z * n.y < s.b.w) { o.b.x = P.pOutGauge; } }
+    case 5u: { o = outflow(s, n); }
     default: {}
   }
   return o;

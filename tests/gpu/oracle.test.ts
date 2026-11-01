@@ -453,7 +453,10 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     const p = await pair(mesh, options, {}, (s) => {
       s.setState((x): PhysicalState => {
         const k = 0.5 * (1 + x / 0.3);
-        const pr = 101325 * (1 + 0.005 * Math.cos((Math.PI * x) / 0.3));
+        // a 5 % wave: p' at the scale of the hot gas's terms rho R T' (a 0.5 % wave left e_q at 2.3e-5
+        // after 1 iteration, plain and preconditioned alike, in interior cells: the f32 state's
+        // rounding of a small p' among large thermal terms, not the boundary)
+        const pr = 101325 * (1 + 0.05 * Math.cos((Math.PI * x) / 0.3));
         const T = 288.15 + 150 * k;
         return { rho: pr / (287.05287 * T), u: -30 * k, v: 0, w: 10 * k, p: pr, z: 0.02 * k };
       });
