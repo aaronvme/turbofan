@@ -393,6 +393,12 @@ describe('the app in Chrome', () => {
         layout.push(...layoutProblems().map((p) => `${mode}: ${p}`));
         if (mode === 'cutaway' || mode === 'data') {
           layout.push(...axialRowProblems().map((p) => `${mode}: ${p}`));
+          // round 7: the legend's floor note on one line (a second made the dock taller and the
+          // label rows smaller at 1366)
+          const note = document.querySelector('.overlay .legend-floor-note');
+          const lineH = note === null ? 0 : parseFloat(getComputedStyle(note).lineHeight);
+          if (note !== null && note.getBoundingClientRect().height > 1.5 * lineH)
+            layout.push(`${mode}: the legend's floor note wraps (${note.textContent ?? ''})`);
           const shownIds = [...document.querySelectorAll<HTMLElement>('.overlay .callout[data-id]')]
             .filter(visible)
             .map((el) => el.dataset.id);

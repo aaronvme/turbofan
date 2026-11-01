@@ -162,19 +162,22 @@ describe('W2V-I7: the legend says what the floor hides', () => {
       expect(f.to).toBeCloseTo((hi - s.min) / (s.max - s.min), 9);
       // W2V-N25 (app-ui round 7): the legend names the dashed frame the plane draws in
       expect(f.label).toMatch(/^Not drawn in the dashed frame: /);
+      // one line in the 440 px legend (a second line made the dock taller and the cut views'
+      // rows smaller at 1366): at most 80 characters
+      expect(f.label.length).toBeLessThanOrEqual(80);
       expect(f.label).toContain('2.5 %');
     }
     expect(legendFor('data', 'mock', 'mach')?.floor?.label).toBe(
-      'Not drawn in the dashed frame: 0 to 0.04 M (the ambient ± 2.5 % of the scale)',
+      'Not drawn in the dashed frame: 0 to 0.04 M (ambient ± 2.5 % of scale)',
     );
     expect(legendFor('data', 'mock', 'speed')?.floor?.label).toBe(
-      'Not drawn in the dashed frame: 0 to 17.5 m/s (the ambient ± 2.5 % of the scale)',
+      'Not drawn in the dashed frame: 0 to 17.5 m/s (ambient ± 2.5 % of scale)',
     );
     expect(legendFor('data', 'mock', 'p')?.floor?.label).toBe(
-      'Not drawn in the dashed frame: 0.841 to 1.19 p / p∞ (the ambient ± 2.5 % of the scale)',
+      'Not drawn in the dashed frame: 0.841 to 1.19 p / p∞ (ambient ± 2.5 % of scale)',
     );
     expect(legendFor('data', 'mock', 't')?.floor?.label).toBe(
-      'Not drawn in the dashed frame: 243 to 333 K (the ambient ± 2.5 % of the scale)',
+      'Not drawn in the dashed frame: 243 to 333 K (ambient ± 2.5 % of scale)',
     );
     // the schlieren is an image of the whole field: no floor
     expect(legendFor('schlieren', 'mock')?.floor).toBeNull();
