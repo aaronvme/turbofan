@@ -8,6 +8,10 @@
 // plane) the grey-share bar, a lit engine (Realistic, Exploded) the silhouette bar. A label in the
 // jet box gives a bandless jet the spread of a banded one, so the browser computes the signature
 // on the canvas alone, never on the page with its overlay.
+// W2A-N30 (critic pass 18): the grey band (0.4-0.6) held the studio's own grey, so the grey share
+// measured how much studio showed. The band is now the knife edge's 0.5 +- 0.01, which leaves the
+// studio out (measured on HEAD, Chrome, the canvas: Schlieren 0.914-0.917 of its field in it, the
+// studio-backed controls 0.01-0.29).
 import { describe, expect, it } from 'vitest';
 import { failedBars, schlierenSignature, SCHLIEREN_BARS } from '../../browser/lib/schlierenCheck';
 
@@ -48,13 +52,29 @@ describe('the Schlieren signature (W2A-I6, W2A-I10)', () => {
   });
 
   it('a cut view (the studio round a coloured plane, a lit cut face): fails the grey-share bar', () => {
-    // a third of the field at the studio's grey: round 5's old bar (0.3) passed it
+    // a third of the field at the studio's grey (round 5's 0.3 bar and the 0.4-0.6 band passed it),
+    // a tenth at the knife edge's own grey
     const s = sig((x, y) =>
-      inEngine(x, y) ? 0.2 : inJet(x, y) || (x + y) % 3 !== 0 ? plane(x, y) : STUDIO,
+      inEngine(x, y)
+        ? 0.2
+        : !inJet(x, y) && (x + y) % 10 === 0
+          ? 0.5
+          : inJet(x, y) || (x + y) % 3 !== 0
+            ? plane(x, y)
+            : STUDIO,
     );
-    expect(s.greyShare).toBeGreaterThan(0.3);
+    expect(s.greyShare).toBeLessThan(0.2);
     expect(s.pass, JSON.stringify(s)).toBe(false);
     expect(failedBars(s)).toEqual(['grey']);
+  });
+
+  it("W2A-N30: the studio's own grey (about 0.47) is not the knife edge's: a studio round the engine has no grey share", () => {
+    const s = sig((x, y) => (inEngine(x, y) ? 0.08 : inJet(x, y) ? bands(x) : STUDIO));
+    expect(s.greyShare, JSON.stringify(s)).toBe(0);
+    expect(failedBars(s)).toContain('grey');
+    // the knife edge's 8-bit neutral (127 or 128 of 255) is in the band
+    for (const l of [127 / 255, 128 / 255])
+      expect(sig((x, y) => (inEngine(x, y) ? 0.08 : l)).greyShare).toBe(1);
   });
 
   it('a lit engine (Realistic, Exploded) on the studio: fails the silhouette bar', () => {
@@ -80,10 +100,10 @@ describe('the Schlieren signature (W2A-I6, W2A-I10)', () => {
     expect(s.pass).toBe(true);
   });
 
-  it('states its bars: the grey share midway between Schlieren on the canvas (0.84-0.90 in Chrome) and the controls (<= 0.55)', () => {
+  it('states its bars: the knife-edge band 0.5 +- 0.01 (W2A-N30), the grey share 0.7 between Schlieren (0.91-0.92 in it) and the controls (<= 0.29)', () => {
     expect(SCHLIEREN_BARS).toEqual({
-      greyMin: 0.4,
-      greyMax: 0.6,
+      greyMin: 0.49,
+      greyMax: 0.51,
       greyShareMin: 0.7,
       silhouetteRatioMax: 0.5,
       jetStdMin: 0.08,
