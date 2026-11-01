@@ -546,6 +546,7 @@ type Size = { readonly w: number; readonly h: number };
 export function Callouts({ snapshot }: { readonly snapshot: SimSnapshot }) {
   const anchors = useApp((s) => s.anchors);
   const engineBox = useApp((s) => s.engineBox);
+  const jetBox = useApp((s) => s.jetBox);
   const post = useApp((s) => s.post);
   const mode = snapshot.view.viewMode;
   const units = useApp((s) => s.units);
@@ -587,7 +588,9 @@ export function Callouts({ snapshot }: { readonly snapshot: SimSnapshot }) {
   }, [panels, mode, post]);
   // laid out again only when an anchor, a size or the room changes (not on every snapshot)
   const box = engineBox === null ? '-' : [engineBox.x, engineBox.y, engineBox.w, engineBox.h];
-  const key = `${mode}:${box.toString()}:${anchors
+  const jet =
+    jetBox === null ? '-' : [jetBox.x, jetBox.y, jetBox.w, jetBox.h].map((v) => v.toFixed(0));
+  const key = `${mode}:${box.toString()}:${jet.toString()}:${anchors
     .map((a) => `${a.id}:${a.visible ? `${a.x.toFixed(1)},${a.y.toFixed(1)}` : '-'}`)
     .join('|')}`;
   // D4-92 (zz): the cut views label outward in axial order, the closed views as before
@@ -596,7 +599,16 @@ export function Callouts({ snapshot }: { readonly snapshot: SimSnapshot }) {
     () =>
       cut
         ? layoutAxial(anchors, (id) => sizes[id] ?? LABEL, vp, reserved, engineBox)
-        : layoutCallouts(anchors, (id) => sizes[id] ?? LABEL, vp, reserved),
+        : // critic pass 18's visual note 2: no label on Schlieren's jet (its anchor still called)
+          layoutCallouts(
+            anchors,
+            (id) => sizes[id] ?? LABEL,
+            vp,
+            reserved,
+            () => [],
+            false,
+            jetBox === null ? [] : [jetBox],
+          ),
     // `key` stands for the anchors' values: a new array of the same anchors is no change
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [key, sizes, vp, reserved],

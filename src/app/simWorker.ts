@@ -31,6 +31,7 @@ import {
   componentAnchors,
   engineRings,
   explodedRings,
+  jetBox,
   projectPoint,
   screenBox,
 } from '../hud/anchors';
@@ -101,7 +102,7 @@ const calloutGeo = calloutGeometry(ENGINE_DEFINITION);
 const ENGINE_RINGS = engineRings(ENGINE_DEFINITION, 2.75);
 /** Schlieren's content: the engine and the near field's jet (its framing, D4-92 zz). */
 const SCHLIEREN_RINGS = engineRings(ENGINE_DEFINITION, FIELD_EXTENTS.near.xMax);
-/** Exploded's content: the modules slid apart (its framing, round 7). */
+/** Exploded's content: the parts it draws, slid apart (its framing, round 7; W2A-I11). */
 const EXPLODED_RINGS = explodedRings(ENGINE_DEFINITION, EXPLODE_GAP);
 
 const median = (xs: readonly number[]): number | null => {
@@ -346,6 +347,10 @@ function projectAnchors(a: App): AxialAnchor[] {
 
 type Framing = 'schlieren' | 'exploded' | 'cut' | null;
 
+/** A framing's content (its screen box is framed): the engine with its jet, the exploded parts, the engine. */
+const framingRings = (f: Exclude<Framing, null>) =>
+  f === 'schlieren' ? SCHLIEREN_RINGS : f === 'exploded' ? EXPLODED_RINGS : ENGINE_RINGS;
+
 /**
  * The framing a view mode has: Schlieren's (D4-92 zz), Exploded's (round 7), the cut views' rows
  * (D4-97 item 2). Realistic keeps the viewer's camera.
@@ -374,8 +379,7 @@ function frameView(a: App, to: Framing, again = false) {
   if (to === null || area === null) return;
   const start = a.orbit;
   const canvas = { w: a.size.width, h: a.size.height };
-  const rings =
-    to === 'schlieren' ? SCHLIEREN_RINGS : to === 'exploded' ? EXPLODED_RINGS : ENGINE_RINGS;
+  const rings = framingRings(to);
   const project = (o: OrbitState) => {
     const pose = orbitPose(o);
     a.view.setCameraPose(pose.position, pose.target);
@@ -566,14 +570,22 @@ function loop(a: App) {
         renderScale: stats.renderScale,
       };
       try {
+        const vp = viewProjection(a);
         post({
           type: 'snapshot',
           snapshot: a.core.snapshot({ flow, flowSource: drawn }),
           diagnostics,
           anchors: projectAnchors(a),
-          engineBox: screenBox(viewProjection(a), ENGINE_RINGS, a.size.width, a.size.height),
-          framedBox: null,
-          jetBox: null,
+          engineBox: screenBox(vp, ENGINE_RINGS, a.size.width, a.size.height),
+          // W2A-N31: the framed view's content box, as framed; the jet in Schlieren (no label on it)
+          framedBox:
+            a.framing === null
+              ? null
+              : screenBox(vp, framingRings(a.framing), a.size.width, a.size.height),
+          jetBox:
+            a.framing === 'schlieren'
+              ? jetBox(vp, ENGINE_DEFINITION, FIELD_EXTENTS.near.xMax, a.size.width, a.size.height)
+              : null,
           refused: a.refused.splice(0),
         });
         postFaults.posted();

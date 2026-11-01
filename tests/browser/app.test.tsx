@@ -689,7 +689,7 @@ describe('the app in Chrome', () => {
     let snapshots = 0;
     let lastVersion = -1;
     // then take-off to the window's end, stepped as one batch (the frame cost is the worker's)
-    const takeoff = 1200;
+    const takeoff = framesOf(P5.windowS.value - P5.idleS.value - P5.leverRampS.value);
     asked += takeoff;
     useApp.getState().post({ type: 'debug', simSteps: { dtS: FIXED_DT, frames: takeoff } });
     const t0 = performance.now();
