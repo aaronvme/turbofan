@@ -84,7 +84,13 @@ export function FlowLegend({
           </span>
         ))}
       </div>
-      {legend.floor === null ? null : <p className="legend-floor-note">{legend.floor.label}</p>}
+      {legend.floor === null ? null : (
+        <p className="legend-floor-note">
+          {/* W2V-N25: the crop's dashed outline, which the note names */}
+          <span className="legend-frame" aria-hidden="true" />
+          <span>{legend.floor.label}</span>
+        </p>
+      )}
       <p className="legend-badge" data-coupling={coupling} data-fallback={fallback !== null}>
         <span className="dot" aria-hidden="true" />
         <span>{provenanceLabel(coupling, fallback)}</span>

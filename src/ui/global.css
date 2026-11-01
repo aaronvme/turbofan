@@ -1103,6 +1103,14 @@ svg text {
   );
   box-shadow: inset 0 0 0 1px rgb(226 230 235 / 28%);
 }
+/* W2V-N25 (app-ui round 7): the cut plane's dashed frame, as drawn (CROP_OUTLINE's colour) */
+.legend-frame {
+  display: inline-block;
+  width: 16px;
+  margin: 0 6px 0 0;
+  vertical-align: middle;
+  border-top: 1.5px dashed rgb(224 230 237 / 75%);
+}
 .legend-floor-note {
   margin: 1px 0 0;
   font-size: 10.5px;

@@ -263,10 +263,10 @@ describe('modes', () => {
     // periodic along the edge, either side of 0 (the crop starts ahead of the intake, x < 0)
     expect(cropDash(-period + 0.5 * dashM)).toBe(1);
     expect(cropDash(3 * period + dashM + 0.5 * gapM)).toBe(0);
-    // over an edge, the share drawn is the dash's
+    // over a whole number of periods along an edge, the share drawn is the dash's
     let on = 0;
     const n = 10_000;
-    for (let i = 0; i < n; i++) on += cropDash(-2 + (5 * i) / n);
+    for (let i = 0; i < n; i++) on += cropDash(-2 + (40 * period * i) / n);
     expect(on / n).toBeCloseTo(dashM / period, 2);
   });
 

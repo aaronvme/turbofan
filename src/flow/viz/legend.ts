@@ -37,7 +37,10 @@ export interface LegendFloor {
   /** The band's ends along the bar, 0..1. */
   readonly from: number;
   readonly to: number;
-  /** "Not drawn: 0 to 0.04 M (the ambient ± 2.5 % of the scale)". */
+  /**
+   * "Not drawn in the dashed frame: 0 to 0.04 M (the ambient ± 2.5 % of the scale)" (W2V-N25: the
+   * crop's dashed outline is the field's frame).
+   */
   readonly label: string;
 }
 
@@ -128,7 +131,7 @@ export function legendFor(
   const floor: LegendFloor = {
     from: (lo - spec.min) / (spec.max - spec.min),
     to: (hi - spec.min) / (spec.max - spec.min),
-    label: `Not drawn: ${shown(lo)} to ${shown(hi)} ${ratio ?? spec.unit} (the ambient ± ${FLOOR_PERCENT} of the scale)`,
+    label: `Not drawn in the dashed frame: ${shown(lo)} to ${shown(hi)} ${ratio ?? spec.unit} (the ambient ± ${FLOOR_PERCENT} of the scale)`,
   };
   return { title: spec.label, unit: ratio ?? spec.unit, ticks, stops, coupling, floor };
 }

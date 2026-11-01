@@ -401,10 +401,26 @@ export function createFlowViz(o: {
       const edgeM = min(min(crop.rMax.sub(r), x.sub(crop.xMin)), crop.xMax.sub(x));
       const edgePx = edgeM.div(max(fwidth(edgeM), 1e-6));
       const inside = mix(float(1), edgePx.add(0.5).clamp(0, 1), crop.on);
+      // W2V-N25 (app-ui round 7): dashed along the nearest edge (modes.ts cropDash), so it reads
+      // as the field's frame, not a leader: the distance from the nearest dash's centre, in
+      // periods, anti-aliased on both ends
+      const period = CROP_OUTLINE.dashM + CROP_OUTLINE.gapM;
+      const duty = CROP_OUTLINE.dashM / period;
+      const along = select(
+        crop.rMax.sub(r).lessThanEqual(min(x.sub(crop.xMin), crop.xMax.sub(x))),
+        x,
+        r,
+      ).div(period);
+      const fromCentre = abs(fract(along.sub(duty / 2 - 0.5)).sub(0.5));
+      const aaDash = max(fwidth(along), 1e-4);
+      const dash = float(1).sub(
+        smoothstep(float(duty / 2).sub(aaDash), float(duty / 2).add(aaDash), fromCentre),
+      );
       const outline = float(1)
         .sub(smoothstep(CROP_OUTLINE.widthPx - 0.5, CROP_OUTLINE.widthPx + 0.5, edgePx))
         .mul(crop.on)
-        .mul(CROP_OUTLINE.alpha);
+        .mul(CROP_OUTLINE.alpha)
+        .mul(dash);
       const framed = mix(rgb, vec3(...CROP_OUTLINE.rgb), outline);
       const a = fluid.mul(inside);
       // W2V-I7 (D4-86): the ambient air is not drawn (fields.ts drawnOnPlane): a crisp,

@@ -29,8 +29,28 @@ export interface CutPlaneCrop {
   readonly rMax: number;
 }
 
-/** D4-83: the crop's outline, drawn just inside the edge: about a pixel, light, translucent. */
-export const CROP_OUTLINE = { widthPx: 1.25, alpha: 0.55, rgb: [0.88, 0.9, 0.93] } as const;
+/**
+ * D4-83: the crop's outline, drawn just inside the edge: about a pixel, light, translucent.
+ * W2V-N25 (app-ui round 7): dashed, `dashM` drawn and `gapM` not along its edge (metres on the
+ * plane: 5-8 px dashes at the app's 90-140 px per metre), and lighter than round 6's 0.55, so it
+ * reads as the field's frame, not as a leader beside the callouts' (the legend names it).
+ */
+export const CROP_OUTLINE = {
+  widthPx: 1.25,
+  alpha: 0.4,
+  rgb: [0.88, 0.9, 0.93],
+  dashM: 0.06,
+  gapM: 0.045,
+} as const;
+
+/**
+ * W2V-N25: 1 on a dash of the crop's outline, 0 in a gap, `alongM` metres along its edge (x along
+ * the outer radius, r along the ends); the plane's shader draws the same, anti-aliased.
+ */
+export function cropDash(alongM: number): number {
+  const u = alongM / (CROP_OUTLINE.dashM + CROP_OUTLINE.gapM);
+  return u - Math.floor(u) < CROP_OUTLINE.dashM / (CROP_OUTLINE.dashM + CROP_OUTLINE.gapM) ? 1 : 0;
+}
 
 export type FlowVizModeId = 'realistic' | 'cutaway' | 'schlieren' | 'data';
 
