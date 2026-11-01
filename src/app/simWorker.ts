@@ -51,6 +51,7 @@ import { createRasterScheduler, type RasterScheduler } from '../shell/mockRaster
 import { backingDpr, backingSize } from '../shell/pixelCap';
 import { createSettleTracker, type SettleTracker } from '../shell/settle';
 import { createPostFaults, stepFault } from '../shell/faults';
+import { snapshotDue } from '../shell/publish';
 import {
   BOOT_CONFIGS,
   WARM_CONFIGS,
@@ -87,8 +88,6 @@ const post = (m: FromWorker) => {
   scope.postMessage(m);
 };
 
-/** A snapshot every this many frames (20 Hz at 60 fps: D2-9's realistic React load is 15 Hz). */
-const PUBLISH_EVERY = 3;
 /** stats() walks the scene to count draws: read the timings this often (as P1 does). */
 const TIMINGS_EVERY = 15;
 /** The frame-cost window, frames (2 s at 60 fps: a held episode's frames stay in view). */
@@ -463,6 +462,7 @@ function loop(a: App) {
   const stamps: number[] = [];
   const postFaults = createPostFaults(MAX_FAILED_POSTS);
   let lastFrameMs = 0;
+  let lastPublish = -Infinity;
   let stats = a.view.stats();
   const tick = (t: number) => {
     if (a.lost) return;
@@ -518,7 +518,9 @@ function loop(a: App) {
     }
     lastFrameMs = performance.now() - t0;
     frameMs.push(lastFrameMs, held);
-    if (frame % PUBLISH_EVERY === 0) {
+    // D4-100: every PUBLISH_EVERY frames, and a heavy (preparing) frame its own
+    if (snapshotDue(frame, performance.now() - lastPublish)) {
+      lastPublish = performance.now();
       const flow = flowStatus(a);
       const drawn = a.fields?.drawn() ?? 'none';
       const diagnostics: AppDiagnostics = {
