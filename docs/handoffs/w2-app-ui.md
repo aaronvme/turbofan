@@ -1,4 +1,40 @@
-w2/app-ui: round 6 (D4-97 items 1-4, W2A-I7..I10, N21, N22, N24-N28, the re-shoot). Main @7a35c60 merged (a fast-forward). Code and shots at 70812f9; gates at 70812f9 (see GATES); this handoff on top.
+w2/app-ui: round 7 (D4-98 items 1, 2 and 4, the four visual notes, N23), REPORTED EARLY at the harness's request: code committed, the targeted browser run passed, the full gates and the docs/look-dev/ui re-shoot NOT run. Main b5ae7ef merged (6bf986f). HEAD 8524c97 plus this handoff.
+
+# Round 7 (2026-10-31): D4-98 (U4 by scheduling, W2H-I5's fixed-dt gate), the visual notes, N23
+
+DONE (TDD: each failing test committed first, "(TDD)" in its message)
+- **U4 / D4-98 item 1** (deca3d7, 82476b3 TDD; b6d6715): `src/shell/warmUp.ts` `COLD_SWITCH_WAIT_FRAMES` = 30 (was 60); after it the asked view takes a slot every frame whatever the last frame's CPU (was every 2nd). Its give-up stays 800 frames waited and it no longer counts against the background's 400-slot cap (that cap would have given it up at about frame 430). The background keeps the CPU rule and SLOT_EVERY. Unit: first slot at frame 30, then one per frame at 8.4/11.2/16 ms; k warm frames shown at 30 + (k - 1); at a light CPU 15 slots in the wait then every frame. U4's check text in PHYSICS 3.5 and the mirror states the mechanism; the 2 s bar is unchanged.
+- **W2H-I5 / D4-98 item 2** (fab0dfb TDD; a5190f9): `src/shell/simSteps.ts`. The worker steps the real frame time (the app) or the suite's counted fixed steps (the `debug` message's `simSteps`; with none left the sim holds). The diagnostics carry `fixedSteps`. A frame that did not step is no longer tagged held. The W2F-N5 case: hold, reset to ground idle, 180 frames of 1/60 s at 0.05, the lever 0.05 to 1.0 in 20 steps of 3 frames (each sent while it holds), then 1200 frames. The cycle cause is untouched.
+- **D4-98 item 4** (e620f67): a production build ignores `debug` (`import.meta.env.PROD`). Not verified with a production bundle.
+- **N23** (2e80b3c TDD; 6eb6d10; FLAGGED RENDER EDIT `engineView.ts`, the report only): `warmUp` reports `done` per configuration; only finished boot configurations are marked warm (`bootWarmed`); the rest warm first in the background; `shownView` never shows "Preparing" for the view already shown; Diagnostics counts the unfinished; warmStall checks both boot configurations finished.
+- **Visual notes** (unit-tested; Chrome shots taken in t1 to `reports/ui/` but NOT looked at yet):
+  - Schlieren and Exploded framing (b4b8dc5 TDD; 33f346a; FLAGGED RENDER EDIT: `EXPLODE_GAP` moved unchanged to `geometry/explode.ts`). Both are framed in the free area above the dock less `FRAME_MARGIN_PX` = 24 on every side (`fitOrbit`, 3 re-projected passes, `FRAMED_MIN_SCALE` 0.6). Exploded's content is `explodedRings`. Unit at both sizes: inside the margin; at least 0.9 of the area across or down; Exploded at 1366 needs scale 0.602.
+  - The crop outline, W2V-N25 (d56294b TDD; 808b785; FLAGGED RENDER EDIT `flowViz.ts`): dashed along its nearest edge (0.06 m drawn, 0.045 m gap; `cropDash` mirrors the shader) and lighter (alpha 0.4, was 0.55). The legend note now reads "Not drawn in the dashed frame: ... (ambient ± 2.5 % of scale)" after a dashed swatch, on one line (legend 440 px). The browser layout bar fails a wrapped note.
+  - The 1366 drawer's long leader (53feaf0 TDD; ea8e5af). Measured in Chrome (`reports/scratch/app-ui/r7/diag-drawer.json`), there were three causes:
+    - the unlit annunciator strip, a 0 x 0 reserved box at x = 671, pushed the top row right;
+    - the top row ignored the top bar because it sits at y = 8 (only bars at y <= 1 counted), so at the minimum scale the whole top row was hidden;
+    - equal layouts did not prefer shorter leaders.
+  - All three are fixed, and a row place pushed onto the engine is dropped, never put on the section. Unit with the measured inputs: closed, all 8 labels in rows; drawer open, the fan above with a leader < 130 px.
+
+MEASURED (t1 at ea8e5af: firstSwitch, app, warmStall, all passed, EXIT 0, 152 s; ON BATTERY (status 1, 86 %), 4.8 GB free, no other browser run: indicative, not conclusive)
+| cold switch into Data (U4 <= 2 s) | round 6 gate run | round 7 t1 |
+|---|---|---|
+| light frame CPU | 2.53 s | 1.61 s (preparing at 106 ms, longest gap 116 ms) |
+| steady 8.4 ms | 3.10 s | 1.93 s (longest gap 98 ms) |
+| steady 11.2 ms | 3.19 s | 1.83 s (longest gap 86 ms) |
+- No give-up. U3: boot 3.39 s in the cold case (<= 5 s). U2: the first-switch JSONs are in `reports/ui/`, but I did not read them before reporting.
+- W2F-N5 on the fixed dt: all 1440 fixed frames stepped, 1005 lost solves (held), 168 held snapshots, held step 3.7 ms CPU, held frame 5.6 ms, and the test passed (no enthalpy throw in this run).
+
+NOT DONE (open)
+- **Gates not run:** typecheck and lint ran per file only; no coverage, test:mesh, test:gpu or full test:browser. Run `reports/scratch/app-ui/r7/gates.ps1` detached.
+- **The re-shoot of `docs/look-dev/ui/` (VITE_UI_LOOKDEV=1) and looking at every shot are not done.** t1's shots in `reports/ui/` (both sizes, every mode, the drawer) are unviewed, so the before/after visual verdicts are open. Round 6's shots are at d267488.
+- U4 on AC (the t1 numbers are on battery).
+
+GOTCHAS
+- Detached runs: `reports/scratch/app-ui/r7/run.ps1` (-Name, -Cmd, -NeedFreeMB, -Browser) and `gates.ps1` (coverage to `reports/scratch/app-ui/r7/coverage`). The diagnostic test is kept as `reports/scratch/app-ui/r7/zzDiag.test.tsx.txt`.
+- At 1366 the cut views sit at the minimum scale with about 8 px to spare above and 15 px below. A legend note that wraps (a taller dock) hid most of the labels.
+- No dev server or MCP page was opened; no run is left going.
+
 
 # Round 6 (2026-10-31): critic pass 17's findings, as D4-97 decided
 
