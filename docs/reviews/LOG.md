@@ -3549,6 +3549,19 @@ None.
      **Camera easing** into framed views goes to W4's motion polish, not W2.
   4. **W2L-N16's fallback, confirmed in advance:** if the default cutaway pose's legacyTraa control ever passes, that pose leaves the moving bound with the reason stated. The band is never re-tuned to make it fail again (D4-74).
   - The three UI changes beyond the brief are kept: the legend at 440 px, and Schlieren and Exploded framed above the dock. The 1366 cut views' ~8 px of slack is accepted, since a taller dock only hides labels by priority.
+- **D4-100 (the W2 official window, 2026-11-01 01:11-02:10 EDT, on local main 469164a: followups-2 and app-ui rounds 6-7 merged, not yet pushed): the official results and what they change.**
+  - **Conditions:** D0-1 as amended (AC 85-100 %, Balanced, no agents, the display held awake by the scripts' execution-state request, Do Not Disturb, Chrome focused). Records committed as written: `docs/bench/p1-2026-11-01-0127-official.json`, `docs/look-dev/timings.json`, `docs/look-dev/timings-flow.json`. The untracked `docs/bench/p1-2026-10-28-2158-quick.json`, an old quick run, made `gitDirty` true; it's noted, not deleted.
+  - **P4: PASS at 6.66 ms back to back,** the measure of record (D4-42). All 24 runs valid, GPU busy 71 %. Beside it: cutaway 7.70, hero 10.77, performance 5.16 ms, and vsync default 11.88 ms (reported, not gated). The first attempt timed out on the look-dev page's first load (vite re-optimizing after the merges) and was rerun after a warm load.
+  - **P1: PASS at 180 it/s** (1.332 ms/it, 60.0 fps) in the app's 1080p scene at 130k (D4-64). It was 157 it/s.
+    - Caveat: P1 times iterations and doesn't check the field.
+  - **U4 (cold switch ≤ 2 s) FAILS on AC:** 2.456 / 2.558 / 2.509 s at light / 8.4 / 11.2 ms. U3 holds (boot 3.45-3.53 s), and the longest gap while preparing is 108-145 ms. The 56-57 warm frames each take longer than a frame slot.
+    - **Fix, for the polish round:** the asked view warms several configurations per frame while preparing. There's room: the gap is ~140 ms against the test's 1000 ms bar. U4 isn't restated, and "Preparing" must never freeze, so the gap stays ≤ 1000 ms.
+  - **P4flow: no valid run, and a new blocker, W2S-B1.**
+    - In the look-dev page, the uncoupled GPU solver diverged: "the density residual is NaN after 6759 iterations", about 1 min at 2 it/frame, at the end of the first run. Every later run drew the MOCK fallback, since a failed solver isn't restarted.
+    - The app shows that visibly, but the real solver doesn't survive a minute in the app scene on current main. The GPU contract cases (D4-63's d463 at 0.02, decaying to 40k) didn't catch it.
+    - **Next, top priority:** a builder reproduces it headless (Dawn, the 130k asset, the app's GpuFlowSolver config and FLOW_SOLVER_LIMITS, 10k+ iterations), bisects 0.003 against the 0.02 cut (D4-89's mirror) and anything else since solver-int, then finds the cause, fixes it TDD, and adds a long-run GPU test of the app's own configuration.
+    - P4flow and P1's field health are re-measured after the fix, in the next quiet window.
+  - **The merge gate on 469164a:** the browser suite timed out twice at 120 s, on `fanBlur` (W1L-I3) and `rotorMotion` (W1V-I1 b, made heavier by followups-2's per-pose controls), in the full suite on a quiet AC machine. Every assertion passed. The polish round gives both explicit longer timeouts or splits them (test plumbing, not a bar; D4-95's precedent). Main is pushed once the browser gate is green.
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 

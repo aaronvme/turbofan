@@ -1,0 +1,868 @@
+{
+  "date": "2026-11-01T05:27:47.481Z",
+  "viewport": "1920x1080 DPR 1",
+  "quality": "high",
+  "protocol": {
+    "warmupS": 10,
+    "runS": 60,
+    "reps": 3,
+    "seed": 1,
+    "pacings": ["vsync", "backToBack"],
+    "order": [
+      [
+        "cutaway, flow Cutaway with tracers, solver uncoupled [back to back]",
+        "cutaway, flow Cutaway with tracers, solver uncoupled",
+        "default (threeQuarterFront), flow Realistic (D4-83 default: haze, no tracers), solver uncoupled",
+        "default (threeQuarterFront), flow Realistic (D4-83 default: haze, no tracers), solver uncoupled [back to back]"
+      ],
+      [
+        "cutaway, flow Cutaway with tracers, solver uncoupled",
+        "default (threeQuarterFront), flow Realistic (D4-83 default: haze, no tracers), solver uncoupled",
+        "default (threeQuarterFront), flow Realistic (D4-83 default: haze, no tracers), solver uncoupled [back to back]",
+        "cutaway, flow Cutaway with tracers, solver uncoupled [back to back]"
+      ],
+      [
+        "default (threeQuarterFront), flow Realistic (D4-83 default: haze, no tracers), solver uncoupled",
+        "default (threeQuarterFront), flow Realistic (D4-83 default: haze, no tracers), solver uncoupled [back to back]",
+        "cutaway, flow Cutaway with tracers, solver uncoupled [back to back]",
+        "cutaway, flow Cutaway with tracers, solver uncoupled"
+      ]
+    ]
+  },
+  "displayIntervalMs": 16.600000001490116,
+  "note": "official only under the D0-1 protocol with the OS power source on AC throughout, nothing else running, Chrome in the foreground (D0-1, D4-42); otherwise indicative",
+  "powerSourceAcThroughout": true,
+  "conditions": {
+    "start": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+      "battery": {
+        "charging": true,
+        "level": 0.87
+      },
+      "adapter": {
+        "vendor": "intel",
+        "architecture": "xe-lpg",
+        "device": "",
+        "description": ""
+      },
+      "timestamps": true,
+      "chrome": "156.0.8078.74",
+      "powerSource": "ac",
+      "powerPlan": "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)",
+      "cpuLoadPercent": "62",
+      "at": "2026-11-01T05:13:25.856Z"
+    },
+    "end": {
+      "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+      "battery": {
+        "charging": true,
+        "level": 0.94
+      },
+      "adapter": {
+        "vendor": "intel",
+        "architecture": "xe-lpg",
+        "device": "",
+        "description": ""
+      },
+      "timestamps": true,
+      "chrome": "156.0.8078.74",
+      "powerSource": "ac",
+      "powerPlan": "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)",
+      "cpuLoadPercent": "0",
+      "at": "2026-11-01T05:27:47.480Z"
+    }
+  },
+  "results": {
+    "default (threeQuarterFront), flow Realistic (D4-83 default: haze, no tracers), solver uncoupled": {
+      "runs": 0,
+      "gpu": {
+        "shadow": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "opaque": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "rotors": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "gtao": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "composite": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "traa": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "dof": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "bloom": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "output": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "other": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        }
+      },
+      "gpuTotal": {
+        "p10": null,
+        "p50": null,
+        "p90": null
+      },
+      "cpu": {
+        "p10": null,
+        "p50": null,
+        "p90": null
+      },
+      "gpuTotalPerRun": [],
+      "pacing": "vsync",
+      "valid": false,
+      "runsUsed": [],
+      "gpuBusyMedian": null,
+      "validity": [
+        {
+          "valid": false,
+          "reasons": [
+            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
+            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+          ],
+          "warnings": []
+        },
+        {
+          "valid": false,
+          "reasons": [
+            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
+            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+          ],
+          "warnings": []
+        },
+        {
+          "valid": false,
+          "reasons": [
+            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
+            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+          ],
+          "warnings": []
+        }
+      ],
+      "load": [
+        {
+          "framesPerS": 60.0032659372755,
+          "gpuBusy": 0.5599717625911405
+        },
+        {
+          "framesPerS": 60.00276602587216,
+          "gpuBusy": 0.575780112102251
+        },
+        {
+          "framesPerS": 59.986203173273125,
+          "gpuBusy": 0.5612429058076068
+        }
+      ],
+      "renderScale": [1, 1, 1],
+      "errors": [0, 0, 0],
+      "powerSource": [
+        ["ac", "ac"],
+        ["ac", "ac"],
+        ["ac", "ac"]
+      ],
+      "flow": {
+        "setting": {
+          "mode": "realistic",
+          "tracers": null
+        },
+        "perRun": [
+          {
+            "flowRender": {
+              "frames": 3605,
+              "p10": 0.6252772,
+              "p50": 0.745933,
+              "p90": 0.7912762000000001
+            },
+            "solverGpuMs": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            },
+            "iterationsPerFrame": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            }
+          },
+          {
+            "flowRender": {
+              "frames": 3605,
+              "p10": 0.7352872000000001,
+              "p50": 0.753172,
+              "p90": 0.7707032
+            },
+            "solverGpuMs": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            },
+            "iterationsPerFrame": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            }
+          },
+          {
+            "flowRender": {
+              "frames": 3604,
+              "p10": 0.67135,
+              "p50": 0.74411,
+              "p90": 0.8230677000000002
+            },
+            "solverGpuMs": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            },
+            "iterationsPerFrame": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            }
+          }
+        ],
+        "flowRenderMs": null,
+        "solverGpuMs": null,
+        "iterationsPerFrame": null
+      }
+    },
+    "cutaway, flow Cutaway with tracers, solver uncoupled": {
+      "runs": 0,
+      "gpu": {
+        "shadow": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "opaque": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "rotors": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "gtao": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "composite": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "traa": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "dof": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "bloom": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "output": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "other": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        }
+      },
+      "gpuTotal": {
+        "p10": null,
+        "p50": null,
+        "p90": null
+      },
+      "cpu": {
+        "p10": null,
+        "p50": null,
+        "p90": null
+      },
+      "gpuTotalPerRun": [],
+      "pacing": "vsync",
+      "valid": false,
+      "runsUsed": [],
+      "gpuBusyMedian": null,
+      "validity": [
+        {
+          "valid": false,
+          "reasons": [
+            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
+            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+          ],
+          "warnings": []
+        },
+        {
+          "valid": false,
+          "reasons": [
+            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
+            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+          ],
+          "warnings": []
+        },
+        {
+          "valid": false,
+          "reasons": [
+            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
+            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+          ],
+          "warnings": []
+        }
+      ],
+      "load": [
+        {
+          "framesPerS": 57.310935573109354,
+          "gpuBusy": 0.6137117659065007
+        },
+        {
+          "framesPerS": 60.00286600748048,
+          "gpuBusy": 0.5939269548489853
+        },
+        {
+          "framesPerS": 59.9864030819666,
+          "gpuBusy": 0.5956909101287976
+        }
+      ],
+      "renderScale": [1, 1, 1],
+      "errors": [0, 0, 0],
+      "powerSource": [
+        ["ac", "ac"],
+        ["ac", "ac"],
+        ["ac", "ac"]
+      ],
+      "flow": {
+        "setting": {
+          "mode": "cutaway",
+          "tracers": true
+        },
+        "perRun": [
+          {
+            "flowRender": {
+              "frames": 3442,
+              "p10": 0.365154,
+              "p50": 0.465518,
+              "p90": 0.6160275
+            },
+            "solverGpuMs": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            },
+            "iterationsPerFrame": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            }
+          },
+          {
+            "flowRender": {
+              "frames": 3605,
+              "p10": 0.42311200000000004,
+              "p50": 0.443643,
+              "p90": 0.45182
+            },
+            "solverGpuMs": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            },
+            "iterationsPerFrame": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            }
+          },
+          {
+            "flowRender": {
+              "frames": 3604,
+              "p10": 0.42535680000000003,
+              "p50": 0.445466,
+              "p90": 0.452705
+            },
+            "solverGpuMs": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            },
+            "iterationsPerFrame": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            }
+          }
+        ],
+        "flowRenderMs": null,
+        "solverGpuMs": null,
+        "iterationsPerFrame": null
+      }
+    },
+    "default (threeQuarterFront), flow Realistic (D4-83 default: haze, no tracers), solver uncoupled [back to back]": {
+      "runs": 0,
+      "gpu": {
+        "shadow": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "opaque": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "rotors": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "gtao": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "composite": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "traa": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "dof": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "bloom": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "output": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "other": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        }
+      },
+      "gpuTotal": {
+        "p10": null,
+        "p50": null,
+        "p90": null
+      },
+      "cpu": {
+        "p10": null,
+        "p50": null,
+        "p90": null
+      },
+      "gpuTotalPerRun": [],
+      "pacing": "backToBack",
+      "valid": false,
+      "runsUsed": [],
+      "gpuBusyMedian": null,
+      "validity": [
+        {
+          "valid": false,
+          "reasons": [
+            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
+            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+          ],
+          "warnings": []
+        },
+        {
+          "valid": false,
+          "reasons": [
+            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
+            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+          ],
+          "warnings": []
+        },
+        {
+          "valid": false,
+          "reasons": [
+            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
+            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+          ],
+          "warnings": []
+        }
+      ],
+      "load": [
+        {
+          "framesPerS": 95.58142170489448,
+          "gpuBusy": 0.6631055180530637
+        },
+        {
+          "framesPerS": 96.3974294018922,
+          "gpuBusy": 0.6645296492941193
+        },
+        {
+          "framesPerS": 95.82135566387535,
+          "gpuBusy": 0.6638932045090323
+        }
+      ],
+      "renderScale": [1, 1, 1],
+      "errors": [0, 0, 0],
+      "powerSource": [
+        ["ac", "ac"],
+        ["ac", "ac"],
+        ["ac", "ac"]
+      ],
+      "flow": {
+        "setting": {
+          "mode": "realistic",
+          "tracers": null
+        },
+        "perRun": [
+          {
+            "flowRender": {
+              "frames": 5738,
+              "p10": 0.4855697,
+              "p50": 0.498851,
+              "p90": 0.5363302
+            },
+            "solverGpuMs": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            },
+            "iterationsPerFrame": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            }
+          },
+          {
+            "flowRender": {
+              "frames": 5785,
+              "p10": 0.4782794,
+              "p50": 0.495414,
+              "p90": 0.5414342
+            },
+            "solverGpuMs": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            },
+            "iterationsPerFrame": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            }
+          },
+          {
+            "flowRender": {
+              "frames": 5752,
+              "p10": 0.481924,
+              "p50": 0.495622,
+              "p90": 0.5442628
+            },
+            "solverGpuMs": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            },
+            "iterationsPerFrame": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            }
+          }
+        ],
+        "flowRenderMs": null,
+        "solverGpuMs": null,
+        "iterationsPerFrame": null
+      }
+    },
+    "cutaway, flow Cutaway with tracers, solver uncoupled [back to back]": {
+      "runs": 0,
+      "gpu": {
+        "shadow": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "opaque": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "rotors": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "gtao": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "composite": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "traa": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "dof": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "bloom": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "output": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        },
+        "other": {
+          "p10": null,
+          "p50": null,
+          "p90": null
+        }
+      },
+      "gpuTotal": {
+        "p10": null,
+        "p50": null,
+        "p90": null
+      },
+      "cpu": {
+        "p10": null,
+        "p50": null,
+        "p90": null
+      },
+      "gpuTotalPerRun": [],
+      "pacing": "backToBack",
+      "valid": false,
+      "runsUsed": [],
+      "gpuBusyMedian": null,
+      "validity": [
+        {
+          "valid": false,
+          "reasons": [
+            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+          ],
+          "warnings": [
+            "GPU busy 56 % of the wall time (under 60 %): not saturated, its clock could still fall"
+          ]
+        },
+        {
+          "valid": false,
+          "reasons": [
+            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
+            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+          ],
+          "warnings": []
+        },
+        {
+          "valid": false,
+          "reasons": [
+            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
+            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+          ],
+          "warnings": []
+        }
+      ],
+      "load": [
+        {
+          "framesPerS": 69.57695544575081,
+          "gpuBusy": 0.5619387689113962
+        },
+        {
+          "framesPerS": 88.66958954694695,
+          "gpuBusy": 0.6994069974104518
+        },
+        {
+          "framesPerS": 88.68640141844476,
+          "gpuBusy": 0.6997366121558287
+        }
+      ],
+      "renderScale": [1, 1, 1],
+      "errors": [0, 0, 0],
+      "powerSource": [
+        ["ac", "ac"],
+        ["ac", "ac"],
+        ["ac", "ac"]
+      ],
+      "flow": {
+        "setting": {
+          "mode": "cutaway",
+          "tracers": true
+        },
+        "perRun": [
+          {
+            "flowRender": {
+              "frames": 4180,
+              "p10": 0.3518158,
+              "p50": 0.390778,
+              "p90": 0.428956
+            },
+            "solverGpuMs": {
+              "frames": 2761,
+              "p10": 3.477166,
+              "p50": 3.629508,
+              "p90": 5.008405999999999
+            },
+            "iterationsPerFrame": {
+              "frames": 2761,
+              "p10": 2,
+              "p50": 2,
+              "p90": 2
+            }
+          },
+          {
+            "flowRender": {
+              "frames": 5325,
+              "p10": 0.370258,
+              "p50": 0.389945,
+              "p90": 0.4004976
+            },
+            "solverGpuMs": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            },
+            "iterationsPerFrame": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            }
+          },
+          {
+            "flowRender": {
+              "frames": 5326,
+              "p10": 0.37057,
+              "p50": 0.3902315,
+              "p90": 0.400727
+            },
+            "solverGpuMs": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            },
+            "iterationsPerFrame": {
+              "frames": 0,
+              "p10": null,
+              "p50": null,
+              "p90": null
+            }
+          }
+        ],
+        "flowRenderMs": null,
+        "solverGpuMs": null,
+        "iterationsPerFrame": null
+      }
+    },
+    "P4flow": {
+      "note": "P4's measure with the flow visuals on, on the solver's field (uncoupled): reported beside the flow-off P4 of record (D4-42), not gated",
+      "maxMs": 8,
+      "rows": {
+        "default (threeQuarterFront), flow Realistic (D4-83 default: haze, no tracers), solver uncoupled": {
+          "renderGpuMs": null,
+          "valid": false,
+          "gpuBusy": null,
+          "flowRenderMs": null,
+          "solverGpuMs": null,
+          "iterationsPerFrame": null
+        },
+        "cutaway, flow Cutaway with tracers, solver uncoupled": {
+          "renderGpuMs": null,
+          "valid": false,
+          "gpuBusy": null,
+          "flowRenderMs": null,
+          "solverGpuMs": null,
+          "iterationsPerFrame": null
+        },
+        "default (threeQuarterFront), flow Realistic (D4-83 default: haze, no tracers), solver uncoupled [back to back]": {
+          "renderGpuMs": null,
+          "valid": false,
+          "gpuBusy": null,
+          "flowRenderMs": null,
+          "solverGpuMs": null,
+          "iterationsPerFrame": null
+        },
+        "cutaway, flow Cutaway with tracers, solver uncoupled [back to back]": {
+          "renderGpuMs": null,
+          "valid": false,
+          "gpuBusy": null,
+          "flowRenderMs": null,
+          "solverGpuMs": null,
+          "iterationsPerFrame": null
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,1455 @@
+{
+  "kind": "p1",
+  "conditions": {
+    "date": "2026-11-01T05:27:49.409Z",
+    "protocol": {
+      "name": "official",
+      "warmupMs": 10000,
+      "runMs": 60000,
+      "runs": 3
+    },
+    "label": "official (D0-1): 3 repetitions in rotated order, each a 10 s warm-up then 60 s; median per configuration",
+    "gitHead": "469164a",
+    "gitDirty": false,
+    "power": {
+      "source": "ac",
+      "batteryStatus": [
+        2
+      ]
+    },
+    "powerPlan": {
+      "guid": "381b4222-f694-41f0-9685-ff5bb260df2e",
+      "name": "Balanced"
+    },
+    "powerMode": {
+      "ac": "balanced",
+      "dc": "balanced",
+      "acOverlay": "00000000-0000-0000-0000-000000000000",
+      "dcOverlay": "00000000-0000-0000-0000-000000000000"
+    },
+    "gpu": [
+      {
+        "name": "Intel(R) Arc(TM) 140T GPU (8GB)",
+        "driverVersion": "32.0.101.8860",
+        "currentRefreshHz": 60
+      }
+    ],
+    "cpu": "Intel(R) Core(TM) Ultra 7 255H",
+    "logicalCpus": 16,
+    "memoryGiB": 15,
+    "cpuLoadBefore": 0.055770154302298876,
+    "gpuBusyBefore": [],
+    "node": "v24.18.0",
+    "chrome": "156.0.8078.74",
+    "chromeCommandLine": "\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,AvoidCorsURLLoaderRestartOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --no-sandbox --start-maximized --user-data-dir=\"C:\\Users\\Aaron\\AppData\\Local\\Temp\\playwright_chromiumdev_profile-vxRilR\" --remote-debugging-pipe --no-startup-window --flag-switches-begin --flag-switches-end --enable-unsafe-swiftshader",
+    "chromeFlags": [
+      "--disable-field-trial-config",
+      "--disable-background-networking",
+      "--disable-background-timer-throttling",
+      "--disable-backgrounding-occluded-windows",
+      "--disable-back-forward-cache",
+      "--disable-breakpad",
+      "--disable-client-side-phishing-detection",
+      "--disable-component-extensions-with-background-pages",
+      "--disable-component-update",
+      "--no-default-browser-check",
+      "--disable-default-apps",
+      "--disable-dev-shm-usage",
+      "--disable-edgeupdater",
+      "--disable-extensions",
+      "--disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,AvoidCorsURLLoaderRestartOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion",
+      "--enable-features=CDPScreenshotNewSurface",
+      "--allow-pre-commit-input",
+      "--disable-hang-monitor",
+      "--disable-ipc-flooding-protection",
+      "--disable-popup-blocking",
+      "--disable-prompt-on-repost",
+      "--disable-renderer-backgrounding",
+      "--disable-updater-scheduler",
+      "--force-color-profile=srgb",
+      "--metrics-recording-only",
+      "--no-first-run",
+      "--password-store=basic",
+      "--use-mock-keychain",
+      "--no-service-autorun",
+      "--export-tagged-pdf",
+      "--disable-search-engine-choice-screen",
+      "--unsafely-disable-devtools-self-xss-warnings",
+      "--edge-skip-compat-layer-relaunch",
+      "--disable-infobars",
+      "--disable-search-engine-choice-screen",
+      "--disable-sync",
+      "--enable-unsafe-swiftshader",
+      "--no-sandbox",
+      "--start-maximized",
+      "--user-data-dir=\"C:\\Users\\Aaron\\AppData\\Local\\Temp\\playwright_chromiumdev_profile-vxRilR\"",
+      "--remote-debugging-pipe",
+      "--no-startup-window",
+      "--flag-switches-begin",
+      "--flag-switches-end",
+      "--enable-unsafe-swiftshader"
+    ],
+    "chromeGpu": [
+      "Driver D3D12 feature level",
+      "<Integrated GPU>  D3D12 backend - Intel(R) Arc(TM) 140T GPU (8GB)",
+      "<Integrated GPU>  Vulkan backend - Intel(R) Arc(TM) 140T GPU (8GB)",
+      "<Integrated GPU>  D3D11 backend - Intel(R) Arc(TM) 140T GPU (8GB)",
+      "<CPU>  D3D12 backend - Microsoft Basic Render Driver",
+      "<CPU>  Vulkan backend - SwiftShader Device (Subzero)",
+      "<CPU>  D3D11 backend - Microsoft Basic Render Driver"
+    ],
+    "display": {
+      "intervalMs": 16.699999999999818,
+      "hz": 59.88023952095874,
+      "probeFrames": 120,
+      "probeMaxMs": 16.900000000000546
+    },
+    "page": {
+      "bench": {
+        "adapter": {
+          "vendor": "intel",
+          "architecture": "xe-lpg",
+          "device": "",
+          "description": "",
+          "features": [
+            "bgra8unorm-storage",
+            "clip-distances",
+            "core-features-and-limits",
+            "depth-clip-control",
+            "depth32float-stencil8",
+            "dual-source-blending",
+            "float32-blendable",
+            "float32-filterable",
+            "indirect-first-instance",
+            "primitive-index",
+            "rg11b10ufloat-renderable",
+            "shader-f16",
+            "subgroup-size-control",
+            "subgroups",
+            "texture-component-swizzle",
+            "texture-compression-bc",
+            "texture-compression-bc-sliced-3d",
+            "texture-compression-unaligned",
+            "texture-formats-tier1",
+            "texture-formats-tier2",
+            "timestamp-query"
+          ],
+          "limits": {
+            "maxTextureDimension1D": 16384,
+            "maxTextureDimension2D": 16384,
+            "maxTextureDimension3D": 2048,
+            "maxTextureArrayLayers": 2048,
+            "maxBindGroups": 4,
+            "maxBindGroupsPlusVertexBuffers": 24,
+            "maxBindingsPerBindGroup": 1000,
+            "maxDynamicUniformBuffersPerPipelineLayout": 10,
+            "maxDynamicStorageBuffersPerPipelineLayout": 8,
+            "maxSampledTexturesPerShaderStage": 48,
+            "maxSamplersPerShaderStage": 16,
+            "maxStorageBuffersPerShaderStage": 16,
+            "maxStorageTexturesPerShaderStage": 8,
+            "maxUniformBuffersPerShaderStage": 12,
+            "maxUniformBufferBindingSize": 65536,
+            "maxStorageBufferBindingSize": 2147483644,
+            "minUniformBufferOffsetAlignment": 256,
+            "minStorageBufferOffsetAlignment": 256,
+            "maxVertexBuffers": 8,
+            "maxBufferSize": 2147483648,
+            "maxVertexAttributes": 30,
+            "maxVertexBufferArrayStride": 2048,
+            "maxInterStageShaderVariables": 28,
+            "maxColorAttachments": 8,
+            "maxColorAttachmentBytesPerSample": 128,
+            "maxComputeWorkgroupStorageSize": 32768,
+            "maxComputeInvocationsPerWorkgroup": 1024,
+            "maxComputeWorkgroupSizeX": 1024,
+            "maxComputeWorkgroupSizeY": 1024,
+            "maxComputeWorkgroupSizeZ": 64,
+            "maxComputeWorkgroupsPerDimension": 65535,
+            "maxImmediateSize": 64,
+            "maxStorageBuffersInFragmentStage": 16,
+            "maxStorageTexturesInFragmentStage": 8,
+            "maxStorageBuffersInVertexStage": 16,
+            "maxStorageTexturesInVertexStage": 8
+          }
+        },
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+        "innerWidth": 1280,
+        "innerHeight": 665,
+        "devicePixelRatio": 1.5,
+        "visibility": "visible",
+        "crossOriginIsolated": false
+      },
+      "app": {
+        "adapter": {
+          "vendor": "intel",
+          "architecture": "xe-lpg",
+          "device": "",
+          "description": "",
+          "features": [
+            "core-features-and-limits",
+            "float32-filterable",
+            "timestamp-query"
+          ],
+          "limits": {
+            "maxTextureDimension1D": 16384,
+            "maxTextureDimension2D": 16384,
+            "maxTextureDimension3D": 2048,
+            "maxTextureArrayLayers": 2048,
+            "maxBindGroups": 4,
+            "maxBindGroupsPlusVertexBuffers": 24,
+            "maxBindingsPerBindGroup": 1000,
+            "maxDynamicUniformBuffersPerPipelineLayout": 10,
+            "maxDynamicStorageBuffersPerPipelineLayout": 8,
+            "maxSampledTexturesPerShaderStage": 48,
+            "maxSamplersPerShaderStage": 16,
+            "maxStorageBuffersPerShaderStage": 16,
+            "maxStorageTexturesPerShaderStage": 8,
+            "maxUniformBuffersPerShaderStage": 12,
+            "maxUniformBufferBindingSize": 65536,
+            "maxStorageBufferBindingSize": 2147483644,
+            "minUniformBufferOffsetAlignment": 256,
+            "minStorageBufferOffsetAlignment": 256,
+            "maxVertexBuffers": 8,
+            "maxBufferSize": 2147483648,
+            "maxVertexAttributes": 30,
+            "maxVertexBufferArrayStride": 2048,
+            "maxInterStageShaderVariables": 28,
+            "maxColorAttachments": 8,
+            "maxColorAttachmentBytesPerSample": 128,
+            "maxComputeWorkgroupStorageSize": 32768,
+            "maxComputeInvocationsPerWorkgroup": 1024,
+            "maxComputeWorkgroupSizeX": 1024,
+            "maxComputeWorkgroupSizeY": 1024,
+            "maxComputeWorkgroupSizeZ": 64,
+            "maxComputeWorkgroupsPerDimension": 65535,
+            "maxImmediateSize": 64,
+            "maxStorageBuffersInFragmentStage": 16,
+            "maxStorageTexturesInFragmentStage": 8,
+            "maxStorageBuffersInVertexStage": 16,
+            "maxStorageTexturesInVertexStage": 8
+          }
+        },
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+        "innerWidth": 1280,
+        "innerHeight": 665,
+        "devicePixelRatio": 1.5,
+        "visibility": "visible",
+        "crossOriginIsolated": false
+      }
+    },
+    "cpuLoadAfter": 0.04790175921007406,
+    "gpuBusyAfter": [],
+    "finished": "2026-11-01T05:39:49.547Z"
+  },
+  "gate": {
+    "displayIntervalMs": 16.699999999999818,
+    "longFrameFactor": 1.5,
+    "throttleFactor": 2.5,
+    "rule": "D2-11 as amended by D3-6",
+    "occlusionDeltaMs": 500,
+    "occlusionMinStretchMs": 1000,
+    "maxThrottledStretchMs": 500,
+    "runTimeoutMs": 160000,
+    "belowRateMedianFactor": 1.5,
+    "rerun": "once, after Page.bringToFront"
+  },
+  "order": {
+    "seed": 3689326294,
+    "repetitions": [
+      [
+        "solver-130k-bench",
+        "solver-130k-app",
+        "spike-130k-16x8"
+      ],
+      [
+        "solver-130k-app",
+        "spike-130k-16x8",
+        "solver-130k-bench"
+      ],
+      [
+        "spike-130k-16x8",
+        "solver-130k-bench",
+        "solver-130k-app"
+      ]
+    ],
+    "effectOnMsPerIt": {
+      "slopePerSlot": -0.005395715013544742,
+      "overSweep": -0.04316572010835794,
+      "n": 9
+    }
+  },
+  "results": [
+    {
+      "id": "solver-130k-app",
+      "group": "p1",
+      "validity": {
+        "valid": true,
+        "reasons": [],
+        "warnings": []
+      },
+      "aggregate": {
+        "runs": 3,
+        "itPerSec": 179.51666666666668,
+        "fps": 60,
+        "frameTimeP50": 16.69999999999709,
+        "frameTimeP95": 16.80000000000291,
+        "frameTimeP99": 16.900000000001455,
+        "longFrames": 0,
+        "callbackDelayP95": 1.1000000014901161,
+        "callbackDelayP99": 1.4999999970168574,
+        "solverMsPerIt": 1.331541111503183,
+        "solverMsPerItP10": 1.2888746666666666,
+        "solverMsPerFrameP50": 3.997696,
+        "saturatedItPerSec": 751.0094816908021,
+        "budgetItPerSec": 315.42398231013686
+      },
+      "repetitions": [
+        {
+          "rep": 0,
+          "seq": 1,
+          "attempt": 1,
+          "validity": {
+            "valid": true,
+            "reasons": [],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.052067401566473756,
+          "result": {
+            "id": "solver-130k-app",
+            "solver": "production",
+            "scene": "app",
+            "cells": 130034,
+            "grid": {
+              "ni": 0,
+              "nj": 0
+            },
+            "blocks": {
+              "bi": 0,
+              "bj": 0
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1076,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3600,
+                "frameTime": {
+                  "n": 3600,
+                  "mean": 16.665916666666266,
+                  "min": 16.39999999999418,
+                  "max": 17,
+                  "p50": 16.69999999999709,
+                  "p95": 16.799999999999272,
+                  "p99": 16.80000000000291
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 0,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3600,
+                  "mean": 0.18408333032868288,
+                  "min": -5.966285243630409e-9,
+                  "max": 6.69999999403808,
+                  "p50": 0.10000000000582077,
+                  "p95": 0.2999999999994543,
+                  "p99": 0.7999999955431122
+                },
+                "fps": 60,
+                "iterations": 10314,
+                "itPerSec": 171.9,
+                "gpuSamples": 3600,
+                "solverMsPerIt": 1.360567771960481,
+                "solverMsPerItP10": 1.2888746666666666,
+                "solverMsPerFrame": {
+                  "n": 3600,
+                  "mean": 3.8980266666669086,
+                  "min": 2.62144,
+                  "max": 5.439488,
+                  "p50": 3.93216,
+                  "p95": 4.390912,
+                  "p99": 4.58752
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 171.9,
+              "fps": 60,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.799999999999272,
+              "frameTimeP99": 16.80000000000291,
+              "longFrames": 0,
+              "callbackDelayP95": 0.2999999999994543,
+              "callbackDelayP99": 0.7999999955431122,
+              "solverMsPerIt": 1.360567771960481,
+              "solverMsPerItP10": 1.2888746666666666,
+              "solverMsPerFrameP50": 3.93216,
+              "saturatedItPerSec": 734.9872756129388,
+              "budgetItPerSec": 308.69465575743425
+            },
+            "resampleMsP50": 0.589824,
+            "renderGpuMsP50": 6.291456,
+            "threeComputeGpuMsP50": null,
+            "sceneTriangles": 1577784,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": null,
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 10449.505859375,
+            "gpuErrors": [],
+            "nonFiniteResiduals": 0,
+            "solverStatus": {
+              "status": "running",
+              "error": null
+            },
+            "measured": {
+              "timeOrigin": 1793511003330.4,
+              "from": 15522.1,
+              "to": 75522.1
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 0
+          }
+        },
+        {
+          "rep": 1,
+          "seq": 3,
+          "attempt": 1,
+          "validity": {
+            "valid": true,
+            "reasons": [],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.061622789828875486,
+          "result": {
+            "id": "solver-130k-app",
+            "solver": "production",
+            "scene": "app",
+            "cells": 130034,
+            "grid": {
+              "ni": 0,
+              "nj": 0
+            },
+            "blocks": {
+              "bi": 0,
+              "bj": 0
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1076,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3600,
+                "frameTime": {
+                  "n": 3600,
+                  "mean": 16.6659444444442,
+                  "min": 15.19999999999709,
+                  "max": 18.19999999999709,
+                  "p50": 16.69999999999709,
+                  "p95": 16.80000000000291,
+                  "p99": 17
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 0,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3600,
+                  "mean": 0.6981388859197922,
+                  "min": 0.09999999403953552,
+                  "max": 24.999999997020495,
+                  "p50": 0.5999999985106115,
+                  "p95": 1.1999999985127943,
+                  "p99": 1.4999999970168574
+                },
+                "fps": 60,
+                "iterations": 10771,
+                "itPerSec": 179.51666666666668,
+                "gpuSamples": 3600,
+                "solverMsPerIt": 1.331541111503183,
+                "solverMsPerItP10": 1.2888746666666666,
+                "solverMsPerFrame": {
+                  "n": 3600,
+                  "mean": 3.983897031111359,
+                  "min": 2.555904,
+                  "max": 5.701632,
+                  "p50": 3.997696,
+                  "p95": 4.128768,
+                  "p99": 4.390912
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 179.51666666666668,
+              "fps": 60,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.80000000000291,
+              "frameTimeP99": 17,
+              "longFrames": 0,
+              "callbackDelayP95": 1.1999999985127943,
+              "callbackDelayP99": 1.4999999970168574,
+              "solverMsPerIt": 1.331541111503183,
+              "solverMsPerItP10": 1.2888746666666666,
+              "solverMsPerFrameP50": 3.997696,
+              "saturatedItPerSec": 751.0094816908021,
+              "budgetItPerSec": 315.42398231013686
+            },
+            "resampleMsP50": 0.589824,
+            "renderGpuMsP50": 6.1603840000000005,
+            "threeComputeGpuMsP50": null,
+            "sceneTriangles": 1577784,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": null,
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 7539.888671875,
+            "gpuErrors": [],
+            "nonFiniteResiduals": 0,
+            "solverStatus": {
+              "status": "running",
+              "error": null
+            },
+            "measured": {
+              "timeOrigin": 1793511149737.4,
+              "from": 15008.6,
+              "to": 75008.6
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 0
+          }
+        },
+        {
+          "rep": 2,
+          "seq": 8,
+          "attempt": 1,
+          "validity": {
+            "valid": true,
+            "reasons": [],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.06541030404081241,
+          "result": {
+            "id": "solver-130k-app",
+            "solver": "production",
+            "scene": "app",
+            "cells": 130034,
+            "grid": {
+              "ni": 0,
+              "nj": 0
+            },
+            "blocks": {
+              "bi": 0,
+              "bj": 0
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1076,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3600,
+                "frameTime": {
+                  "n": 3600,
+                  "mean": 16.665916666666426,
+                  "min": 15.700000000000728,
+                  "max": 17.700000000000728,
+                  "p50": 16.69999999999709,
+                  "p95": 16.80000000000291,
+                  "p99": 16.900000000001455
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 0,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3600,
+                  "mean": 0.6347777777608977,
+                  "min": 1.4915713109076023e-9,
+                  "max": 10.299999998504063,
+                  "p50": 0.5999999985069735,
+                  "p95": 1.1000000014901161,
+                  "p99": 1.4999999985084287
+                },
+                "fps": 60,
+                "iterations": 10795,
+                "itPerSec": 179.91666666666666,
+                "gpuSamples": 3600,
+                "solverMsPerIt": 1.3307541639648706,
+                "solverMsPerItP10": 1.2888746666666666,
+                "solverMsPerFrame": {
+                  "n": 3600,
+                  "mean": 3.9904142222224634,
+                  "min": 2.555904,
+                  "max": 6.422528,
+                  "p50": 3.997696,
+                  "p95": 4.128768,
+                  "p99": 4.456448
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 179.91666666666666,
+              "fps": 60,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.80000000000291,
+              "frameTimeP99": 16.900000000001455,
+              "longFrames": 0,
+              "callbackDelayP95": 1.1000000014901161,
+              "callbackDelayP99": 1.4999999985084287,
+              "solverMsPerIt": 1.3307541639648706,
+              "solverMsPerItP10": 1.2888746666666666,
+              "solverMsPerFrameP50": 3.997696,
+              "saturatedItPerSec": 751.4535945697015,
+              "budgetItPerSec": 315.61050971927466
+            },
+            "resampleMsP50": 0.589824,
+            "renderGpuMsP50": 6.1603840000000005,
+            "threeComputeGpuMsP50": null,
+            "sceneTriangles": 1577784,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": null,
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 4357.79931640625,
+            "gpuErrors": [],
+            "nonFiniteResiduals": 0,
+            "solverStatus": {
+              "status": "running",
+              "error": null
+            },
+            "measured": {
+              "timeOrigin": 1793511508148.2,
+              "from": 15165,
+              "to": 75165
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "solver-130k-bench",
+      "group": "p1",
+      "validity": {
+        "valid": true,
+        "reasons": [],
+        "warnings": []
+      },
+      "aggregate": {
+        "runs": 3,
+        "itPerSec": 119.86666666666666,
+        "fps": 59.983333333333334,
+        "frameTimeP50": 16.69999999999709,
+        "frameTimeP95": 16.80000000000291,
+        "frameTimeP99": 16.900000000001455,
+        "longFrames": 1,
+        "callbackDelayP95": 0.5000000029831426,
+        "callbackDelayP99": 1.0020000028638587,
+        "solverMsPerIt": 2.4528639999999755,
+        "solverMsPerItP10": 2.12992,
+        "solverMsPerFrameP50": 4.980736,
+        "saturatedItPerSec": 407.6866878881218,
+        "budgetItPerSec": 171.22840891301115
+      },
+      "repetitions": [
+        {
+          "rep": 0,
+          "seq": 0,
+          "attempt": 1,
+          "validity": {
+            "valid": true,
+            "reasons": [],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.07601615424700364,
+          "result": {
+            "id": "solver-130k-bench",
+            "solver": "production",
+            "scene": "bench",
+            "cells": 130034,
+            "grid": {
+              "ni": 0,
+              "nj": 0
+            },
+            "blocks": {
+              "bi": 0,
+              "bj": 0
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1076,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3600,
+                "frameTime": {
+                  "n": 3600,
+                  "mean": 16.665916666666448,
+                  "min": 16.29999999998836,
+                  "max": 17.10000000000582,
+                  "p50": 16.69999999999709,
+                  "p95": 16.799999999995634,
+                  "p99": 16.80000000000291
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 0,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3600,
+                  "mean": 0.4359722251995835,
+                  "min": 0.09999999999854481,
+                  "max": 13.5,
+                  "p50": 0.30000000447034836,
+                  "p95": 1.1000000014901161,
+                  "p99": 1.300000002978777
+                },
+                "fps": 60,
+                "iterations": 7192,
+                "itPerSec": 119.86666666666666,
+                "gpuSamples": 3600,
+                "solverMsPerIt": 2.5474933036707235,
+                "solverMsPerItP10": 2.228224,
+                "solverMsPerFrame": {
+                  "n": 3600,
+                  "mean": 5.08932551111103,
+                  "min": 1.835008,
+                  "max": 14.680064,
+                  "p50": 5.24288,
+                  "p95": 5.832704,
+                  "p99": 6.356992
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 119.86666666666666,
+              "fps": 60,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.799999999995634,
+              "frameTimeP99": 16.80000000000291,
+              "longFrames": 0,
+              "callbackDelayP95": 1.1000000014901161,
+              "callbackDelayP99": 1.300000002978777,
+              "solverMsPerIt": 2.5474933036707235,
+              "solverMsPerItP10": 2.228224,
+              "solverMsPerFrameP50": 5.24288,
+              "saturatedItPerSec": 392.5427393897696,
+              "budgetItPerSec": 164.86795054370324
+            },
+            "resampleMsP50": 0.65536,
+            "renderGpuMsP50": 3.5389439999999994,
+            "threeComputeGpuMsP50": 0.065536,
+            "sceneTriangles": 571042,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": null,
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 9841.490234375,
+            "gpuErrors": [],
+            "nonFiniteResiduals": 0,
+            "solverStatus": {
+              "status": "running",
+              "error": null
+            },
+            "measured": {
+              "timeOrigin": 1793510919456.6,
+              "from": 23549.3,
+              "to": 83549.3
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 0
+          }
+        },
+        {
+          "rep": 1,
+          "seq": 5,
+          "attempt": 1,
+          "validity": {
+            "valid": true,
+            "reasons": [],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.060291931722918475,
+          "result": {
+            "id": "solver-130k-bench",
+            "solver": "production",
+            "scene": "bench",
+            "cells": 130034,
+            "grid": {
+              "ni": 0,
+              "nj": 0
+            },
+            "blocks": {
+              "bi": 0,
+              "bj": 0
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1076,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3599,
+                "frameTime": {
+                  "n": 3599,
+                  "mean": 16.670575159766116,
+                  "min": 16,
+                  "max": 33.19999999999709,
+                  "p50": 16.69999999999709,
+                  "p95": 16.80000000000291,
+                  "p99": 17.099999999998545
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 1,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3599,
+                  "mean": 0.28243956651813446,
+                  "min": -2.9831426218152046e-9,
+                  "max": 8.699999997021223,
+                  "p50": 0.20000000298023224,
+                  "p95": 0.5000000029831426,
+                  "p99": 1.0020000028638587
+                },
+                "fps": 59.983333333333334,
+                "iterations": 7168,
+                "itPerSec": 119.46666666666667,
+                "gpuSamples": 3599,
+                "solverMsPerIt": 2.4528639999999755,
+                "solverMsPerItP10": 2.12992,
+                "solverMsPerFrame": {
+                  "n": 3599,
+                  "mean": 4.885281787163045,
+                  "min": 2.555904,
+                  "max": 9.699328,
+                  "p50": 4.980736,
+                  "p95": 5.701632,
+                  "p99": 6.227230719999999
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 119.46666666666667,
+              "fps": 59.983333333333334,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.80000000000291,
+              "frameTimeP99": 17.099999999998545,
+              "longFrames": 1,
+              "callbackDelayP95": 0.5000000029831426,
+              "callbackDelayP99": 1.0020000028638587,
+              "solverMsPerIt": 2.4528639999999755,
+              "solverMsPerItP10": 2.12992,
+              "solverMsPerFrameP50": 4.980736,
+              "saturatedItPerSec": 407.6866878881218,
+              "budgetItPerSec": 171.22840891301115
+            },
+            "resampleMsP50": 0.65536,
+            "renderGpuMsP50": 3.407872,
+            "threeComputeGpuMsP50": 0.065536,
+            "sceneTriangles": 571042,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": null,
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 4446.8701171875,
+            "gpuErrors": [],
+            "nonFiniteResiduals": 0,
+            "solverStatus": {
+              "status": "running",
+              "error": null
+            },
+            "measured": {
+              "timeOrigin": 1793511295715.3,
+              "from": 10624.4,
+              "to": 70624.4
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 0
+          }
+        },
+        {
+          "rep": 2,
+          "seq": 7,
+          "attempt": 1,
+          "validity": {
+            "valid": true,
+            "reasons": [],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.05946152606083136,
+          "result": {
+            "id": "solver-130k-bench",
+            "solver": "production",
+            "scene": "bench",
+            "cells": 130034,
+            "grid": {
+              "ni": 0,
+              "nj": 0
+            },
+            "blocks": {
+              "bi": 0,
+              "bj": 0
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1076,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3598,
+                "frameTime": {
+                  "n": 3598,
+                  "mean": 16.67518065591941,
+                  "min": 15.89999999999418,
+                  "max": 33.5,
+                  "p50": 16.69999999999709,
+                  "p95": 16.80000000000291,
+                  "p99": 16.900000000001455
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 2,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3598,
+                  "mean": 0.33346303206821604,
+                  "min": 0.09999999403953552,
+                  "max": 19.5,
+                  "p50": 0.29999999701976776,
+                  "p95": 0.5,
+                  "p99": 0.8999999999943975
+                },
+                "fps": 59.96666666666667,
+                "iterations": 7197,
+                "itPerSec": 119.95,
+                "gpuSamples": 3598,
+                "solverMsPerIt": 2.448962943448637,
+                "solverMsPerItP10": 2.097152,
+                "solverMsPerFrame": {
+                  "n": 3598,
+                  "mean": 4.898606532518004,
+                  "min": 2.555904,
+                  "max": 6.946816,
+                  "p50": 4.980736,
+                  "p95": 5.636096,
+                  "p99": 6.029312
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 119.95,
+              "fps": 59.96666666666667,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.80000000000291,
+              "frameTimeP99": 16.900000000001455,
+              "longFrames": 2,
+              "callbackDelayP95": 0.5,
+              "callbackDelayP99": 0.8999999999943975,
+              "solverMsPerIt": 2.448962943448637,
+              "solverMsPerItP10": 2.097152,
+              "solverMsPerFrameP50": 4.980736,
+              "saturatedItPerSec": 408.3361092396919,
+              "budgetItPerSec": 171.5011658806706
+            },
+            "resampleMsP50": 0.65536,
+            "renderGpuMsP50": 3.407872,
+            "threeComputeGpuMsP50": 0.065536,
+            "sceneTriangles": 571042,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": null,
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 7002.56689453125,
+            "gpuErrors": [],
+            "nonFiniteResiduals": 0,
+            "solverStatus": {
+              "status": "running",
+              "error": null
+            },
+            "measured": {
+              "timeOrigin": 1793511437208.6,
+              "from": 10624.9,
+              "to": 70624.9
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "spike-130k-16x8",
+      "group": "p1",
+      "validity": {
+        "valid": true,
+        "reasons": [],
+        "warnings": []
+      },
+      "aggregate": {
+        "runs": 3,
+        "itPerSec": 289.15,
+        "fps": 59.983333333333334,
+        "frameTimeP50": 16.69999999999709,
+        "frameTimeP95": 16.799999999999272,
+        "frameTimeP99": 16.80000000000291,
+        "longFrames": 1,
+        "callbackDelayP95": 0.40000000447071216,
+        "callbackDelayP99": 0.7000000044718035,
+        "solverMsPerIt": 1.3403809990201145,
+        "solverMsPerItP10": 1.2320768,
+        "solverMsPerFrameP50": 6.488064,
+        "saturatedItPerSec": 746.0565322330367,
+        "budgetItPerSec": 313.3437435378754
+      },
+      "repetitions": [
+        {
+          "rep": 0,
+          "seq": 2,
+          "attempt": 1,
+          "validity": {
+            "valid": true,
+            "reasons": [],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.056876660486122124,
+          "result": {
+            "id": "spike-130k-16x8",
+            "solver": "spike",
+            "scene": "bench",
+            "cells": 131072,
+            "grid": {
+              "ni": 512,
+              "nj": 256
+            },
+            "blocks": {
+              "bi": 4,
+              "bj": 3
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1056,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3600,
+                "frameTime": {
+                  "n": 3600,
+                  "mean": 16.665916666666092,
+                  "min": 16.30000000000291,
+                  "max": 17,
+                  "p50": 16.69999999999709,
+                  "p95": 16.799999999999272,
+                  "p99": 16.80000000000291
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 0,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3600,
+                  "mean": 0.4941944444117396,
+                  "min": -2.979504643008113e-9,
+                  "max": 3.5999999985069735,
+                  "p50": 0.40000000298095983,
+                  "p95": 1.0999999985069735,
+                  "p99": 1.3999999999996544
+                },
+                "fps": 60,
+                "iterations": 16474,
+                "itPerSec": 274.56666666666666,
+                "gpuSamples": 3600,
+                "solverMsPerIt": 1.3567551215248268,
+                "solverMsPerItP10": 1.245184,
+                "solverMsPerFrame": {
+                  "n": 3600,
+                  "mean": 6.208662186666797,
+                  "min": 3.538944,
+                  "max": 13.43488,
+                  "p50": 6.094848,
+                  "p95": 7.143424,
+                  "p99": 7.733248
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 274.56666666666666,
+              "fps": 60,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.799999999999272,
+              "frameTimeP99": 16.80000000000291,
+              "longFrames": 0,
+              "callbackDelayP95": 1.0999999985069735,
+              "callbackDelayP99": 1.3999999999996544,
+              "solverMsPerIt": 1.3567551215248268,
+              "solverMsPerItP10": 1.245184,
+              "solverMsPerFrameP50": 6.094848,
+              "saturatedItPerSec": 737.0526811618904,
+              "budgetItPerSec": 309.56212608799393
+            },
+            "resampleMsP50": 0.131072,
+            "renderGpuMsP50": 3.6700159999999986,
+            "threeComputeGpuMsP50": 0.065536,
+            "sceneTriangles": 571042,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": "65536",
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 0.05506711042835377,
+            "gpuErrors": [],
+            "measured": {
+              "timeOrigin": 1793511079170.3,
+              "from": 10245.8,
+              "to": 70245.8
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 0
+          }
+        },
+        {
+          "rep": 1,
+          "seq": 4,
+          "attempt": 1,
+          "validity": {
+            "valid": true,
+            "reasons": [],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.061290545215801684,
+          "result": {
+            "id": "spike-130k-16x8",
+            "solver": "spike",
+            "scene": "bench",
+            "cells": 131072,
+            "grid": {
+              "ni": 512,
+              "nj": 256
+            },
+            "blocks": {
+              "bi": 4,
+              "bj": 3
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1056,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3599,
+                "frameTime": {
+                  "n": 3599,
+                  "mean": 16.67057515976606,
+                  "min": 16.10000000000582,
+                  "max": 33.400000000001455,
+                  "p50": 16.69999999999709,
+                  "p95": 16.799999999999272,
+                  "p99": 16.80000000000291
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 1,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3599,
+                  "mean": 0.25123645603646194,
+                  "min": -1.4915713109076023e-9,
+                  "max": 2.7000000044718035,
+                  "p50": 0.20000000447180355,
+                  "p95": 0.40000000447071216,
+                  "p99": 0.7000000044718035
+                },
+                "fps": 59.983333333333334,
+                "iterations": 17349,
+                "itPerSec": 289.15,
+                "gpuSamples": 3599,
+                "solverMsPerIt": 1.3403809990201145,
+                "solverMsPerItP10": 1.2320768,
+                "solverMsPerFrame": {
+                  "n": 3599,
+                  "mean": 6.461314240622294,
+                  "min": 3.60448,
+                  "max": 12.976128,
+                  "p50": 6.488064,
+                  "p95": 7.20896,
+                  "p99": 7.667712
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 289.15,
+              "fps": 59.983333333333334,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.799999999999272,
+              "frameTimeP99": 16.80000000000291,
+              "longFrames": 1,
+              "callbackDelayP95": 0.40000000447071216,
+              "callbackDelayP99": 0.7000000044718035,
+              "solverMsPerIt": 1.3403809990201145,
+              "solverMsPerItP10": 1.2320768,
+              "solverMsPerFrameP50": 6.488064,
+              "saturatedItPerSec": 746.0565322330367,
+              "budgetItPerSec": 313.3437435378754
+            },
+            "resampleMsP50": 0.131072,
+            "renderGpuMsP50": 3.604479999999999,
+            "threeComputeGpuMsP50": 0.065536,
+            "sceneTriangles": 571042,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": "65536",
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 0.04920532472897321,
+            "gpuErrors": [],
+            "measured": {
+              "timeOrigin": 1793511225100.7,
+              "from": 10292.2,
+              "to": 70292.2
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 0
+          }
+        },
+        {
+          "rep": 2,
+          "seq": 6,
+          "attempt": 1,
+          "validity": {
+            "valid": true,
+            "reasons": [],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.0942403186545696,
+          "result": {
+            "id": "spike-130k-16x8",
+            "solver": "spike",
+            "scene": "bench",
+            "cells": 131072,
+            "grid": {
+              "ni": 512,
+              "nj": 256
+            },
+            "blocks": {
+              "bi": 4,
+              "bj": 3
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1056,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3599,
+                "frameTime": {
+                  "n": 3599,
+                  "mean": 16.670547374270093,
+                  "min": 16.200000000000728,
+                  "max": 33.30000000000291,
+                  "p50": 16.69999999999709,
+                  "p95": 16.799999999999272,
+                  "p99": 16.80000000000291
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 1,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3599,
+                  "mean": 0.21214226467322658,
+                  "min": 0,
+                  "max": 13.700000001488661,
+                  "p50": 0.20000000298023224,
+                  "p95": 0.40000000297732186,
+                  "p99": 0.6000000045029447
+                },
+                "fps": 59.983333333333334,
+                "iterations": 17901,
+                "itPerSec": 298.35,
+                "gpuSamples": 3599,
+                "solverMsPerIt": 1.2918181303837721,
+                "solverMsPerItP10": 1.0813439999999999,
+                "solverMsPerFrame": {
+                  "n": 3599,
+                  "mean": 6.425350472908947,
+                  "min": 3.538944,
+                  "max": 20.840448,
+                  "p50": 6.488064,
+                  "p95": 7.20896,
+                  "p99": 7.86432
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 298.35,
+              "fps": 59.983333333333334,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.799999999999272,
+              "frameTimeP99": 16.80000000000291,
+              "longFrames": 1,
+              "callbackDelayP95": 0.40000000297732186,
+              "callbackDelayP99": 0.6000000045029447,
+              "solverMsPerIt": 1.2918181303837721,
+              "solverMsPerItP10": 1.0813439999999999,
+              "solverMsPerFrameP50": 6.488064,
+              "saturatedItPerSec": 774.102775367397,
+              "budgetItPerSec": 325.1231656543068
+            },
+            "resampleMsP50": 0.131072,
+            "renderGpuMsP50": 3.6044799999999984,
+            "threeComputeGpuMsP50": 0.065536,
+            "sceneTriangles": 571042,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": "65536",
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 0.04047144332434982,
+            "gpuErrors": [],
+            "measured": {
+              "timeOrigin": 1793511366659.5,
+              "from": 10226.9,
+              "to": 70226.9
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 0
+          }
+        }
+      ]
+    }
+  ],
+  "rejectedAttempts": [],
+  "workerProbe": null,
+  "consoleErrors": [
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: pass timer: unclassified pass \"\" (0.459 ms)",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: pass timer: unclassified pass \"\" (0.393 ms)",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: pass timer: unclassified pass \"\" (0.393 ms)"
+  ]
+}
