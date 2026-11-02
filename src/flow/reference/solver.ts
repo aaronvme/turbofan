@@ -11,7 +11,12 @@ import {
 } from './boundary';
 import { referenceState, type GasModel, type ReferenceState } from './gas';
 import { limitedSlopes } from './muscl';
-import { lowMachBeta2, preconditionIncrement, spectralRadius } from './precondition';
+import {
+  lowMachBeta2,
+  neighbourSpectralRadius,
+  preconditionIncrement,
+  spectralRadius,
+} from './precondition';
 import { slau2Flux } from './slau2';
 import { extIndex, type SolverMesh } from './solverMesh';
 import type { SourceModel, SourceRates } from './sources';
@@ -550,11 +555,20 @@ export class ReferenceSolver {
     for (let g = 0; g < m.nGhosts; g++) betaExt[n + g] = betaExt[m.ghostSrc[g] ?? 0] as number;
   }
 
-  /** tau and dt per cell; `tracking` applies the low-Mach preconditioner's beta^2 if it is on. */
+  /**
+   * tau and dt per cell; `tracking` applies the low-Mach preconditioner's beta^2 if it is on. With
+   * it (minMach < 1), each face's eigenvalue is the larger of the two cells' preconditioned spectral
+   * radii, each with its own beta (section 17, W2S-I1): a cold cell at rest has beta = minMach and
+   * a step 1/minMach times its acoustic one, and hot gas arriving through a face at 100-300 m/s
+   * then crossed it at a Courant number of 5-50 (the f64 oracle went non-finite in one iteration).
+   * A slip wall's face keeps the cell's own (its ghost mirrors the cell; the wall flux is pressure
+   * only).
+   */
   private computeLocalDt(tracking: boolean): void {
     const m = this.mesh;
-    const { P, tau, dt, cellFace, cellNbr, bExt, beta2 } = this;
+    const { P, tau, dt, cellFace, cellNbr, bExt, beta2, betaExt, wall } = this;
     this.computeBeta(tracking);
+    const pairwise = tracking && this.pre !== undefined && this.pre.minMach < 1;
     for (let c = 0; c < m.nCells; c++) {
       const u = P[NP * c + 1] as number;
       const v = P[NP * c + 2] as number;
@@ -570,8 +584,15 @@ export class ReferenceSolver {
           const nx = (d === 0 ? m.iNx[f] : m.jNx[f]) as number;
           const nr = (d === 0 ? m.iNr[f] : m.jNr[f]) as number;
           const area = (d === 0 ? m.iArea[f] : m.jArea[f]) as number;
-          const bf = 0.5 * (bc + (bExt[cellNbr[4 * c + k] ?? 0] as number));
-          best = Math.max(best, bf * area * spectralRadius(u * nx + v * nr, a, b2));
+          const nb = cellNbr[4 * c + k] ?? 0;
+          const bf = 0.5 * (bc + (bExt[nb] as number));
+          let lf = spectralRadius(u * nx + v * nr, a, b2);
+          if (pairwise && wall[nb] !== 1)
+            lf = Math.max(
+              lf,
+              neighbourSpectralRadius(this.ref, P, NP * nb, nx, nr, betaExt[nb] as number),
+            );
+          best = Math.max(best, bf * area * lf);
         }
         lam += best;
       }

@@ -102,8 +102,8 @@ export function samplePocket(
   let tMin = Infinity;
   let sound = true;
   for (let c = 0; c < n; c++) {
-    for (let k = 0; k < NU; k++) if (!Number.isFinite(U[NU * c + k] as number)) sound = false;
-    for (let k = 0; k < NP; k++) if (!Number.isFinite(P[NP * c + k] as number)) sound = false;
+    for (let k = 0; k < NU; k++) if (!Number.isFinite(U[NU * c + k])) sound = false;
+    for (let k = 0; k < NP; k++) if (!Number.isFinite(P[NP * c + k])) sound = false;
     if (!(rhoInf + (U[NU * c] as number) > 0)) sound = false;
     const t = P[NP * c + 6] as number;
     if (t > tMax) tMax = t;

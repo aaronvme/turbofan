@@ -11,6 +11,7 @@ import {
 } from '../../../src/flow/reference/gas';
 import {
   lowMachBeta2,
+  neighbourSpectralRadius,
   preconditionIncrement,
   spectralRadius,
 } from '../../../src/flow/reference/precondition';
@@ -513,7 +514,12 @@ describe('D4-44 (c): preconditioned tracking where beta varies between cells', (
     600_000,
   );
 
-  it.fails(
+  // J's pin is lifted by SOLVER.md 17 (W2S-I1, w3/scheme): with each face's eigenvalue the larger
+  // of its two cells', the dead-air cells at beta = M_cut beside the jet take the jet's step on
+  // their shared faces, and J meets the rule at 2415 iterations at 0.003, staying below 9.1e-6 of
+  // its peak through 30000 (1.6e-8 at 28000; before: 0.24 at 20000). D4-52 had located the stall
+  // in exactly those cells. R keeps its limiter floor (pinned above).
+  it(
     'J: converges a low-Mach jet into dead air (a shear layer beside cells at M_cut)',
     () => {
       const b = rectangle('jet', 0, 0.8, 0, 0.4, 32, 16);
@@ -539,4 +545,162 @@ describe('D4-44 (c): preconditioned tracking where beta varies between cells', (
     },
     600_000,
   );
+});
+
+// SOLVER.md 17 (W2S-I1, D5-2): with preconditioning, each face's eigenvalue in the local step is the
+// larger of its two cells' preconditioned spectral radii. A cell at rest has beta = minMach and a
+// step 1/minMach times its acoustic one; hot gas arriving through a face at 100-300 m/s crossed it
+// at a Courant number of 5-50 (ladder L14: non-finite in one iteration).
+describe('section 17: the local step takes both cells of every face (W2S-I1)', () => {
+  const pocketMesh = () =>
+    solverMesh(
+      singleBlock(rectangle('duct', -0.04, 0.04, 0.3, 0.33, 8, 3), {
+        imin: BC.INFLOW,
+        imax: BC.OUTFLOW,
+        jmin: BC.SLIP_WALL,
+        jmax: BC.SLIP_WALL,
+      }),
+    );
+  // cell (4, 1) hot (1500 K, Z 0.015) at -200 m/s at pressure equilibrium, the rest at rest
+  const hot = (x: number, r: number) => Math.abs(x - 0.005) < 0.005 && Math.abs(r - 0.315) < 0.005;
+  const start = (x: number, r: number) => {
+    const T = hot(x, r) ? 1500 : 288.15;
+    return {
+      rho: 101325 / (287.05287 * T),
+      u: hot(x, r) ? -200 : 0,
+      v: 0,
+      w: 0,
+      p: 101325,
+      z: hot(x, r) ? 0.015 : 0,
+    };
+  };
+  const PRE = { minMach: 0.02, machCut: 0.02 } as const;
+
+  it("is the neighbour state's own radius, its sound speed from its p', rho' and Z", () => {
+    const ref = referenceState(THERMALLY_PERFECT, AMBIENT);
+    const P = physicalToPrim(ref, { rho: 0.235, u: -200, v: 30, w: 0, p: 101325, z: 0.015 }, 0.3);
+    const beta = 0.3;
+    // the record's c is consToPrim's; the rule's comes from (p', rho', Z): the same to rounding
+    const own = spectralRadius(-200 * 0.6 + 30 * 0.8, P[7] as number, beta * beta);
+    expect(neighbourSpectralRadius(ref, P, 0, 0.6, 0.8, beta)).toBeCloseTo(own, 9);
+    // a stored c is not read (a ghost's is don't-care, W2R-N2)
+    const Q = Float64Array.from(P);
+    Q[7] = 1e6;
+    Q[6] = 1e6;
+    expect(neighbourSpectralRadius(ref, Q, 0, 0.6, 0.8, beta)).toBe(
+      neighbourSpectralRadius(ref, P, 0, 0.6, 0.8, beta),
+    );
+    expect(neighbourSpectralRadius(ref, P, 0, 1, 0, 1)).toBeCloseTo(200 + (P[7] as number), 9);
+  });
+
+  it("gives a cold cell at rest the hot neighbour's eigenvalue on their face", () => {
+    const mesh = pocketMesh();
+    const pre = new ReferenceSolver(mesh, {
+      gas: THERMALLY_PERFECT,
+      freeStream: AMBIENT,
+      lowMachPreconditioning: PRE,
+    });
+    pre.setState(start);
+    const dt = pre.localDt();
+    const P = pre.primitives();
+    const ref = pre.ref;
+    // the rule, recomputed from the public parts: beta from lowMachBeta2 (dp from the face
+    // neighbours' p'), the sum over the two directions of the larger b_f |S| radius of each face
+    const betaOf = (e: number) => {
+      const c = e < mesh.nCells ? e : (mesh.ghostSrc[e - mesh.nCells] ?? 0);
+      let dp = 0;
+      const i = c % 8;
+      const j = Math.floor(c / 8);
+      const p0 = P[NP * c + 4] as number;
+      for (const [di, dj] of [
+        [-1, 0],
+        [1, 0],
+        [0, -1],
+        [0, 1],
+      ] as const) {
+        const ii = i + di;
+        const jj = j + dj;
+        if (ii < 0 || ii >= 8 || jj < 0 || jj >= 3) continue;
+        dp = Math.max(dp, Math.abs((P[NP * (jj * 8 + ii) + 4] as number) - p0));
+      }
+      return Math.sqrt(
+        lowMachBeta2(P, NP * c, mesh.cellR[c] as number, 0.02, dp, ref.rho + (P[NP * c] as number)),
+      );
+    };
+    const cold = 1 * 8 + 3; // west of the hot cell (4, 1)
+    const hotCell = 1 * 8 + 4;
+    const f = mesh.blocks[0]?.iFaceOffset ?? 0;
+    const east = f + 1 * 9 + 4;
+    const radius = (c: number, nb: number, nx: number, nr: number) =>
+      Math.max(
+        spectralRadius(
+          (P[NP * c + 1] as number) * nx + (P[NP * c + 2] as number) * nr,
+          P[NP * c + 7] as number,
+          betaOf(c) ** 2,
+        ),
+        neighbourSpectralRadius(ref, P, NP * nb, nx, nr, betaOf(nb)),
+      );
+    const lamE =
+      (mesh.iArea[east] as number) *
+      radius(cold, hotCell, mesh.iNx[east] as number, mesh.iNr[east] as number);
+    const own =
+      (mesh.iArea[east] as number) *
+      spectralRadius(0, P[NP * cold + 7] as number, betaOf(cold) ** 2);
+    // the hot cell's radius sets the cold cell's i-direction: its step is at least 15x shorter
+    expect(lamE / own).toBeGreaterThan(15);
+    const tau = (dt[cold] as number) / (mesh.cellVolR[cold] as number);
+    const jS = (mesh.blocks[0]?.jFaceOffset ?? 0) + 1 * 8 + 3;
+    const jN = jS + 8;
+    const lamJ = Math.max(
+      (mesh.jArea[jS] as number) *
+        radius(cold, cold - 8, mesh.jNx[jS] as number, mesh.jNr[jS] as number),
+      (mesh.jArea[jN] as number) *
+        radius(cold, cold + 8, mesh.jNx[jN] as number, mesh.jNr[jN] as number),
+    );
+    const west = east - 1;
+    const lamW =
+      (mesh.iArea[west] as number) *
+      radius(cold, cold - 1, mesh.iNx[west] as number, mesh.iNr[west] as number);
+    expect(tau * (Math.max(lamW, lamE) + lamJ)).toBeCloseTo(DEFAULT_CFL_PRECONDITIONED, 12);
+  });
+
+  it("leaves the plain scheme and a slip wall face at the cell's own eigenvalue", () => {
+    const mesh = pocketMesh();
+    const plain = new ReferenceSolver(mesh, { gas: THERMALLY_PERFECT, freeStream: AMBIENT });
+    plain.setState(start);
+    const dt = plain.localDt();
+    const P = plain.primitives();
+    const cold = 1 * 8 + 3;
+    const a = P[NP * cold + 7] as number;
+    const f = mesh.blocks[0]?.iFaceOffset ?? 0;
+    const jf = mesh.blocks[0]?.jFaceOffset ?? 0;
+    const lamI = Math.max(mesh.iArea[f + 9 + 3] as number, mesh.iArea[f + 9 + 4] as number) * a;
+    const lamJ = Math.max(mesh.jArea[jf + 8 + 3] as number, mesh.jArea[jf + 16 + 3] as number) * a;
+    // the plain step is the cell's own |vn| + c (= c at rest) on every face
+    expect(((dt[cold] as number) / (mesh.cellVolR[cold] as number)) * (lamI + lamJ)).toBeCloseTo(
+      DEFAULT_CFL,
+      12,
+    );
+    // a hot wall cell under cold gas: its wall ghost extrapolates rho' to 2 rho_0 - rho_1 < 0, a
+    // state with no sound speed, so the wall face keeps the cell's own radius (and stays finite)
+    const pre = new ReferenceSolver(mesh, {
+      gas: THERMALLY_PERFECT,
+      freeStream: AMBIENT,
+      lowMachPreconditioning: PRE,
+    });
+    const wallHot = (x: number, r: number) => Math.abs(x - 0.005) < 0.005 && r < 0.31;
+    pre.setState((x, r) => {
+      const T = wallHot(x, r) ? 1500 : 288.15;
+      return {
+        rho: 101325 / (287.05287 * T),
+        u: 0,
+        v: 0,
+        w: 0,
+        p: 101325,
+        z: wallHot(x, r) ? 0.015 : 0,
+      };
+    });
+    const d0 = pre.localDt();
+    expect(d0.every((d) => Number.isFinite(d) && d > 0)).toBe(true);
+  });
 });

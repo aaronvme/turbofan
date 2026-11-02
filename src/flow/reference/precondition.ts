@@ -9,6 +9,8 @@ import {
   deltaH,
   gasConstantMix,
   productsFraction,
+  soundSpeed,
+  temperatureFromPressure,
   type ReferenceState,
 } from './gas';
 import { dq2 } from './state';
@@ -41,6 +43,27 @@ export function spectralRadius(vn: number, c: number, beta2: number): number {
   if (beta2 >= 1) return a + c;
   const d = 1 - beta2;
   return 0.5 * ((1 + beta2) * a + Math.sqrt(d * d * a * a + 4 * beta2 * c * c));
+}
+
+/**
+ * The preconditioned spectral radius of a face neighbour's state P[o..] (a primitive record) along
+ * the unit normal (nx, nr), with the neighbour's own beta (a ghost: its source cell's): the
+ * neighbour's half of the local step's face eigenvalue (docs/SOLVER.md section 17, W2S-I1). Its
+ * sound speed comes from its own p', rho' and Z by section 3, as SLAU2 takes a face state's (a
+ * ghost's stored T' and c are don't-care, W2R-N2).
+ */
+export function neighbourSpectralRadius(
+  ref: ReferenceState,
+  P: ArrayLike<number>,
+  o: number,
+  nx: number,
+  nr: number,
+  beta: number,
+): number {
+  const phi = productsFraction(ref.gas, P[o + 5] as number);
+  const tP = temperatureFromPressure(ref, P[o] as number, P[o + 4] as number, phi);
+  const c = soundSpeed(ref.gas, ref.t + tP, phi);
+  return spectralRadius((P[o + 1] as number) * nx + (P[o + 2] as number) * nr, c, beta * beta);
 }
 
 /**
