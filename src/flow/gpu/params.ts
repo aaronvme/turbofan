@@ -102,6 +102,8 @@ export const PARAM_FIELDS = [
   ['cpaT0', 'f32'],
   /** p_out - p_inf. */
   ['pOutGauge', 'f32'],
+  /** p_out: the total pressure of the outflow's backflow (section 5, W2S-B1; its total T is T_inf). */
+  ['pOut', 'f32'],
   /** beta_inf^2 of the far field (1: the physical characteristics). */
   ['farBeta2', 'f32'],
   /** 1 if the free stream is supersonic (u_inf >= c_inf): the inflow ghost is the free stream. */
@@ -254,6 +256,7 @@ export function stageParams(
     dT0: bc.t0 - ref.t,
     cpaT0: cpMix(g, bc.t0, 0),
     pOutGauge: bc.pOut - ref.p,
+    pOut: bc.pOut,
     farBeta2: bc.farFieldBeta2,
     supersonicInflow: ref.u >= ref.c ? 1 : 0,
     cfl:

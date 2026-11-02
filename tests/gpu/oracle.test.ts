@@ -11,7 +11,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { SimDevice } from '../../src/gpu/device';
 import { GpuSolver, type GpuSolverOptions } from '../../src/flow/gpu/device/gpuSolver';
 import { DEFAULT_CFL_PRECONDITIONED } from '../../src/flow/gpu/params';
-import { caloricallyPerfectGas, type GasModel } from '../../src/flow/reference/gas';
+import {
+  THERMALLY_PERFECT,
+  caloricallyPerfectGas,
+  type GasModel,
+} from '../../src/flow/reference/gas';
 import { ReferenceSolver, type SolverOptions } from '../../src/flow/reference/solver';
 import type { SolverMesh } from '../../src/flow/reference/solverMesh';
 import type { SourceModel } from '../../src/flow/reference/sources';
@@ -435,5 +439,48 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     }
     p.gpu.setCellSource({ kMass, damping });
     await trackingRows(p, 'S sink');
+  });
+
+  it('the outflow’s backflow (SOLVER.md 5, W2S-B1): the inflow ghost at (p_out, T_inf), and the kernel follows the oracle (row C’s tolerances)', async () => {
+    // hot, fuelled, swirling gas flowing back in through the outflow (imax), preconditioned at the
+    // engine's cut: every outflow ghost takes the backflow branch
+    const mesh = duct(40);
+    const options: SolverOptions = {
+      gas: THERMALLY_PERFECT,
+      freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
+      lowMachPreconditioning: ENGINE_PRECONDITIONING_CUT,
+    };
+    const p = await pair(mesh, options, {}, (s) => {
+      s.setState((x): PhysicalState => {
+        const k = 0.5 * (1 + x / 0.3);
+        // a 5 % wave: p' at the scale of the hot gas's terms rho R T' (a 0.5 % wave left e_q at 2.3e-5
+        // after 1 iteration, plain and preconditioned alike, in interior cells: the f32 state's
+        // rounding of a small p' among large thermal terms, not the boundary)
+        const pr = 101325 * (1 + 0.05 * Math.cos((Math.PI * x) / 0.3));
+        const T = 288.15 + 150 * k;
+        return { rho: pr / (287.05287 * T), u: -30 * k, v: 0, w: 10 * k, p: pr, z: 0.02 * k };
+      });
+    });
+    const P = await p.gpu.readPrimitives();
+    const R = p.ref.primitives();
+    let outflowGhosts = 0;
+    for (let g = 0; g < mesh.nGhosts; g++) {
+      if (mesh.ghostBc[g] !== BC.OUTFLOW) continue;
+      outflowGhosts++;
+      const e = NP * (mesh.nCells + g);
+      // no swirl and no fuel come in: the ambient's, not the cell's
+      expect(P[e + 3] === 0 && P[e + 5] === 0, `ghost ${g}: rw ${P[e + 3]}, Z ${P[e + 5]}`).toBe(
+        true,
+      );
+      expect(R[e + 3] === 0 && R[e + 5] === 0).toBe(true);
+      for (const k of [0, 1, 2, 4]) {
+        expect(Math.abs((P[e + k] ?? NaN) - (R[e + k] ?? NaN))).toBeLessThan(
+          1e-5 * Math.max(1, Math.abs(R[e + k] ?? NaN)),
+        );
+      }
+    }
+    expect(outflowGhosts).toBe(2 * 4);
+    await trackingRows(p, 'backflow');
+    p.gpu.destroy();
   });
 });

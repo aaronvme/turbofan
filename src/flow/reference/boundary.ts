@@ -137,12 +137,14 @@ function stagnationOffset(ref: ReferenceState, t0: number, sigma: number): numbe
  * p'_s + rho c u_n,s (3 Newton steps on sigma, each with 3 on T). Taking the static pressure from
  * inside instead made the ghost's speed answer a pressure change with -dp / (rho u), a feedback 1 / M
  * times faster than the acoustic time step covers: the plain scheme diverged from its own steady
- * state at low Mach, and stalled at M 0.3-0.4 (ladder L4b, L9). A supersonic free stream is imposed
- * whole.
+ * state at low Mach, and stalled at M 0.3-0.4 (ladder L4b, L9). The inflow BC passes its totals
+ * (a supersonic free stream is imposed whole, in ghostPrimitive); the outflow's backflow passes
+ * the ambient's beyond it, (p_out, T_inf) (W2S-B1).
  */
 function inflow(
   ref: ReferenceState,
-  bp: BoundaryParams,
+  p0: number,
+  t0: number,
   P: ArrayLike<number>,
   s: number,
   nx: number,
@@ -150,32 +152,26 @@ function inflow(
   out: Float64Array,
   o: number,
 ): void {
-  if (ref.u >= ref.c) {
-    out.fill(0, o, o + NP);
-    out[o + 1] = ref.u;
-    out[o + 7] = ref.c;
-    return;
-  }
   const g = ref.gas;
   const r = ref.r;
   const un = (P[s + 1] as number) * nx + (P[s + 2] as number) * nr;
   const rc = (ref.rho + (P[s] as number)) * (P[s + 7] as number);
   const w = (P[s + 4] as number) + rc * un;
-  const dp0 = bp.p0 - ref.p;
+  const dp0 = p0 - ref.p;
   // the ghost's gauge pressure on the isentrope at speed sigma (exact zero at sigma = 0, p0 = p_inf)
-  const pAt = (tau: number) => dp0 + bp.p0 * Math.expm1(entropyDelta(g, bp.t0, tau, 0) / r);
+  const pAt = (tau: number) => dp0 + p0 * Math.expm1(entropyDelta(g, t0, tau, 0) / r);
   let sigma = Math.max(0, -un);
   for (let k = 0; k < NEWTON_STEPS; k++) {
-    const tau = stagnationOffset(ref, bp.t0, sigma);
+    const tau = stagnationOffset(ref, t0, sigma);
     const pb = pAt(tau);
-    const rhoB = (ref.p + pb) / (r * (bp.t0 + tau));
+    const rhoB = (ref.p + pb) / (r * (t0 + tau));
     // G(sigma) = p'_b - rho c sigma - w, G' = -(rho_b sigma + rho c) < 0
     sigma = Math.max(0, sigma + (pb - rc * sigma - w) / (rhoB * sigma + rc));
   }
-  const tau = stagnationOffset(ref, bp.t0, sigma);
+  const tau = stagnationOffset(ref, t0, sigma);
   const pP = pAt(tau);
-  const tb = bp.t0 + tau;
-  const dT = bp.t0 - ref.t + tau;
+  const tb = t0 + tau;
+  const dT = t0 - ref.t + tau;
   out[o] = (pP - ref.rho * r * dT) / (r * tb);
   out[o + 1] = -nx * sigma;
   out[o + 2] = -nr * sigma;
@@ -245,11 +241,23 @@ export function ghostPrimitive(
       farField(ref, bp.farFieldBeta2, P, s, nx, nr, out, o);
       return;
     case BC_CODE.INFLOW:
-      inflow(ref, bp, P, s, nx, nr, out, o);
+      if (ref.u >= ref.c) {
+        out.fill(0, o, o + NP);
+        out[o + 1] = ref.u;
+        out[o + 7] = ref.c;
+        return;
+      }
+      inflow(ref, bp.p0, bp.t0, P, s, nx, nr, out, o);
       return;
     case BC_CODE.OUTFLOW: {
-      copy(P, s, out, o);
       const vn = (P[s + 1] as number) * nx + (P[s + 2] as number) * nr;
+      // backflow (section 5, W2S-B1): what enters comes from the ambient beyond the boundary, at
+      // rest at p_out and T_inf, as through an inflow face; never the cell's own state copied back
+      if (vn < 0) {
+        inflow(ref, bp.pOut, ref.t, P, s, nx, nr, out, o);
+        return;
+      }
+      copy(P, s, out, o);
       if (vn < (P[s + 7] as number)) out[o + 4] = bp.pOut - ref.p;
       return;
     }

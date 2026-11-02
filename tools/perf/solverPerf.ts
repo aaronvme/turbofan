@@ -68,7 +68,10 @@ export interface PerfAmplitudes {
  * face's beta (D4-44), the engine's preconditioned tracking (the GpuFlowSolver default) took it
  * non-finite after about 150 iterations, and a 0.1 % pressure wave at rest within 10 (W2R-I6:
  * w2-solver-perf and w2-solver-int handoffs, tools/perf/dawn.ts soak). With D4-44 both, and the
- * hot plume alone, stay finite for 1000 iterations. Profiles and A/B runs still re-set it.
+ * hot plume alone, stay finite for 1000 iterations. Left running (the look-dev page), it reversed
+ * the jet at the outflow and went NaN at 6756 until the outflow's backflow took the ambient's
+ * totals (W2S-B1, SOLVER.md 5 and 16); since, it comes to rest by 20000
+ * (tests/gpu-ladder/app-longrun.test.ts). Profiles and A/B runs still re-set it.
  */
 export const PERF_AMPLITUDES: PerfAmplitudes = {
   jet: 60,

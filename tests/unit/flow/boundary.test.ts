@@ -177,6 +177,42 @@ describe('boundary conditions', () => {
     expect(given[4]).toBeCloseTo(9e4 - ambient.p, 9);
     const sup = physicalToPrim(ambient, { rho: 1.1, u: 600, v: 0, w: 0, p: 1.1e5, z: 0 }, 1);
     expect(Array.from(ghost(ambient, BC.OUTFLOW, sup, 1, 0))).toEqual(Array.from(sup));
+    // the face at rest (vn = 0) is still an outflow face: the copy at p_out
+    const still = physicalToPrim(ambient, { rho: 0.7, u: 0, v: 0, w: 4, p: 1.1e5, z: 0.01 }, 1);
+    const g0 = ghost(ambient, BC.OUTFLOW, still, 1, 0);
+    expect(g0[4] === 0 && g0[5] === still[5] && g0[3] === still[3]).toBe(true);
+  });
+
+  it('outflow with backflow (W2S-B1): the inflow ghost at the ambient totals (p_out, T_inf)', () => {
+    // hot, fuelled, swirling gas flowing back in through the face (vn < 0): the ghost does not
+    // copy it; what enters comes from the ambient beyond the boundary, at rest at p_out and T_inf
+    const back = physicalToPrim(ambient, { rho: 0.6, u: -40, v: 6, w: 25, p: 1.02e5, z: 0.02 }, 1);
+    for (const pOut of [ambient.p, 9e4]) {
+      const params = boundaryParams(ambient, { outflowPressure: pOut });
+      const g = ghost(ambient, BC.OUTFLOW, back, 1, 0, params);
+      const totals = boundaryParams(ambient, { inflowTotal: { p0: pOut, t0: ambient.t } });
+      const asInflow = ghost(ambient, BC.INFLOW, back, 1, 0, totals);
+      expect(Array.from(g)).toEqual(Array.from(asInflow));
+      // along the inward normal (-x here), no swirl, no fuel; at p_out 9e4, below the cell's
+      // characteristic, the outside cannot push gas in: the ghost is at rest (sigma clamps at 0)
+      if (pOut === ambient.p) expect(g[1]).toBeLessThan(0);
+      else expect(g[1] === 0 && g[4] === pOut - ambient.p).toBe(true);
+      expect(g[2] === 0 && g[3] === 0 && g[5] === 0).toBe(true);
+      // the static temperature at most the ambient's (total T_inf)
+      expect(g[6]).toBeLessThanOrEqual(0);
+    }
+    // a slanted face: only the normal component decides (vn = -40 * 0.6 + 6 * -0.8 < 0)
+    const slant = ghost(ambient, BC.OUTFLOW, back, 0.6, -0.8);
+    expect(slant[3] === 0 && slant[5] === 0).toBe(true);
+    // a backflow cell at the ambient's own state gives back the ambient
+    const rest = physicalToPrim(
+      ambient,
+      { rho: ambient.rho, u: 0, v: 0, w: 0, p: ambient.p, z: 0 },
+      1,
+    );
+    rest[1] = -1e-30;
+    const g = ghost(ambient, BC.OUTFLOW, rest, 1, 0);
+    for (let k = 0; k < 6; k++) expect(Math.abs(g[k] ?? NaN)).toBeLessThan(1e-12);
   });
 });
 
