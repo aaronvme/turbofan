@@ -1,0 +1,2564 @@
+{
+  "kind": "p1",
+  "conditions": {
+    "date": "2026-11-02T04:22:02.423Z",
+    "protocol": {
+      "name": "official",
+      "warmupMs": 10000,
+      "runMs": 60000,
+      "runs": 3
+    },
+    "label": "official (D0-1): 3 repetitions in rotated order, each a 10 s warm-up then 60 s; median per configuration",
+    "gitHead": "c64da3c",
+    "gitDirty": true,
+    "power": {
+      "source": "ac",
+      "batteryStatus": [
+        2
+      ]
+    },
+    "powerPlan": {
+      "guid": "381b4222-f694-41f0-9685-ff5bb260df2e",
+      "name": "Balanced"
+    },
+    "powerMode": {
+      "ac": "balanced",
+      "dc": "balanced",
+      "acOverlay": "00000000-0000-0000-0000-000000000000",
+      "dcOverlay": "00000000-0000-0000-0000-000000000000"
+    },
+    "gpu": [
+      {
+        "name": "Intel(R) Arc(TM) 140T GPU (8GB)",
+        "driverVersion": "32.0.101.8860",
+        "currentRefreshHz": 60
+      }
+    ],
+    "cpu": "Intel(R) Core(TM) Ultra 7 255H",
+    "logicalCpus": 16,
+    "memoryGiB": 15,
+    "cpuLoadBefore": 0.03789416980897526,
+    "gpuBusyBefore": [],
+    "node": "v24.18.0",
+    "chrome": "156.0.8078.74",
+    "chromeCommandLine": "\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-edgeupdater --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,AvoidCorsURLLoaderRestartOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --disable-updater-scheduler --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --disable-infobars --disable-search-engine-choice-screen --disable-sync --enable-unsafe-swiftshader --no-sandbox --start-maximized --user-data-dir=\"C:\\Users\\Aaron\\AppData\\Local\\Temp\\playwright_chromiumdev_profile-qPn68v\" --remote-debugging-pipe --no-startup-window --flag-switches-begin --flag-switches-end --enable-unsafe-swiftshader",
+    "chromeFlags": [
+      "--disable-field-trial-config",
+      "--disable-background-networking",
+      "--disable-background-timer-throttling",
+      "--disable-backgrounding-occluded-windows",
+      "--disable-back-forward-cache",
+      "--disable-breakpad",
+      "--disable-client-side-phishing-detection",
+      "--disable-component-extensions-with-background-pages",
+      "--disable-component-update",
+      "--no-default-browser-check",
+      "--disable-default-apps",
+      "--disable-dev-shm-usage",
+      "--disable-edgeupdater",
+      "--disable-extensions",
+      "--disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,AvoidCorsURLLoaderRestartOnRedirect,Translate,AutoDeElevate,OptimizationHints,NetworkTimeServiceQuerying,AimEnabled,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion",
+      "--enable-features=CDPScreenshotNewSurface",
+      "--allow-pre-commit-input",
+      "--disable-hang-monitor",
+      "--disable-ipc-flooding-protection",
+      "--disable-popup-blocking",
+      "--disable-prompt-on-repost",
+      "--disable-renderer-backgrounding",
+      "--disable-updater-scheduler",
+      "--force-color-profile=srgb",
+      "--metrics-recording-only",
+      "--no-first-run",
+      "--password-store=basic",
+      "--use-mock-keychain",
+      "--no-service-autorun",
+      "--export-tagged-pdf",
+      "--disable-search-engine-choice-screen",
+      "--unsafely-disable-devtools-self-xss-warnings",
+      "--edge-skip-compat-layer-relaunch",
+      "--disable-infobars",
+      "--disable-search-engine-choice-screen",
+      "--disable-sync",
+      "--enable-unsafe-swiftshader",
+      "--no-sandbox",
+      "--start-maximized",
+      "--user-data-dir=\"C:\\Users\\Aaron\\AppData\\Local\\Temp\\playwright_chromiumdev_profile-qPn68v\"",
+      "--remote-debugging-pipe",
+      "--no-startup-window",
+      "--flag-switches-begin",
+      "--flag-switches-end",
+      "--enable-unsafe-swiftshader"
+    ],
+    "chromeGpu": [
+      "Driver D3D12 feature level",
+      "<Integrated GPU>  D3D12 backend - Intel(R) Arc(TM) 140T GPU (8GB)",
+      "<Integrated GPU>  Vulkan backend - Intel(R) Arc(TM) 140T GPU (8GB)",
+      "<Integrated GPU>  D3D11 backend - Intel(R) Arc(TM) 140T GPU (8GB)",
+      "<CPU>  D3D12 backend - Microsoft Basic Render Driver",
+      "<CPU>  Vulkan backend - SwiftShader Device (Subzero)",
+      "<CPU>  D3D11 backend - Microsoft Basic Render Driver"
+    ],
+    "display": {
+      "intervalMs": 16.699999999999818,
+      "hz": 59.88023952095874,
+      "probeFrames": 120,
+      "probeMaxMs": 16.899999999999636
+    },
+    "page": {
+      "app": {
+        "adapter": {
+          "vendor": "intel",
+          "architecture": "xe-lpg",
+          "device": "",
+          "description": "",
+          "features": [
+            "core-features-and-limits",
+            "float32-filterable",
+            "timestamp-query"
+          ],
+          "limits": {
+            "maxTextureDimension1D": 16384,
+            "maxTextureDimension2D": 16384,
+            "maxTextureDimension3D": 2048,
+            "maxTextureArrayLayers": 2048,
+            "maxBindGroups": 4,
+            "maxBindGroupsPlusVertexBuffers": 24,
+            "maxBindingsPerBindGroup": 1000,
+            "maxDynamicUniformBuffersPerPipelineLayout": 10,
+            "maxDynamicStorageBuffersPerPipelineLayout": 8,
+            "maxSampledTexturesPerShaderStage": 48,
+            "maxSamplersPerShaderStage": 16,
+            "maxStorageBuffersPerShaderStage": 16,
+            "maxStorageTexturesPerShaderStage": 8,
+            "maxUniformBuffersPerShaderStage": 12,
+            "maxUniformBufferBindingSize": 65536,
+            "maxStorageBufferBindingSize": 2147483644,
+            "minUniformBufferOffsetAlignment": 256,
+            "minStorageBufferOffsetAlignment": 256,
+            "maxVertexBuffers": 8,
+            "maxBufferSize": 2147483648,
+            "maxVertexAttributes": 30,
+            "maxVertexBufferArrayStride": 2048,
+            "maxInterStageShaderVariables": 28,
+            "maxColorAttachments": 8,
+            "maxColorAttachmentBytesPerSample": 128,
+            "maxComputeWorkgroupStorageSize": 32768,
+            "maxComputeInvocationsPerWorkgroup": 1024,
+            "maxComputeWorkgroupSizeX": 1024,
+            "maxComputeWorkgroupSizeY": 1024,
+            "maxComputeWorkgroupSizeZ": 64,
+            "maxComputeWorkgroupsPerDimension": 65535,
+            "maxImmediateSize": 64,
+            "maxStorageBuffersInFragmentStage": 16,
+            "maxStorageTexturesInFragmentStage": 8,
+            "maxStorageBuffersInVertexStage": 16,
+            "maxStorageTexturesInVertexStage": 8
+          }
+        },
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+        "innerWidth": 1280,
+        "innerHeight": 665,
+        "devicePixelRatio": 1.5,
+        "visibility": "visible",
+        "crossOriginIsolated": false
+      },
+      "bench": {
+        "adapter": {
+          "vendor": "intel",
+          "architecture": "xe-lpg",
+          "device": "",
+          "description": "",
+          "features": [
+            "bgra8unorm-storage",
+            "clip-distances",
+            "core-features-and-limits",
+            "depth-clip-control",
+            "depth32float-stencil8",
+            "dual-source-blending",
+            "float32-blendable",
+            "float32-filterable",
+            "indirect-first-instance",
+            "primitive-index",
+            "rg11b10ufloat-renderable",
+            "shader-f16",
+            "subgroup-size-control",
+            "subgroups",
+            "texture-component-swizzle",
+            "texture-compression-bc",
+            "texture-compression-bc-sliced-3d",
+            "texture-compression-unaligned",
+            "texture-formats-tier1",
+            "texture-formats-tier2",
+            "timestamp-query"
+          ],
+          "limits": {
+            "maxTextureDimension1D": 16384,
+            "maxTextureDimension2D": 16384,
+            "maxTextureDimension3D": 2048,
+            "maxTextureArrayLayers": 2048,
+            "maxBindGroups": 4,
+            "maxBindGroupsPlusVertexBuffers": 24,
+            "maxBindingsPerBindGroup": 1000,
+            "maxDynamicUniformBuffersPerPipelineLayout": 10,
+            "maxDynamicStorageBuffersPerPipelineLayout": 8,
+            "maxSampledTexturesPerShaderStage": 48,
+            "maxSamplersPerShaderStage": 16,
+            "maxStorageBuffersPerShaderStage": 16,
+            "maxStorageTexturesPerShaderStage": 8,
+            "maxUniformBuffersPerShaderStage": 12,
+            "maxUniformBufferBindingSize": 65536,
+            "maxStorageBufferBindingSize": 2147483644,
+            "minUniformBufferOffsetAlignment": 256,
+            "minStorageBufferOffsetAlignment": 256,
+            "maxVertexBuffers": 8,
+            "maxBufferSize": 2147483648,
+            "maxVertexAttributes": 30,
+            "maxVertexBufferArrayStride": 2048,
+            "maxInterStageShaderVariables": 28,
+            "maxColorAttachments": 8,
+            "maxColorAttachmentBytesPerSample": 128,
+            "maxComputeWorkgroupStorageSize": 32768,
+            "maxComputeInvocationsPerWorkgroup": 1024,
+            "maxComputeWorkgroupSizeX": 1024,
+            "maxComputeWorkgroupSizeY": 1024,
+            "maxComputeWorkgroupSizeZ": 64,
+            "maxComputeWorkgroupsPerDimension": 65535,
+            "maxImmediateSize": 64,
+            "maxStorageBuffersInFragmentStage": 16,
+            "maxStorageTexturesInFragmentStage": 8,
+            "maxStorageBuffersInVertexStage": 16,
+            "maxStorageTexturesInVertexStage": 8
+          }
+        },
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+        "innerWidth": 1280,
+        "innerHeight": 665,
+        "devicePixelRatio": 1.5,
+        "visibility": "visible",
+        "crossOriginIsolated": false
+      }
+    },
+    "cpuLoadAfter": 0.04299397834700945,
+    "gpuBusyAfter": [],
+    "finished": "2026-11-02T04:45:04.517Z"
+  },
+  "gate": {
+    "displayIntervalMs": 16.699999999999818,
+    "longFrameFactor": 1.5,
+    "throttleFactor": 2.5,
+    "rule": "D2-11 as amended by D3-6",
+    "occlusionDeltaMs": 500,
+    "occlusionMinStretchMs": 1000,
+    "maxThrottledStretchMs": 500,
+    "runTimeoutMs": 160000,
+    "belowRateMedianFactor": 1.5,
+    "rerun": "once, after Page.bringToFront"
+  },
+  "order": {
+    "seed": 477509730,
+    "repetitions": [
+      [
+        "solver-130k-app",
+        "spike-130k-16x8",
+        "solver-130k-bench"
+      ],
+      [
+        "spike-130k-16x8",
+        "solver-130k-bench",
+        "solver-130k-app"
+      ],
+      [
+        "solver-130k-bench",
+        "solver-130k-app",
+        "spike-130k-16x8"
+      ]
+    ],
+    "effectOnMsPerIt": null
+  },
+  "results": [
+    {
+      "id": "solver-130k-app",
+      "group": "p1",
+      "validity": {
+        "valid": false,
+        "reasons": [
+          "repetition 1: page lost focus 1 times (blur) during the run",
+          "repetition 1: page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)",
+          "repetition 2: page lost focus 1 times (blur) during the run",
+          "repetition 2: page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)",
+          "repetition 3: page lost focus 1 times (blur) during the run",
+          "repetition 3: page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+        ],
+        "warnings": []
+      },
+      "aggregate": null,
+      "repetitions": [
+        {
+          "rep": 0,
+          "seq": 1,
+          "attempt": 2,
+          "validity": {
+            "valid": false,
+            "reasons": [
+              "page lost focus 1 times (blur) during the run",
+              "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+            ],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.06871908318283412,
+          "result": {
+            "id": "solver-130k-app",
+            "solver": "production",
+            "scene": "app",
+            "cells": 130034,
+            "grid": {
+              "ni": 0,
+              "nj": 0
+            },
+            "blocks": {
+              "bi": 0,
+              "bj": 0
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1076,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3384,
+                "frameTime": {
+                  "n": 3384,
+                  "mean": 17.72969858156006,
+                  "min": 16,
+                  "max": 34.099999999998545,
+                  "p50": 16.69999999999709,
+                  "p95": 33.299999999995634,
+                  "p99": 33.400000000001455
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 216,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3384,
+                  "mean": 1.072517736361813,
+                  "min": 0.19999999999708962,
+                  "max": 6.900000017878483,
+                  "p50": 0.7999999940366251,
+                  "p95": 2.6000000089406967,
+                  "p99": 3.1999999950517304
+                },
+                "fps": 56.4,
+                "iterations": 7440,
+                "itPerSec": 124,
+                "gpuSamples": 2997,
+                "solverMsPerIt": 1.7204625550555335,
+                "solverMsPerItP10": 1.3981013333333332,
+                "solverMsPerFrame": {
+                  "n": 2997,
+                  "mean": 3.826694491825165,
+                  "min": 2.490368,
+                  "max": 6.619136,
+                  "p50": 3.866624,
+                  "p95": 5.439488,
+                  "p99": 6.029312
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 124,
+              "fps": 56.4,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 33.299999999995634,
+              "frameTimeP99": 33.400000000001455,
+              "longFrames": 216,
+              "callbackDelayP95": 2.6000000089406967,
+              "callbackDelayP99": 3.1999999950517304,
+              "solverMsPerIt": 1.7204625550555335,
+              "solverMsPerItP10": 1.3981013333333332,
+              "solverMsPerFrameP50": 3.866624,
+              "saturatedItPerSec": 581.239037758495,
+              "budgetItPerSec": 244.1203958585679
+            },
+            "resampleMsP50": 0.589824,
+            "renderGpuMsP50": 6.619136,
+            "threeComputeGpuMsP50": null,
+            "sceneTriangles": 1577784,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": null,
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 5014.40673828125,
+            "gpuErrors": [],
+            "nonFiniteResiduals": 0,
+            "solverStatus": {
+              "status": "running",
+              "error": null
+            },
+            "measured": {
+              "timeOrigin": 1793593469367.3,
+              "from": 15477.6,
+              "to": 75477.6
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 1
+          }
+        },
+        {
+          "rep": 1,
+          "seq": 11,
+          "attempt": 2,
+          "validity": {
+            "valid": false,
+            "reasons": [
+              "page lost focus 1 times (blur) during the run",
+              "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+            ],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.0659318039674141,
+          "result": {
+            "id": "solver-130k-app",
+            "solver": "production",
+            "scene": "app",
+            "cells": 130034,
+            "grid": {
+              "ni": 0,
+              "nj": 0
+            },
+            "blocks": {
+              "bi": 0,
+              "bj": 0
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1076,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3362,
+                "frameTime": {
+                  "n": 3362,
+                  "mean": 17.84574657941681,
+                  "min": 16.099999999998545,
+                  "max": 33.60000000000582,
+                  "p50": 16.69999999999709,
+                  "p95": 33.29999999999927,
+                  "p99": 33.40000000000429
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 238,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3362,
+                  "mean": 1.072397370644443,
+                  "min": 0.2999999761595973,
+                  "max": 4.899999994042446,
+                  "p50": 0.7999999821186066,
+                  "p95": 2.5999999880732503,
+                  "p99": 3.1389999907049297
+                },
+                "fps": 56.03333333333333,
+                "iterations": 7126,
+                "itPerSec": 118.76666666666667,
+                "gpuSamples": 2938,
+                "solverMsPerIt": 1.7781676814272052,
+                "solverMsPerItP10": 1.409024,
+                "solverMsPerFrame": {
+                  "n": 2938,
+                  "mean": 3.7996380884955943,
+                  "min": 2.490368,
+                  "max": 7.471104,
+                  "p50": 3.801088,
+                  "p95": 5.505024,
+                  "p99": 6.029312
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 118.76666666666667,
+              "fps": 56.03333333333333,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 33.29999999999927,
+              "frameTimeP99": 33.40000000000429,
+              "longFrames": 238,
+              "callbackDelayP95": 2.5999999880732503,
+              "callbackDelayP99": 3.1389999907049297,
+              "solverMsPerIt": 1.7781676814272052,
+              "solverMsPerItP10": 1.409024,
+              "solverMsPerFrameP50": 3.801088,
+              "saturatedItPerSec": 562.3766590996487,
+              "budgetItPerSec": 236.19819682185243
+            },
+            "resampleMsP50": 0.589824,
+            "renderGpuMsP50": 7.864319999999999,
+            "threeComputeGpuMsP50": null,
+            "sceneTriangles": 1577784,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": null,
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 6409.107421875,
+            "gpuErrors": [],
+            "nonFiniteResiduals": 0,
+            "solverStatus": {
+              "status": "running",
+              "error": null
+            },
+            "measured": {
+              "timeOrigin": 1793594188027.5,
+              "from": 15285.3,
+              "to": 75285.3
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 1
+          }
+        },
+        {
+          "rep": 2,
+          "seq": 15,
+          "attempt": 2,
+          "validity": {
+            "valid": false,
+            "reasons": [
+              "page lost focus 1 times (blur) during the run",
+              "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+            ],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.0622535622456481,
+          "result": {
+            "id": "solver-130k-app",
+            "solver": "production",
+            "scene": "app",
+            "cells": 130034,
+            "grid": {
+              "ni": 0,
+              "nj": 0
+            },
+            "blocks": {
+              "bi": 0,
+              "bj": 0
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1076,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3365,
+                "frameTime": {
+                  "n": 3365,
+                  "mean": 17.82977711738464,
+                  "min": 15.5,
+                  "max": 34.39999999999418,
+                  "p50": 16.69999999999709,
+                  "p95": 33.29999999999927,
+                  "p99": 33.400000000001455
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 235,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3365,
+                  "mean": 0.9670430789199881,
+                  "min": 0.09999999403953552,
+                  "max": 6.999999988081981,
+                  "p50": 0.699999988079071,
+                  "p95": 2.4999999761625076,
+                  "p99": 2.9999999940398268
+                },
+                "fps": 56.083333333333336,
+                "iterations": 7122,
+                "itPerSec": 118.7,
+                "gpuSamples": 2947,
+                "solverMsPerIt": 1.7701809481387285,
+                "solverMsPerItP10": 1.409024,
+                "solverMsPerFrame": {
+                  "n": 2947,
+                  "mean": 3.7758253953172773,
+                  "min": 2.555904,
+                  "max": 7.012352,
+                  "p50": 3.735552,
+                  "p95": 5.439488,
+                  "p99": 6.064701439999998
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 118.7,
+              "fps": 56.083333333333336,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 33.29999999999927,
+              "frameTimeP99": 33.400000000001455,
+              "longFrames": 235,
+              "callbackDelayP95": 2.4999999761625076,
+              "callbackDelayP99": 2.9999999940398268,
+              "solverMsPerIt": 1.7701809481387285,
+              "solverMsPerItP10": 1.409024,
+              "solverMsPerFrameP50": 3.735552,
+              "saturatedItPerSec": 564.9139999226962,
+              "budgetItPerSec": 237.2638799675324
+            },
+            "resampleMsP50": 0.589824,
+            "renderGpuMsP50": 7.536639999999999,
+            "threeComputeGpuMsP50": null,
+            "sceneTriangles": 1577784,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": null,
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 7002.56689453125,
+            "gpuErrors": [],
+            "nonFiniteResiduals": 0,
+            "solverStatus": {
+              "status": "running",
+              "error": null
+            },
+            "measured": {
+              "timeOrigin": 1793594481527.4,
+              "from": 15438.9,
+              "to": 75438.9
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "solver-130k-bench",
+      "group": "p1",
+      "validity": {
+        "valid": false,
+        "reasons": [
+          "repetition 1: page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)",
+          "repetition 2: page lost focus 1 times (blur) during the run",
+          "repetition 2: page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)",
+          "repetition 3: page lost focus 1 times (blur) during the run",
+          "repetition 3: page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+        ],
+        "warnings": []
+      },
+      "aggregate": null,
+      "repetitions": [
+        {
+          "rep": 0,
+          "seq": 5,
+          "attempt": 2,
+          "validity": {
+            "valid": false,
+            "reasons": [
+              "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+            ],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.07299574429236572,
+          "result": {
+            "id": "solver-130k-bench",
+            "solver": "production",
+            "scene": "bench",
+            "cells": 130034,
+            "grid": {
+              "ni": 0,
+              "nj": 0
+            },
+            "blocks": {
+              "bi": 0,
+              "bj": 0
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1076,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3593,
+                "frameTime": {
+                  "n": 3593,
+                  "mean": 16.698357918173777,
+                  "min": 16.19999999999709,
+                  "max": 33.5,
+                  "p50": 16.69999999999709,
+                  "p95": 16.80000000000291,
+                  "p99": 16.899999999999636
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 7,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3593,
+                  "mean": 0.7964096912924902,
+                  "min": 0.09999999403953552,
+                  "max": 6,
+                  "p50": 0.6000000059611921,
+                  "p95": 2.3000000059619197,
+                  "p99": 3.8000000064386406
+                },
+                "fps": 59.88333333333333,
+                "iterations": 4183,
+                "itPerSec": 69.71666666666667,
+                "gpuSamples": 3593,
+                "solverMsPerIt": 3.3513759885249685,
+                "solverMsPerItP10": 2.883584,
+                "solverMsPerFrame": {
+                  "n": 3593,
+                  "mean": 3.901699348733756,
+                  "min": 2.555904,
+                  "max": 9.8304,
+                  "p50": 3.60448,
+                  "p95": 6.094848,
+                  "p99": 6.755450879999995
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 69.71666666666667,
+              "fps": 59.88333333333333,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.80000000000291,
+              "frameTimeP99": 16.899999999999636,
+              "longFrames": 7,
+              "callbackDelayP95": 2.3000000059619197,
+              "callbackDelayP99": 3.8000000064386406,
+              "solverMsPerIt": 3.3513759885249685,
+              "solverMsPerItP10": 2.883584,
+              "solverMsPerFrameP50": 3.60448,
+              "saturatedItPerSec": 298.38490322302727,
+              "budgetItPerSec": 125.32165935367144
+            },
+            "resampleMsP50": 0.720896,
+            "renderGpuMsP50": 3.997695999999999,
+            "threeComputeGpuMsP50": 0.065536,
+            "sceneTriangles": 571042,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": null,
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 12444.69921875,
+            "gpuErrors": [],
+            "nonFiniteResiduals": 0,
+            "solverStatus": {
+              "status": "running",
+              "error": null
+            },
+            "measured": {
+              "timeOrigin": 1793593757722.3,
+              "from": 11010.2,
+              "to": 71010.2
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 0
+          }
+        },
+        {
+          "rep": 1,
+          "seq": 9,
+          "attempt": 2,
+          "validity": {
+            "valid": false,
+            "reasons": [
+              "page lost focus 1 times (blur) during the run",
+              "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+            ],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.06500834668774069,
+          "result": {
+            "id": "solver-130k-bench",
+            "solver": "production",
+            "scene": "bench",
+            "cells": 130034,
+            "grid": {
+              "ni": 0,
+              "nj": 0
+            },
+            "blocks": {
+              "bi": 0,
+              "bj": 0
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1076,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3600,
+                "frameTime": {
+                  "n": 3600,
+                  "mean": 16.66591666666615,
+                  "min": 16.399999999997817,
+                  "max": 16.900000000001455,
+                  "p50": 16.69999999999709,
+                  "p95": 16.799999999995634,
+                  "p99": 16.80000000000291
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 0,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3600,
+                  "mean": 0.1800555677115982,
+                  "min": 0,
+                  "max": 15.000000005966285,
+                  "p50": 0.2000000000007276,
+                  "p95": 0.3000000238389475,
+                  "p99": 0.40100002366588705
+                },
+                "fps": 60,
+                "iterations": 7177,
+                "itPerSec": 119.61666666666666,
+                "gpuSamples": 3600,
+                "solverMsPerIt": 2.9172788362826116,
+                "solverMsPerItP10": 2.62144,
+                "solverMsPerFrame": {
+                  "n": 3600,
+                  "mean": 5.8159195022223855,
+                  "min": 2.686976,
+                  "max": 7.733248,
+                  "p50": 5.89824,
+                  "p95": 6.22592,
+                  "p99": 6.5536
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 119.61666666666666,
+              "fps": 60,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.799999999995634,
+              "frameTimeP99": 16.80000000000291,
+              "longFrames": 0,
+              "callbackDelayP95": 0.3000000238389475,
+              "callbackDelayP99": 0.40100002366588705,
+              "solverMsPerIt": 2.9172788362826116,
+              "solverMsPerItP10": 2.62144,
+              "solverMsPerFrameP50": 5.89824,
+              "saturatedItPerSec": 342.7851967946491,
+              "budgetItPerSec": 143.96978265375262
+            },
+            "resampleMsP50": 0.720896,
+            "renderGpuMsP50": 3.6700159999999995,
+            "threeComputeGpuMsP50": 0.065536,
+            "sceneTriangles": 571042,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": null,
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 4446.8701171875,
+            "gpuErrors": [],
+            "nonFiniteResiduals": 0,
+            "solverStatus": {
+              "status": "running",
+              "error": null
+            },
+            "measured": {
+              "timeOrigin": 1793594041259.8,
+              "from": 10759.7,
+              "to": 70759.7
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 1
+          }
+        },
+        {
+          "rep": 2,
+          "seq": 13,
+          "attempt": 2,
+          "validity": {
+            "valid": false,
+            "reasons": [
+              "page lost focus 1 times (blur) during the run",
+              "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+            ],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.06228129838677078,
+          "result": {
+            "id": "solver-130k-bench",
+            "solver": "production",
+            "scene": "bench",
+            "cells": 130034,
+            "grid": {
+              "ni": 0,
+              "nj": 0
+            },
+            "blocks": {
+              "bi": 0,
+              "bj": 0
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1076,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3600,
+                "frameTime": {
+                  "n": 3600,
+                  "mean": 16.665999999999464,
+                  "min": 16.39999999999418,
+                  "max": 17,
+                  "p50": 16.69999999999709,
+                  "p95": 16.799999999999272,
+                  "p99": 16.80000000000291
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 0,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3600,
+                  "mean": 0.20208332146205824,
+                  "min": -2.3843313101679087e-8,
+                  "max": 9.80000000000291,
+                  "p50": 0.19999998807907104,
+                  "p95": 0.3000000000029104,
+                  "p99": 0.49999999403918993
+                },
+                "fps": 60,
+                "iterations": 6274,
+                "itPerSec": 104.56666666666666,
+                "gpuSamples": 3600,
+                "solverMsPerIt": 3.025226996493511,
+                "solverMsPerItP10": 2.654208,
+                "solverMsPerFrame": {
+                  "n": 3600,
+                  "mean": 5.272298382222375,
+                  "min": 2.62144,
+                  "max": 12.058624,
+                  "p50": 5.767168,
+                  "p95": 6.160384,
+                  "p99": 6.619136
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 104.56666666666666,
+              "fps": 60,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.799999999999272,
+              "frameTimeP99": 16.80000000000291,
+              "longFrames": 0,
+              "callbackDelayP95": 0.3000000000029104,
+              "callbackDelayP99": 0.49999999403918993,
+              "solverMsPerIt": 3.025226996493511,
+              "solverMsPerItP10": 2.654208,
+              "solverMsPerFrameP50": 5.767168,
+              "saturatedItPerSec": 330.5537075925486,
+              "budgetItPerSec": 138.8325571888704
+            },
+            "resampleMsP50": 0.65536,
+            "renderGpuMsP50": 3.7355519999999998,
+            "threeComputeGpuMsP50": 0.065536,
+            "sceneTriangles": 571042,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": null,
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 4272.54443359375,
+            "gpuErrors": [],
+            "nonFiniteResiduals": 0,
+            "solverStatus": {
+              "status": "running",
+              "error": null
+            },
+            "measured": {
+              "timeOrigin": 1793594334797.9,
+              "from": 10775.2,
+              "to": 70775.2
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "spike-130k-16x8",
+      "group": "p1",
+      "validity": {
+        "valid": false,
+        "reasons": [
+          "repetition 1: page lost focus 1 times (blur) during the run",
+          "repetition 1: page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)",
+          "repetition 2: page lost focus 1 times (blur) during the run",
+          "repetition 2: page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)",
+          "repetition 3: page lost focus 1 times (blur) during the run",
+          "repetition 3: page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+        ],
+        "warnings": []
+      },
+      "aggregate": null,
+      "repetitions": [
+        {
+          "rep": 0,
+          "seq": 3,
+          "attempt": 2,
+          "validity": {
+            "valid": false,
+            "reasons": [
+              "page lost focus 1 times (blur) during the run",
+              "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+            ],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.10522653997766912,
+          "result": {
+            "id": "spike-130k-16x8",
+            "solver": "spike",
+            "scene": "bench",
+            "cells": 131072,
+            "grid": {
+              "ni": 512,
+              "nj": 256
+            },
+            "blocks": {
+              "bi": 4,
+              "bj": 3
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1056,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3598,
+                "frameTime": {
+                  "n": 3598,
+                  "mean": 16.675180655919505,
+                  "min": 16.19999999999891,
+                  "max": 33.400000000001455,
+                  "p50": 16.69999999999709,
+                  "p95": 16.80000000000291,
+                  "p99": 16.900000000001455
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 2,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3598,
+                  "mean": 0.7054196895013364,
+                  "min": 0,
+                  "max": 9.200000023840403,
+                  "p50": 0.5000000238433131,
+                  "p95": 2.000000000893851,
+                  "p99": 3.600000017875791
+                },
+                "fps": 59.96666666666667,
+                "iterations": 14228,
+                "itPerSec": 237.13333333333333,
+                "gpuSamples": 3598,
+                "solverMsPerIt": 1.5943561967950661,
+                "solverMsPerItP10": 1.458176,
+                "solverMsPerFrame": {
+                  "n": 3598,
+                  "mean": 6.304752631462197,
+                  "min": 1.31072,
+                  "max": 38.66624,
+                  "p50": 6.22592,
+                  "p95": 7.012352,
+                  "p99": 9.963438079999984
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 237.13333333333333,
+              "fps": 59.96666666666667,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.80000000000291,
+              "frameTimeP99": 16.900000000001455,
+              "longFrames": 2,
+              "callbackDelayP95": 2.000000000893851,
+              "callbackDelayP99": 3.600000017875791,
+              "solverMsPerIt": 1.5943561967950661,
+              "solverMsPerItP10": 1.458176,
+              "solverMsPerFrameP50": 6.22592,
+              "saturatedItPerSec": 627.2124146474761,
+              "budgetItPerSec": 263.42921415193996
+            },
+            "resampleMsP50": 0.131072,
+            "renderGpuMsP50": 3.7355519999999998,
+            "threeComputeGpuMsP50": 0.065536,
+            "sceneTriangles": 571042,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": "65536",
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 0.5854851313197287,
+            "gpuErrors": [],
+            "measured": {
+              "timeOrigin": 1793593615794.7,
+              "from": 10227.3,
+              "to": 70227.3
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 1
+          }
+        },
+        {
+          "rep": 1,
+          "seq": 7,
+          "attempt": 2,
+          "validity": {
+            "valid": false,
+            "reasons": [
+              "page lost focus 1 times (blur) during the run",
+              "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+            ],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.06290192854839796,
+          "result": {
+            "id": "spike-130k-16x8",
+            "solver": "spike",
+            "scene": "bench",
+            "cells": 131072,
+            "grid": {
+              "ni": 512,
+              "nj": 256
+            },
+            "blocks": {
+              "bi": 4,
+              "bj": 3
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1056,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3600,
+                "frameTime": {
+                  "n": 3600,
+                  "mean": 16.66594444444388,
+                  "min": 16.39999999999418,
+                  "max": 17,
+                  "p50": 16.69999999999709,
+                  "p95": 16.799999999999272,
+                  "p99": 16.80000000000291
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 0,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3600,
+                  "mean": 0.20744445629249336,
+                  "min": 0,
+                  "max": 1.2000000119223841,
+                  "p50": 0.20000001192238415,
+                  "p95": 0.4000000000014552,
+                  "p99": 0.5000000179438211
+                },
+                "fps": 60,
+                "iterations": 14399,
+                "itPerSec": 239.98333333333332,
+                "gpuSamples": 3600,
+                "solverMsPerIt": 1.533667109104803,
+                "solverMsPerItP10": 1.39264,
+                "solverMsPerFrame": {
+                  "n": 3600,
+                  "mean": 6.13424241777796,
+                  "min": 4.128768,
+                  "max": 10.223616,
+                  "p50": 6.160384,
+                  "p95": 6.684672,
+                  "p99": 7.012352
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 239.98333333333332,
+              "fps": 60,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.799999999999272,
+              "frameTimeP99": 16.80000000000291,
+              "longFrames": 0,
+              "callbackDelayP95": 0.4000000000014552,
+              "callbackDelayP99": 0.5000000179438211,
+              "solverMsPerIt": 1.533667109104803,
+              "solverMsPerItP10": 1.39264,
+              "solverMsPerFrameP50": 6.160384,
+              "saturatedItPerSec": 652.0319788195086,
+              "budgetItPerSec": 273.85343110419365
+            },
+            "resampleMsP50": 0.131072,
+            "renderGpuMsP50": 3.6700159999999995,
+            "threeComputeGpuMsP50": 0.065536,
+            "sceneTriangles": 571042,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": "65536",
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 0.612186137586832,
+            "gpuErrors": [],
+            "measured": {
+              "timeOrigin": 1793593899657.7,
+              "from": 10218.1,
+              "to": 70218.1
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 1
+          }
+        },
+        {
+          "rep": 2,
+          "seq": 17,
+          "attempt": 2,
+          "validity": {
+            "valid": false,
+            "reasons": [
+              "page lost focus 1 times (blur) during the run",
+              "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+            ],
+            "warnings": []
+          },
+          "cpuLoadDuring": 0.0728739098959412,
+          "result": {
+            "id": "spike-130k-16x8",
+            "solver": "spike",
+            "scene": "bench",
+            "cells": 131072,
+            "grid": {
+              "ni": 512,
+              "nj": 256
+            },
+            "blocks": {
+              "bi": 4,
+              "bj": 3
+            },
+            "tile": {
+              "x": 16,
+              "y": 8
+            },
+            "workgroups": 1056,
+            "iterations": "adaptive",
+            "protocol": {
+              "name": "official",
+              "warmupMs": 10000,
+              "runMs": 60000,
+              "runs": 1
+            },
+            "runs": [
+              {
+                "index": 0,
+                "frames": 3600,
+                "frameTime": {
+                  "n": 3600,
+                  "mean": 16.665944444443873,
+                  "min": 16.39999999999418,
+                  "max": 17.10000000000582,
+                  "p50": 16.69999999999709,
+                  "p95": 16.799999999999272,
+                  "p99": 16.80000000000291
+                },
+                "displayIntervalMs": 16.699999999999818,
+                "longFrames": 0,
+                "throttledMs": 0,
+                "longestThrottledMs": 0,
+                "longestOcclusionMs": 0,
+                "callbackDelay": {
+                  "n": 3600,
+                  "mean": 0.4968611109454792,
+                  "min": 0,
+                  "max": 4.599999999998545,
+                  "p50": 0.30000000596191967,
+                  "p95": 1.7000000059633749,
+                  "p99": 2.301000011682458
+                },
+                "fps": 60,
+                "iterations": 14442,
+                "itPerSec": 240.7,
+                "gpuSamples": 3600,
+                "solverMsPerIt": 1.4763116199972222,
+                "solverMsPerItP10": 1.376256,
+                "solverMsPerFrame": {
+                  "n": 3600,
+                  "mean": 5.922470115555781,
+                  "min": 2.752512,
+                  "max": 27.262976,
+                  "p50": 5.636096,
+                  "p95": 6.946816,
+                  "p99": 7.667712
+                }
+              }
+            ],
+            "aggregate": {
+              "runs": 1,
+              "itPerSec": 240.7,
+              "fps": 60,
+              "frameTimeP50": 16.69999999999709,
+              "frameTimeP95": 16.799999999999272,
+              "frameTimeP99": 16.80000000000291,
+              "longFrames": 0,
+              "callbackDelayP95": 1.7000000059633749,
+              "callbackDelayP99": 2.301000011682458,
+              "solverMsPerIt": 1.4763116199972222,
+              "solverMsPerItP10": 1.376256,
+              "solverMsPerFrameP50": 5.636096,
+              "saturatedItPerSec": 677.3637668732036,
+              "budgetItPerSec": 284.49278208674554
+            },
+            "resampleMsP50": 0.131072,
+            "renderGpuMsP50": 3.7355519999999998,
+            "threeComputeGpuMsP50": 0.065536,
+            "sceneTriangles": 571042,
+            "drawingBuffer": [
+              1920,
+              1080
+            ],
+            "timestampQuantumNs": "65536",
+            "stateFinite": true,
+            "maxAbsGaugePressurePa": 0.5207003312389133,
+            "gpuErrors": [],
+            "measured": {
+              "timeOrigin": 1793594627950.6,
+              "from": 10226,
+              "to": 70226
+            },
+            "pageHiddenMs": 0,
+            "pageBlurs": 1
+          }
+        }
+      ]
+    }
+  ],
+  "rejectedAttempts": [
+    {
+      "rep": 0,
+      "seq": 0,
+      "attempt": 1,
+      "validity": {
+        "valid": false,
+        "reasons": [
+          "page without the focus at the start of the run (document.hasFocus() false: Chrome not in the foreground)",
+          "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+        ],
+        "warnings": []
+      },
+      "cpuLoadDuring": 0.07524029740491915,
+      "result": {
+        "id": "solver-130k-app",
+        "solver": "production",
+        "scene": "app",
+        "cells": 130034,
+        "grid": {
+          "ni": 0,
+          "nj": 0
+        },
+        "blocks": {
+          "bi": 0,
+          "bj": 0
+        },
+        "tile": {
+          "x": 16,
+          "y": 8
+        },
+        "workgroups": 1076,
+        "iterations": "adaptive",
+        "protocol": {
+          "name": "official",
+          "warmupMs": 10000,
+          "runMs": 60000,
+          "runs": 1
+        },
+        "runs": [
+          {
+            "index": 0,
+            "frames": 3414,
+            "frameTime": {
+              "n": 3414,
+              "mean": 17.56909783245459,
+              "min": 16.19999999999709,
+              "max": 33.60000000000582,
+              "p50": 16.69999999999709,
+              "p95": 33.19999999999709,
+              "p99": 33.400000000001455
+            },
+            "displayIntervalMs": 16.699999999999818,
+            "longFrames": 185,
+            "throttledMs": 0,
+            "longestThrottledMs": 0,
+            "longestOcclusionMs": 0,
+            "callbackDelay": {
+              "n": 3414,
+              "mean": 0.999326300411495,
+              "min": 0.0999999910563929,
+              "max": 42.69999999999709,
+              "p50": 0.6999999910622137,
+              "p95": 2.5000000029831426,
+              "p99": 3.500000002595334
+            },
+            "fps": 56.9,
+            "iterations": 7929,
+            "itPerSec": 132.15,
+            "gpuSamples": 3069,
+            "solverMsPerIt": 1.6641382025141644,
+            "solverMsPerItP10": 1.3544106666666667,
+            "solverMsPerFrame": {
+              "n": 3069,
+              "mean": 3.925283951775865,
+              "min": 2.490368,
+              "max": 7.077888,
+              "p50": 4.063232,
+              "p95": 5.308416,
+              "p99": 6.029312
+            }
+          }
+        ],
+        "aggregate": {
+          "runs": 1,
+          "itPerSec": 132.15,
+          "fps": 56.9,
+          "frameTimeP50": 16.69999999999709,
+          "frameTimeP95": 33.19999999999709,
+          "frameTimeP99": 33.400000000001455,
+          "longFrames": 185,
+          "callbackDelayP95": 2.5000000029831426,
+          "callbackDelayP99": 3.500000002595334,
+          "solverMsPerIt": 1.6641382025141644,
+          "solverMsPerItP10": 1.3544106666666667,
+          "solverMsPerFrameP50": 4.063232,
+          "saturatedItPerSec": 600.9116301093319,
+          "budgetItPerSec": 252.38288464591938
+        },
+        "resampleMsP50": 0.589824,
+        "renderGpuMsP50": 6.750208000000001,
+        "threeComputeGpuMsP50": null,
+        "sceneTriangles": 1577784,
+        "drawingBuffer": [
+          1920,
+          1080
+        ],
+        "timestampQuantumNs": null,
+        "stateFinite": true,
+        "maxAbsGaugePressurePa": 10246.392578125,
+        "gpuErrors": [],
+        "nonFiniteResiduals": 0,
+        "solverStatus": {
+          "status": "running",
+          "error": null
+        },
+        "measured": {
+          "timeOrigin": 1793593376671.3,
+          "from": 32277.1,
+          "to": 92277.1
+        },
+        "pageHiddenMs": 0,
+        "pageBlurs": 0
+      }
+    },
+    {
+      "rep": 0,
+      "seq": 2,
+      "attempt": 1,
+      "validity": {
+        "valid": false,
+        "reasons": [
+          "page lost focus 1 times (blur) during the run",
+          "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+        ],
+        "warnings": []
+      },
+      "cpuLoadDuring": 0.05724127055563332,
+      "result": {
+        "id": "spike-130k-16x8",
+        "solver": "spike",
+        "scene": "bench",
+        "cells": 131072,
+        "grid": {
+          "ni": 512,
+          "nj": 256
+        },
+        "blocks": {
+          "bi": 4,
+          "bj": 3
+        },
+        "tile": {
+          "x": 16,
+          "y": 8
+        },
+        "workgroups": 1056,
+        "iterations": "adaptive",
+        "protocol": {
+          "name": "official",
+          "warmupMs": 10000,
+          "runMs": 60000,
+          "runs": 1
+        },
+        "runs": [
+          {
+            "index": 0,
+            "frames": 3600,
+            "frameTime": {
+              "n": 3600,
+              "mean": 16.66591666666612,
+              "min": 16.400000000001455,
+              "max": 16.900000000001455,
+              "p50": 16.69999999999709,
+              "p95": 16.799999999999272,
+              "p99": 16.80000000000291
+            },
+            "displayIntervalMs": 16.699999999999818,
+            "longFrames": 0,
+            "throttledMs": 0,
+            "longestThrottledMs": 0,
+            "longestOcclusionMs": 0,
+            "callbackDelay": {
+              "n": 3600,
+              "mean": 0.5002500120003818,
+              "min": 0.09999999999854481,
+              "max": 3.8000000238389475,
+              "p50": 0.3999999999996362,
+              "p95": 1.7000000178813934,
+              "p99": 2.3000000000029104
+            },
+            "fps": 60,
+            "iterations": 14580,
+            "itPerSec": 243,
+            "gpuSamples": 3600,
+            "solverMsPerIt": 1.459272761591206,
+            "solverMsPerItP10": 1.359872,
+            "solverMsPerFrame": {
+              "n": 3600,
+              "mean": 5.910054684444694,
+              "min": 4.128768,
+              "max": 12.648448,
+              "p50": 5.767168,
+              "p95": 6.819020799999982,
+              "p99": 7.602176
+            }
+          }
+        ],
+        "aggregate": {
+          "runs": 1,
+          "itPerSec": 243,
+          "fps": 60,
+          "frameTimeP50": 16.69999999999709,
+          "frameTimeP95": 16.799999999999272,
+          "frameTimeP99": 16.80000000000291,
+          "longFrames": 0,
+          "callbackDelayP95": 1.7000000178813934,
+          "callbackDelayP99": 2.3000000000029104,
+          "solverMsPerIt": 1.459272761591206,
+          "solverMsPerItP10": 1.359872,
+          "solverMsPerFrameP50": 5.767168,
+          "saturatedItPerSec": 685.2728470786981,
+          "budgetItPerSec": 287.8145957730532
+        },
+        "resampleMsP50": 0.131072,
+        "renderGpuMsP50": 3.735551999999999,
+        "threeComputeGpuMsP50": 0.065536,
+        "sceneTriangles": 571042,
+        "drawingBuffer": [
+          1920,
+          1080
+        ],
+        "timestampQuantumNs": "65536",
+        "stateFinite": true,
+        "maxAbsGaugePressurePa": 0.46484503864485305,
+        "gpuErrors": [],
+        "measured": {
+          "timeOrigin": 1793593545210.9,
+          "from": 10247.8,
+          "to": 70247.8
+        },
+        "pageHiddenMs": 0,
+        "pageBlurs": 1
+      }
+    },
+    {
+      "rep": 0,
+      "seq": 4,
+      "attempt": 1,
+      "validity": {
+        "valid": false,
+        "reasons": [
+          "page lost focus 1 times (blur) during the run",
+          "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+        ],
+        "warnings": []
+      },
+      "cpuLoadDuring": 0.06352265331204116,
+      "result": {
+        "id": "solver-130k-bench",
+        "solver": "production",
+        "scene": "bench",
+        "cells": 130034,
+        "grid": {
+          "ni": 0,
+          "nj": 0
+        },
+        "blocks": {
+          "bi": 0,
+          "bj": 0
+        },
+        "tile": {
+          "x": 16,
+          "y": 8
+        },
+        "workgroups": 1076,
+        "iterations": "adaptive",
+        "protocol": {
+          "name": "official",
+          "warmupMs": 10000,
+          "runMs": 60000,
+          "runs": 1
+        },
+        "runs": [
+          {
+            "index": 0,
+            "frames": 3600,
+            "frameTime": {
+              "n": 3600,
+              "mean": 16.665916666666178,
+              "min": 16.39999999999418,
+              "max": 17.099999999998545,
+              "p50": 16.69999999999709,
+              "p95": 16.799999999999272,
+              "p99": 16.80000000000291
+            },
+            "displayIntervalMs": 16.699999999999818,
+            "longFrames": 0,
+            "throttledMs": 0,
+            "longestThrottledMs": 0,
+            "longestOcclusionMs": 0,
+            "callbackDelay": {
+              "n": 3600,
+              "mean": 0.20530554964141426,
+              "min": -1.788430381566286e-8,
+              "max": 3.499999982115696,
+              "p50": 0.19999999403808033,
+              "p95": 0.30000000596191967,
+              "p99": 0.4999999821156962
+            },
+            "fps": 60,
+            "iterations": 5635,
+            "itPerSec": 93.91666666666667,
+            "gpuSamples": 3600,
+            "solverMsPerIt": 3.1439253238687535,
+            "solverMsPerItP10": 2.719744,
+            "solverMsPerFrame": {
+              "n": 3600,
+              "mean": 4.921116444444636,
+              "min": 2.490368,
+              "max": 11.599872,
+              "p50": 5.57056,
+              "p95": 6.422528,
+              "p99": 7.077888
+            }
+          }
+        ],
+        "aggregate": {
+          "runs": 1,
+          "itPerSec": 93.91666666666667,
+          "fps": 60,
+          "frameTimeP50": 16.69999999999709,
+          "frameTimeP95": 16.799999999999272,
+          "frameTimeP99": 16.80000000000291,
+          "longFrames": 0,
+          "callbackDelayP95": 0.30000000596191967,
+          "callbackDelayP99": 0.4999999821156962,
+          "solverMsPerIt": 3.1439253238687535,
+          "solverMsPerItP10": 2.719744,
+          "solverMsPerFrameP50": 5.57056,
+          "saturatedItPerSec": 318.07371263177816,
+          "budgetItPerSec": 133.59095930534684
+        },
+        "resampleMsP50": 0.720896,
+        "renderGpuMsP50": 3.8010879999999996,
+        "threeComputeGpuMsP50": 0.065536,
+        "sceneTriangles": 571042,
+        "drawingBuffer": [
+          1920,
+          1080
+        ],
+        "timestampQuantumNs": null,
+        "stateFinite": true,
+        "maxAbsGaugePressurePa": 11061.0732421875,
+        "gpuErrors": [],
+        "nonFiniteResiduals": 0,
+        "solverStatus": {
+          "status": "running",
+          "error": null
+        },
+        "measured": {
+          "timeOrigin": 1793593686414,
+          "from": 10988.1,
+          "to": 70988.1
+        },
+        "pageHiddenMs": 0,
+        "pageBlurs": 1
+      }
+    },
+    {
+      "rep": 1,
+      "seq": 6,
+      "attempt": 1,
+      "validity": {
+        "valid": false,
+        "reasons": [
+          "page lost focus 1 times (blur) during the run",
+          "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+        ],
+        "warnings": []
+      },
+      "cpuLoadDuring": 0.057836742717389186,
+      "result": {
+        "id": "spike-130k-16x8",
+        "solver": "spike",
+        "scene": "bench",
+        "cells": 131072,
+        "grid": {
+          "ni": 512,
+          "nj": 256
+        },
+        "blocks": {
+          "bi": 4,
+          "bj": 3
+        },
+        "tile": {
+          "x": 16,
+          "y": 8
+        },
+        "workgroups": 1056,
+        "iterations": "adaptive",
+        "protocol": {
+          "name": "official",
+          "warmupMs": 10000,
+          "runMs": 60000,
+          "runs": 1
+        },
+        "runs": [
+          {
+            "index": 0,
+            "frames": 3600,
+            "frameTime": {
+              "n": 3600,
+              "mean": 16.665916666666106,
+              "min": 15.600000000000364,
+              "max": 17.700000000000728,
+              "p50": 16.69999999999709,
+              "p95": 16.799999999999272,
+              "p99": 16.80000000000291
+            },
+            "displayIntervalMs": 16.699999999999818,
+            "longFrames": 0,
+            "throttledMs": 0,
+            "longestThrottledMs": 0,
+            "longestOcclusionMs": 0,
+            "callbackDelay": {
+              "n": 3600,
+              "mean": 0.6109166666120357,
+              "min": 0.09999998808052624,
+              "max": 25.00000000595901,
+              "p50": 0.3999999940424459,
+              "p95": 1.7999999943382137,
+              "p99": 2.5999999941587157
+            },
+            "fps": 60,
+            "iterations": 14981,
+            "itPerSec": 249.68333333333334,
+            "gpuSamples": 3600,
+            "solverMsPerIt": 1.4327934316801056,
+            "solverMsPerItP10": 1.359872,
+            "solverMsPerFrame": {
+              "n": 3600,
+              "mean": 5.9624106666669,
+              "min": 5.373952,
+              "max": 9.764864,
+              "p50": 5.701632,
+              "p95": 7.077888,
+              "p99": 7.602176
+            }
+          }
+        ],
+        "aggregate": {
+          "runs": 1,
+          "itPerSec": 249.68333333333334,
+          "fps": 60,
+          "frameTimeP50": 16.69999999999709,
+          "frameTimeP95": 16.799999999999272,
+          "frameTimeP99": 16.80000000000291,
+          "longFrames": 0,
+          "callbackDelayP95": 1.7999999943382137,
+          "callbackDelayP99": 2.5999999941587157,
+          "solverMsPerIt": 1.4327934316801056,
+          "solverMsPerItP10": 1.359872,
+          "solverMsPerFrameP50": 5.701632,
+          "saturatedItPerSec": 697.9373145418398,
+          "budgetItPerSec": 293.13367210757275
+        },
+        "resampleMsP50": 0.131072,
+        "renderGpuMsP50": 3.6700159999999995,
+        "threeComputeGpuMsP50": 0.065536,
+        "sceneTriangles": 571042,
+        "drawingBuffer": [
+          1920,
+          1080
+        ],
+        "timestampQuantumNs": "65536",
+        "stateFinite": true,
+        "maxAbsGaugePressurePa": 0.5808615954592824,
+        "gpuErrors": [],
+        "measured": {
+          "timeOrigin": 1793593829097.7,
+          "from": 10231.4,
+          "to": 70231.4
+        },
+        "pageHiddenMs": 0,
+        "pageBlurs": 1
+      }
+    },
+    {
+      "rep": 1,
+      "seq": 8,
+      "attempt": 1,
+      "validity": {
+        "valid": false,
+        "reasons": [
+          "page lost focus 1 times (blur) during the run",
+          "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+        ],
+        "warnings": []
+      },
+      "cpuLoadDuring": 0.06689062302184585,
+      "result": {
+        "id": "solver-130k-bench",
+        "solver": "production",
+        "scene": "bench",
+        "cells": 130034,
+        "grid": {
+          "ni": 0,
+          "nj": 0
+        },
+        "blocks": {
+          "bi": 0,
+          "bj": 0
+        },
+        "tile": {
+          "x": 16,
+          "y": 8
+        },
+        "workgroups": 1076,
+        "iterations": "adaptive",
+        "protocol": {
+          "name": "official",
+          "warmupMs": 10000,
+          "runMs": 60000,
+          "runs": 1
+        },
+        "runs": [
+          {
+            "index": 0,
+            "frames": 3594,
+            "frameTime": {
+              "n": 3594,
+              "mean": 16.693711741791493,
+              "min": 16.39999999999418,
+              "max": 33.400000000001455,
+              "p50": 16.69999999999709,
+              "p95": 16.80000000000109,
+              "p99": 16.80000000000291
+            },
+            "displayIntervalMs": 16.699999999999818,
+            "longFrames": 6,
+            "throttledMs": 0,
+            "longestThrottledMs": 0,
+            "longestOcclusionMs": 0,
+            "callbackDelay": {
+              "n": 3594,
+              "mean": 0.7009460273688604,
+              "min": 0,
+              "max": 29.400000005960464,
+              "p50": 0.4999999940409907,
+              "p95": 1.900000017878483,
+              "p99": 3.1070000119203707
+            },
+            "fps": 59.9,
+            "iterations": 5824,
+            "itPerSec": 97.06666666666666,
+            "gpuSamples": 3594,
+            "solverMsPerIt": 2.9404441318681265,
+            "solverMsPerItP10": 2.62144,
+            "solverMsPerFrame": {
+              "n": 3594,
+              "mean": 4.764926717863125,
+              "min": 2.555904,
+              "max": 10.15808,
+              "p50": 5.24288,
+              "p95": 6.094848,
+              "p99": 6.684672
+            }
+          }
+        ],
+        "aggregate": {
+          "runs": 1,
+          "itPerSec": 97.06666666666666,
+          "fps": 59.9,
+          "frameTimeP50": 16.69999999999709,
+          "frameTimeP95": 16.80000000000109,
+          "frameTimeP99": 16.80000000000291,
+          "longFrames": 6,
+          "callbackDelayP95": 1.900000017878483,
+          "callbackDelayP99": 3.1070000119203707,
+          "solverMsPerIt": 2.9404441318681265,
+          "solverMsPerItP10": 2.62144,
+          "solverMsPerFrameP50": 5.24288,
+          "saturatedItPerSec": 340.0846794408159,
+          "budgetItPerSec": 142.83556536514268
+        },
+        "resampleMsP50": 0.720896,
+        "renderGpuMsP50": 3.8010879999999996,
+        "threeComputeGpuMsP50": 0.065536,
+        "sceneTriangles": 571042,
+        "drawingBuffer": [
+          1920,
+          1080
+        ],
+        "timestampQuantumNs": null,
+        "stateFinite": true,
+        "maxAbsGaugePressurePa": 3749.85009765625,
+        "gpuErrors": [],
+        "nonFiniteResiduals": 0,
+        "solverStatus": {
+          "status": "running",
+          "error": null
+        },
+        "measured": {
+          "timeOrigin": 1793593970202.7,
+          "from": 10736.7,
+          "to": 70736.7
+        },
+        "pageHiddenMs": 0,
+        "pageBlurs": 1
+      }
+    },
+    {
+      "rep": 1,
+      "seq": 10,
+      "attempt": 1,
+      "validity": {
+        "valid": false,
+        "reasons": [
+          "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+        ],
+        "warnings": []
+      },
+      "cpuLoadDuring": 0.10761642892761074,
+      "result": {
+        "id": "solver-130k-app",
+        "solver": "production",
+        "scene": "app",
+        "cells": 130034,
+        "grid": {
+          "ni": 0,
+          "nj": 0
+        },
+        "blocks": {
+          "bi": 0,
+          "bj": 0
+        },
+        "tile": {
+          "x": 16,
+          "y": 8
+        },
+        "workgroups": 1076,
+        "iterations": "adaptive",
+        "protocol": {
+          "name": "official",
+          "warmupMs": 10000,
+          "runMs": 60000,
+          "runs": 1
+        },
+        "runs": [
+          {
+            "index": 0,
+            "frames": 3410,
+            "frameTime": {
+              "n": 3410,
+              "mean": 17.589618768328148,
+              "min": 15.599999999998545,
+              "max": 50,
+              "p50": 16.69999999999709,
+              "p95": 33.20000000000073,
+              "p99": 33.400000000001455
+            },
+            "displayIntervalMs": 16.699999999999818,
+            "longFrames": 187,
+            "throttledMs": 100,
+            "longestThrottledMs": 50,
+            "longestOcclusionMs": 0,
+            "callbackDelay": {
+              "n": 3410,
+              "mean": 0.9524633431154506,
+              "min": 0.10000001192383934,
+              "max": 13.199999988079071,
+              "p50": 0.6000000119202014,
+              "p95": 2.6999999940380803,
+              "p99": 3.300000011920929
+            },
+            "fps": 56.833333333333336,
+            "iterations": 7278,
+            "itPerSec": 121.3,
+            "gpuSamples": 3037,
+            "solverMsPerIt": 1.740059547527943,
+            "solverMsPerItP10": 1.409024,
+            "solverMsPerFrame": {
+              "n": 3037,
+              "mean": 3.743104716496588,
+              "min": 1.31072,
+              "max": 12.713984,
+              "p50": 3.670016,
+              "p95": 5.308416,
+              "p99": 6.029312
+            }
+          }
+        ],
+        "aggregate": {
+          "runs": 1,
+          "itPerSec": 121.3,
+          "fps": 56.833333333333336,
+          "frameTimeP50": 16.69999999999709,
+          "frameTimeP95": 33.20000000000073,
+          "frameTimeP99": 33.400000000001455,
+          "longFrames": 187,
+          "callbackDelayP95": 2.6999999940380803,
+          "callbackDelayP99": 3.300000011920929,
+          "solverMsPerIt": 1.740059547527943,
+          "solverMsPerItP10": 1.409024,
+          "solverMsPerFrameP50": 3.670016,
+          "saturatedItPerSec": 574.6929761229572,
+          "budgetItPerSec": 241.37104997164207
+        },
+        "resampleMsP50": 0.589824,
+        "renderGpuMsP50": 7.20896,
+        "threeComputeGpuMsP50": null,
+        "sceneTriangles": 1577784,
+        "drawingBuffer": [
+          1920,
+          1080
+        ],
+        "timestampQuantumNs": null,
+        "stateFinite": true,
+        "maxAbsGaugePressurePa": 9439.486328125,
+        "gpuErrors": [],
+        "nonFiniteResiduals": 0,
+        "solverStatus": {
+          "status": "running",
+          "error": null
+        },
+        "measured": {
+          "timeOrigin": 1793594112360.5,
+          "from": 15239.1,
+          "to": 75239.1
+        },
+        "pageHiddenMs": 0,
+        "pageBlurs": 0
+      }
+    },
+    {
+      "rep": 2,
+      "seq": 12,
+      "attempt": 1,
+      "validity": {
+        "valid": false,
+        "reasons": [
+          "page lost focus 1 times (blur) during the run",
+          "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+        ],
+        "warnings": []
+      },
+      "cpuLoadDuring": 0.06793415195054539,
+      "result": {
+        "id": "solver-130k-bench",
+        "solver": "production",
+        "scene": "bench",
+        "cells": 130034,
+        "grid": {
+          "ni": 0,
+          "nj": 0
+        },
+        "blocks": {
+          "bi": 0,
+          "bj": 0
+        },
+        "tile": {
+          "x": 16,
+          "y": 8
+        },
+        "workgroups": 1076,
+        "iterations": "adaptive",
+        "protocol": {
+          "name": "official",
+          "warmupMs": 10000,
+          "runMs": 60000,
+          "runs": 1
+        },
+        "runs": [
+          {
+            "index": 0,
+            "frames": 3598,
+            "frameTime": {
+              "n": 3598,
+              "mean": 16.675180655919405,
+              "min": 16.19999999999709,
+              "max": 33.299999999995634,
+              "p50": 16.69999999999709,
+              "p95": 16.80000000000291,
+              "p99": 16.803000000002623
+            },
+            "displayIntervalMs": 16.699999999999818,
+            "longFrames": 2,
+            "throttledMs": 0,
+            "longestThrottledMs": 0,
+            "longestOcclusionMs": 0,
+            "callbackDelay": {
+              "n": 3598,
+              "mean": 0.5834630352331984,
+              "min": -1.1921656550839543e-8,
+              "max": 5.30000000000291,
+              "p50": 0.3999999940424459,
+              "p95": 2.1999999940380803,
+              "p99": 3.6000000119238393
+            },
+            "fps": 59.96666666666667,
+            "iterations": 4438,
+            "itPerSec": 73.96666666666667,
+            "gpuSamples": 3598,
+            "solverMsPerIt": 3.398051936908513,
+            "solverMsPerItP10": 2.752512,
+            "solverMsPerFrame": {
+              "n": 3598,
+              "mean": 4.1913714552530195,
+              "min": 2.490368,
+              "max": 12.255232,
+              "p50": 3.670016,
+              "p95": 6.22592,
+              "p99": 6.946816
+            }
+          }
+        ],
+        "aggregate": {
+          "runs": 1,
+          "itPerSec": 73.96666666666667,
+          "fps": 59.96666666666667,
+          "frameTimeP50": 16.69999999999709,
+          "frameTimeP95": 16.80000000000291,
+          "frameTimeP99": 16.803000000002623,
+          "longFrames": 2,
+          "callbackDelayP95": 2.1999999940380803,
+          "callbackDelayP99": 3.6000000119238393,
+          "solverMsPerIt": 3.398051936908513,
+          "solverMsPerItP10": 2.752512,
+          "solverMsPerFrameP50": 3.670016,
+          "saturatedItPerSec": 294.2862612364254,
+          "budgetItPerSec": 123.60022971929867
+        },
+        "resampleMsP50": 0.720896,
+        "renderGpuMsP50": 3.932159999999999,
+        "threeComputeGpuMsP50": 0.065536,
+        "sceneTriangles": 571042,
+        "drawingBuffer": [
+          1920,
+          1080
+        ],
+        "timestampQuantumNs": null,
+        "stateFinite": true,
+        "maxAbsGaugePressurePa": 9639.947265625,
+        "gpuErrors": [],
+        "nonFiniteResiduals": 0,
+        "solverStatus": {
+          "status": "running",
+          "error": null
+        },
+        "measured": {
+          "timeOrigin": 1793594263683.1,
+          "from": 10759.7,
+          "to": 70759.7
+        },
+        "pageHiddenMs": 0,
+        "pageBlurs": 1
+      }
+    },
+    {
+      "rep": 2,
+      "seq": 14,
+      "attempt": 1,
+      "validity": {
+        "valid": false,
+        "reasons": [
+          "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+        ],
+        "warnings": []
+      },
+      "cpuLoadDuring": 0.0647435666124812,
+      "result": {
+        "id": "solver-130k-app",
+        "solver": "production",
+        "scene": "app",
+        "cells": 130034,
+        "grid": {
+          "ni": 0,
+          "nj": 0
+        },
+        "blocks": {
+          "bi": 0,
+          "bj": 0
+        },
+        "tile": {
+          "x": 16,
+          "y": 8
+        },
+        "workgroups": 1076,
+        "iterations": "adaptive",
+        "protocol": {
+          "name": "official",
+          "warmupMs": 10000,
+          "runMs": 60000,
+          "runs": 1
+        },
+        "runs": [
+          {
+            "index": 0,
+            "frames": 3360,
+            "frameTime": {
+              "n": 3360,
+              "mean": 17.8612499999998,
+              "min": 15.899999999997817,
+              "max": 33.69999999999709,
+              "p50": 16.69999999999709,
+              "p95": 33.29999999999582,
+              "p99": 33.400000000001455
+            },
+            "displayIntervalMs": 16.699999999999818,
+            "longFrames": 241,
+            "throttledMs": 0,
+            "longestThrottledMs": 0,
+            "longestOcclusionMs": 0,
+            "callbackDelay": {
+              "n": 3360,
+              "mean": 1.0202976249885816,
+              "min": 0.10000001192020136,
+              "max": 7.200000005959737,
+              "p50": 0.7000000119223841,
+              "p95": 2.500000017884304,
+              "p99": 3.041000008105788
+            },
+            "fps": 56,
+            "iterations": 6971,
+            "itPerSec": 116.18333333333334,
+            "gpuSamples": 2934,
+            "solverMsPerIt": 1.7960976734760723,
+            "solverMsPerItP10": 1.4199466666666665,
+            "solverMsPerFrame": {
+              "n": 2934,
+              "mean": 3.745849237900475,
+              "min": 2.490368,
+              "max": 7.667712,
+              "p50": 3.60448,
+              "p95": 5.505024,
+              "p99": 6.094848
+            }
+          }
+        ],
+        "aggregate": {
+          "runs": 1,
+          "itPerSec": 116.18333333333334,
+          "fps": 56,
+          "frameTimeP50": 16.69999999999709,
+          "frameTimeP95": 33.29999999999582,
+          "frameTimeP99": 33.400000000001455,
+          "longFrames": 241,
+          "callbackDelayP95": 2.500000017884304,
+          "callbackDelayP99": 3.041000008105788,
+          "solverMsPerIt": 1.7960976734760723,
+          "solverMsPerItP10": 1.4199466666666665,
+          "solverMsPerFrameP50": 3.60448,
+          "saturatedItPerSec": 556.7625941325635,
+          "budgetItPerSec": 233.84028953567667
+        },
+        "resampleMsP50": 0.589824,
+        "renderGpuMsP50": 7.7987839999999995,
+        "threeComputeGpuMsP50": null,
+        "sceneTriangles": 1577784,
+        "drawingBuffer": [
+          1920,
+          1080
+        ],
+        "timestampQuantumNs": null,
+        "stateFinite": true,
+        "maxAbsGaugePressurePa": 12256.41015625,
+        "gpuErrors": [],
+        "nonFiniteResiduals": 0,
+        "solverStatus": {
+          "status": "running",
+          "error": null
+        },
+        "measured": {
+          "timeOrigin": 1793594405899.7,
+          "from": 15253.2,
+          "to": 75253.2
+        },
+        "pageHiddenMs": 0,
+        "pageBlurs": 0
+      }
+    },
+    {
+      "rep": 2,
+      "seq": 16,
+      "attempt": 1,
+      "validity": {
+        "valid": false,
+        "reasons": [
+          "page lost focus 1 times (blur) during the run",
+          "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
+        ],
+        "warnings": []
+      },
+      "cpuLoadDuring": 0.059439813548535,
+      "result": {
+        "id": "spike-130k-16x8",
+        "solver": "spike",
+        "scene": "bench",
+        "cells": 131072,
+        "grid": {
+          "ni": 512,
+          "nj": 256
+        },
+        "blocks": {
+          "bi": 4,
+          "bj": 3
+        },
+        "tile": {
+          "x": 16,
+          "y": 8
+        },
+        "workgroups": 1056,
+        "iterations": "adaptive",
+        "protocol": {
+          "name": "official",
+          "warmupMs": 10000,
+          "runMs": 60000,
+          "runs": 1
+        },
+        "runs": [
+          {
+            "index": 0,
+            "frames": 3600,
+            "frameTime": {
+              "n": 3600,
+              "mean": 16.66591666666611,
+              "min": 16.30000000000291,
+              "max": 17,
+              "p50": 16.69999999999709,
+              "p95": 16.799999999999272,
+              "p99": 16.80000000000291
+            },
+            "displayIntervalMs": 16.699999999999818,
+            "longFrames": 0,
+            "throttledMs": 0,
+            "longestThrottledMs": 0,
+            "longestOcclusionMs": 0,
+            "callbackDelay": {
+              "n": 3600,
+              "mean": 0.19102777784399172,
+              "min": -1.1921656550839543e-8,
+              "max": 11.199999988079071,
+              "p50": 0.19999999403808033,
+              "p95": 0.30000001192092896,
+              "p99": 0.49999998814157154
+            },
+            "fps": 60,
+            "iterations": 14381,
+            "itPerSec": 239.68333333333334,
+            "gpuSamples": 3600,
+            "solverMsPerIt": 1.5471162494958854,
+            "solverMsPerItP10": 1.458176,
+            "solverMsPerFrame": {
+              "n": 3600,
+              "mean": 6.180299662222444,
+              "min": 4.128768,
+              "max": 14.680064,
+              "p50": 6.160384,
+              "p95": 6.750208,
+              "p99": 7.20896
+            }
+          }
+        ],
+        "aggregate": {
+          "runs": 1,
+          "itPerSec": 239.68333333333334,
+          "fps": 60,
+          "frameTimeP50": 16.69999999999709,
+          "frameTimeP95": 16.799999999999272,
+          "frameTimeP99": 16.80000000000291,
+          "longFrames": 0,
+          "callbackDelayP95": 0.30000001192092896,
+          "callbackDelayP99": 0.49999998814157154,
+          "solverMsPerIt": 1.5471162494958854,
+          "solverMsPerItP10": 1.458176,
+          "solverMsPerFrameP50": 6.160384,
+          "saturatedItPerSec": 646.3638400319571,
+          "budgetItPerSec": 271.472812813422
+        },
+        "resampleMsP50": 0.131072,
+        "renderGpuMsP50": 3.7355519999999993,
+        "threeComputeGpuMsP50": 0.065536,
+        "sceneTriangles": 571042,
+        "drawingBuffer": [
+          1920,
+          1080
+        ],
+        "timestampQuantumNs": "65536",
+        "stateFinite": true,
+        "maxAbsGaugePressurePa": 0.6152943127526669,
+        "gpuErrors": [],
+        "measured": {
+          "timeOrigin": 1793594557345.5,
+          "from": 10250.8,
+          "to": 70250.8
+        },
+        "pageHiddenMs": 0,
+        "pageBlurs": 1
+      }
+    }
+  ],
+  "workerProbe": null,
+  "consoleErrors": [
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: pass timer: unclassified pass \"\" (0.459 ms)",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: pass timer: unclassified pass \"\" (0.393 ms)",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: pass timer: unclassified pass \"\" (0.393 ms)",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: pass timer: unclassified pass \"\" (0.459 ms)",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: pass timer: unclassified pass \"\" (0.393 ms)",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: pass timer: unclassified pass \"\" (0.393 ms)",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127",
+    "warning: The powerPreference option is currently ignored when calling requestAdapter() on Windows. See https://crbug.com/369219127"
+  ]
+}

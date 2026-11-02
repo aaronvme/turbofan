@@ -3576,6 +3576,55 @@ None.
   4. **The screenshots are re-shot on merged main at the display's own DPR (1.5),** in the merge gate's browser run with the display held awake. The builder's ratio-1 set is not committed.
   5. **Every detached browser run holds the display awake** with `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)`, for builders, critics and the orchestrator alike. It changes no setting and ends with the process. A slept display drops Chrome to DPR 1 and slows it about 10×, which voided critic 19's first browser run.
   - **Next:** push main once the gates on 2e262af are green. Then the quiet window's official set on that main: U4 alone with the quiet flag, P4flow after a warm load, and P1 for the field health (D4-100's re-measures).
+- **D4-102 (the second W2 official window, 2026-11-01 23:05-23:45 EST, on main c64da3c): D4-100's re-measures.** Conditions: AC 100 %, Balanced, no agents and no other test processes, display held awake, Do Not Disturb. Records as written: `docs/bench/p1-2026-11-01-2322-official.json`, `docs/look-dev/timings-flow.json`.
+  - **U4 PASSES officially on AC, quiet.** A cold switch into Data showed in 1.551 / 1.523 / 1.801 s at light / 8.4 / 11.2 ms (≤ 2 s), with the longest gap 295-431 ms (≤ 1000). U2: Schlieren 56, Cutaway 98, a switch while warming 83 ms (≤ 250). U3: boot 3.66-4.65 s (≤ 5). So U1-U5 all hold on the merged app.
+  - **W2S-B1 is fixed in the app scene too.** Every P4flow run drew the uncoupled solver field at its start and end, about 9,000 iterations per back-to-back run, with no divergence.
+  - **P4flow and the P1 rerun are INVALID for focus (D4-73):** the first run blurred at 61 s, and Chrome then never held the foreground (nobody clicked into the harness's window).
+    - P4flow, indicative only: Realistic (haze, no tracers) 6.75 ms back to back / 7.70 vsync, Cutaway with tracers 7.75 / 8.25; flow passes 0.34-0.58 ms; solver 3.5-4.3 ms at 2 it/frame.
+    - P4flow is a reported row (P4 ≤ 8 ms gates the flow-off default, which passed officially at 6.66 ms).
+    - P1 of record stays 180 it/s (D4-100, 01:27).
+    - A valid P4flow record is owed to the next quiet window with someone present to click into the capture's Chrome once.
+  - **Lesson:** during official runs the orchestrator spawns no console processes, which may take focus, and the D0-1 checklist's single click into Chrome needs a person present.
+
+## W2 COMPLETE (2026-11-01, main c64da3c and this commit, pushed)
+
+**Built, reviewed (critic passes 9-19, the santa-loop on the solver) and merged:**
+- **The f64 reference solver** with the CPU ladder (L1-L9), and **the WGSL GPU solver** (3 dispatches per iteration, D4-44's β mirror, D4-89's M_cut 0.02 mirror). D4-63 (growth from rest) is closed on the CPU and the GPU, and decays fast since the outflow backflow fix (D4-101).
+- **W2S-B1** (a NaN at 6756 iterations from a recycled outflow backflow) is fixed; the app's own rest start was always an exact zero.
+- **Look-dev 4-5** with the LOD (P4).
+- **Flow visuals:** particles, cut plane, schlieren, heat haze, glow, legend, the coupling state with a visible MOCK fallback (D4-82), and the Data plane's ambient floor (D4-86).
+- **The worker app shell and the UI on the real cycle model:**
+  - the engine display and the throttle quadrant;
+  - the fan and HPC maps with "below map" (D4-87), T-s and the station strip;
+  - callouts at their drawn size in axial rows;
+  - the progressive warm-up (D4-91/D4-95/D4-101);
+  - faults on screen, diagnostics, and What's simulated;
+  - the RTL and browser suites with a layout bar.
+- **The bounded held retry** (P5, P5b; W2H-B1 fixed).
+- **The cycle and bench follow-ups.**
+
+**Official numbers (D0-1):**
+
+| Row | Result |
+|---|---|
+| P4 | 6.66 ms back to back (≤ 8) |
+| P1 | 180 it/s at 130k in the app scene (≥ 150) |
+| U4 | 1.52-1.80 s (≤ 2) |
+| U2 | 56-98 ms (≤ 250) |
+| U3 | 3.7-4.7 s (≤ 5) |
+
+**Gates on main:** 2395 unit tests passed + 11 expected fail (lines 99.55 %), mesh 29, gpu 72, gpu-ladder 15 + 1, browser 55.
+
+**Open, carried past W2:**
+- A valid P4flow record (needs a person to click into Chrome in a quiet window).
+- **W2S-I1:** a hot gas pocket goes non-finite at M_cut 0.02 + CFL 0.8. It's pre-registered, and a scheme round before W3's coupling fixes it.
+- W2S-N1..N3: the backflow at p_out ≠ p∞, §5's wording, the flight totals.
+- The part-power backlog: W2H-I1/I4/I5 and the held spools bounded from below.
+- W2A-N32/N33.
+- Camera easing (W4).
+- The cycle mutation backlog (D3-13).
+
+**W3 (coupling: body forces, calibration, plume ν_t, the bake, physical time; audio; scenarios) waits for Aaron's review and go,** as W1 → W2 did (D3-2).
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 

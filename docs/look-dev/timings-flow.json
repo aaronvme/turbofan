@@ -1,5 +1,5 @@
 {
-  "date": "2026-11-01T05:27:47.481Z",
+  "date": "2026-11-02T04:22:00.576Z",
   "viewport": "1920x1080 DPR 1",
   "quality": "high",
   "protocol": {
@@ -29,7 +29,7 @@
       ]
     ]
   },
-  "displayIntervalMs": 16.600000001490116,
+  "displayIntervalMs": 16.69999999552965,
   "note": "official only under the D0-1 protocol with the OS power source on AC throughout, nothing else running, Chrome in the foreground (D0-1, D4-42); otherwise indicative",
   "powerSourceAcThroughout": true,
   "conditions": {
@@ -37,7 +37,7 @@
       "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
       "battery": {
         "charging": true,
-        "level": 0.87
+        "level": 1
       },
       "adapter": {
         "vendor": "intel",
@@ -49,14 +49,14 @@
       "chrome": "156.0.8078.74",
       "powerSource": "ac",
       "powerPlan": "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)",
-      "cpuLoadPercent": "62",
-      "at": "2026-11-01T05:13:25.856Z"
+      "cpuLoadPercent": "19",
+      "at": "2026-11-02T04:07:39.721Z"
     },
     "end": {
       "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
       "battery": {
         "charging": true,
-        "level": 0.94
+        "level": 1
       },
       "adapter": {
         "vendor": "intel",
@@ -68,8 +68,8 @@
       "chrome": "156.0.8078.74",
       "powerSource": "ac",
       "powerPlan": "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)",
-      "cpuLoadPercent": "0",
-      "at": "2026-11-01T05:27:47.480Z"
+      "cpuLoadPercent": "3",
+      "at": "2026-11-02T04:22:00.572Z"
     }
   },
   "results": {
@@ -146,40 +146,40 @@
         {
           "valid": false,
           "reasons": [
-            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
-            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+            "page without the focus at the start of the run (document.hasFocus() false: Chrome not in the foreground)",
+            "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
           ],
           "warnings": []
         },
         {
           "valid": false,
           "reasons": [
-            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
-            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+            "page without the focus at the start of the run (document.hasFocus() false: Chrome not in the foreground)",
+            "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
           ],
           "warnings": []
         },
         {
           "valid": false,
           "reasons": [
-            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
-            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+            "page without the focus at the start of the run (document.hasFocus() false: Chrome not in the foreground)",
+            "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
           ],
           "warnings": []
         }
       ],
       "load": [
         {
-          "framesPerS": 60.0032659372755,
-          "gpuBusy": 0.5599717625911405
+          "framesPerS": 59.68627215740676,
+          "gpuBusy": 0.4697549655079578
         },
         {
-          "framesPerS": 60.00276602587216,
-          "gpuBusy": 0.575780112102251
+          "framesPerS": 59.836835896099885,
+          "gpuBusy": 0.4715814083171779
         },
         {
-          "framesPerS": 59.986203173273125,
-          "gpuBusy": 0.5612429058076068
+          "framesPerS": 59.70432777225447,
+          "gpuBusy": 0.46880085683192635
         }
       ],
       "renderScale": [1, 1, 1],
@@ -197,62 +197,62 @@
         "perRun": [
           {
             "flowRender": {
-              "frames": 3605,
-              "p10": 0.6252772,
-              "p50": 0.745933,
-              "p90": 0.7912762000000001
+              "frames": 3582,
+              "p10": 0.5457884000000001,
+              "p50": 0.581976,
+              "p90": 0.6156678
             },
             "solverGpuMs": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3582,
+              "p10": 3.8168,
+              "p50": 4.3389575,
+              "p90": 4.7413503000000015
             },
             "iterationsPerFrame": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3582,
+              "p10": 2,
+              "p50": 2,
+              "p90": 2
             }
           },
           {
             "flowRender": {
-              "frames": 3605,
-              "p10": 0.7352872000000001,
-              "p50": 0.753172,
-              "p90": 0.7707032
+              "frames": 3596,
+              "p10": 0.5432520000000001,
+              "p50": 0.5639810000000001,
+              "p90": 0.5880955000000001
             },
             "solverGpuMs": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3591,
+              "p10": 3.7139349999999998,
+              "p50": 4.2721610000000005,
+              "p90": 4.534243
             },
             "iterationsPerFrame": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3591,
+              "p10": 2,
+              "p50": 2,
+              "p90": 2
             }
           },
           {
             "flowRender": {
-              "frames": 3604,
-              "p10": 0.67135,
-              "p50": 0.74411,
-              "p90": 0.8230677000000002
+              "frames": 3584,
+              "p10": 0.5349606,
+              "p50": 0.5610125,
+              "p90": 0.5944289
             },
             "solverGpuMs": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3583,
+              "p10": 3.8221944,
+              "p50": 4.28966,
+              "p90": 4.6588246
             },
             "iterationsPerFrame": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3583,
+              "p10": 2,
+              "p50": 2,
+              "p90": 2
             }
           }
         ],
@@ -334,40 +334,40 @@
         {
           "valid": false,
           "reasons": [
-            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
-            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+            "page without the focus at the start of the run (document.hasFocus() false: Chrome not in the foreground)",
+            "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
           ],
           "warnings": []
         },
         {
           "valid": false,
           "reasons": [
-            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
-            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+            "page without the focus at the start of the run (document.hasFocus() false: Chrome not in the foreground)",
+            "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
           ],
           "warnings": []
         },
         {
           "valid": false,
           "reasons": [
-            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
-            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+            "page without the focus at the start of the run (document.hasFocus() false: Chrome not in the foreground)",
+            "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
           ],
           "warnings": []
         }
       ],
       "load": [
         {
-          "framesPerS": 57.310935573109354,
-          "gpuBusy": 0.6137117659065007
+          "framesPerS": 59.953377001434326,
+          "gpuBusy": 0.5078491442534371
         },
         {
-          "framesPerS": 60.00286600748048,
-          "gpuBusy": 0.5939269548489853
+          "framesPerS": 59.99090137994843,
+          "gpuBusy": 0.5033011811164427
         },
         {
-          "framesPerS": 59.9864030819666,
-          "gpuBusy": 0.5956909101287976
+          "framesPerS": 59.89930117481665,
+          "gpuBusy": 0.507454835976889
         }
       ],
       "renderScale": [1, 1, 1],
@@ -385,62 +385,62 @@
         "perRun": [
           {
             "flowRender": {
-              "frames": 3442,
-              "p10": 0.365154,
-              "p50": 0.465518,
-              "p90": 0.6160275
+              "frames": 3600,
+              "p10": 0.31603390000000003,
+              "p50": 0.339008,
+              "p90": 0.4213572
             },
             "solverGpuMs": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3598,
+              "p10": 3.6010301,
+              "p50": 4.1120055,
+              "p90": 4.4143272
             },
             "iterationsPerFrame": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3598,
+              "p10": 2,
+              "p50": 2,
+              "p90": 2
             }
           },
           {
             "flowRender": {
               "frames": 3605,
-              "p10": 0.42311200000000004,
-              "p50": 0.443643,
-              "p90": 0.45182
+              "p10": 0.315727,
+              "p50": 0.342602,
+              "p90": 0.8147657999999997
             },
             "solverGpuMs": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3600,
+              "p10": 3.5673011000000003,
+              "p50": 3.7983095000000002,
+              "p90": 4.399426
             },
             "iterationsPerFrame": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3600,
+              "p10": 2,
+              "p50": 2,
+              "p90": 2
             }
           },
           {
             "flowRender": {
-              "frames": 3604,
-              "p10": 0.42535680000000003,
-              "p50": 0.445466,
-              "p90": 0.452705
+              "frames": 3594,
+              "p10": 0.2989196,
+              "p50": 0.319243,
+              "p90": 0.35990860000000013
             },
             "solverGpuMs": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3594,
+              "p10": 3.6323414,
+              "p50": 4.147214,
+              "p90": 4.495441
             },
             "iterationsPerFrame": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3594,
+              "p10": 2,
+              "p50": 2,
+              "p90": 2
             }
           }
         ],
@@ -522,40 +522,46 @@
         {
           "valid": false,
           "reasons": [
-            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
-            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+            "page without the focus at the start of the run (document.hasFocus() false: Chrome not in the foreground)",
+            "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
           ],
-          "warnings": []
+          "warnings": [
+            "GPU busy 47 % of the wall time (under 60 %): not saturated, its clock could still fall"
+          ]
         },
         {
           "valid": false,
           "reasons": [
-            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
-            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+            "page without the focus at the start of the run (document.hasFocus() false: Chrome not in the foreground)",
+            "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
           ],
-          "warnings": []
+          "warnings": [
+            "GPU busy 47 % of the wall time (under 60 %): not saturated, its clock could still fall"
+          ]
         },
         {
           "valid": false,
           "reasons": [
-            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
-            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+            "page without the focus at the start of the run (document.hasFocus() false: Chrome not in the foreground)",
+            "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
           ],
-          "warnings": []
+          "warnings": [
+            "GPU busy 47 % of the wall time (under 60 %): not saturated, its clock could still fall"
+          ]
         }
       ],
       "load": [
         {
-          "framesPerS": 95.58142170489448,
-          "gpuBusy": 0.6631055180530637
+          "framesPerS": 67.77802405477901,
+          "gpuBusy": 0.4708082429952071
         },
         {
-          "framesPerS": 96.3974294018922,
-          "gpuBusy": 0.6645296492941193
+          "framesPerS": 67.6649750422906,
+          "gpuBusy": 0.47401288440634776
         },
         {
-          "framesPerS": 95.82135566387535,
-          "gpuBusy": 0.6638932045090323
+          "framesPerS": 67.54819871470765,
+          "gpuBusy": 0.4728073592403856
         }
       ],
       "renderScale": [1, 1, 1],
@@ -573,62 +579,62 @@
         "perRun": [
           {
             "flowRender": {
-              "frames": 5738,
-              "p10": 0.4855697,
-              "p50": 0.498851,
-              "p90": 0.5363302
+              "frames": 4071,
+              "p10": 0.467132,
+              "p50": 0.477497,
+              "p90": 0.506143
             },
             "solverGpuMs": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 4067,
+              "p10": 3.412426,
+              "p50": 3.468832,
+              "p90": 4.911229199999999
             },
             "iterationsPerFrame": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 4067,
+              "p10": 2,
+              "p50": 2,
+              "p90": 2
             }
           },
           {
             "flowRender": {
-              "frames": 5785,
-              "p10": 0.4782794,
-              "p50": 0.495414,
-              "p90": 0.5414342
+              "frames": 4062,
+              "p10": 0.45760619999999996,
+              "p50": 0.466663,
+              "p90": 0.4817159
             },
             "solverGpuMs": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 4060,
+              "p10": 3.405239,
+              "p50": 3.4623739999999996,
+              "p90": 4.889441999999999
             },
             "iterationsPerFrame": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 4060,
+              "p10": 2,
+              "p50": 2,
+              "p90": 2
             }
           },
           {
             "flowRender": {
-              "frames": 5752,
-              "p10": 0.481924,
-              "p50": 0.495622,
-              "p90": 0.5442628
+              "frames": 4055,
+              "p10": 0.4578828,
+              "p50": 0.468382,
+              "p90": 0.48515400000000003
             },
             "solverGpuMs": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 4053,
+              "p10": 3.441906,
+              "p50": 3.50852,
+              "p90": 4.940968399999999
             },
             "iterationsPerFrame": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 4053,
+              "p10": 2,
+              "p50": 2,
+              "p90": 2
             }
           }
         ],
@@ -710,41 +716,46 @@
         {
           "valid": false,
           "reasons": [
-            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+            "INVALID (hidden, unfocused or stalled): page lost focus 1 times (blur) during the run",
+            "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
           ],
           "warnings": [
-            "GPU busy 56 % of the wall time (under 60 %): not saturated, its clock could still fall"
+            "GPU busy 51 % of the wall time (under 60 %): not saturated, its clock could still fall"
           ]
         },
         {
           "valid": false,
           "reasons": [
-            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
-            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+            "page without the focus at the start of the run (document.hasFocus() false: Chrome not in the foreground)",
+            "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
           ],
-          "warnings": []
+          "warnings": [
+            "GPU busy 51 % of the wall time (under 60 %): not saturated, its clock could still fall"
+          ]
         },
         {
           "valid": false,
           "reasons": [
-            "INVALID (flow field): at the start the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)",
-            "INVALID (flow field): at the end the MOCK was drawn (fallback: solver diverged: the density residual is NaN after 6759 iterations)"
+            "page without the focus at the start of the run (document.hasFocus() false: Chrome not in the foreground)",
+            "page without the focus at the end of the run (document.hasFocus() false: Chrome not in the foreground)"
           ],
-          "warnings": []
+          "warnings": [
+            "GPU busy 51 % of the wall time (under 60 %): not saturated, its clock could still fall"
+          ]
         }
       ],
       "load": [
         {
-          "framesPerS": 69.57695544575081,
-          "gpuBusy": 0.5619387689113962
+          "framesPerS": 64.33874072037393,
+          "gpuBusy": 0.5081004577067468
         },
         {
-          "framesPerS": 88.66958954694695,
-          "gpuBusy": 0.6994069974104518
+          "framesPerS": 64.69984470704927,
+          "gpuBusy": 0.5122938036378948
         },
         {
-          "framesPerS": 88.68640141844476,
-          "gpuBusy": 0.6997366121558287
+          "framesPerS": 64.53881327237573,
+          "gpuBusy": 0.5104191461147485
         }
       ],
       "renderScale": [1, 1, 1],
@@ -762,19 +773,19 @@
         "perRun": [
           {
             "flowRender": {
-              "frames": 4180,
-              "p10": 0.3518158,
-              "p50": 0.390778,
-              "p90": 0.428956
+              "frames": 3862,
+              "p10": 0.3307322,
+              "p50": 0.355128,
+              "p90": 0.4263987
             },
             "solverGpuMs": {
-              "frames": 2761,
-              "p10": 3.477166,
-              "p50": 3.629508,
-              "p90": 5.008405999999999
+              "frames": 3861,
+              "p10": 3.435812,
+              "p50": 3.536436,
+              "p90": 5.04549
             },
             "iterationsPerFrame": {
-              "frames": 2761,
+              "frames": 3861,
               "p10": 2,
               "p50": 2,
               "p90": 2
@@ -782,42 +793,42 @@
           },
           {
             "flowRender": {
-              "frames": 5325,
-              "p10": 0.370258,
-              "p50": 0.389945,
-              "p90": 0.4004976
+              "frames": 3885,
+              "p10": 0.295988,
+              "p50": 0.314321,
+              "p90": 0.3256016
             },
             "solverGpuMs": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3883,
+              "p10": 3.4188433999999996,
+              "p50": 3.503051,
+              "p90": 5.0040528
             },
             "iterationsPerFrame": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3883,
+              "p10": 2,
+              "p50": 2,
+              "p90": 2
             }
           },
           {
             "flowRender": {
-              "frames": 5326,
-              "p10": 0.37057,
-              "p50": 0.3902315,
-              "p90": 0.400727
+              "frames": 3873,
+              "p10": 0.29656,
+              "p50": 0.314321,
+              "p90": 0.3267064
             },
             "solverGpuMs": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3873,
+              "p10": 3.4430511999999998,
+              "p50": 3.524718,
+              "p90": 4.997176199999999
             },
             "iterationsPerFrame": {
-              "frames": 0,
-              "p10": null,
-              "p50": null,
-              "p90": null
+              "frames": 3873,
+              "p10": 2,
+              "p50": 2,
+              "p90": 2
             }
           }
         ],
