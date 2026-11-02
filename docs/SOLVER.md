@@ -813,7 +813,7 @@ On the GPU the at-rest case fails the undershoot row too (−0.040 ΔT): its f32
 | 12.2 C-pre after 1 / 10 / 100 (f32 storage; GPU against the oracle) | CPU 1.43e-7 / 1.79e-7 / 1.06e-6; GPU 5.13e-7 / 3.77e-7 / 1.05e-6 | 1.35e-7 / 1.71e-7 / 4.65e-7 | 5.68e-7 / 3.54e-7 / 1.29e-6 |
 | 12.2 S after 1 / 10 / 100 | CPU 1.25e-7 / 1.11e-7 / 2.02e-6; GPU 5.32e-7 / 4.77e-7 / 7.67e-6 | 1.25e-7 / 1.09e-7 / 6.29e-7 | 5.32e-7 / 5.06e-7 / 9.72e-6 |
 | E-L5, E-L9a over the flux scale; B | 2.67e-8, 2.46e-12; 1.266e-11 | | 2.67e-8, 2.46e-12; 1.266e-11, 1.95e-5 m/s |
-| D4-63 (a) L2(p′) max over 1000-2000; at 20000 | CPU 0.4450 / 0.009223; GPU 0.4450 / 0.008997 | (the CPU run was still going at hand-back) | **0.4497** / 0.0077 |
+| D4-63 (a) L2(p′) max over 1000-2000; at 20000 | CPU 0.4450 / 0.009223; GPU 0.4450 / 0.008997 | finite to 3000, then the 6 h timeout on battery: 0.428 at 1000, 0.270 at 2000 (not of record) | **0.4497** / 0.0077 |
 | D4-63 (b) weighted residual 20000/10000; 20000/100 | CPU 0.1535 / 0.03063; GPU 0.1634 / 0.03253 | | **0.2112** / 0.03125 (trend 0.858 per 1000 over 15000-20000, against 0.820) |
 | W2S-B1 long run (a); (b) | 0.659 / 5.09e-4; 0.108 / 7.28e-3 | | 0.629 / 1.55e-3; 0.186 / 0.0287 (max T′ 300.9 K, start 299.9) |
 | L14 | (new) | finite 10/10, 3 cases pass every row | finite 10/10, 2 cases pass every row |
