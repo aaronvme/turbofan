@@ -4,6 +4,8 @@
 
 import { radiusAt, type ComponentId, type EngineDefinition } from '../contracts/engine';
 import { explodeOffsets } from '../geometry/explode';
+import { engineParts } from '../geometry/parts';
+import { engineWalls } from '../geometry/walls';
 import type { ViewMode } from '../contracts/ui';
 
 export interface WorldAnchor {
@@ -186,29 +188,77 @@ export function engineRings(def: EngineDefinition, xEnd: number): [number, numbe
   return out;
 }
 
+/** Rings of 16 points round the axis at (x, r), appended to `out`. */
+function pushRing(out: [number, number, number][], x: number, r: number): void {
+  for (let j = 0; j < 16; j++) {
+    const t = (2 * Math.PI * j) / 16;
+    out.push([x, r * Math.cos(t), r * Math.sin(t)]);
+  }
+}
+
+/** The wall fillets' samples for Exploded's framing content (the view's default quality's). */
+const EXPLODED_WALL_SAMPLES = 3;
+
 /**
- * Round 7 (Exploded's framing): points round the exploded engine's outside, each module's casing
- * over its length, slid by its explode offset at full explode (geometry/explode.ts); the intake at
- * the nacelle's outside, the ring it shows. Rings of 16 for its screen box.
+ * Exploded's framing content: what the exploded view draws, slid apart at full explode
+ * (geometry/explode.ts). W2A-I11 (critic pass 18): every part that is not a skin and every blade
+ * row (its edges' hub and tip points), each slid by its module's offset; the skins and the stand
+ * are hidden from explode 0.02 (engineView.ts), so of the intake only the fan case is drawn. Round
+ * 7 took the intake at the nacelle's outside and the bypass duct, which the view does not draw:
+ * Exploded sat off-centre (135 against 32 px at 1366) and 17-21 % smaller than the area allows.
+ * Rings of 16 for its screen box.
  */
 export function explodedRings(def: EngineDefinition, gap: number): [number, number, number][] {
   const off = explodeOffsets(def, 1, gap);
-  const curves = def.flowpath.curves;
   const out: [number, number, number][] = [];
-  for (const c of def.flowpath.components) {
-    for (let k = 0; k <= 4; k++) {
-      const x = c.xStart + ((c.xEnd - c.xStart) * k) / 4;
-      const casing = radiusAt(curves[c.casing], x);
-      const outer = c.id === 'inlet' ? radiusAt(curves.nacelleOuter, x) : null;
-      const r = Math.max(casing ?? 0, outer ?? 0);
-      if (r <= 0) continue;
-      for (let j = 0; j < 16; j++) {
-        const t = (2 * Math.PI * j) / 16;
-        out.push([x + off[c.id], r * Math.cos(t), r * Math.sin(t)]);
-      }
-    }
+  for (const p of engineParts(def, engineWalls(def, EXPLODED_WALL_SAMPLES))) {
+    if (p.skin) continue;
+    const dx = p.module === null ? 0 : off[p.module];
+    for (const q of p.loop) pushRing(out, q.x + dx, Math.abs(q.r));
   }
+  for (const row of def.bladeRows)
+    for (const e of [row.leadingEdge, row.trailingEdge])
+      for (const q of [e.hub, e.tip]) pushRing(out, q.x + off[row.component], q.r);
   return out;
+}
+
+/**
+ * Critic pass 18's visual note 2: the core jet behind the nozzle, which Schlieren draws as its
+ * bands: the tube of the core nozzle's exit radius (the core cowl's last point) from the exit to
+ * `xEnd` (the near field's end). Its screen box is kept clear of labels in Schlieren (the Core
+ * exhaust label sat on it). Rings of 16.
+ */
+export function jetRings(def: EngineDefinition, xEnd: number): [number, number, number][] {
+  const exit = def.flowpath.curves.coreCowl.points.at(-1);
+  if (exit === undefined) throw new Error('anchors: no core nozzle');
+  const out: [number, number, number][] = [];
+  const n = 8;
+  for (let k = 0; k <= n; k++) pushRing(out, exit.x + ((xEnd - exit.x) * k) / n, exit.r);
+  return out;
+}
+
+/**
+ * The core jet's CSS-pixel box behind the nozzle (null: off screen): jetRings' box, cut at the
+ * nozzle exit's centre on the jet's side. The exit ring's near side projects in front of the
+ * nozzle, over the engine's own silhouette, where Schlieren draws no bands; a label may go there.
+ */
+export function jetBox(
+  m: ArrayLike<number>,
+  def: EngineDefinition,
+  xEnd: number,
+  width: number,
+  height: number,
+): { x: number; y: number; w: number; h: number } | null {
+  const box = screenBox(m, jetRings(def, xEnd), width, height);
+  const exit = def.flowpath.curves.coreCowl.points.at(-1);
+  if (box === null || exit === undefined) return box;
+  const e = projectPoint(m, [exit.x, 0, 0], width, height);
+  const f = projectPoint(m, [xEnd, 0, 0], width, height);
+  if (!Number.isFinite(e.x) || !Number.isFinite(f.x)) return box;
+  const right = f.x >= e.x;
+  const x0 = right ? Math.max(box.x, e.x) : box.x;
+  const x1 = right ? box.x + box.w : Math.min(box.x + box.w, e.x);
+  return x1 > x0 ? { x: x0, y: box.y, w: x1 - x0, h: box.h } : null;
 }
 
 /** The CSS-pixel box of the points in view (null: none is). */

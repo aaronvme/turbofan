@@ -61,6 +61,8 @@ describe('W2A-N22: the background warm-up on screen (Diagnostics)', { timeout: T
           ],
           frames: 52,
           cpuMaxMs: 41,
+          cpuMs: 900,
+          slotCpuMaxMs: 210,
           slowest: '',
           gaveUp: ['exploded'],
           suspended: true,

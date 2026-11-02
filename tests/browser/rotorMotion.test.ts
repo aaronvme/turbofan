@@ -54,8 +54,13 @@
 // fail with the shipped pipeline passing, and the default pose stays in the moving bound. The
 // default pose's control fails by 1.00 tile, which holds because the measurement is deterministic
 // (the same frames every run; the D4-93 rows repeat to the digit).
+// D4-99 item 4 (W2L-N16), stated before it happens: if the default pose's control ever passes (its
+// margin is about one standard error, and the order of the measurements moves the numbers), that
+// pose leaves the moving bound with the reason stated here and in LOOKDEV.md; the band is never
+// re-tuned to make it fail again (D4-74). The per-sample counts are on file beside the means
+// (test-results/rotorMotion.txt); keep the order: the shipped poses, then the controls in POSES order.
 
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { ENGINE_DEFINITION } from '../../src/engine/definition';
 import { createEngineView, type DebugFlags, type EngineView } from '../../src/render/engineView';
@@ -91,154 +96,184 @@ const POSES: Readonly<Record<string, Pose>> = {
 
 const mean = (xs: readonly number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
 
+// D4-100 (the merge gate on 469164a): this was one test of the five poses and the two controls,
+// 87.0 s alone and 86.6 s in the full suite on AC (2026-11-01, reports/scratch/polish), and it
+// timed out at 120 s in the official window's full suite with every assertion passing (the
+// critic's battery run was 2.3-2.7x slower overall). Test plumbing, not a bar (D4-95's
+// precedent): one test per pose and per control, in the same order on the same views (the same
+// frames, so the same numbers: GOTCHA 1 of w2-followups-2; the rows repeated to the digit), each
+// with POSE_TIMEOUT_MS: split, they took 9-27 s alone on AC (9d63da3; 27 s the first control, which
+// opens its view), so 240 s is over 8x the longest.
+const POSE_TIMEOUT_MS = 240_000;
+/** A view's creation (its boot compile, about 1 s here), with the same margin. */
+const SETUP_TIMEOUT_MS = 60_000;
+
 describe('W1V-I1 (b): TRAA reprojects the turning rotors', () => {
   let view: EngineView | null = null;
-  afterAll(async () => {
-    if (view !== null) await view.dispose();
-  });
-
-  it('in motion, every shutter-0 pose stays within MARGIN tiles of the held-still floor (means of 8 frames)', async () => {
-    const c = document.createElement('canvas');
+  const c = document.createElement('canvas');
+  const rows: string[] = [];
+  const open = (legacyTraa: boolean) =>
+    createEngineView({
+      gpu: navigator.gpu,
+      canvas: c,
+      definition: ENGINE_DEFINITION,
+      width: W,
+      height: H,
+      dpr: 1,
+      quality: 'high',
+      legacyTraa,
+    });
+  beforeAll(async () => {
     c.width = W;
     c.height = H;
     document.body.appendChild(c);
-    const open = (legacyTraa: boolean) =>
-      createEngineView({
-        gpu: navigator.gpu,
-        canvas: c,
-        definition: ENGINE_DEFINITION,
-        width: W,
-        height: H,
-        dpr: 1,
-        quality: 'high',
-        legacyTraa,
-      });
     view = await open(false);
-    let v = view;
-    const run = async (frames: number, dt: number) => {
-      for (let i = 0; i < frames; i++) {
-        v.frame(dt);
-        await nextFrame();
-      }
-    };
-    const measure = async (name: string, pose: Pose, flags: DebugFlags) => {
-      const place = () => {
-        v.setPreset(pose.preset);
-        if (pose.camera && pose.target) v.setCameraPose(pose.camera, pose.target);
-      };
-      /** One sample: a TRAA frame and the TRAA-off still at its phase (both at dt 0). */
-      const sample = () => {
-        const traa = grab(v, c);
-        v.setDebugFlags({ ...flags, noTraa: true });
-        const still = grab(v, c);
-        v.setDebugFlags(flags);
-        return {
-          traa,
-          still,
-          tiles: diff(traa, still, THRESHOLD, band).tilesOver25,
-          // reported beside it in a banded pose: the same frames without the band
-          unbanded: diff(traa, still, THRESHOLD).tilesOver25,
-        };
-      };
-      v.setDebugFlags(flags);
-      place();
-      await settle(v, 48);
-      // D4-96 (W2L-I9): in the cutaway preset the cap pixels are left out of both counts: the
-      // pixels where the TRAA-off still with the caps differs from one without (the caps, their
-      // hatch and what they cover), and nothing around them. A band pixel never counts as
-      // changed; a tile's 25 % rule stays of the whole tile (D4-93's band was every tile with a
-      // cap pixel plus one tile around it)
-      let band: Uint8Array | undefined;
-      let bandPx = 0;
-      if (pose.preset === 'cutaway') {
-        v.setDebugFlags({ ...flags, noTraa: true });
-        const withCaps = grab(v, c);
-        v.setDebugFlags({ ...flags, noTraa: true, noCaps: true });
-        const withoutCaps = grab(v, c);
-        v.setDebugFlags(flags);
-        band = new Uint8Array(W * H);
-        for (let i = 0; i < W * H; i++)
-          if (Math.abs((withCaps.lum[i] ?? 0) - (withoutCaps.lum[i] ?? 0)) > THRESHOLD) {
-            band[i] = 1;
-            bandPx++;
-          }
-        await settle(v, REST_BETWEEN);
-      }
-      const floor: number[] = [];
-      const floorUnbanded: number[] = [];
-      for (let k = 0; k < SAMPLES; k++) {
-        if (k > 0) await settle(v, REST_BETWEEN);
-        const s = sample();
-        floor.push(s.tiles);
-        floorUnbanded.push(s.unbanded);
-      }
-      place();
-      await run(48, 1 / 60);
-      // each grab renders one more frame at dt 0: the spools hold still for it, so zero rotor
-      // motion is right there, and the history it reprojects is the moving one
-      const moving: number[] = [];
-      const movingUnbanded: number[] = [];
-      for (let k = 0; k < SAMPLES; k++) {
-        if (k > 0) await run(MOVING_BETWEEN, 1 / 60);
-        const s = sample();
-        moving.push(s.tiles);
-        movingUnbanded.push(s.unbanded);
-        if (k === 0)
-          await commands.writeFile(
-            `test-results/rotorMotion/${name}-moving.png`,
-            diffImage(s.still, s.traa, THRESHOLD),
-            'base64',
-          );
-      }
-      return {
-        floor: mean(floor),
-        moving: mean(moving),
-        floors: floor,
-        movings: moving,
-        bandPx,
-        unbanded: band === undefined ? null : [mean(floorUnbanded), mean(movingUnbanded)],
-      };
-    };
-    const line = (r: {
-      floor: number;
-      moving: number;
-      floors: number[];
-      movings: number[];
-      bandPx: number;
-      unbanded: number[] | null;
-    }) =>
-      `at rest ${r.floor.toFixed(2)} tiles [${r.floors.join(' ')}] | moving ${r.moving.toFixed(2)} tiles [${r.movings.join(' ')}]${r.unbanded === null ? '' : ` (${String(r.bandPx)} cap pixels, ${((100 * r.bandPx) / (W * H)).toFixed(1)} % of the frame, left out; without the band ${(r.unbanded[0] ?? NaN).toFixed(2)} / ${(r.unbanded[1] ?? NaN).toFixed(2)})`}`;
-    const rows: string[] = [];
-    const failures: string[] = [];
-    for (const [name, pose] of Object.entries(POSES)) {
-      const r = await measure(name, pose, {});
-      rows.push(`${name}: ${line(r)}`);
-      if (r.moving > r.floor + MARGIN) failures.push(name);
+  }, SETUP_TIMEOUT_MS);
+  afterAll(async () => {
+    if (rows.length > 0) {
+      await commands.writeFile('test-results/rotorMotion.txt', `${rows.join('\n')}\n`);
+      console.warn(`W1V-I1 rotor motion (means of ${String(SAMPLES)} frames)\n${rows.join('\n')}`);
     }
-    expect(v.stats().errors).toEqual([]);
-    await v.dispose();
-    view = await open(true);
-    v = view;
-    // D4-96 (W2L-I9): every banded pose gets its own control, which must fail there, so a band
-    // that held every tile telling the two pipelines apart (the default cutaway pose under D4-93's
-    // band: legacyTraa 0.63 tiles against 6, critic pass 16) cannot pass unseen
-    const controlPasses: string[] = [];
-    for (const [name, pose] of Object.entries(POSES)) {
-      if (pose.preset !== 'cutaway') continue;
-      const control = await measure(`control-${name}`, pose, {});
-      rows.push(
-        `control (legacyTraa: three's resolve, zero rotor velocity) ${name}: ${line(control)}`,
-      );
-      if (!(control.moving > control.floor + MARGIN)) controlPasses.push(name);
-    }
-    await commands.writeFile('test-results/rotorMotion.txt', `${rows.join('\n')}\n`);
-    console.warn(`W1V-I1 rotor motion (means of ${String(SAMPLES)} frames)\n${rows.join('\n')}`);
-    expect(v.stats().errors).toEqual([]);
-    expect(failures, rows.join('\n')).toEqual([]);
-    expect(controlPasses, `the control must fail in every banded pose\n${rows.join('\n')}`).toEqual(
-      [],
-    );
+    if (view !== null) await view.dispose();
   });
+  const theView = (): EngineView => {
+    if (view === null) throw new Error('no view');
+    return view;
+  };
+  const run = async (frames: number, dt: number) => {
+    const v = theView();
+    for (let i = 0; i < frames; i++) {
+      v.frame(dt);
+      await nextFrame();
+    }
+  };
+  const measure = async (name: string, pose: Pose, flags: DebugFlags) => {
+    const v = theView();
+    const place = () => {
+      v.setPreset(pose.preset);
+      if (pose.camera && pose.target) v.setCameraPose(pose.camera, pose.target);
+    };
+    /** One sample: a TRAA frame and the TRAA-off still at its phase (both at dt 0). */
+    const sample = () => {
+      const traa = grab(v, c);
+      v.setDebugFlags({ ...flags, noTraa: true });
+      const still = grab(v, c);
+      v.setDebugFlags(flags);
+      return {
+        traa,
+        still,
+        tiles: diff(traa, still, THRESHOLD, band).tilesOver25,
+        // reported beside it in a banded pose: the same frames without the band
+        unbanded: diff(traa, still, THRESHOLD).tilesOver25,
+      };
+    };
+    v.setDebugFlags(flags);
+    place();
+    await settle(v, 48);
+    // D4-96 (W2L-I9): in the cutaway preset the cap pixels are left out of both counts: the
+    // pixels where the TRAA-off still with the caps differs from one without (the caps, their
+    // hatch and what they cover), and nothing around them. A band pixel never counts as
+    // changed; a tile's 25 % rule stays of the whole tile (D4-93's band was every tile with a
+    // cap pixel plus one tile around it)
+    let band: Uint8Array | undefined;
+    let bandPx = 0;
+    if (pose.preset === 'cutaway') {
+      v.setDebugFlags({ ...flags, noTraa: true });
+      const withCaps = grab(v, c);
+      v.setDebugFlags({ ...flags, noTraa: true, noCaps: true });
+      const withoutCaps = grab(v, c);
+      v.setDebugFlags(flags);
+      band = new Uint8Array(W * H);
+      for (let i = 0; i < W * H; i++)
+        if (Math.abs((withCaps.lum[i] ?? 0) - (withoutCaps.lum[i] ?? 0)) > THRESHOLD) {
+          band[i] = 1;
+          bandPx++;
+        }
+      await settle(v, REST_BETWEEN);
+    }
+    const floor: number[] = [];
+    const floorUnbanded: number[] = [];
+    for (let k = 0; k < SAMPLES; k++) {
+      if (k > 0) await settle(v, REST_BETWEEN);
+      const s = sample();
+      floor.push(s.tiles);
+      floorUnbanded.push(s.unbanded);
+    }
+    place();
+    await run(48, 1 / 60);
+    // each grab renders one more frame at dt 0: the spools hold still for it, so zero rotor
+    // motion is right there, and the history it reprojects is the moving one
+    const moving: number[] = [];
+    const movingUnbanded: number[] = [];
+    for (let k = 0; k < SAMPLES; k++) {
+      if (k > 0) await run(MOVING_BETWEEN, 1 / 60);
+      const s = sample();
+      moving.push(s.tiles);
+      movingUnbanded.push(s.unbanded);
+      if (k === 0)
+        await commands.writeFile(
+          `test-results/rotorMotion/${name}-moving.png`,
+          diffImage(s.still, s.traa, THRESHOLD),
+          'base64',
+        );
+    }
+    return {
+      floor: mean(floor),
+      moving: mean(moving),
+      floors: floor,
+      movings: moving,
+      bandPx,
+      unbanded: band === undefined ? null : [mean(floorUnbanded), mean(movingUnbanded)],
+    };
+  };
+  const line = (r: {
+    floor: number;
+    moving: number;
+    floors: number[];
+    movings: number[];
+    bandPx: number;
+    unbanded: number[] | null;
+  }) =>
+    `at rest ${r.floor.toFixed(2)} tiles [${r.floors.join(' ')}] | moving ${r.moving.toFixed(2)} tiles [${r.movings.join(' ')}]${r.unbanded === null ? '' : ` (${String(r.bandPx)} cap pixels, ${((100 * r.bandPx) / (W * H)).toFixed(1)} % of the frame, left out; without the band ${(r.unbanded[0] ?? NaN).toFixed(2)} / ${(r.unbanded[1] ?? NaN).toFixed(2)})`}`;
+
+  for (const [name, pose] of Object.entries(POSES))
+    it(
+      `${name}: in motion, the shutter-0 pose stays within MARGIN tiles of the held-still floor (means of 8 frames)`,
+      async () => {
+        const r = await measure(name, pose, {});
+        const row = `${name}: ${line(r)}`;
+        rows.push(row);
+        expect(theView().stats().errors).toEqual([]);
+        expect(r.moving, row).toBeLessThanOrEqual(r.floor + MARGIN);
+      },
+      POSE_TIMEOUT_MS,
+    );
+
+  // D4-96 (W2L-I9): every banded pose gets its own control, which must fail there, so a band
+  // that held every tile telling the two pipelines apart (the default cutaway pose under D4-93's
+  // band: legacyTraa 0.63 tiles against 6, critic pass 16) cannot pass unseen. The controls run
+  // after every shipped pose, in POSES order, on a legacyTraa view (the first opens it)
+  const banded = Object.entries(POSES).filter(([, pose]) => pose.preset === 'cutaway');
+  for (const [k, [name, pose]] of banded.entries())
+    it(
+      `control (legacyTraa) ${name}: fails the bound, as the band must let it (D4-96)`,
+      async () => {
+        if (k === 0) {
+          await theView().dispose();
+          view = null;
+          view = await open(true);
+        }
+        const control = await measure(`control-${name}`, pose, {});
+        const row = `control (legacyTraa: three's resolve, zero rotor velocity) ${name}: ${line(control)}`;
+        rows.push(row);
+        expect(theView().stats().errors).toEqual([]);
+        expect(
+          control.moving,
+          `the control must fail in every banded pose\n${row}`,
+        ).toBeGreaterThan(control.floor + MARGIN);
+      },
+      POSE_TIMEOUT_MS,
+    );
 });
 
 // W2L-I1 (critic pass 8): the test above cannot see the motion vectors (with them dropped our

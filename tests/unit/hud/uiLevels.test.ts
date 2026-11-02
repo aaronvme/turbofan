@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { SM_CAUTION_FRACTION, surgeMarginView } from '../../../src/hud/compressorMap';
 import { UI_LEVELS, UI_ROWS } from '../../../src/hud/uiLevels';
+import { PREPARE_FRAME_CPU_MS } from '../../../src/shell/warmUp';
 
 function physicsUiRows(): { id: string; check: string; pass: string }[] {
   const path = fileURLToPath(new URL('../../../docs/PHYSICS.md', import.meta.url));
@@ -47,9 +48,18 @@ describe('the UI levels mirror docs/PHYSICS.md 3.5 (D4-91)', () => {
     expect(UI_LEVELS.coldSwitchMaxMs).toBe(2000);
     expect(rows[3]?.pass).toContain('≤ 2 s');
     // D4-98 item 1: the mechanism, not the bar: 30 frames of preparing, then a slot every frame
-    expect(rows[3]?.check).toContain('after 30 frames of preparing');
-    expect(rows[3]?.check).toContain('one every frame');
+    // D4-100: from the first frame of preparing (D4-98 waited 30 frames)
+    expect(rows[3]?.check).toContain('From its first frame of preparing');
+    expect(rows[3]?.check).toContain('a slot every frame');
     expect(rows[3]?.check).not.toContain('60 frames');
+    // D4-100: each such slot several warm frames up to the scheduler's own cap (the mechanism)
+    expect(rows[3]?.check).toContain(
+      `several warm frames until their CPU reaches ${String(PREPARE_FRAME_CPU_MS)} ms (D4-100)`,
+    );
+    // D4-99 item 2: the condition is scoped to the frames the app is built for (the bar unchanged)
+    expect(rows[3]?.check).toContain(
+      'at any steady frame CPU up to 11.2 ms (tested; D4-99 item 2)',
+    );
     // D4-97 item 2 (W2A-I8): the cut views' framing, its minimum engine scale and the row
     expect(UI_LEVELS.cutViewMinScale).toBe(0.6);
     expect(rows[4]?.check).toContain('0.6 of');

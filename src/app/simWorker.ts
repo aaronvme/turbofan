@@ -31,6 +31,7 @@ import {
   componentAnchors,
   engineRings,
   explodedRings,
+  jetBox,
   projectPoint,
   screenBox,
 } from '../hud/anchors';
@@ -50,12 +51,14 @@ import { createRasterScheduler, type RasterScheduler } from '../shell/mockRaster
 import { backingDpr, backingSize } from '../shell/pixelCap';
 import { createSettleTracker, type SettleTracker } from '../shell/settle';
 import { createPostFaults, stepFault } from '../shell/faults';
+import { snapshotDue } from '../shell/publish';
 import {
   BOOT_CONFIGS,
   WARM_CONFIGS,
   bootWarmed,
   configFor,
   createWarmScheduler,
+  nextWarmBudget,
   shownView,
   type WarmScheduler,
 } from '../shell/warmUp';
@@ -85,8 +88,6 @@ const post = (m: FromWorker) => {
   scope.postMessage(m);
 };
 
-/** A snapshot every this many frames (20 Hz at 60 fps: D2-9's realistic React load is 15 Hz). */
-const PUBLISH_EVERY = 3;
 /** stats() walks the scene to count draws: read the timings this often (as P1 does). */
 const TIMINGS_EVERY = 15;
 /** The frame-cost window, frames (2 s at 60 fps: a held episode's frames stay in view). */
@@ -94,20 +95,13 @@ const COST_WINDOW = 120;
 const MAX_ERRORS = 8;
 /** Snapshot posts that may fail in a row before the overlay is told the app cannot go on. */
 const MAX_FAILED_POSTS = 3;
-/**
- * D4-91: the CPU a warm frame may spend on objects not drawn before (three's node builds), ms.
- * With the warm frame's draws and the real frame it stays inside a 16.7 ms frame; one object is
- * always let through, so a single slow build (a large material) can exceed it once.
- */
-const WARM_BUDGET_MS = 4;
-
 const anchors = componentAnchors(ENGINE_DEFINITION);
 const calloutGeo = calloutGeometry(ENGINE_DEFINITION);
 /** The engine's outside to the core nozzle (the cut views' label rows). */
 const ENGINE_RINGS = engineRings(ENGINE_DEFINITION, 2.75);
 /** Schlieren's content: the engine and the near field's jet (its framing, D4-92 zz). */
 const SCHLIEREN_RINGS = engineRings(ENGINE_DEFINITION, FIELD_EXTENTS.near.xMax);
-/** Exploded's content: the modules slid apart (its framing, round 7). */
+/** Exploded's content: the parts it draws, slid apart (its framing, round 7; W2A-I11). */
 const EXPLODED_RINGS = explodedRings(ENGINE_DEFINITION, EXPLODE_GAP);
 
 const median = (xs: readonly number[]): number | null => {
@@ -181,6 +175,9 @@ interface App {
   warmCpuMaxMs: number;
   /** The slowest warm frame's configuration and its slowest object (where a hitch comes from). */
   warmSlowest: string;
+  /** D4-100: the warm frames' CPU so far, and the most one frame's warm frames took, ms. */
+  warmCpuMs: number;
+  warmSlotCpuMaxMs: number;
   /** D4-95: the background waited in the last frame (an input or a switch less than 1 s ago). */
   warmSuspended: boolean;
   appliedView: RenderState | null;
@@ -349,6 +346,10 @@ function projectAnchors(a: App): AxialAnchor[] {
 
 type Framing = 'schlieren' | 'exploded' | 'cut' | null;
 
+/** A framing's content (its screen box is framed): the engine with its jet, the exploded parts, the engine. */
+const framingRings = (f: Exclude<Framing, null>) =>
+  f === 'schlieren' ? SCHLIEREN_RINGS : f === 'exploded' ? EXPLODED_RINGS : ENGINE_RINGS;
+
 /**
  * The framing a view mode has: Schlieren's (D4-92 zz), Exploded's (round 7), the cut views' rows
  * (D4-97 item 2). Realistic keeps the viewer's camera.
@@ -377,8 +378,7 @@ function frameView(a: App, to: Framing, again = false) {
   if (to === null || area === null) return;
   const start = a.orbit;
   const canvas = { w: a.size.width, h: a.size.height };
-  const rings =
-    to === 'schlieren' ? SCHLIEREN_RINGS : to === 'exploded' ? EXPLODED_RINGS : ENGINE_RINGS;
+  const rings = framingRings(to);
   const project = (o: OrbitState) => {
     const pose = orbitPose(o);
     a.view.setCameraPose(pose.position, pose.target);
@@ -411,31 +411,43 @@ async function startSolver(a: App): Promise<GpuFlowSolver> {
 }
 
 /**
- * D4-91: one warm frame in this frame's slot, if it has one (src/shell/warmUp.ts): the asked
- * view's configuration first, then the background order. A warm frame that throws is an error,
- * said, and its configuration is given up on (shown anyway), never a stuck "preparing". D4-95:
- * the background waits while a switch is pending (the asked view not shown yet, or its transition
- * not settled) and for a second after it and after any input (handle()).
+ * D4-91: the warm frames in this frame's slot, if it has one (src/shell/warmUp.ts): the asked
+ * view's configuration first, then the background order; one warm frame, or (D4-100: the asked
+ * view past its wait) several, until their CPU reaches the slot's cap (nextWarmBudget). A warm
+ * frame that throws is an error, said, and its configuration is given up on (shown anyway), never
+ * a stuck "preparing". D4-95: the background waits while a switch is pending (the asked view not
+ * shown yet, or its transition not settled) and for a second after it and after any input
+ * (handle()).
  */
 function warmSlot(a: App, frame: number, lastFrameMs: number) {
   const nowMs = performance.now();
   const switchPending = a.preparing !== null || a.settledFrames === 0;
-  const id = a.warm.next(frame, lastFrameMs, configFor(a.core.view), { nowMs, switchPending });
+  const slot = a.warm.slot(frame, lastFrameMs, configFor(a.core.view), { nowMs, switchPending });
   a.warmSuspended = a.warm.suspended(nowMs);
-  if (id === null) return;
+  if (slot === null) return;
+  const { id } = slot;
+  let spent = 0;
   try {
-    const r = a.view.warmFrame(WARM_CONFIGS[id], { cpuMs: WARM_BUDGET_MS });
-    a.warmFrames++;
-    if (r.cpuMs > a.warmCpuMaxMs) {
-      a.warmCpuMaxMs = r.cpuMs;
-      a.warmSlowest = `${id}: ${r.slowest.name} ${r.slowest.ms.toFixed(0)} ms, outside the draws ${r.outsideMs.toFixed(0)} ms`;
+    let budget = nextWarmBudget(slot, 0, null);
+    while (budget > 0) {
+      const r = a.view.warmFrame(WARM_CONFIGS[id], { cpuMs: budget });
+      a.warmFrames++;
+      spent += r.cpuMs;
+      if (r.cpuMs > a.warmCpuMaxMs) {
+        a.warmCpuMaxMs = r.cpuMs;
+        a.warmSlowest = `${id}: ${r.slowest.name} ${r.slowest.ms.toFixed(0)} ms, outside the draws ${r.outsideMs.toFixed(0)} ms`;
+      }
+      if (r.done) a.warm.done(id);
+      budget = nextWarmBudget(slot, spent, r);
     }
-    if (r.done) a.warm.done(id);
   } catch (e) {
     a.warm.done(id);
     const msg = `warm-up ${id}: ${e instanceof Error ? e.message : String(e)}`;
     pushError(a, msg);
     console.warn(msg);
+  } finally {
+    a.warmCpuMs += spent;
+    a.warmSlotCpuMaxMs = Math.max(a.warmSlotCpuMaxMs, spent);
   }
 }
 
@@ -450,6 +462,7 @@ function loop(a: App) {
   const stamps: number[] = [];
   const postFaults = createPostFaults(MAX_FAILED_POSTS);
   let lastFrameMs = 0;
+  let lastPublish = -Infinity;
   let stats = a.view.stats();
   const tick = (t: number) => {
     if (a.lost) return;
@@ -505,7 +518,9 @@ function loop(a: App) {
     }
     lastFrameMs = performance.now() - t0;
     frameMs.push(lastFrameMs, held);
-    if (frame % PUBLISH_EVERY === 0) {
+    // D4-100: every PUBLISH_EVERY frames, and a heavy (preparing) frame its own
+    if (snapshotDue(frame, performance.now() - lastPublish)) {
+      lastPublish = performance.now();
       const flow = flowStatus(a);
       const drawn = a.fields?.drawn() ?? 'none';
       const diagnostics: AppDiagnostics = {
@@ -537,6 +552,8 @@ function loop(a: App) {
           ...a.warm.state(),
           frames: a.warmFrames,
           cpuMaxMs: a.warmCpuMaxMs,
+          cpuMs: a.warmCpuMs,
+          slotCpuMaxMs: a.warmSlotCpuMaxMs,
           slowest: a.warmSlowest,
           gaveUp: a.warm.gaveUp(),
           suspended: a.warmSuspended,
@@ -555,12 +572,22 @@ function loop(a: App) {
         renderScale: stats.renderScale,
       };
       try {
+        const vp = viewProjection(a);
         post({
           type: 'snapshot',
           snapshot: a.core.snapshot({ flow, flowSource: drawn }),
           diagnostics,
           anchors: projectAnchors(a),
-          engineBox: screenBox(viewProjection(a), ENGINE_RINGS, a.size.width, a.size.height),
+          engineBox: screenBox(vp, ENGINE_RINGS, a.size.width, a.size.height),
+          // W2A-N31: the framed view's content box, as framed; the jet in Schlieren (no label on it)
+          framedBox:
+            a.framing === null
+              ? null
+              : screenBox(vp, framingRings(a.framing), a.size.width, a.size.height),
+          jetBox:
+            a.framing === 'schlieren'
+              ? jetBox(vp, ENGINE_DEFINITION, FIELD_EXTENTS.near.xMax, a.size.width, a.size.height)
+              : null,
           refused: a.refused.splice(0),
         });
         postFaults.posted();
@@ -716,6 +743,8 @@ async function init(m: Extract<ToWorker, { type: 'init' }>) {
     warmFrames: 0,
     warmCpuMaxMs: 0,
     warmSlowest: '',
+    warmCpuMs: 0,
+    warmSlotCpuMaxMs: 0,
     warmSuspended: false,
     appliedView: null,
     errors: [],

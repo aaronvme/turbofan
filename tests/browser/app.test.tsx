@@ -9,13 +9,20 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { commands, page, userEvent } from 'vitest/browser';
+import { THRESHOLDS } from '../../src/contracts/thresholds';
 import { VIEW_MODES, type ViewMode } from '../../src/contracts/ui';
 import type { FrameBudget } from '../../src/shell/protocol';
+import { FRAME_MARGIN_PX, inset } from '../../src/shell/orbit';
 import { BACKING_STORE_MAX_PX } from '../../src/shell/pixelCap';
 import { SETTLED_FRAMES } from '../../src/shell/settle';
 import { App } from '../../src/ui/App';
 import { useApp } from '../../src/ui/store';
-import { failedBars, schlierenSignature, type SchlierenSignature } from './lib/schlierenCheck';
+import {
+  failedBars,
+  greyShare,
+  schlierenSignature,
+  type SchlierenSignature,
+} from './lib/schlierenCheck';
 import '../../src/ui/global.css';
 
 const env = (import.meta as { env?: Record<string, string | undefined> }).env;
@@ -71,8 +78,13 @@ interface Shot {
    * canvas alone (W2A-I10: the overlay hidden for that screenshot, so no label or legend in it).
    */
   readonly schlieren: SchlierenSignature | null;
+  /** W2A-N30: the free area's share in bands of these half-widths about 0.5 (recorded). */
+  readonly greyBands: Readonly<Record<string, number>> | null;
   readonly jpeg: string;
 }
+
+/** W2A-N30: the half-widths about the knife edge's 0.5 whose grey share is recorded. */
+const GREY_BANDS = [0.005, 0.01, 0.015, 0.02, 0.03, 0.05, 0.1] as const;
 
 const bitmapOf = async (png: string) =>
   createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob());
@@ -151,12 +163,37 @@ async function shoot(): Promise<Shot> {
           w: view.width,
           h: view.height,
         });
+  const greyBands =
+    engineBox === null || view === undefined
+      ? null
+      : Object.fromEntries(
+          GREY_BANDS.map((b) => [
+            String(b),
+            Number(
+              greyShare(
+                lum,
+                cv.width,
+                cv.height,
+                engineBox,
+                {
+                  x: view.left,
+                  y: view.top,
+                  w: view.width,
+                  h: view.height,
+                },
+                0.5 - b,
+                0.5 + b,
+              ).toFixed(3),
+            ),
+          ]),
+        );
   return {
     w: bmp.width,
     h: bmp.height,
     centreStd: Math.sqrt(Math.max(0, sum2 / n - mean * mean)),
     centreLit: lit / n,
     schlieren,
+    greyBands,
     jpeg,
   };
 }
@@ -223,8 +260,15 @@ function calloutProblems(): string[] {
     (el) => visible(el) && shown(el).height > 0,
   );
   const id = (el: HTMLElement) => el.dataset.id ?? el.textContent;
+  // critic pass 18's visual note 2: in Schlieren no label sits on the jet (the worker's jet box,
+  // canvas px, posted in Schlieren only)
+  const jet = useApp.getState().jetBox;
   labels.forEach((a, i) => {
     const ra = a.getBoundingClientRect();
+    if (jet !== null) {
+      const j = new DOMRect(hostRect.left + jet.x, hostRect.top + jet.y, jet.w, jet.h);
+      if (overlap(ra, j) > 0.5) out.push(`callout ${id(a)} sits on the jet`);
+    }
     for (const b of labels.slice(i + 1))
       if (overlap(ra, b.getBoundingClientRect()) > 0.5)
         out.push(`callout ${id(a)} overlaps callout ${id(b)}`);
@@ -357,6 +401,37 @@ function axialRowProblems(): string[] {
   return out;
 }
 
+/**
+ * W2A-N31 (critic pass 18): Schlieren and Exploded land inside the free area above the dock less
+ * FRAME_MARGIN_PX (the area the overlay posts, measured here as it measures it: the centre column
+ * above the dock less 8 px), as the worker's framed content box (Exploded's drawn parts, W2A-I11;
+ * Schlieren's engine and jet) says, 2 px for the re-projection's residual. A framing dropped from
+ * the worker leaves the content where the orbit puts it, outside the area.
+ */
+function framedProblems(mode: ViewMode): string[] {
+  const host = document.querySelector('.overlay .callouts')?.getBoundingClientRect();
+  const c = document.querySelector('.center')?.getBoundingClientRect();
+  const dock = document.querySelector('.center .dock')?.getBoundingClientRect();
+  const box = useApp.getState().framedBox;
+  if (host === undefined || c === undefined) return ['no callouts host or centre column'];
+  if (box === null) return ['no framed content box'];
+  const bottom = dock === undefined ? c.bottom : Math.min(c.bottom, dock.top - 8);
+  const rows = { x: c.left - host.left, y: c.top - host.top, w: c.width, h: bottom - c.top };
+  const a = inset(rows, FRAME_MARGIN_PX);
+  const inside =
+    box.x >= a.x - 2 &&
+    box.y >= a.y - 2 &&
+    box.x + box.w <= a.x + a.w + 2 &&
+    box.y + box.h <= a.y + a.h + 2;
+  const r = (b: { x: number; y: number; w: number; h: number }) =>
+    `${b.x.toFixed(0)},${b.y.toFixed(0)}-${(b.x + b.w).toFixed(0)},${(b.y + b.h).toFixed(0)}`;
+  return inside
+    ? []
+    : [
+        `${mode} is framed outside the area: the content ${r(box)}, the area less the margin ${r(a)}`,
+      ];
+}
+
 /** D4-88: the worker says the view has settled in `mode` (its transition done, TRAA converged). */
 function settledIn(mode: ViewMode): boolean {
   const s = useApp.getState();
@@ -391,6 +466,11 @@ describe('the app in Chrome', () => {
       for (const [i, mode] of VIEW_MODES.entries()) {
         await toMode(mode);
         layout.push(...layoutProblems().map((p) => `${mode}: ${p}`));
+        if (mode === 'schlieren' || mode === 'exploded') {
+          layout.push(...framedProblems(mode).map((p) => `${mode}: ${p}`));
+          const fb = useApp.getState().framedBox;
+          rows.push(`  ${mode} framed content box ${JSON.stringify(fb)}`);
+        }
         if (mode === 'cutaway' || mode === 'data') {
           layout.push(...axialRowProblems().map((p) => `${mode}: ${p}`));
           // round 7: the legend's floor note on one line (a second made the dock taller and the
@@ -435,6 +515,9 @@ describe('the app in Chrome', () => {
         // the jet bar
         const sig = JSON.stringify(shot.schlieren);
         rows.push(`  ${mode} schlieren signature ${sig}`);
+        rows.push(
+          `  ${mode} grey share by band half-width (W2A-N30) ${JSON.stringify(shot.greyBands)}`,
+        );
         const fails = shot.schlieren === null ? null : failedBars(shot.schlieren);
         if (mode === 'schlieren') {
           expect(shot.schlieren?.pass, `schlieren: ${sig}`).toBe(true);
@@ -574,7 +657,12 @@ describe('the app in Chrome', () => {
     // part-power round's). The sim holds, resets to ground idle, and steps counted frames of
     // FIXED_DT; each lever change is sent while it holds, so the inputs meet the same steps every
     // run. The app itself keeps the real frame time.
-    const FIXED_DT = 1 / 60;
+    // W2H-N10 (critic pass 18): P5's window, read from the contract as heldFrame.test.ts reads it:
+    // windowS from ground idle, idleS at idle, the leverRampS ramp, then the take-off lever to the
+    // window's end (it ran 20 s after the ramp's end, 24 s in all)
+    const P5 = THRESHOLDS.P5.values;
+    const FIXED_DT = 1 / P5.stepRateHz.value;
+    const framesOf = (seconds: number) => Math.round(seconds * P5.stepRateHz.value);
     let asked = 0;
     const step = async (frames: number, what: string) => {
       asked += frames;
@@ -587,7 +675,7 @@ describe('the app in Chrome', () => {
     useApp.getState().send({ type: 'setThrottle', lever: 0.05 });
     // 3 s at 0.05, then the w2f-c12 probe's case: the lever ramped from idle to take-off over 1 s
     // of sim time, in 20 steps of 0.05 every 3 frames
-    await step(180, 'the idle hold');
+    await step(framesOf(P5.idleS.value), 'the idle hold');
     const before = useApp.getState().diagnostics?.budget;
     for (let k = 1; k <= 20; k++) {
       useApp.getState().send({ type: 'setThrottle', lever: 0.05 * k });
@@ -600,13 +688,14 @@ describe('the app in Chrome', () => {
     let heldSnapshots = 0;
     let snapshots = 0;
     let lastVersion = -1;
-    // then 20 s of sim time at take-off, stepped as one batch (the frame cost is the worker's)
-    asked += 1200;
-    useApp.getState().post({ type: 'debug', simSteps: { dtS: FIXED_DT, frames: 1200 } });
+    // then take-off to the window's end, stepped as one batch (the frame cost is the worker's)
+    const takeoff = framesOf(P5.windowS.value - P5.idleS.value - P5.leverRampS.value);
+    asked += takeoff;
+    useApp.getState().post({ type: 'debug', simSteps: { dtS: FIXED_DT, frames: takeoff } });
     const t0 = performance.now();
     while ((useApp.getState().diagnostics?.fixedSteps?.frames ?? -1) < asked) {
       if (performance.now() - t0 > 90_000)
-        throw new Error('the 1200 fixed frames: not within 90 s');
+        throw new Error(`the ${String(takeoff)} fixed frames: not within 90 s`);
       const s = useApp.getState();
       if (s.snapshot !== null && s.snapshot.version !== lastVersion && s.diagnostics !== null) {
         lastVersion = s.snapshot.version;
@@ -657,8 +746,10 @@ describe('the app in Chrome', () => {
       n1End: s.snapshot?.cycle.n1Percent ?? null,
     };
     await commands.writeFile('reports/ui/frame-cost.json', `${JSON.stringify(record, null, 2)}\n`);
-    // every frame asked for was stepped on the fixed dt (W2H-I5: the same case every run)
+    // every frame asked for was stepped on the fixed dt (W2H-I5: the same case every run), and
+    // they are P5's window (W2H-N10)
     expect(record.fixedFrames).toBe(asked);
+    expect(asked).toBe(framesOf(P5.windowS.value));
     // the case exercises a held gas path, or its numbers would not answer W2F-N5
     expect(record.lostSolves).toBeGreaterThan(0);
     expect(problems()).toEqual([]);

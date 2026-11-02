@@ -20,7 +20,7 @@
 // The pass-4 march (one rasterised rotor image, reprojected) fails both: its shredded far
 // side, hub comb and dark crescents are tiles far off the reference.
 
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { commands } from 'vitest/browser';
 import { ENGINE_DEFINITION } from '../../src/engine/definition';
 import { createEngineView, type EngineView } from '../../src/render/engineView';
@@ -96,14 +96,22 @@ function error(est: Float32Array, ref: Float32Array, mask: Uint8Array): Err {
   return { mae: n > 0 ? sum / n : 0, tile: worst, moving: n / (W * H) };
 }
 
+// D4-100 (the merge gate on 469164a): the one test of three shots took 25.9 s alone and 26.6 s in
+// the full suite on AC (2026-11-01, reports/scratch/polish), and timed out at 120 s in the
+// official window's full suite with every assertion passing (a slowdown of at least 4.6x, cause
+// unknown; the critic's battery run was 2.3-2.7x slower overall). Test plumbing, not a bar (D4-95's
+// precedent): one test per shot, in the same order on the same view (the same frames), each with
+// SHOT_TIMEOUT_MS: split, the shots took 23 s (the first, with the view's first compiles), 7 and 9 s
+// alone on AC (9d63da3), so 240 s is over 10x the longest.
+const SHOT_TIMEOUT_MS = 240_000;
+/** The view's creation (its boot compile, about 1 s here), with the same margin. */
+const SETUP_TIMEOUT_MS = 60_000;
+
 describe('W1L-I3: the fan blur matches a 64-still box-shutter reference', () => {
   let view: EngineView | null = null;
-  afterAll(async () => {
-    if (view !== null) await view.dispose();
-  });
-
-  it('fanIdle, hero and fanTakeoff: estimator and shipped frame within the stated bounds', async () => {
-    const c = document.createElement('canvas');
+  const c = document.createElement('canvas');
+  const rows: string[] = [];
+  beforeAll(async () => {
     c.width = W;
     c.height = H;
     document.body.appendChild(c);
@@ -116,73 +124,83 @@ describe('W1L-I3: the fan blur matches a 64-still box-shutter reference', () => 
       dpr: 1,
       quality: 'high',
     });
-    const v = view;
-    const rows: string[] = [];
-    const failures: string[] = [];
-    for (const shot of ['fanIdle', 'hero', 'fanTakeoff'] as LookPresetId[]) {
-      const preset = LOOK_PRESETS[shot];
-      v.setDebugFlags({ noTraa: true, linear: true });
-      v.setPreset(shot);
-      await settle(v, 8);
-      const blur = (v.stats().lpBlurDeg * Math.PI) / 180;
-      // the reference: 64 stills, shutter 0, the fan turned across the exposure
-      v.setShutter(0);
-      const ref = await meanOf(v, c, N_REF, (i) => {
-        v.setDebugFlags({
-          noTraa: true,
-          linear: true,
-          lpPhase: ((i + 0.5) / N_REF - 0.5) * blur,
-        });
-      });
-      const mask = new Uint8Array(W * H);
-      for (let p = 0; p < W * H; p++)
-        mask[p] = (ref.hi[p] ?? 0) - (ref.lo[p] ?? 0) > MOVING ? 1 : 0;
-      // the estimator: 64 frames at the preset's shutter, TRAA off
-      v.setShutter(preset.shutterDeg);
-      v.setDebugFlags({ noTraa: true, linear: true });
-      await settle(v, 2);
-      const est = await meanOf(v, c, N_REF, () => undefined);
-      // what ships: TRAA on, one frame
-      v.setDebugFlags({ linear: true });
-      await settle(v, 48);
-      const shipped = grab(v, c);
-      const raw = error(est.mean, ref.mean, mask);
-      const traa = error(shipped.lum, ref.mean, mask);
-      // what ships in motion: the spools turn for 48 frames, then the reference at the new phase
-      v.setDebugFlags({ linear: true });
-      for (let i = 0; i < 48; i++) {
-        v.frame(1 / 60);
-        await nextFrame();
-      }
-      const shippedMoving = grab(v, c);
-      v.setShutter(0);
-      const refMoving = await meanOf(v, c, N_REF, (i) => {
-        v.setDebugFlags({
-          noTraa: true,
-          linear: true,
-          lpPhase: ((i + 0.5) / N_REF - 0.5) * blur,
-        });
-      });
-      v.setShutter(preset.shutterDeg);
-      const maskMoving = new Uint8Array(W * H);
-      for (let p = 0; p < W * H; p++)
-        maskMoving[p] = (refMoving.hi[p] ?? 0) - (refMoving.lo[p] ?? 0) > MOVING ? 1 : 0;
-      const moving = error(shippedMoving.lum, refMoving.mean, maskMoving);
-      rows.push(
-        `${shot} (blur ${((blur * 180) / Math.PI).toFixed(1)} deg, moving ${(100 * raw.moving).toFixed(1)} % of the frame): estimator MAE ${raw.mae.toFixed(4)} worst tile ${raw.tile.toFixed(4)} | shipped MAE ${traa.mae.toFixed(4)} worst tile ${traa.tile.toFixed(4)} | shipped in motion MAE ${moving.mae.toFixed(4)} worst tile ${moving.tile.toFixed(4)}`,
-      );
-      if (moving.mae > LIMITS.traa.mae || moving.tile > LIMITS.traa.tile)
-        failures.push(`${shot} shipped in motion`);
-      if (raw.moving < 0.01) failures.push(`${shot}: the fan barely moves (${raw.moving})`);
-      if (raw.mae > LIMITS.raw.mae || raw.tile > LIMITS.raw.tile)
-        failures.push(`${shot} estimator`);
-      if (traa.mae > LIMITS.traa.mae || traa.tile > LIMITS.traa.tile)
-        failures.push(`${shot} shipped`);
+  }, SETUP_TIMEOUT_MS);
+  afterAll(async () => {
+    if (rows.length > 0) {
+      console.warn(`W1L-I3 fan blur\n${rows.join('\n')}`);
+      // the measured numbers, for the handoff (the browser console does not reach the log)
+      await commands.writeFile('test-results/fanBlur.txt', `${rows.join('\n')}\n`);
     }
-    console.warn(`W1L-I3 fan blur\n${rows.join('\n')}`);
-    // the measured numbers, for the handoff (the browser console does not reach the log)
-    await commands.writeFile('test-results/fanBlur.txt', `${rows.join('\n')}\n`);
-    expect(v.stats().errors).toEqual([]);
-    expect(failures, rows.join('\n')).toEqual([]);
+    if (view !== null) await view.dispose();
   });
+
+  for (const shot of ['fanIdle', 'hero', 'fanTakeoff'] as LookPresetId[])
+    it(
+      `${shot}: estimator and shipped frame (still and in motion) within the stated bounds`,
+      async () => {
+        if (view === null) throw new Error('no view');
+        const v = view;
+        const failures: string[] = [];
+        const preset = LOOK_PRESETS[shot];
+        v.setDebugFlags({ noTraa: true, linear: true });
+        v.setPreset(shot);
+        await settle(v, 8);
+        const blur = (v.stats().lpBlurDeg * Math.PI) / 180;
+        // the reference: 64 stills, shutter 0, the fan turned across the exposure
+        v.setShutter(0);
+        const ref = await meanOf(v, c, N_REF, (i) => {
+          v.setDebugFlags({
+            noTraa: true,
+            linear: true,
+            lpPhase: ((i + 0.5) / N_REF - 0.5) * blur,
+          });
+        });
+        const mask = new Uint8Array(W * H);
+        for (let p = 0; p < W * H; p++)
+          mask[p] = (ref.hi[p] ?? 0) - (ref.lo[p] ?? 0) > MOVING ? 1 : 0;
+        // the estimator: 64 frames at the preset's shutter, TRAA off
+        v.setShutter(preset.shutterDeg);
+        v.setDebugFlags({ noTraa: true, linear: true });
+        await settle(v, 2);
+        const est = await meanOf(v, c, N_REF, () => undefined);
+        // what ships: TRAA on, one frame
+        v.setDebugFlags({ linear: true });
+        await settle(v, 48);
+        const shipped = grab(v, c);
+        const raw = error(est.mean, ref.mean, mask);
+        const traa = error(shipped.lum, ref.mean, mask);
+        // what ships in motion: the spools turn for 48 frames, then the reference at the new phase
+        v.setDebugFlags({ linear: true });
+        for (let i = 0; i < 48; i++) {
+          v.frame(1 / 60);
+          await nextFrame();
+        }
+        const shippedMoving = grab(v, c);
+        v.setShutter(0);
+        const refMoving = await meanOf(v, c, N_REF, (i) => {
+          v.setDebugFlags({
+            noTraa: true,
+            linear: true,
+            lpPhase: ((i + 0.5) / N_REF - 0.5) * blur,
+          });
+        });
+        v.setShutter(preset.shutterDeg);
+        const maskMoving = new Uint8Array(W * H);
+        for (let p = 0; p < W * H; p++)
+          maskMoving[p] = (refMoving.hi[p] ?? 0) - (refMoving.lo[p] ?? 0) > MOVING ? 1 : 0;
+        const moving = error(shippedMoving.lum, refMoving.mean, maskMoving);
+        const row = `${shot} (blur ${((blur * 180) / Math.PI).toFixed(1)} deg, moving ${(100 * raw.moving).toFixed(1)} % of the frame): estimator MAE ${raw.mae.toFixed(4)} worst tile ${raw.tile.toFixed(4)} | shipped MAE ${traa.mae.toFixed(4)} worst tile ${traa.tile.toFixed(4)} | shipped in motion MAE ${moving.mae.toFixed(4)} worst tile ${moving.tile.toFixed(4)}`;
+        rows.push(row);
+        if (moving.mae > LIMITS.traa.mae || moving.tile > LIMITS.traa.tile)
+          failures.push(`${shot} shipped in motion`);
+        if (raw.moving < 0.01) failures.push(`${shot}: the fan barely moves (${raw.moving})`);
+        if (raw.mae > LIMITS.raw.mae || raw.tile > LIMITS.raw.tile)
+          failures.push(`${shot} estimator`);
+        if (traa.mae > LIMITS.traa.mae || traa.tile > LIMITS.traa.tile)
+          failures.push(`${shot} shipped`);
+        expect(v.stats().errors).toEqual([]);
+        expect(failures, row).toEqual([]);
+      },
+      SHOT_TIMEOUT_MS,
+    );
 });

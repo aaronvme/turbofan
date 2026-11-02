@@ -22,7 +22,7 @@ export const UI_ROWS = {
   },
   U4: {
     checkText:
-      "An unwarmed switch (D4-97 item 1, W2A-I7): from the click into a view mode whose configuration is not yet warm to that view shown (`preparing` cleared), at a steady frame CPU of any value. The asked view takes its warm slots under the frame-CPU rule, and after 30 frames of preparing one every frame whatever the last frame's CPU (D4-98 item 1); its give-up counts the frames waited (`src/shell/warmUp.ts`; `tests/browser/firstSwitch.test.tsx`, 1366 x 768)",
+      "An unwarmed switch (D4-97 item 1, W2A-I7): from the click into a view mode whose configuration is not yet warm to that view shown (`preparing` cleared), at any steady frame CPU up to 11.2 ms (tested; D4-99 item 2). From its first frame of preparing the asked view takes a slot every frame whatever the last frame's CPU (D4-98 item 1 waited 30 frames first; D4-100 none), each slot several warm frames until their CPU reaches 200 ms (D4-100); its give-up counts the frames waited (`src/shell/warmUp.ts`; `tests/browser/firstSwitch.test.tsx`, 1366 x 768)",
     passText: '≤ 2 s; indicative on the shared machine, official only in a quiet run (D0-1)',
   },
   U5: {
@@ -54,7 +54,7 @@ export const UI_LEVELS = {
   firstSwitchMaxGapMs: 250,
   /** U3: boot to ready, ms. */
   bootToReadyMaxMs: 5000,
-  /** U4: an unwarmed switch shown within this, at any steady frame CPU, ms. */
+  /** U4: an unwarmed switch shown within this, at any steady frame CPU up to 11.2 ms, ms. */
   coldSwitchMaxMs: 2000,
   /** U5: the cut views' framing never below this of the engine's size at the orbit before. */
   cutViewMinScale: 0.6,

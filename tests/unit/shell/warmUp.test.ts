@@ -12,13 +12,16 @@ import {
   COLD_SWITCH_WAIT_FRAMES,
   MAX_PREPARE_FRAMES,
   MAX_WARM_FRAMES,
+  PREPARE_FRAME_CPU_MS,
   QUIET_AFTER_INPUT_MS,
   SLOT_EVERY,
   SLOT_FRAME_CPU_MS,
+  WARM_BUDGET_MS,
   WARM_CONFIGS,
   bootWarmed,
   configFor,
   createWarmScheduler,
+  nextWarmBudget,
   shownView,
   type WarmClock,
 } from '../../../src/shell/warmUp';
@@ -209,11 +212,11 @@ describe('D4-95: the background warm-up is suspended around input and switches',
     expect(s.next(4 * SLOT_EVERY, 1, 'data:t+tracers', at(2100))).toBe('cutaway+tracers');
   });
 
-  it('keeps the slot rule while preparing: one slot every SLOT_EVERY frames, after a light frame', () => {
+  it('D4-100: the asked view takes a slot every frame while preparing, whatever the last frame took', () => {
     const s = booted();
     expect(s.next(0, 1, 'exploded', at(0, true))).toBe('exploded');
-    expect(s.next(1, 1, 'exploded', at(17, true))).toBeNull();
-    expect(s.next(SLOT_EVERY, SLOT_FRAME_CPU_MS + 1, 'exploded', at(34, true))).toBeNull();
+    expect(s.next(1, 1, 'exploded', at(17, true))).toBe('exploded');
+    expect(s.next(SLOT_EVERY, SLOT_FRAME_CPU_MS + 1, 'exploded', at(34, true))).toBe('exploded');
   });
 });
 
@@ -248,8 +251,8 @@ describe('D4-97 item 1 (W2A-I7), D4-98 item 1: a cold switch waits at most 30 fr
   };
   const everyFrameFrom = (f0: number, n: number) => Array.from({ length: n }, (_, k) => f0 + k);
 
-  it('the bound is 30 frames of preparing; the give-up counts the frames waited (about 13 s)', () => {
-    expect(COLD_SWITCH_WAIT_FRAMES).toBe(30);
+  it('the bound is 0 frames of preparing (D4-100; D4-98 had 30); the give-up counts the frames waited (about 13 s)', () => {
+    expect(COLD_SWITCH_WAIT_FRAMES).toBe(0);
     expect(MAX_PREPARE_FRAMES).toBe(800);
   });
 
@@ -258,25 +261,22 @@ describe('D4-97 item 1 (W2A-I7), D4-98 item 1: a cold switch waits at most 30 fr
     ['a steady 11.2 ms (critic 15: the held frame in the worker)', 11.2],
     ['a steady 16 ms', 16],
   ] as const)
-    it(`at ${name} frame: the first slot at frame 30, then one every frame`, () => {
+    it(`at ${name} frame: the first slot at frame ${String(COLD_SWITCH_WAIT_FRAMES)}, then one every frame`, () => {
       const { slots } = run(() => cpu, 20);
       expect(slots).toEqual(everyFrameFrom(COLD_SWITCH_WAIT_FRAMES, 20));
     });
 
-  it('at a steady 8.0 ms frame (under the bar): a slot every SLOT_EVERY frames from the first, then every frame from frame 30', () => {
-    expect(run(() => 8.0, 5).slots).toEqual([0, 2, 4, 6, 8]);
-    const { slots } = run(() => 8.0, 20);
-    expect(slots).toEqual([
-      0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 31, 32, 33, 34,
-    ]);
+  it('at a steady 8.0 ms frame (under the bar): a slot every frame from the first (D4-100)', () => {
+    expect(run(() => 8.0, 5).slots).toEqual([0, 1, 2, 3, 4]);
+    expect(run(() => 8.0, 20).slots).toEqual(everyFrameFrom(0, 20));
   });
 
-  it('loaded (9-14 ms, one frame in 50 at 8 ms): the light frame gives a slot, then every frame from frame 30', () => {
+  it('loaded (9-14 ms, one frame in 50 at 8 ms): a slot every frame from the first (D4-100)', () => {
     const { slots } = run((f) => (f % 50 === 0 ? 8 : 9 + (f % 6)), 12);
-    expect(slots).toEqual([0, ...everyFrameFrom(30, 11)]);
+    expect(slots).toEqual(everyFrameFrom(0, 12));
   });
 
-  it('a configuration that needs k warm frames is shown 30 + (k - 1) frames after the click, at any steady CPU over the bar', () => {
+  it('a configuration that needs k slots is shown COLD_SWITCH_WAIT_FRAMES + (k - 1) frames after the click, at any steady CPU', () => {
     for (const cpu of [8.4, 11.2, 30])
       for (const k of [1, 3, 47]) {
         const { shown } = run(() => cpu, k);
@@ -286,8 +286,8 @@ describe('D4-97 item 1 (W2A-I7), D4-98 item 1: a cold switch waits at most 30 fr
       }
   });
 
-  it('at a light CPU, 47 warm frames (Cutaway) are shown by frame 61: 15 slots in the wait, then every frame', () => {
-    expect(run(() => 4, 47).shown).toBe(61);
+  it('at a light CPU, 47 slots (Cutaway) are shown at frame 46: every frame (D4-100; D4-98 waited, frame 61)', () => {
+    expect(run(() => 4, 47).shown).toBe(46);
   });
 
   it('gives up on a view that never finishes after MAX_PREPARE_FRAMES frames waited (shown anyway, said)', () => {
@@ -309,7 +309,6 @@ describe('D4-97 item 1 (W2A-I7), D4-98 item 1: a cold switch waits at most 30 fr
   it('the background keeps its SLOT_EVERY once the asked view is shown', () => {
     const s = booted();
     const clock = (f: number) => ({ nowMs: 1e6 + f * frameMs, switchPending: false });
-    for (let f = 0; f < 30; f++) expect(s.next(f, 11.2, 'exploded', clock(f))).toBeNull();
     expect(s.next(30, 11.2, 'exploded', clock(30))).toBe('exploded');
     s.done('exploded');
     // the shown view's last slot was at frame 30: the background's next at 32 at the earliest
@@ -318,20 +317,208 @@ describe('D4-97 item 1 (W2A-I7), D4-98 item 1: a cold switch waits at most 30 fr
     expect(s.next(33, 1, 'exploded', clock(33))).toBeNull();
   });
 
-  it('the wait starts again for the next cold switch (it is the asked view that waited)', () => {
+  it('each cold switch prepares from its first frame (it is the asked view that is prepared)', () => {
     const s = booted();
     const clock = (f: number) => ({ nowMs: f * frameMs, switchPending: true });
-    for (let f = 0; f < COLD_SWITCH_WAIT_FRAMES; f++)
-      expect(s.next(f, 11.2, 'exploded', clock(f))).toBeNull();
-    expect(s.next(COLD_SWITCH_WAIT_FRAMES, 11.2, 'exploded', clock(30))).toBe('exploded');
-    expect(s.next(31, 11.2, 'exploded', clock(31))).toBe('exploded');
+    expect(s.next(0, 11.2, 'exploded', clock(0))).toBe('exploded');
+    expect(s.next(1, 11.2, 'exploded', clock(1))).toBe('exploded');
     s.done('exploded');
     // shown; then a switch into another cold view, at frame 200
     expect(s.next(150, 11.2, 'exploded', clock(150))).toBeNull();
-    expect(s.next(200, 11.2, 'schlieren', clock(200))).toBeNull();
-    expect(s.next(229, 11.2, 'schlieren', clock(229))).toBeNull();
-    expect(s.next(230, 11.2, 'schlieren', clock(230))).toBe('schlieren');
-    expect(s.next(231, 11.2, 'schlieren', clock(231))).toBe('schlieren');
+    expect(s.next(200, 11.2, 'schlieren', clock(200))).toBe('schlieren');
+    expect(s.next(201, 11.2, 'schlieren', clock(201))).toBe('schlieren');
+  });
+});
+
+describe('D4-100 (U4 on AC): past its wait the asked view warms several frames in one, up to PREPARE_FRAME_CPU_MS', () => {
+  // The W2 official window (AC, quiet): the cold switch into Data took 2.46-2.56 s against U4's
+  // 2 s, with 56-57 warm frames, one a frame past the 30-frame wait, each lengthening its frame
+  // past one vsync. The longest snapshot gap while preparing was 108-145 ms against the test's
+  // 1 s freeze bar, so there is room: past its wait the asked view's frame takes warm frames until
+  // its warm CPU reaches PREPARE_FRAME_CPU_MS (one object is always let through, so one slow build
+  // can pass it). Before the wait, and for the background, a slot is one warm frame at
+  // WARM_BUDGET_MS, as before (D4-95 item 3: the background keeps its rule).
+  const booted = () => {
+    const s = createWarmScheduler();
+    for (const id of BOOT_CONFIGS) s.done(id);
+    return s;
+  };
+  const frameMs = 1000 / 60;
+  const pending = (f: number): WarmClock => ({ nowMs: f * frameMs, switchPending: true });
+
+  it('the cap is stated: 200 ms of warm CPU a frame (inside D4-100 gap room), one warm frame 4 ms', () => {
+    expect(PREPARE_FRAME_CPU_MS).toBe(200);
+    expect(WARM_BUDGET_MS).toBe(4);
+    // a frame of the cap, its slowest object (the official run's 24-26 ms) and a heavy frame's own
+    // CPU stays far inside the 1 s freeze bar (firstSwitch.test.tsx FREEZE_MS)
+    expect(PREPARE_FRAME_CPU_MS + 50 + 16.7).toBeLessThan(1000 / 2);
+  });
+
+  it('a background slot: one warm frame at WARM_BUDGET_MS; the asked view: the cap from its first frame', () => {
+    const s = booted();
+    expect(s.slot(0, 4, 'realistic', calm(0))).toEqual({
+      id: 'cutaway+tracers',
+      capMs: WARM_BUDGET_MS,
+      several: false,
+    });
+    const t = booted();
+    expect(t.slot(0, 4, 'data:mach+tracers', pending(0))).toEqual({
+      id: 'data:mach+tracers',
+      capMs: PREPARE_FRAME_CPU_MS,
+      several: true,
+    });
+  });
+
+  for (const cpu of [4, 8.4, 11.2])
+    it(`past the wait (at a ${String(cpu)} ms frame) the asked view's slot is several warm frames up to the cap, every frame`, () => {
+      const s = booted();
+      for (let f = 0; f < COLD_SWITCH_WAIT_FRAMES; f++)
+        s.slot(f, cpu, 'data:mach+tracers', pending(f));
+      for (let f = COLD_SWITCH_WAIT_FRAMES; f < COLD_SWITCH_WAIT_FRAMES + 5; f++)
+        expect(s.slot(f, cpu, 'data:mach+tracers', pending(f)), String(f)).toEqual({
+          id: 'data:mach+tracers',
+          capMs: PREPARE_FRAME_CPU_MS,
+          several: true,
+        });
+      // next() names the same configuration
+      expect(s.next(40, cpu, 'data:mach+tracers', pending(40))).toBe('data:mach+tracers');
+    });
+
+  it('nextWarmBudget: the first warm frame takes the cap; more follow under the cap while they draw something new', () => {
+    const several = { id: 'data:mach+tracers', capMs: 200, several: true } as const;
+    const one = { id: 'cutaway+tracers', capMs: 4, several: false } as const;
+    const report = (done: boolean, newObjects: number) => ({ done, newObjects });
+    expect(nextWarmBudget(several, 0, null)).toBe(200);
+    expect(nextWarmBudget(one, 0, null)).toBe(4);
+    // a background slot is one warm frame, whatever it drew
+    expect(nextWarmBudget(one, 1, report(false, 1))).toBe(0);
+    // the cap less what the frame's warm frames took so far
+    expect(nextWarmBudget(several, 60, report(false, 3))).toBe(140);
+    expect(nextWarmBudget(several, 199, report(false, 3))).toBe(1);
+    // the cap reached, the configuration done, or nothing new drawn (what is left is the GPU
+    // compiling, which another warm frame in the same frame cannot hurry): no more this frame
+    expect(nextWarmBudget(several, 200, report(false, 3))).toBe(0);
+    expect(nextWarmBudget(several, 230, report(false, 3))).toBe(0);
+    expect(nextWarmBudget(several, 50, report(true, 3))).toBe(0);
+    expect(nextWarmBudget(several, 50, report(false, 0))).toBe(0);
+  });
+
+  /**
+   * A cold switch in a model of the warm frames: the configuration's objects, each built once in
+   * a warm frame (its build CPU, ms; at least one a warm frame, then while the budget lasts), each
+   * drawn with a fixed CPU once built; a warm frame is done when it drew nothing new and nothing
+   * is left. The frames at 60 Hz, each lasting whole vsyncs: its own CPU plus its warm frames',
+   * which the next frame's slot rule sees (the worker's lastFrameMs). The CPU side only: the GPU's
+   * compiles run alongside, and the Chrome run measures the whole (firstSwitch.test.tsx).
+   */
+  const coldSwitch = (
+    frameCpuMs: number,
+    builds: readonly number[],
+    drawMs: number,
+    /** D4-98's rule: one warm frame at WARM_BUDGET_MS a slot (the official run's). */
+    oneWarmFrame = false,
+  ) => {
+    const s = booted();
+    const asked = 'data:mach+tracers';
+    let next = 0;
+    let t = 0;
+    let longest = 0;
+    let lastCpu = frameCpuMs;
+    /** One warm frame at a budget: its CPU, and what it drew new. */
+    const warmFrame = (budget: number) => {
+      let used = 0;
+      let n = 0;
+      while (next < builds.length && (n === 0 || used < budget)) {
+        used += builds[next] ?? 0;
+        next++;
+        n++;
+      }
+      return { cpuMs: used + drawMs * next, done: n === 0, newObjects: n };
+    };
+    for (let f = 0; f < 2000; f++) {
+      const given = s.slot(f, lastCpu, asked, { nowMs: t, switchPending: true });
+      // D4-98's rule: in its 30-frame wait a slot only every SLOT_EVERY frames after a light frame
+      const waiting =
+        oneWarmFrame && f < 30 && (lastCpu > SLOT_FRAME_CPU_MS || f % SLOT_EVERY !== 0);
+      const slot =
+        given === null || waiting
+          ? null
+          : oneWarmFrame
+            ? { ...given, capMs: WARM_BUDGET_MS, several: false }
+            : given;
+      let spent = 0;
+      if (slot !== null) {
+        let budget = nextWarmBudget(slot, 0, null);
+        while (budget > 0) {
+          const r = warmFrame(budget);
+          spent += r.cpuMs;
+          if (r.done) s.done(asked);
+          budget = nextWarmBudget(slot, spent, r);
+        }
+      }
+      lastCpu = frameCpuMs + spent;
+      const wall = Math.ceil(lastCpu / frameMs - 1e-9) * frameMs;
+      longest = Math.max(longest, wall);
+      t += wall;
+      if (s.isWarm(asked)) return { shownMs: t, longestFrameMs: longest };
+    }
+    return { shownMs: Infinity, longestFrameMs: longest };
+  };
+
+  it('the model: 57 objects of 4-26 ms (the official run: 56-57 warm frames, the slowest object 24-26 ms) show within 2 s at a light, 8.4 and 11.2 ms frame, no frame near 1 s', () => {
+    const builds = Array.from({ length: 57 }, (_, k) => 4 + ((k * 7) % 23));
+    for (const cpu of [4, 8.4, 11.2]) {
+      const r = coldSwitch(cpu, builds, 0.05);
+      expect(r.shownMs, `${String(cpu)} ms`).toBeLessThan(2000);
+      expect(r.longestFrameMs, `${String(cpu)} ms`).toBeLessThan(PREPARE_FRAME_CPU_MS + 26 + 34);
+      // D4-98's one warm frame a frame, in the same model, misses U4 as the official run did at a
+      // steady frame over the slot rule (no slot in the wait: the model's light frames take 15
+      // there, which the official light run, 2.46 s, did not show)
+      if (cpu > SLOT_FRAME_CPU_MS)
+        expect(coldSwitch(cpu, builds, 0.05, true).shownMs, `${String(cpu)} ms`).toBeGreaterThan(
+          2000,
+        );
+    }
+  });
+});
+
+describe('W2A-N29: a cold view the viewer leaves keeps no slots against the background cap', () => {
+  // critic pass 18's probe (docs/reviews/probes/w2a-abandoned-cold.probe.ts.txt): past its wait
+  // the asked view takes a slot every frame, and they counted against MAX_WARM_FRAMES, so a view
+  // left after about 470 such slots (about 8 s, on a machine whose compiles take that long) was
+  // given up at its first background slot with no further warm frame. Only background slots count
+  // toward MAX_WARM_FRAMES now; the asked view's own give-up is its frames waited.
+  for (const waited of [300, 420, 500, 790])
+    it(`after ${String(waited)} frames as the asked view, it is warmed in the background, not given up`, () => {
+      const s = createWarmScheduler();
+      for (const id of ['realistic', 'realistic+tracers', 'cutaway+tracers', 'schlieren'] as const)
+        s.done(id);
+      const calmAt = (f: number) => ({ nowMs: f * 16.7, switchPending: false });
+      for (let f = 0; f < waited; f++) s.next(f, 11.2, 'data:mach+tracers', calmAt(f));
+      // back to Realistic (warm): the background reaches Data next (a calm clock, a light CPU)
+      let got: string | null = null;
+      for (let f = waited; f < waited + 50 && got === null; f++)
+        got = s.next(f, 4, 'realistic', { nowMs: f * 16.7 + 5000, switchPending: false });
+      expect(got).toBe('data:mach+tracers');
+      expect(s.gaveUp()).toEqual([]);
+      expect(s.isWarm('data:mach+tracers')).toBe(false);
+    });
+
+  it('a background configuration is still given up after MAX_WARM_FRAMES background slots', () => {
+    const s = createWarmScheduler();
+    for (const id of ['realistic', 'realistic+tracers', 'cutaway+tracers', 'schlieren'] as const)
+      s.done(id);
+    const calmAt = (f: number) => ({ nowMs: 1e6 + f * 16.7, switchPending: false });
+    // 100 frames asked (70 every-frame slots past the wait), then left
+    for (let f = 0; f < 100; f++) s.next(f, 11.2, 'data:mach+tracers', calmAt(f));
+    // the asked view's last slot was at frame 99: the background's first at 101
+    let f = 101;
+    for (let k = 0; k < MAX_WARM_FRAMES; k++) {
+      expect(s.next(f, 1, 'realistic', calmAt(f)), String(k)).toBe('data:mach+tracers');
+      f += SLOT_EVERY;
+    }
+    expect(s.next(f, 1, 'realistic', calmAt(f))).toBe('exploded');
+    expect(s.gaveUp()).toEqual(['data:mach+tracers']);
   });
 });
 

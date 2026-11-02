@@ -131,6 +131,9 @@ export interface AppDiagnostics {
     readonly queue: readonly string[];
     readonly frames: number;
     readonly cpuMaxMs: number;
+    /** D4-100: the warm frames' CPU so far, and the most one frame's warm frames took, ms. */
+    readonly cpuMs: number;
+    readonly slotCpuMaxMs: number;
     /** The slowest warm frame's configuration and its slowest new object, with its own ms. */
     readonly slowest: string;
     readonly gaveUp: readonly string[];
@@ -173,6 +176,13 @@ export type FromWorker =
       readonly anchors: readonly AxialAnchor[];
       /** D4-92 (zz): the engine's screen box (the cut views' label rows), null off screen. */
       readonly engineBox: Rect | null;
+      /**
+       * W2A-N31: the framed view's content box (Schlieren's engine and jet, Exploded's drawn parts,
+       * the cut views' engine), null when the view is not framed or it is off screen.
+       */
+      readonly framedBox: Rect | null;
+      /** Critic pass 18's visual note 2: Schlieren's jet behind the nozzle (null: not Schlieren). */
+      readonly jetBox: Rect | null;
       /** Problems of the commands refused since the last snapshot. */
       readonly refused: readonly string[];
     }
