@@ -519,32 +519,28 @@ describe('D4-44 (c): preconditioned tracking where beta varies between cells', (
   // their shared faces, and J meets the rule at 2415 iterations at 0.003, staying below 9.1e-6 of
   // its peak through 30000 (1.6e-8 at 28000; before: 0.24 at 20000). D4-52 had located the stall
   // in exactly those cells. R keeps its limiter floor (pinned above).
-  it(
-    'J: converges a low-Mach jet into dead air (a shear layer beside cells at M_cut)',
-    () => {
-      const b = rectangle('jet', 0, 0.8, 0, 0.4, 32, 16);
-      const mesh = solverMesh({
-        blocks: [b],
-        patches: [
-          { block: 0, face: 'imin', start: 0, end: 4, bc: BC.INFLOW, label: 'nozzle' },
-          { block: 0, face: 'imin', start: 4, end: 16, bc: BC.SLIP_WALL, label: 'base' },
-          ...facePatches(b, 0, { imax: BC.OUTFLOW, jmin: BC.AXIS, jmax: BC.FARFIELD }),
-        ],
-      });
-      const M = 0.05;
-      const s = new ReferenceSolver(mesh, {
-        gas,
-        freeStream: AMBIENT,
-        inflowTotal: { p0: 101325 * (1 + 0.2 * M * M) ** 3.5, t0: 288.15 * (1 + 0.2 * M * M) },
-        lowMachPreconditioning: ENGINE,
-      });
-      s.setUniform({ rho: s.ref.rho, u: 0, v: 0, w: 0, p: 101325, z: 0 });
-      // before D4-44: 3e-2 of the peak at 20000, wandering between 5e-3 and 0.17
-      const conv = converge(s, 1e-5, 20000, 'peak');
-      expect(conv.converged).toBe(true);
-    },
-    600_000,
-  );
+  it('J: converges a low-Mach jet into dead air (a shear layer beside cells at M_cut)', () => {
+    const b = rectangle('jet', 0, 0.8, 0, 0.4, 32, 16);
+    const mesh = solverMesh({
+      blocks: [b],
+      patches: [
+        { block: 0, face: 'imin', start: 0, end: 4, bc: BC.INFLOW, label: 'nozzle' },
+        { block: 0, face: 'imin', start: 4, end: 16, bc: BC.SLIP_WALL, label: 'base' },
+        ...facePatches(b, 0, { imax: BC.OUTFLOW, jmin: BC.AXIS, jmax: BC.FARFIELD }),
+      ],
+    });
+    const M = 0.05;
+    const s = new ReferenceSolver(mesh, {
+      gas,
+      freeStream: AMBIENT,
+      inflowTotal: { p0: 101325 * (1 + 0.2 * M * M) ** 3.5, t0: 288.15 * (1 + 0.2 * M * M) },
+      lowMachPreconditioning: ENGINE,
+    });
+    s.setUniform({ rho: s.ref.rho, u: 0, v: 0, w: 0, p: 101325, z: 0 });
+    // before D4-44: 3e-2 of the peak at 20000, wandering between 5e-3 and 0.17
+    const conv = converge(s, 1e-5, 20000, 'peak');
+    expect(conv.converged).toBe(true);
+  }, 600_000);
 });
 
 // SOLVER.md 17 (W2S-I1, D5-2): with preconditioning, each face's eigenvalue in the local step is the
