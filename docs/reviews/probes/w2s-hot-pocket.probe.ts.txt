@@ -1,0 +1,84 @@
+// Critic pass 19 probe (W2S-I1, the builder's W3 watch item): does a hot, low-density pocket beside
+// a slip wall run away under the engine's preconditioning (minMach = M_cut = 0.02, CFL 0.8), in the
+// f64 oracle, without the outflow's recycling? An annular duct r 0.30-0.45 m, x -0.3..0.3 m, 60 x 16,
+// slip walls both sides, inflow (ambient totals) / outflow (p_inf). A pocket of T' (default 900 K)
+// and Z 0.015 at pressure equilibrium, |x| < 0.06 m, beside the outer wall (or mid-channel), moving
+// at u0 (default -50 m/s: upstream, as the failing cells did). Reports max T' every 100 iterations.
+//   node --import ./tools/mesh/ts-resolve.mjs w2s-hot-pocket.probe.ts [--dT 900] [--u -50] [--where wall|mid] [--plain] [--its 3000] [--every 100] [--cfl X]
+import { THERMALLY_PERFECT } from './src/flow/reference/gas';
+import { ReferenceSolver, type SolverOptions } from './src/flow/reference/solver';
+import { NP } from './src/flow/reference/state';
+import { BC, rectangle, singleBlock, solverMesh } from './tests/unit/flow/helpers';
+
+const args = process.argv.slice(2);
+const arg = (n: string, d: string) => {
+  const i = args.indexOf(n);
+  return i >= 0 ? (args[i + 1] ?? d) : d;
+};
+const dT = Number(arg('--dT', '900'));
+const u0 = Number(arg('--u', '-50'));
+const where = arg('--where', 'wall');
+const its = Number(arg('--its', '3000'));
+const plain = args.includes('--plain');
+const every = Number(arg('--every', '100'));
+const cfl = args.includes('--cfl') ? Number(arg('--cfl', '0.8')) : undefined;
+
+const mesh = solverMesh(
+  singleBlock(rectangle('duct', -0.3, 0.3, 0.3, 0.45, 60, 16), {
+    imin: BC.INFLOW,
+    imax: BC.OUTFLOW,
+    jmin: BC.SLIP_WALL,
+    jmax: BC.SLIP_WALL,
+  }),
+);
+const options: SolverOptions = {
+  gas: THERMALLY_PERFECT,
+  freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
+  ...(plain ? {} : { lowMachPreconditioning: { minMach: 0.02, machCut: 0.02 } }),
+  ...(cfl === undefined ? {} : { cfl }),
+};
+const s = new ReferenceSolver(mesh, options);
+const R = 287.05287;
+const inPocket = (x: number, r: number) =>
+  Math.abs(x) < 0.06 && (where === 'wall' ? r > 0.41 : Math.abs(r - 0.375) < 0.035);
+s.setState((x, r) => {
+  const hot = inPocket(x, r);
+  const T = 288.15 + (hot ? dT : 0);
+  // a smooth-ish edge is not needed for the question: a sharp pocket is the harder case
+  return { rho: 101325 / (R * T), u: hot ? u0 : 0, v: 0, w: 0, p: 101325, z: hot ? 0.015 : 0 };
+});
+const stat = () => {
+  const P = s.primitives();
+  let tMax = -Infinity;
+  let tMin = Infinity;
+  let at = -1;
+  for (let c = 0; c < mesh.nCells; c++) {
+    const t = P[NP * c + 6] ?? NaN;
+    if (Number.isNaN(t)) return { tMax: NaN, tMin: NaN, at: c };
+    if (t > tMax) {
+      tMax = t;
+      at = c;
+    }
+    tMin = Math.min(tMin, t);
+  }
+  return { tMax, tMin, at };
+};
+const first = stat();
+process.stdout.write(
+  `config: dT ${dT} K, u ${u0} m/s, pocket ${where}, ${plain ? 'plain' : 'preconditioned 0.02'}, cells ${mesh.nCells}; start max T' ${first.tMax.toFixed(1)} K\n`,
+);
+let peak = first.tMax;
+for (let k = every; k <= its; k += every) {
+  s.iterate(every);
+  const st = stat();
+  peak = Math.max(peak, st.tMax);
+  const r = s.stats.residualDensityL2;
+  process.stdout.write(
+    `${k}: max T' ${st.tMax.toFixed(1)} K (cell ${st.at}, x ${(mesh.cellX[st.at] ?? NaN).toFixed(3)} r ${(mesh.cellR[st.at] ?? NaN).toFixed(3)}) min T' ${st.tMin.toFixed(1)} res ${r.toExponential(3)}\n`,
+  );
+  if (!Number.isFinite(st.tMax)) {
+    process.stdout.write(`NON-FINITE by ${k}\n`);
+    break;
+  }
+}
+process.stdout.write(`peak max T' ${peak.toFixed(1)} K against the start ${first.tMax.toFixed(1)} K\n`);

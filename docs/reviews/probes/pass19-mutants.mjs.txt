@@ -1,0 +1,90 @@
+// Critic pass 19: hand mutants on a copy of trial19 (git archive, reports/scratch/c19/tree), each
+// applied alone (an exact, unique string replacement), the named vitest runs made, the file restored.
+// Usage: node mutants.mjs <set> [id,id,...]   set: unit | gpu | chrome   (writes mutants.log beside it)
+// A mutant is KILLED when any of its runs exits non-zero.
+import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const tree = join(here, 'tree');
+const log = join(here, 'mutants.log');
+const unit = (...files) => [['vitest', 'run', ...files]];
+const gpuOracle = ['vitest', 'run', '-c', 'vitest.gpu.config.ts', 'tests/gpu/oracle.test.ts', '-t', 'backflow'];
+const gpuAll = ['vitest', 'run', '-c', 'vitest.gpu.config.ts'];
+const longRun = ['vitest', 'run', '-c', 'vitest.gpuladder.config.ts', 'tests/gpu-ladder/app-longrun.test.ts'];
+const flowViz = ['vitest', 'run', '-c', 'vitest.browser.config.ts', 'tests/browser/flowViz.test.ts', '-t', 'W2V-I8'];
+const appModes = ['vitest', 'run', '-c', 'vitest.browser.config.ts', 'tests/browser/app.test.tsx', '-t', 'boots'];
+const WB = 'src/flow/gpu/wgsl/boundary.ts';
+const RB = 'src/flow/reference/boundary.ts';
+const BACK = 'return subsonicInflow(s, n, Totals(P.pOut, P.pOutGauge, P.tInf, 0.0, P.cpaInf));';
+const M = {
+  gpu: [
+    // A. w2/solver-diverge, the kernel
+    { id: 'A1g-oracle', file: WB, from: 'if (vn < 0.0) {', to: 'if (vn < -1e30) {', runs: [gpuOracle] },
+    { id: 'A1g-longrun', file: WB, from: 'if (vn < 0.0) {', to: 'if (vn < -1e30) {', runs: [longRun] },
+    { id: 'A2g', file: WB, from: BACK, to: 'var g = subsonicInflow(s, n, Totals(P.pOut, P.pOutGauge, P.tInf, 0.0, P.cpaInf)); g.a.w = s.a.w; g.b.y = s.b.y; return g;', runs: [gpuOracle] },
+    { id: 'A3g', file: 'src/flow/gpu/params.ts', from: 'pOut: bc.pOut,', to: 'pOut: ref.p,', runs: [gpuAll] },
+    { id: 'A4g', file: WB, from: BACK, to: 'return subsonicInflow(s, n, Totals(P.pOut, P.pOutGauge, P.tInf + 50.0, 50.0, P.cpaInf));', runs: [gpuOracle] },
+  ],
+  unit: [
+    // A. w2/solver-diverge, the oracle
+    { id: 'A4c', file: RB, from: 'if (vn < 0) {', to: 'if (vn <= 0) {', runs: unit('tests/unit/flow/boundary.test.ts') },
+    { id: 'A5c', file: RB, from: 'inflow(ref, bp.pOut, ref.t, P, s, nx, nr, out, o);', to: 'inflow(ref, bp.p0, ref.t, P, s, nx, nr, out, o);', runs: unit('tests/unit/flow/boundary.test.ts') },
+    { id: 'A6c', file: RB, from: 'inflow(ref, bp.pOut, ref.t, P, s, nx, nr, out, o);', to: 'inflow(ref, bp.pOut, ref.t + (P[s + 6] as number), P, s, nx, nr, out, o);', runs: unit('tests/unit/flow/boundary.test.ts') },
+    { id: 'A7c', file: RB, from: 'if (vn < 0) {', to: 'if (vn < -1e30) {', runs: unit('tests/unit/flow/boundary.test.ts') },
+    // B. w2/polish
+    { id: 'W0', file: 'src/shell/warmUp.ts', from: 'export const COLD_SWITCH_WAIT_FRAMES = 0;', to: 'export const COLD_SWITCH_WAIT_FRAMES = 30;', runs: unit('tests/unit/shell/warmUp.test.ts') },
+    { id: 'W8', file: 'src/shell/warmUp.ts', from: 'if (!slot.several || last.done || last.newObjects === 0) return 0;', to: 'if (!slot.several || last.done) return 0;', runs: unit('tests/unit/shell/warmUp.test.ts') },
+    { id: 'W9', file: 'src/shell/warmUp.ts', from: 'return { id: preparing.id, capMs: PREPARE_FRAME_CPU_MS, several: true };', to: 'return { id: preparing.id, capMs: WARM_BUDGET_MS, several: false };', runs: unit('tests/unit/shell/warmUp.test.ts') },
+    { id: 'W10', file: 'src/shell/warmUp.ts', from: '    frames.set(id, (frames.get(id) ?? 0) + 1);\n', to: '', runs: unit('tests/unit/shell/warmUp.test.ts') },
+    { id: 'W11', file: 'src/shell/warmUp.ts', from: 'export const PREPARE_FRAME_CPU_MS = 200;', to: 'export const PREPARE_FRAME_CPU_MS = 900;', runs: unit('tests/unit/shell/warmUp.test.ts') },
+    { id: 'P1', file: 'src/shell/publish.ts', from: 'return frame % PUBLISH_EVERY === 0 || sinceLastMs >= PUBLISH_MAX_GAP_MS;', to: 'return frame % PUBLISH_EVERY === 0 && sinceLastMs >= PUBLISH_MAX_GAP_MS;', runs: unit('tests/unit/shell/publish.test.ts') },
+    { id: 'P2', file: 'src/shell/publish.ts', from: 'export const PUBLISH_MAX_GAP_MS = 50;', to: 'export const PUBLISH_MAX_GAP_MS = 100;', runs: unit('tests/unit/shell/publish.test.ts') },
+    { id: 'E1', file: 'src/hud/anchors.ts', from: '    if (p.skin) continue;\n', to: '', runs: unit('tests/unit/hud/calloutLayout.test.ts') },
+    { id: 'E2', file: 'src/hud/anchors.ts', from: '  for (const row of def.bladeRows)\n', to: '  for (const row of def.bladeRows.slice(0, 0))\n', runs: unit('tests/unit/hud/calloutLayout.test.ts') },
+    { id: 'J1', file: 'src/hud/anchors.ts', from: 'const x0 = right ? Math.max(box.x, e.x) : box.x;', to: 'const x0 = box.x;', runs: unit('tests/unit/hud/calloutLayout.test.ts') },
+    { id: 'C7', file: 'src/hud/callouts.ts', from: 'const blocked = [...reserved, ...avoid].some(', to: 'const blocked = [...reserved].some(', runs: unit('tests/unit/hud/calloutLayout.test.ts') },
+    { id: 'G3', file: 'tests/browser/lib/schlierenCheck.ts', from: 'greyMin: 0.49,', to: 'greyMin: 0.4,', runs: unit('tests/unit/ui/schlierenCheck.test.ts') },
+  ],
+  chrome: [
+    { id: 'V2', file: 'src/render/flowViz.ts', from: '.sub(ambientFloor(id))', to: ".sub(ambientFloor(id) * (id === 't' ? 4 : 1))", runs: [flowViz] },
+    { id: 'V3', file: 'src/render/flowViz.ts', from: '.sub(ambientFloor(id))', to: ".sub(ambientFloor(id) * (id === 't' ? 2 : 1))", runs: [flowViz] },
+    { id: 'V4', file: 'src/render/flowViz.ts', from: '.sub(ambientFloor(id))', to: ".sub(ambientFloor(id) * (id === 'p' ? 2 : 1))", runs: [flowViz] },
+    { id: 'F1', file: 'src/app/simWorker.ts', from: "m === 'schlieren' || m === 'exploded' ? m :", to: "m === 'schlieren' ? m :", runs: [appModes] },
+  ],
+};
+const set = process.argv[2] ?? 'unit';
+const want = process.argv[3]?.split(',');
+for (const m of M[set] ?? []) {
+  if (want !== undefined && !want.includes(m.id)) continue;
+  const path = join(tree, m.file);
+  const orig = readFileSync(path, 'utf8');
+  const n = orig.split(m.from).length - 1;
+  if (n !== 1) {
+    appendFileSync(log, `${m.id} SKIP: the pattern occurs ${n} times in ${m.file}\n`);
+    continue;
+  }
+  writeFileSync(path, orig.replace(m.from, m.to));
+  const t0 = Date.now();
+  const verdicts = [];
+  try {
+    for (const args of m.runs) {
+      const r = spawnSync('npx', args, { cwd: tree, shell: true, encoding: 'utf8', maxBuffer: 1 << 28 });
+      const out = `${r.stdout}\n${r.stderr}`;
+      writeFileSync(join(here, `mut-${m.id}.log`), out);
+      const failed = (out.match(/Tests\s+(\d+) failed/) ?? [])[1] ?? '0';
+      const passed = (out.match(/Tests\s+.*?(\d+) passed/) ?? [])[1] ?? '?';
+      verdicts.push({ code: r.status, failed, passed });
+    }
+  } finally {
+    writeFileSync(path, orig);
+  }
+  const killed = verdicts.some((v) => v.code !== 0);
+  appendFileSync(
+    log,
+    `${m.id} ${killed ? 'KILLED' : 'SURVIVED'} (${verdicts.map((v) => `exit ${String(v.code)}, ${v.failed} failed, ${v.passed} passed`).join('; ')}, ${String(Math.round((Date.now() - t0) / 1000))} s) ${m.file}\n`,
+  );
+}
+appendFileSync(log, `DONE ${set} ${new Date().toISOString()}\n`);

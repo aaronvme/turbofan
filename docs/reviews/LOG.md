@@ -5196,3 +5196,222 @@ Power: **on battery for every gate** (status 1; 70 % at the start, 44 % at the e
 2. **U4's "at any steady frame CPU":** the test pins 8.4 and 11.2 ms. At a frame CPU over about 16 ms, below 60 fps, the 30 + 45-47 frames alone take over 2 s, so "any" cannot hold there. D4-98 kept the text. Should the check text say "up to 11.2 ms (a 60 fps frame)", or is that out of U4's scope?
 3. **W2A-I11:** Exploded's framing goes to app-ui's next round, with W2A-N29..N31 and the Schlieren label on the jet (visual note 2)? An eased camera move into framed views (visual note 3) is a suggestion for the same round.
 4. **W2L-N16:** confirm in advance that if the default cutaway pose's control ever passes, D4-96's fallback applies (the pose out of the moving bound, with the reason), not a re-tuned band.
+
+## Critic pass 19: w2/solver-diverge @5d87a79, w2/polish @f5492ef
+
+**Scope.**
+- A, w2/solver-diverge (`9b5a6c2..5d87a79`): W2S-B1 (D4-100), the look-dev page's GPU solver going NaN at iteration 6756. The fix is a backflow branch in the outflow BC (SOLVER.md §5), in the oracle (`src/flow/reference/boundary.ts`) and the kernel (`src/flow/gpu/wgsl/boundary.ts`, the `pOut` uniform), with a 20000-iteration GPU test of the app's own configuration (`tests/gpu-ladder/app-longrun.test.ts`), a unit row and an oracle row. It changes the scheme contract (§5's outflow rule), so this review is what the orchestrator ratifies. The builder's W3 note (hot wall gas running away under preconditioning, in f64 too) is weighed below with a probe.
+- B, w2/polish (`9b5a6c2..f5492ef`): D4-99 item 3 and D4-100: the split browser tests with 240 s timeouts, U4's scheduler (the asked view warms up to 200 ms of CPU a frame, a snapshot every 3 frames or after 50 ms, `COLD_SWITCH_WAIT_FRAMES` = 0), W2A-I11, N29-N31, the Schlieren label off the jet, W2V-N26 (the floor against its TS mirror, its bar tightened from 2 % to 0.2 % after its first run), W2H-N10, and U4's check text. The re-shot `docs/look-dev/ui/` images, uncommitted in the builder's worktree, are judged below (read only).
+
+**Setup** (2026-11-01, the critic worktree):
+- `critic` merged the local main 9b5a6c2 (a fast-forward). A throwaway local branch `trial19` took two `--no-ff` merges, both clean: w2/solver-diverge (c7aca30), then w2/polish (3d9ef78). The branches share no file (A: SOLVER.md and `src/flow`; B: PHYSICS.md's U4 row, `src/app`, `src/hud`, `src/shell`, `src/ui` and the browser tests).
+- Every gate ran alone and detached on trial19 (`Start-Process`, one script, a status line per step with the power state and the free memory). **Power: AC for every gate** (BatteryStatus 2, 100 %). The orchestrator's CPU d463 run (node PID 22108) shared the CPU throughout. Nothing else of mine used the GPU during the GPU gates, except my unit mutants alongside gpu-ladder, and the Dawn mutants and the CPU hot-pocket probe alongside coverage. Those are deterministic, and no timing is gated in them.
+- **Keep-awake.** The gate script held `SetThreadExecutionState(0x80000001)` (system only), as asked. That let the display sleep at its 5-minute AC timeout during the browser gate, and the laptop entered Modern Standby at 21:50:23-21:53:22. The first browser run is void for that reason (Gates). For the Chrome mutants and the browser re-run, a separate process held 0x80000003 (system and display). That is an execution-state request too, and no setting changed.
+- Mutants and probes ran on `git archive` copies (`reports/scratch/c19/tree` of trial19, `reports/scratch/c19/pre` of main 9b5a6c2), so no gate read a mutated `src`. The Chrome mutants ran after the browser gate.
+- The builders' worktrees were only read (the shots, the logs, `repro.ts`, which I copied into my pre-fix copy to run it).
+- Probes: `docs/reviews/probes/w2s-hot-pocket.probe.ts.txt`, `pass19-mutants.mjs.txt`.
+- `critic` is checked out again. The local branch `trial19` (3d9ef78, unpushed) is left in place, because the PreToolUse hook blocked `git branch -D`: the orchestrator can delete it. Nothing of mine is left running (the keep-awake is released), and no Chrome or dev server of mine is open.
+
+### A. w2/solver-diverge @5d87a79
+
+**What holds (read, then my runs):**
+- **The rule is the standard pressure-outlet backflow.** A face the flow enters (vn < 0) becomes a subsonic inflow at the backflow totals (p0, T0) = (p_out, T∞), along the inward normal, with no swirl and Z = 0, at the speed σ set by the cell's outgoing characteristic p′ + ρc·u_n. That is the usual commercial-code treatment (the outlet's static pressure taken as the backflow's total pressure, a stated backflow total temperature and composition, the direction normal to the boundary). The copy it replaces specified all four incoming characteristics from the cell, which fed the cell's own momentum, total enthalpy and fuel back in. §5's rationale says so correctly, and the old rule's positive feedback (inflowing total pressure p_out + ½ρvn²) is the right diagnosis.
+- **The two implementations are the same rule** (`reference/boundary.ts:256-257`, `wgsl/boundary.ts:97-106`, `params.ts:259`):
+  - the same totals, p_out and T∞; dp0 = p_out − p∞ in f64 before rounding on both sides (`pOutGauge`), dT0 = 0, the initial τ at cp(T∞) on both sides (`cpaInf` = `cpMix(g, ref.t, 0)`);
+  - the same 3 + 3 Newton steps, the same ghost (−σn, rw 0, Z 0, T∞ + τ, ρ′ from the ghost's p and T);
+  - the inflow refactor moves the supersonic free stream to the INFLOW case only (`ghostPrimitive`; the kernel's `inflow`), so INFLOW's values are unchanged, and the backflow never takes the free stream.
+- **A face with vn ≥ 0 is bitwise unchanged** on both sides by reading (the same comparison, the same copy and p_out), and a NaN vn still falls to the old path. My test:gpu repeats E-L5 2.67e-8 and E-L9a 2.46e-12 over the flux scale, their values of record.
+- **The reproduction is honest.** I ran the builder's `repro.ts` (`--init perf --frames --iterations 7000 --locate`) on main 9b5a6c2, the pre-fix code, on Dawn:
+  - **first non-finite state at iteration 6756**, in block 5 `core`, i 508-513, j 11-13 (the first 12 of the non-finite cells), x 2.51-2.56 m, r 0.39-0.41 m: the core nozzle's outer rows, as the handoff says;
+  - the maximum Mach sits at the outflow's axis corner (plume-core i 822, j 0, x 33.7 m) from iteration 2000 on, at 0.47 there and 0.90 by 6400-6800, while the field's max T′ climbs 321 K (2000) → 518 (3000) → 814 (5000) → 940 K (5800): the reversed jet recycling hot gas;
+  - the GPU residual never decays (173 at 100, 362 at 1000, 205-300 from 4500 on).
+- **The long-run test fails without the fix and passes with it.**
+  - Mutant A1g-longrun (the kernel's backflow branch off): the look-dev start's first non-finite checkpoint is 6800, max T′ 970.7 K by 6000; the rest start still passes. That is the TDD commit's failure.
+  - With the fix (my test:gpu-ladder), every row equals the builder's to the digit: peak 21.01 (< 100); (a) 0.6588 over 1000-2000 and 5.088e-4 at 20000 (≤ 2); (b) 0.1082 and 0.007278 (≤ 1); max T′ 303.8 K over the run and 0.94 K at 20000; the GPU's own residual 0.0228 of its value at 100. The rest start stays bitwise ambient at 5000-20000.
+- **D4-63 on the GPU moves as claimed**, in my run: (a) 0.4450 / 0.008997, (b) 0.1634 / 0.03253, the 15000-20000 trend 0.8195 per 1000. Rows without an outflow face are unchanged: L1 2.13e-5 m/s, B 1.266e-11 and 1.95e-5 m/s, L7 1.779, L8 0.754 %.
+- **The CPU ladder rows touching the outflow hold as of record.** I re-ran L4a, L4b, L5 and L9a on my trial19 copy (`vitest.ladder.config.ts`, 3 files passed and L9a failed only on its known D4-57 row). L9b I read from the builder's run of the same `src` (405 s, left out with the CPU d463 run going).
+  - L4a: 0.278 % / 0.0997 % in 915 iterations.
+  - L5: 0.0843 % in 948.
+  - L4b: 1.640 %, steadiness 0.0258 %.
+  - L9a: 8.86e-6, with its D4-57 spread 1.062e-5 (the known failure).
+  - L9b: 0.80 %, spread 2.49e-5, and its known convergence failure.
+  - Every value equals LOG's records (`LOG.md:1964-1975`, `:2898-2900`) to the digit. The handoff's "no record value in docs to compare L4b/L9b against" is wrong: the records exist, and the values equal them.
+- **The tests are aimed right.** The oracle row puts hot, fuelled, swirling gas into the outflow, checks every outflow ghost of the kernel against the oracle's (1e-5) and that no swirl or fuel enters, then runs row C's tolerances (my run: 4.35e-6 / 6.57e-6 / 1.17e-5 against 1e-5 / 1e-4 / 1e-3). Its 5 % wave instead of 0.5 % is a measurement choice, not a loosened bar: `relativeError` divides each field's max error by its max perturbation, and with 0.5 % the f32 state's rounding of p among the thermal terms (≈ 1e-5 of the wave) is the error, in the interior and plain alike. The unit row checks the ghost equals the INFLOW ghost at (p_out, T∞) for two p_out, and that a face at rest is still an outflow face.
+
+**The CPU d463 run (the orchestrator's re-run at 5d87a79, detached, 21:03-22:31; read from its `d463.out`): it passes every D4-79 row, and it moves as the GPU did.**
+
+| D4-63 contract case, M_cut 0.02 | CPU before (D4-89, round 13) | **CPU with the backflow branch** | GPU with the branch (my gpu-ladder) |
+|---|---|---|---|
+| signature: peak max \|p′\|/first (< 100) | | 4.212 | 4.212 |
+| (a) L2(p′)/first, max over 1000-2000 (≤ 2) | 0.778 | **0.4450** | 0.4450 |
+| (a) at 20000 (≤ 2) | 0.488 | **0.009223** | 0.008997 |
+| (b) weighted residual 20000 / 10000 (≤ 1) | 0.524 | **0.1535** | 0.1634 |
+| (b) 20000 / 100 (≤ 1) | 0.223 | **0.03063** | 0.03253 |
+| weighted residual over 15000-20000 | 0.33-0.42, rising 0.35 → 0.40 over the last 1000 | 0.159 → 0.125 → 0.092 → 0.075 → 0.064 → 0.055, monotone (about 0.81 per 1000) | 0.160 → 0.0588 (0.820 per 1000) |
+
+So D4-89's recorded slow late decay on the CPU is gone too. The CPU and GPU agree to 3-4 digits through 2000 iterations (weighted residual 2.1225 / 2.2303 at 1000 / 2000 against the GPU's 2.122 / 2.234). The handoff's NEXT 2 can record the CPU column beside the GPU's in SOLVER.md §16. The builder's own CPU d463 run had timed out at its 6 h limit (`run/g-ladder.log`): its coverage run in the same window took 12 h, so the machine slept overnight, as the orchestrator's note says.
+
+**The builder's W3 note, probed.** The engine runaway's last stage is hot product gas growing 1.12-1.2× per iteration in a wall cell under preconditioning, in f64 too. Its trigger here (recycled backflow) is gone. Is the scheme itself safe with hot gas? My probe (`w2s-hot-pocket.probe.ts.txt`): the f64 oracle on a 60 × 16 annular duct (r 0.30-0.45 m, slip walls, inflow and outflow), thermally perfect gas, a sharp pocket of T′ ΔT and Z 0.015 at pressure equilibrium (|x| < 0.06 m), moving axially at u0 in still ambient gas, preconditioned at the engine's minMach = M_cut = 0.02:
+
+| pocket (ΔT, u0, where) | preconditioned 0.02, CFL 0.8 (the default) | plain (CFL 1.5) | preconditioned, CFL 0.4 / 0.1 / 0.02 |
+|---|---|---|---|
+| 900 K, −50 m/s, wall | bounded, decays (900 → 255 K by 1000) | | |
+| 900 K, −150 m/s, wall | **non-finite within 100 iterations** | | |
+| 1200 K, −100 m/s, wall | **non-finite within 5 iterations** | bounded (peak 1213 K) | bounded to 400 (peak 1200 / 1202 / 1203 K) |
+| 1200 K, −300 m/s, wall | **non-finite within 100** | bounded (peak 1215 K) | |
+| 1200 K, −300 m/s, mid-channel | **non-finite within 100** | | |
+| 1200 K at rest, wall | bounded | | |
+
+So the preconditioned tracking scheme at the default CFL 0.8 has a step-size instability for hot gas moving at 100-300 m/s through still cold gas, with or without a wall. Halving the CFL removes it here, and the plain scheme never has it. The engine case the builder bisected was different (its CFL 0.4 run followed the same pseudo-time path, so semi-discrete), so these may be two mechanisms of the same hot-gas family. Either way, W3's combustor puts exactly this state in the core (hot jets at 100+ m/s beside cold flow). This is W2S-I1 below: not this branch's defect, and not a reason to hold it, but it should be pre-registered before W3's coupling, as D4-63 was.
+
+#### Blocking
+None.
+
+#### Important
+- **W2S-I1 (pre-existing, for W3): the preconditioned scheme at the engine's cut diverges within 5-100 iterations from a hot gas pocket moving at 100-300 m/s, at the default CFL 0.8** (`src/flow/reference/solver.ts:28` and `src/flow/gpu/params.ts:17`, `DEFAULT_CFL_PRECONDITIONED = 0.8`; D4-32/D4-40/D4-44).
+  - Scenario: W3 couples the combustor. The core then carries 1300-1700 K gas at 100-200 m/s beside cold bypass and cooling flow. A hot transient can take the solver non-finite within a few iterations. The app then falls back to the MOCK (visibly), and the coupled field is lost. My probe reproduces that in a 960-cell duct (table above) in the f64 oracle, so it is the scheme, not f32 or the kernel. The plain scheme and CFL 0.4 stay bounded on the same cases.
+  - Fix, before W3's coupling, under a pre-stated rule (D4-63's pattern):
+    1. pre-register the hot-pocket case as a ladder row, CPU and GPU: the probe's grid at ΔT 900 and 1200 K, u0 −100 and −300 m/s, at a wall and mid-channel, with D4-79's rule (finite, peak max T′ ≤ its start plus a stated margin, decay at 2000);
+    2. find the step limit: D4-44 (b) (the scaled diffusion's eigenvalue in the local step), or a local step from the hot cell's preconditioned eigenvalues, with a positivity guard on T (and ρ) per stage as the last resort;
+    3. re-run the builder's engine runaway from `perf-lastfinite.bin` (the pre-fix 6700 state) under the fix, to see whether the semi-discrete wall growth is the same mechanism.
+
+#### Nits
+- **W2S-N1: the kernel's backflow at p_out ≠ p∞ is untested** (`src/flow/gpu/params.ts:259`; `tests/gpu/oracle.test.ts:444-485`). Mutant A3g (`pOut: ref.p`, the uniform at p∞ whatever the BC says) survives all of test:gpu (72 passed). The oracle row runs at the default p_out = p∞, where the `pOut` uniform equals p∞ anyway. Only the CPU unit row covers a p_out of 9e4. Fix: run the oracle row (or a second one) at an outflow pressure of, say, 0.98 p∞, so the kernel's `pOut` and `pOutGauge` are both exercised against the oracle.
+- **W2S-N2: §5's continuity sentence holds only for a cell at p_out** (`docs/SOLVER.md:112`). For p_s ≠ p_out the face's response jumps at vn = 0. The outflow ghost (u_s, p_out) puts p_out at the face only halfway: the face velocity is about u_s + (p_s − p_out)/(2ρc). The backflow ghost is the boundary state itself, so the face velocity is −σ, about (p_s − p_out)/(ρc). That is twice the response, on a switch a face can chatter across. Nothing shows it today: D4-63's rest state, whose outflow faces carry tiny velocities of either sign, decays faster with the branch (0.820 per 1000 against 0.994). Fix: say so in §5 ("continuous in p and u only for a cell at p_out; for p_s ≠ p_out the face's mass flux doubles its response across vn = 0"), and treat a limit cycle in a D4-63-type residual at an outflow as the first suspect.
+- **W2S-N3: the backflow totals are the ambient at rest in the engine's frame** (`reference/boundary.ts:257`, `wgsl/boundary.ts:101`). In flight (u∞ ≠ 0) the gas beyond the exit moves at u∞, and its total pressure is p∞ + ½ρ∞u∞², not p_out. The handoff says W3 can revisit; §5 should say the rule is the static-ambient form and that flight cases revisit it (one line).
+
+#### Verdict A: **MERGE**
+- B 0, I 1 (W2S-I1, pre-existing, for W3), N 3 (W2S-N1..N3).
+- **Ratify the §5 change.** It is the standard pressure-outlet backflow, the same in the oracle and the kernel, bitwise neutral for vn ≥ 0 (E-L5 and E-L9a at their records, the CPU outflow rows at theirs), and it removes a positive feedback with no physical source. The reproduction repeats at 6756 on main, and the long-run test fails without the fix (6800) and passes with it. D4-63's contract case passes by more on the GPU and on the CPU (the orchestrator's d463 run: (a) 0.4450 / 0.009223, (b) 0.1535 / 0.03063).
+
+### B. w2/polish @f5492ef
+
+Checklists: react-reviewer, typescript-reviewer, silent-failure-hunter and pr-test-analyzer, applied by hand as one review. D4-74 and D4-95..D4-100 were checked against the branch.
+
+**What holds:**
+- **The browser-gate timeouts are test plumbing, not a bar.** fanBlur runs one test per shot and rotorMotion one per pose and per legacyTraa control, in the same order on the same views. Each test has a 240 s timeout, over 8× its longest measured piece (27 s). The assertions are the old ones restated per test: `moving ≤ floor + MARGIN` for the shipped poses and `moving > floor + MARGIN` for each control. W2L-N16's fallback is stated in rotorMotion's comment as D4-99 item 4 confirmed it. In my run every rotor row and both controls equal pass 18's to the digit, sample by sample: the default cutaway shipped 9.75 / 12.13 against its control's 9.88 / 16.88, and the close-up 1.75 / 4.63 against 1.38 / 22.75. The split kept the measurement order.
+- **W2A-I11 is fixed.** `explodedRings` is now every part that is not a skin, plus the blade rows' edges, each slid by its module's offset (`anchors.ts:206-224`). The stand is a separate mesh, not a part, so it is not in it. The unit tests frame it and require the drawn parts' box centred within 8 px each way and filling the area one way at both sizes. They also check that the front is the fan case, not the hidden inlet lip, and that no skin's radius is in it.
+  - Mutant E1 (skins kept) is killed.
+  - E2 (the blade rows dropped) survives. It is equivalent for the framing: the blade rows lie inside the parts' box, which the test pins by its extremes.
+  - The shots show it (Visual review).
+- **N31: the framed views are checked in Chrome.** `framedProblems` (`app.test.tsx:411`) fails Schlieren or Exploded whose posted framed box leaves the area above the dock less FRAME_MARGIN_PX (2 px residual). Mutant F1 (the worker's `framingOf` drops Exploded, pass 18's case) is killed at both sizes. In my run both framed boxes lie inside: Exploded 312-1032 px at 1366 and 358-1538 px at 1920, Schlieren 336-1006 and 439-1458.
+- **N29: only background slots count toward MAX_WARM_FRAMES.** Mutant W10 (no count) is killed. My pass-18 probe's cases are the unit tests now: after 300, 420, 500 or 790 frames as the asked view, the view is warmed in the background.
+- **N30: the grey band is 0.5 ± 0.01.** It was measured on HEAD and stated before the gating run. In the shots' records Schlieren has 0.914-0.917 of its free area in it, and the studio-backed controls 0.01-0.29 (the cut views 0.08-0.11, Exploded 0.14-0.29, Realistic 0.01). The 0.7 share bar now has a margin of 0.21 over Schlieren and 0.41 over the nearest control, where it had 0.15 under one before. Mutant G3 (the old 0.4 band) is killed.
+- **The Schlieren Core exhaust label is off the jet.** `jetBox` is the core jet's tube from the nozzle exit to the near field's end, cut at the exit's centre, so the nozzle's own silhouette stays available to labels. It is posted in Schlieren only and passed to `layoutCallouts` as content to avoid, while the anchor stays callable. App.test's layout bar fails any label overlapping it.
+  - Mutants C7 (the avoid list ignored) and J1 (the box not cut at the exit) are killed.
+  - The shots show the label on the nacelle, left of the nozzle, at both sizes.
+- **W2H-N10: the fixed-dt record is P5's window**, read from the contract (`stepRateHz`, `idleS`, `leverRampS`, `windowS`). `expect(asked).toBe(framesOf(P5.windowS))` pins 1380 frames. My run: 1380 fixed frames, 23.20 s of sim time, 1005 lost solves, 173 held snapshots (pass 18: 1440 frames, 24.15 s, 1005, 168; the extra held snapshots are the new time-based posts).
+- **U4's scheduler cannot loop or starve.**
+  - `nextWarmBudget` stops a frame's warm frames at the cap, when the configuration is done, or when a warm frame drew nothing new (what is left is the GPU compiling).
+  - Every warm frame draws at least one new object while any is left, so the `while` in `warmSlot` ends.
+  - A NaN `cpuMs` ends it too (`Math.max(0, NaN)` is NaN, and NaN > 0 is false).
+  - A throw gives the configuration up, as before, and the `finally` records the CPU.
+  - The background keeps one warm frame at 4 ms, its CPU rule and SLOT_EVERY.
+  - Mutants W0 (the 30-frame wait back), W8 (no stop on nothing new), W9 (the asked view one warm frame), W11 (the cap at 900 ms), P1 (`&&` for `||`) and P2 (a 100 ms gap) are killed.
+  - With `COLD_SWITCH_WAIT_FRAMES` = 0, the asked view's branch in the slot loop (`warmUp.ts:270`) is reachable only once a view is given up. That is dead in practice, and harmless.
+- **The cap is soft by one warm frame**, which is expected. `warmFrame`'s `cpuMs` is its whole wall time, and the next warm frame's budget is the cap less what was spent. A frame can therefore pass 200 ms by one warm frame's draws plus one object.
+  - The builder's gate run recorded frames of 341-380 ms CPU and snapshot gaps of 382-435 ms while preparing.
+  - The official run's gaps were 108-145 ms. D4-100 allows up to 1000 ms.
+  - My re-run: frames of 254-277 ms and gaps of 261-380 ms.
+- **W2V-N26's tightened bar (2 % → 0.2 % after its first run): accepted.**
+  - D4-74 forbids loosening a bar after seeing data, and this moves the other way.
+  - The comparison is a self-consistency check: the shader's floor against its own TS mirror, with the floor-edge entries' rounding and off-curve colours excluded. Any disagreement beyond that is a bug, so 2 % was loose without a reason, and the shipped floor's 0-93 px (≤ 0.04 %) sits 5× under 0.2 %.
+  - The test states the history.
+  - It has power at the new bar. Mutant V2 (T's floor ×4) disagrees on 0.63 % / 1.14 % (idle / take-off), the builder's numbers. My V3 (T's floor ×2) disagrees on 0.29 % / 0.81 % and my V4 (p's floor ×2) on 19.1 % at take-off. All three are killed.
+  - At idle a 2× T floor is only 1.45× over the bar, so take-off (the bypass air at 330-350 K) carries the T check. That is why the test runs both levers.
+
+**U4 and the 30-frame wait (the handoff's decision 1).** D4-97 declined "skipping the CPU rule outright for the asked view", because a bounded wait kept the frame budget the default. D4-98 then cut the wait to 30 frames and spent the frame budget after it ("the user is already waiting on Preparing"). D4-100 asked for several warm frames per frame "while preparing". Removing the wait is a builder's reading. It reverses D4-98 item 1's adopted 30 frames and goes past what D4-97 declined, so it needs ratifying. **I recommend ratifying it**:
+- The wait no longer buys the viewer anything. During it the old view animates smoothly for 0.5 s under "Preparing", and that 0.5 s was a quarter of U4's 2 s. On AC the official run missed U4 by 0.46-0.56 s.
+- The cost is bounded and visible: frames of up to about 0.4 s while preparing, under the 1 s freeze bar, with the spinner up. Work for an abandoned view is not wasted, because its built objects stay built.
+- The measurements, all on AC on a shared machine: with the wait 2.24-2.42 s (the builder's run4); without it 1.89-2.15 s (run5) and 1.41-1.58 s (the builder's gate run).
+- My trial19 re-run (AC, the display on, not quiet, with the orchestrator's CPU d463 run on the CPU, so boot took 4.46-4.50 s against the quiet 3.5 s): **1.995 / 1.969 / 1.944 s** at light / 8.4 / 11.2 ms, 25-29 warm frames, nothing given up. My first run, with the display asleep, gave 2.13 / 1.98 / 2.00 s. So under load it sits at the bar, and the quiet window decides it.
+- Reverting is one constant and its tests (mutant W0 shows the tests pin it).
+- If the orchestrator wants D4-97's default back for quick click-throughs, a short wait (about 6 frames, 0.1 s) would keep most of the gain. Nothing measured asks for it.
+- U4 in a quiet window is still owed (D4-99 item 1), and it decides U4, not this.
+
+#### Blocking
+None.
+
+#### Important
+None.
+
+#### Nits
+- **W2A-N32: `snapshotDue` mixes a frame modulo with a time gap, so the snapshot rate doubles when frames are slow** (`src/shell/publish.ts:13-15`).
+  - After a time-based post, the next multiple-of-3 frame posts again.
+  - In a model of steady frames:
+
+    | frames | before (every 3rd frame) | now |
+    |---|---|---|
+    | 25 ms (40 fps) | 13.3 Hz | 26.7 Hz |
+    | 30 ms (33 fps) | 11.1 Hz | 22.2 Hz |
+    | 33 ms (30 fps) | 10.0 Hz | 20.0 Hz |
+    | 50 ms (20 fps) | 6.7 Hz | 20.0 Hz |
+
+  - The extra posts land when the frame is already over budget, against D2-9's 15 Hz realistic React load. Each also carries the anchors' projection and three screen boxes.
+  - The unit tests cover only 60 fps and 250-280 ms frames.
+  - Fix: count frames since the last post (`framesSince >= PUBLISH_EVERY || sinceLastMs >= PUBLISH_MAX_GAP_MS`). That caps the rate near 20 Hz at any frame time and keeps a heavy frame posting its own snapshot. Add a 40 fps case to the test.
+- **W2A-N33: U4's check text names only the cap as the stop** (`src/hud/uiLevels.ts:25`, PHYSICS.md U4). The slot also ends when a warm frame draws nothing new or the view is done, and the cap is passed by up to one warm frame (above). Fix: "each slot several warm frames until their CPU reaches 200 ms (the last may pass it) or nothing new is drawn". It is a flagged contract text, so this is a wording request for the ratifying decision.
+
+#### Verdict B: **MERGE**
+- B 0, I 0, N 2 (W2A-N32, W2A-N33).
+- D4-99 item 3 and D4-100's items are in:
+  - the split tests and their timeouts;
+  - Exploded framed on what it draws, centred, and checked in Chrome;
+  - N29 and N30;
+  - the label off the jet;
+  - W2V-N26's lower edge;
+  - P5's 1380 frames.
+- The wait's removal goes to the orchestrator with my recommendation to ratify. The shots are fit to commit (Visual review).
+
+### Visual review (the 13 uncommitted shots in `.claude/worktrees/w2-polish/docs/look-dev/ui/`, read only, against main's round 6-7 shots)
+**Fixed and at the bar:**
+- **Exploded (W2A-I11)** now fills the free area and is centred. At 1366 the content runs 312-1032 px against the area's 312-1030 (it was 135 px of studio on the left against 32 on the right). At 1920 it runs 358-1538 px, 25 / 29 px from the columns (it was 235 against 62). The engine reads about 20 % larger. The fan case is the front, with no phantom inlet lip.
+- **Schlieren's Core exhaust label** sits on the nacelle, left of the nozzle, at both sizes, with a short leader to the exit. The jet's bright and dark bands are clear of any label, so critic pass 18's visual note 2 is fixed.
+- Realistic, the cut views, Data, the drawer and the solver shot are round 7's: eight labels in two axial rows at both sizes, the 1366 drawer's Fan leader short, and the dashed crop outline as before.
+
+**Notes:**
+1. **These shots were rendered at DPR 1, because the display was asleep.** The records say "backing 1366x768 at dpr 1" and "ultra: ... at dpr 1 (high: 1)". Round 7's were at DPR 1.5 (backing 1920×1079 and 1994×1039, downsampled into the same CSS-pixel JPEGs).
+   - My first trial19 run, with the display asleep, was at DPR 1 too. My re-run with the display held on was at DPR 1.5 ("ultra: backing 2049x1152 at dpr 1.5 (high: 1.41)").
+   - So the builder's gate run, which waited hours for the machine to be free, most likely shot them with the display off.
+   - At DPR 1 they are a touch softer at the edges, and D4-85's ultra row is vacuous: ultra and high are both the full DPR, under the 1080p cap.
+   - The framing and the labels are what the branch makes. My DPR-1.5 trial19 shots (gitignored, `reports/ui/` in the critic worktree) match them in every element.
+2. Still open from round 5 and on the W4 list: camera easing into framed views (D4-99), "Preparing the Data view…" for a quantity change, the T-s "45" on its line, and no labels in Exploded.
+3. **Fit to commit: yes** in content, all 13 and both records. For parity with round 7's set, prefer a re-shoot on the merged main with `VITE_UI_LOOKDEV=1` and the display held on (DPR 1.5). Committing these is acceptable if the DPR is noted.
+
+### Gates (trial19: main 9b5a6c2 + w2/solver-diverge @5d87a79 + w2/polish @f5492ef)
+Power: **AC for every gate** (BatteryStatus 2, 100 %). The orchestrator's CPU d463 run shared the CPU throughout. Keep-awake: the gate script's (system only) for every gate, plus a system-and-display request for the browser re-run (Setup).
+
+| gate | result |
+|---|---|
+| `npm run typecheck` | clean, 19 s (2/100 %) |
+| `npm run lint` (ESLint + Prettier) | clean, 76 s (2/100 %) |
+| `npm run coverage` (own reportsDirectory) | **139 files, 2395 passed + 11 expected fail (2406)**, exit 0 (the per-directory thresholds hold), 844 s (2/100 %). Statements 98.54 %, branches 87.95 %, functions 99.56 %, lines 99.55 %. Core lines: thermo 100 %, cycle 99.62 %, flow/reference 100 %, geometry 99.59 %, src/flow 99.50 %. Changed files (lines / branches): reference/boundary 100 / 90.2, gpu/params 100 / 93.3, warmUp 100 / 93.8, publish 100 / 100, anchors 100 / 83.3, callouts 100 / 88.2 |
+| `npm run test:mesh` | 2 files, 29 passed (3 s) |
+| `npm run test:gpu` | **12 files, 72 passed**, 86 s. E-L5 2.67e-8, E-L9a 2.46e-12 over the flux scale (their records); C-cut 4.84e-7 / 1.90e-6 / 3.18e-6 (row C's); the new backflow row 4.35e-6 / 6.57e-6 / 1.17e-5 |
+| `npm run test:gpu-ladder` | **4 files, 15 passed + 1 expected fail** (L9a's D4-57 steadiness), 458 s. The long run's rows and D4-63's equal the builder's (A); L1 2.13e-5 m/s, B 1.266e-11, L7 1.779, L8 0.754 %, L2 0.00277, L3 0.00211, L4 0.00278 / 0.000996, L5 0.000843, L6 3.0e-4 / 4.9e-8 |
+| `npm run test:browser`, first run | **void** (an environment failure), 1224 s, AC, 4.2 GB free, no other vitest browser run. The script's keep-awake held only the system (0x80000001), so the display slept at its 5-minute AC timeout. Chrome then rendered at DPR 1, fanBlur's hero and fanTakeoff timed out at 240 s (the whole file took 688 s against the builder's 26 s; hero's in-motion MAE was 0.169 against its 0.0062), and Modern Standby at 21:50:23 closed warmStall's browser connection. 9 files passed, and 3 were not reached |
+| `npm run test:browser`, re-run with the display held (0x80000003) | **14 files, 55 passed**, 547 s (2/100 %), 5.3 GB free, no other vitest browser run, DPR 1.5. 0 WebGPU errors. `docs/` stayed clean |
+
+### Mutants (by hand on the trial19 copy; `pass19-mutants.mjs.txt`; each file restored after)
+| set | killed | survived |
+|---|---|---|
+| A, oracle (unit, `boundary.test.ts`) | A4c (vn ≤ 0 takes the branch), A5c (the backflow at p0, not p_out), A6c (the cell's T as the backflow total), A7c (the branch off) | none |
+| A, kernel (Dawn) | A1g (the branch off: the oracle row, and the long run non-finite by 6800), A2g (the cell's swirl and Z into the backflow ghost), A4g (a backflow total of T∞ + 50 K) | **A3g** (`pOut: ref.p`, the uniform at p∞ whatever the BC: all of test:gpu passes, W2S-N1) |
+| B, scheduler and cadence (`warmUp`, `publish`) | W0 (the 30-frame wait back), W8 (no stop when nothing new is drawn), W9 (the asked view one 4 ms warm frame), W10 (no background count: N29), W11 (the cap at 900 ms), P1 (`&&` for `\|\|`), P2 (a 100 ms gap) | none |
+| B, framing, callouts, grey band (`anchors`, `callouts`, `schlierenCheck`) | E1 (skins kept), J1 (the jet box not cut at the exit), C7 (the avoid list ignored), G3 (the band back to 0.4-0.6) | E2 (the blade rows dropped): equivalent, they lie inside the parts' box |
+| B, Chrome (`flowViz` W2V-I8/N26, `app.test` modes) | V2 (T's floor ×4: 0.63 / 1.14 %), V3 (T's floor ×2: 0.29 / 0.81 %), V4 (p's floor ×2: 19.1 % at take-off), F1 (Exploded's framing dropped: "exploded: no framed content box" at both sizes; its first run lost the browser connection and is not counted) | none |
+
+**Totals:** A 7/8 (unit 4/4, Dawn 3/4); B 15/16 (unit 11/12 with 1 equivalent, Chrome 4/4). The probes are not mutants: the pre-fix reproduction (`repro.ts` on main) and the hot pocket (W2S-I1).
+
+### Verdicts
+- **A. w2/solver-diverge @5d87a79: MERGE.** B 0, I 1 (W2S-I1: pre-existing, for W3), N 3. Ratify §5's backflow branch: it is the standard pressure-outlet backflow, the same in both implementations, and bitwise neutral for vn ≥ 0. The long-run test fails without it (non-finite by 6800) and passes with it, and the CPU d463 run passes D4-79's rows with it.
+- **B. w2/polish @f5492ef: MERGE.** B 0, I 0, N 2. The 30-frame wait's removal needs ratifying; I recommend it. The re-shot images are fit to commit.
+
+**Merge order:** w2/solver-diverge, then w2/polish (trial19's order; the two touch no common file, so either order is clean). Commit the 13 shots and the two records after the merge, from the polish worktree as they are, or from a re-shoot on the merged main. After the merge, the next quiet window measures P4flow and P1's field health with A's fix (D4-100), and U4 alone with `VITE_UI_QUIET=1` (D4-99 item 1).
+
+### Questions for the orchestrator
+1. **SOLVER.md §5 (A):** ratify the backflow branch as the outflow's rule, with (p_out, T∞, Z = 0) as the backflow totals? Flight cases revisit the totals at W3 (W2S-N3).
+2. **W2S-I1:** pre-register the hot-pocket case (CPU and GPU, D4-79's rule) before W3's coupling, and give the scheme round the step limit (D4-44 (b), or a local step from the hot cell's preconditioned eigenvalues, a positivity guard last)? My probe is the starting case.
+3. **U4 (B):** ratify `COLD_SWITCH_WAIT_FRAMES` = 0 (the asked view warms from its first frame of preparing), against D4-97/D4-98's wait? I recommend it. Also, U4's check text as amended by W2A-N33?
+4. **The shots:** commit the builder's DPR-1 set (shot with the display asleep), or re-shoot on the merged main with the display held on, so the set is at DPR 1.5 like round 7's? I prefer the re-shoot.
+5. **Keep-awake in detached browser runs:** make it system and display (`0x80000003`, ES_DISPLAY_REQUIRED added), for builders and critics alike? With the system flag alone, the display sleeps at its 5-minute AC timeout, Chrome drops to DPR 1 and is throttled, and Modern Standby can close the browser connection. My first browser gate failed that way (fanBlur about 10× slower, 2 timeouts at 240 s, warmStall's connection lost), and the builder's shots show the same DPR 1. D0-1 already asks for the display awake in official runs.
