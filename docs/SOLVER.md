@@ -793,3 +793,31 @@ On the GPU the at-rest case fails the undershoot row too (−0.040 ΔT): its f32
 | trial: this branch with the wall ghost's ρ′ and Z mirrored (scratch only) | **finite to 7000** (300 iterations), max T′ falling 1059 → 979 K |
 
 - *Where it fails on the branch:* the core duct's outer-wall row beside the cell §16 named, core (509, 15) at x 2.52 m, r 0.43 m. The gas there leaves the wall (v −45 to −65 m/s), its Z falls 0.0063 → 0.0024 → −0.0011, and its T′ climbs 2322 → 4056 → 9117 → 31,740 K over 6758-6768: the wall scalar drain above, in its heating form. So the semi-discrete wall growth the critic asked about is **not** the step mechanism of L14's non-finite cases (the pairwise step delays it by 15 iterations), and not the backflow (which only brought the hot gas there). It is the wall drain of L14's failing rows, and the mirrored-scalar trial removes it here too. The app's own start (rest) never reaches this state (§16).
+
+**No regression (D5-2's pre-registered list; HEAD cd62658, 2026-11-02, on battery).** The rule touches only the preconditioned tracking rows; the plain and physical rows are bitwise the same code on both sides.
+
+| row | record | CPU oracle | GPU kernel |
+|---|---|---|---|
+| L1 quiescent (bitwise 0); uniform M 0.5 | 0; GPU 2.13e-5 m/s (the CPU's: plain path, code unchanged) | 0; 2.03e-13 | 0; 2.13e-5 |
+| L2 L1(ρ), shock offset | physical time, code unchanged | 0.002767, 0.2282 | 0.002768, 0.2282 |
+| L3 L1(ρ) | physical time, code unchanged | 0.002113 | 0.002113 |
+| L4a Mach, mass flow, iterations | 0.278 %, 0.0997 %, 915 | 0.2779 %, 0.0997 %, 915 | 0.2779 %, 0.0996 % (its D4-38 rows as before: plain, code unchanged) |
+| L4b shock, steadiness | 1.640 %, 2.58e-4 | 1.6397 %, 2.580e-4 | (not a GPU row) |
+| L5 mass flow, iterations | 0.0843 %, 948 | 0.0843 %, 948 | 0.0843 % |
+| L6 radial equilibrium, drift (free vortex; solid body) | plain tracking, code unchanged | 3.005e-4, 4.7e-15; 2.90e-5, 5.41e-8 | 3.007e-4, 4.9e-8; 2.89e-5, 8.6e-8 |
+| L7 M 0.01 (96 × 96) asymmetry; \|Cd\|; ratio M 0.01 / M 0.3 | 0.01093; 0.00131; 1.779 | **0.01110** (+1.6 %); 0.00129; 1.644 | **0.01110**; 0.00129; 1.644 (14781 / 8993 its) |
+| L8 velocity, steadiness | 0.754 %, 3.2e-5 | 0.7529 %, 2.40e-5 | 0.752 %, 3.22e-5 |
+| L9a Euler work, steadiness (D4-57 KNOWN-FAIL) | 8.86e-6, 1.062e-5 | 8.857e-6, 1.062e-5 | as of record (pinned) |
+| L9b momentum theory, steadiness | 0.80 %, 2.49e-5 | 0.8008 %, 2.487e-5 | pass, spread 3.43e-5 |
+| 12.2 floors (L4a, L5; f32 / f64) | 1.590e-4, 1.096e-3; 6.4e-13, 5.9e-12 | the same | |
+| 12.2 C-pre after 1 / 10 / 100 (f32 storage; GPU against the oracle) | CPU 1.43e-7 / 1.79e-7 / 1.06e-6; GPU 5.13e-7 / 3.77e-7 / 1.05e-6 | 1.35e-7 / 1.71e-7 / 4.65e-7 | 5.68e-7 / 3.54e-7 / 1.29e-6 |
+| 12.2 S after 1 / 10 / 100 | CPU 1.25e-7 / 1.11e-7 / 2.02e-6; GPU 5.32e-7 / 4.77e-7 / 7.67e-6 | 1.25e-7 / 1.09e-7 / 6.29e-7 | 5.32e-7 / 5.06e-7 / 9.72e-6 |
+| E-L5, E-L9a over the flux scale; B | 2.67e-8, 2.46e-12; 1.266e-11 | | 2.67e-8, 2.46e-12; 1.266e-11, 1.95e-5 m/s |
+| D4-63 (a) L2(p′) max over 1000-2000; at 20000 | CPU 0.4450 / 0.009223; GPU 0.4450 / 0.008997 | (the CPU run was still going at hand-back) | **0.4497** / 0.0077 |
+| D4-63 (b) weighted residual 20000/10000; 20000/100 | CPU 0.1535 / 0.03063; GPU 0.1634 / 0.03253 | | **0.2112** / 0.03125 (trend 0.858 per 1000 over 15000-20000, against 0.820) |
+| W2S-B1 long run (a); (b) | 0.659 / 5.09e-4; 0.108 / 7.28e-3 | | 0.629 / 1.55e-3; 0.186 / 0.0287 (max T′ 300.9 K, start 299.9) |
+| L14 | (new) | finite 10/10, 3 cases pass every row | finite 10/10, 2 cases pass every row |
+
+Every row passes its bar. Strictly against the record, a few values read on a pseudo-time path are worse: L7's asymmetry (+1.6 %, read at the 1e-4 stop), and on the GPU D4-63's 1000-2000 window (+1 %) and its residual ratio 20000/10000 (0.211 against 0.163, still ≤ 1), and the W2S-B1 long run's ratios at 20000 (still 35-500× inside). Those are values at a stop or a fixed iteration of a changed iteration map, not of the steady state (which the rule does not change); whether D5-2's "at or better than record" applies to them is the handoff's decision 3. The f32 agreement rows (C-pre, S) move both ways by up to 1.3× inside tolerances of 18-775×.
+
+**P1 (indicative only: on battery, `--quick`, D4-63's CPU run beside it).** In one session, the app scene's solver at 1.739 ms/it with the rule and 1.700 ms/it without it (the stage kernel patched off, then restored), so the rule costs about 2 % of the kernel's iteration; both runs report 120 it/s, the 2 iterations per frame at 60 Hz on battery. P1 of record stays 180 it/s (D4-100), to be re-measured in a quiet window on AC.
