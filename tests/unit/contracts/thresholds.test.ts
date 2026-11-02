@@ -51,9 +51,9 @@ const physics = readPhysicsThresholds();
 
 describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
   it('finds the full pre-registered set in PHYSICS.md', () => {
-    // T1-T4, C1-C12 (C10 by D3-3, C11 by D3-11, C12 by D3-17), L1-L13, P1-P5 and P5b (P4 by D4-2,
-    // P5 by D4-90, P5b by D4-94)
-    expect(physics.length).toBe(4 + 12 + 13 + 6);
+    // T1-T4, C1-C12 (C10 by D3-3, C11 by D3-11, C12 by D3-17), L1-L14 (L14 by D5-2), P1-P5 and P5b
+    // (P4 by D4-2, P5 by D4-90, P5b by D4-94)
+    expect(physics.length).toBe(4 + 12 + 14 + 6);
   });
 
   it('has exactly the same IDs, in the same order', () => {
@@ -100,6 +100,11 @@ describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
     expect(THRESHOLDS.C12.values.maxTimeToThrustS.value).toBe(10);
     expect(THRESHOLDS.L1.values.iterations.value).toBe(20_000);
     expect(THRESHOLDS.L12.values.t4ErrorK.value).toBe(10);
+    expect(THRESHOLDS.L14.values.iterations.value).toBe(2000);
+    expect(THRESHOLDS.L14.values.machCut.value).toBe(0.02);
+    expect(THRESHOLDS.L14.values.cfl.value).toBe(0.8);
+    expect(THRESHOLDS.L14.values.maxPeakTemperatureRatio.value).toBe(1.03);
+    expect(THRESHOLDS.L14.values.maxUndershootFractionOfDeltaT.value).toBe(0.03);
     expect(THRESHOLDS.P1.values.minIterationsPerS.value).toBe(150);
     expect(THRESHOLDS.P3.values.maxValidationErrors.value).toBe(0);
     expect(THRESHOLDS.P4.values.maxRenderGpuMs.value).toBe(8);

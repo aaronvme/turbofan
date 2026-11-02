@@ -1,0 +1,195 @@
+// Ladder L14 (PHYSICS.md 3.3, D5-2; W2S-I1): a hot gas pocket moving through still cold gas at the
+// engine's defaults, shared by the CPU ladder (cases/l14.ts) and the GPU ladder
+// (tests/gpu-ladder/l14.test.ts) so the two run the same cases and rows. The set-up is critic pass
+// 19's probe (docs/reviews/probes/w2s-hot-pocket.probe.ts.txt): an annular duct r 0.30-0.45 m,
+// x -0.3..0.3 m, 60 x 16 cells, slip walls on both sides, inflow at the ambient totals and outflow
+// at p_inf, thermally perfect gas, ISA SLS at rest; a sharp pocket of T' = dT and Z 0.015 at
+// pressure equilibrium over |x| < 0.06 m, at the outer wall (r > 0.41 m) or mid-channel
+// (|r - 0.375| < 0.035 m), moving axially at u0.
+import { THRESHOLDS } from '../../src/contracts/thresholds';
+import { THERMALLY_PERFECT } from '../../src/flow/reference/gas';
+import type { SolverOptions } from '../../src/flow/reference/solver';
+import type { SolverMesh } from '../../src/flow/reference/solverMesh';
+import { NP, NU, type PhysicalState } from '../../src/flow/reference/state';
+import { BC, rectangle, singleBlock, solverMesh } from '../unit/flow/helpers';
+import type { LadderRow } from './common';
+import { AMBIENT_AT_REST, ENGINE_PRECONDITIONING_CUT } from './oracle';
+
+export interface HotPocketCase {
+  /** T' of the pocket, K. */
+  readonly dT: number;
+  /** The pocket's axial velocity, m/s (negative: upstream, as the engine's failing cells moved). */
+  readonly u0: number;
+  readonly where: 'wall' | 'mid';
+}
+
+/**
+ * PHYSICS.md 3.3 L14's cases: dT in {900, 1200} K x u0 in {-100, -300} m/s x {wall, mid}, then the
+ * probe's two cases that were bounded before any fix (900 K at -50 m/s and 1200 K at rest, both at
+ * the wall), which must stay bounded.
+ */
+export const HOT_POCKET_CASES: readonly HotPocketCase[] = [
+  ...[900, 1200].flatMap((dT) =>
+    [-100, -300].flatMap((u0) =>
+      (['wall', 'mid'] as const).map((where): HotPocketCase => ({ dT, u0, where })),
+    ),
+  ),
+  { dT: 900, u0: -50, where: 'wall' },
+  { dT: 1200, u0: 0, where: 'wall' },
+];
+
+export const caseName = (c: HotPocketCase): string => `${c.dT} K, ${c.u0} m/s, ${c.where}`;
+
+const L14 = THRESHOLDS.L14.values;
+/** The run length of every case (PHYSICS.md 3.3 L14: finite to 2000 iterations). */
+export const HOT_POCKET_ITERATIONS = L14.iterations.value;
+
+/** The duct: 60 x 16 cells, slip walls both sides, inflow at imin and outflow at imax. */
+export function hotPocketMesh(): SolverMesh {
+  return solverMesh(
+    singleBlock(rectangle('duct', -0.3, 0.3, 0.3, 0.45, 60, 16), {
+      imin: BC.INFLOW,
+      imax: BC.OUTFLOW,
+      jmin: BC.SLIP_WALL,
+      jmax: BC.SLIP_WALL,
+    }),
+  );
+}
+
+/**
+ * The engine's defaults: thermally perfect gas, ISA SLS at rest, preconditioned tracking with
+ * minMach = M_cut = 0.02 in force (D4-81's global cut, the GPU default's ENGINE_MACH_CUT), the
+ * default preconditioned CFL (0.8, no `cfl` given) and the default (sharp) limiter.
+ */
+export const HOT_POCKET_OPTIONS: SolverOptions = {
+  gas: THERMALLY_PERFECT,
+  freeStream: AMBIENT_AT_REST,
+  lowMachPreconditioning: ENGINE_PRECONDITIONING_CUT,
+};
+
+const R_AIR = 287.05287;
+
+export function inPocket(c: HotPocketCase, x: number, r: number): boolean {
+  return Math.abs(x) < 0.06 && (c.where === 'wall' ? r > 0.41 : Math.abs(r - 0.375) < 0.035);
+}
+
+/** The start: the pocket at pressure equilibrium (p = p_inf), the rest the ambient at rest. */
+export function hotPocketState(c: HotPocketCase): (x: number, r: number) => PhysicalState {
+  const p = AMBIENT_AT_REST.pressure;
+  return (x, r) => {
+    const hot = inPocket(c, x, r);
+    const T = AMBIENT_AT_REST.temperature + (hot ? c.dT : 0);
+    return { rho: p / (R_AIR * T), u: hot ? c.u0 : 0, v: 0, w: 0, p, z: hot ? 0.015 : 0 };
+  };
+}
+
+/** One sample of the field: max and min T' over the cells, and whether every cell is sound. */
+export interface PocketSample {
+  readonly tMax: number;
+  readonly tMin: number;
+  /** Every conserved value and primitive is finite, and rho > 0 in every cell. */
+  readonly sound: boolean;
+}
+
+/** The sample of the primitives P (cells first) and the conserved state U of n cells. */
+export function samplePocket(
+  P: ArrayLike<number>,
+  U: ArrayLike<number>,
+  rhoInf: number,
+  n: number,
+): PocketSample {
+  let tMax = -Infinity;
+  let tMin = Infinity;
+  let sound = true;
+  for (let c = 0; c < n; c++) {
+    for (let k = 0; k < NU; k++) if (!Number.isFinite(U[NU * c + k] as number)) sound = false;
+    for (let k = 0; k < NP; k++) if (!Number.isFinite(P[NP * c + k] as number)) sound = false;
+    if (!(rhoInf + (U[NU * c] as number) > 0)) sound = false;
+    const t = P[NP * c + 6] as number;
+    if (t > tMax) tMax = t;
+    if (t < tMin) tMin = t;
+  }
+  return { tMax, tMin, sound };
+}
+
+/** A run of one case: the start sample, then one per iteration until the first unsound one. */
+export interface PocketTrace {
+  readonly start: PocketSample;
+  /** Iterations completed with a sound state (HOT_POCKET_ITERATIONS when the run held). */
+  readonly soundIterations: number;
+  /** The largest max T' over the start and every sound iteration. */
+  readonly peak: number;
+  /** The smallest min T' over the start and every sound iteration. */
+  readonly low: number;
+  /** Max T' at the last iteration (NaN unless the run held to the end). */
+  readonly end: number;
+  /** Where the run's peak sat (iteration, then cell), for the evidence. */
+  readonly peakAt: readonly [number, number];
+}
+
+/** Runs one case through `step` (one iteration, then the sample of the new state). */
+export async function tracePocket(
+  start: PocketSample,
+  step: () => Promise<PocketSample & { readonly at?: number }> | (PocketSample & { at?: number }),
+): Promise<PocketTrace> {
+  let peak = start.tMax;
+  let low = start.tMin;
+  let end = NaN;
+  let peakAt: [number, number] = [0, -1];
+  let k = 0;
+  while (k < HOT_POCKET_ITERATIONS) {
+    const s = await step();
+    if (!s.sound) break;
+    k++;
+    if (s.tMax > peak) {
+      peak = s.tMax;
+      peakAt = [k, s.at ?? -1];
+    }
+    low = Math.min(low, s.tMin);
+    if (k === HOT_POCKET_ITERATIONS) end = s.tMax;
+  }
+  return { start, soundIterations: k, peak, low, end, peakAt };
+}
+
+/**
+ * PHYSICS.md 3.3 L14's four rows of one case: finite to 2000 iterations with rho > 0; the run's
+ * peak max T' <= 1.03 x its start; max T' at 2000 <= its start; min T' >= -0.03 dT (the run's
+ * minimum over every iteration and cell, the stricter reading).
+ */
+export function hotPocketRows(c: HotPocketCase, t: PocketTrace, tag = ''): LadderRow[] {
+  const name = `${tag}${caseName(c)}`;
+  const held = t.soundIterations === HOT_POCKET_ITERATIONS;
+  const peak = held ? t.peak / t.start.tMax : NaN;
+  const end = held ? t.end / t.start.tMax : NaN;
+  const low = held ? t.low / c.dT : NaN;
+  return [
+    {
+      id: 'L14',
+      metric: `${name}: iterations finite with rho > 0`,
+      threshold: `= ${HOT_POCKET_ITERATIONS}`,
+      value: t.soundIterations,
+      pass: held,
+    },
+    {
+      id: 'L14',
+      metric: `${name}: peak max T' / its start`,
+      threshold: `<= ${L14.maxPeakTemperatureRatio.value}`,
+      value: peak,
+      pass: peak <= L14.maxPeakTemperatureRatio.value,
+    },
+    {
+      id: 'L14',
+      metric: `${name}: max T' at ${HOT_POCKET_ITERATIONS} / its start`,
+      threshold: '<= 1',
+      value: end,
+      pass: end <= 1,
+    },
+    {
+      id: 'L14',
+      metric: `${name}: min T' / dT`,
+      threshold: `>= -${L14.maxUndershootFractionOfDeltaT.value}`,
+      value: low,
+      pass: low >= -L14.maxUndershootFractionOfDeltaT.value,
+    },
+  ];
+}
