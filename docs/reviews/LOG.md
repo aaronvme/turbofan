@@ -3669,6 +3669,31 @@ None.
     - the pure parts live in pure modules under `src/audio` with ≥ 90 % line coverage: the source model from the cycle state, the oscillators, the spectra and the limiter;
     - the AudioWorklet glue is covered by the browser suite.
   - **Sound stays off until the viewer turns it on:** no AudioContext before a gesture.
+- **D5-5 (w3/scheme's decisions 1-3, from its handoff at 92b98fd, SOLVER.md 17).**
+  1. **The slip-wall ghost mirrors ρ′ and Z (adopted).** p′, ρw and the tangential velocity keep the extrapolation that L6 needs.
+     - **Why:** extrapolating ρ′ and Z lets a flow leaving the wall drain fuel and entropy faster than the wall cell holds them (ρZ < 0, T′ below ambient). That drain:
+       - fails L14's undershoot row on 5 cases and makes the 1.39 overshoot;
+       - fails the GPU's at-rest case;
+       - still takes the f64 engine runaway non-finite at 6770.
+     - **Mirroring is the standard reflective treatment** of a scalar at a slip wall (zero normal gradient).
+     - **The scratch trial's evidence:**
+       - every L14 undershoot ≥ −0.007 ΔT, and the late overshoot gone;
+       - the engine runaway finite to 7000;
+       - the CPU rows run so far equal to their records, with L9a now passing D4-57's steadiness row (9.20e-6 against 1e-5).
+     - **Adopted subject to** round 2 (TDD, oracle and kernel, SOLVER.md §5's wall row, the boundary unit tests), the full CPU and GPU ladders including L7 and D4-63 (CPU on AC), and the critic.
+  2. **L14's peak row is restated against the run's own compression (amended in PHYSICS.md 3.3).** The 1.03 bar was set from the probe's 100-iteration sampling, which missed the start transient.
+     - **What the row actually caught:** a hot slug set moving at 300 m/s into still gas decelerates, and its leading edge compresses: p′ ≈ 11 kPa at iteration 10, whose isentropic compression alone gives 1.034 × ΔT. The plain scheme, closer to the physical transient, peaks at 1.14-1.17.
+     - **What the row is for:** catching a temperature the scheme makes, not one the physics makes. So each cell's T′ is now compared with the start's hot gas compressed isentropically to that cell's own pressure.
+     - **Controls:**
+       - the positivity-guard-only candidate (worst peak 2.645) must fail the restated row, or the decision comes back;
+       - the plain scheme's value under it is reported.
+     - **Unchanged:** the finiteness, end ≤ start and undershoot rows stay as pre-registered.
+  3. **"At or better than its record" (D5-2) applies to converged (steady-state) values.**
+     - **Values read at a fixed iteration or at a stopping tolerance** on a changed pseudo-time path must pass their own row's bar, and are reported beside their record.
+     - **Why:** the step rule changes the iteration map, not the steady state. Such values then move both ways: L7's Cd and ratio got better, and its asymmetry got 1.6 % worse at the 1e-4 stop. Requiring every one of them to be no worse would forbid any change to the local step.
+     - **Round 2 must show the steady state is unchanged:** L7 converged to 1e-6 with and without the rule.
+  4. **J at M_cut 0.02** (backflow on 9 of 16 outflow rows, stalling at 0.6-0.85 of its peak) is diagnosed and reported in round 2 as W2S-N2's first suspect. It gates nothing now, but it matters for L11 (w3/plume-bake).
+  5. **Order:** w3/scheme round 2 (a fresh agent in the same worktree) does items 1-4 plus the owed CPU D4-63 on AC. Then critic pass 20 reviews w3/scheme as a whole, and w3/coupling waits for its MERGE. The audio builder resumes when a second slot is free (AC and RAM ≥ 2.5 GB).
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
