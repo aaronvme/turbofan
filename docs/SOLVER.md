@@ -782,3 +782,14 @@ On the GPU the at-rest case fails the undershoot row too (−0.040 ΔT): its f32
 
 **J (D4-44 (c), W2R-I8) converges.** The low-Mach jet into dead air at its row's settings (minMach = M_cut = 0.003) had stalled at 0.2-0.6 of its peak since round 6, and D4-52 had located the stall in the dead-air cells at β = M_cut beside the jet. With the pairwise rule those cells take the jet's radius on their shared faces. J meets D4-44 (c)'s rule at **2415 iterations** and stays below 9.1e-6 of its peak through 30000 (1.6e-8 at 28000), so its `it.fails` pin is lifted. R (the blockage duct from rest) keeps its sharp-limiter floor and stays pinned.
 - *At the engine's cut 0.02*, J does not converge with the contract or with the rule alike (0.6-0.85 of its peak over 2000-30000 in both). D4-59's 5.8e-5 at 0.02 predates D4-101's backflow branch: J's outflow column now carries backflow on 9 of its 16 rows (the jet's entrainment), and the residual sits in the jet next to the outflow. That is W2S-N2's first suspect (§5), reported here, not changed.
+
+**The engine runaway re-run (D5-2, reported, not gated).** The f64 oracle on the 130k mesh from w2/solver-diverge's GPU state at 6700 iterations (`perf-lastfinite.bin`, the look-dev start before D4-101's backflow branch; scratch `reports/scratch/diverge`, the copied `oracle.ts` with the source trees `before` and `beforeStep`), minMach = M_cut = 0.02, CFL 0.8:
+
+| source | result from the 6700 state |
+|---|---|
+| before D4-101 (no backflow branch, the contract step) | non-finite at 6755 (16 cells), as §16 records |
+| before D4-101 with the pairwise step | non-finite by 6770 (63 cells) |
+| this branch (the backflow branch and the pairwise step) | non-finite by 6770 (63 cells); the outflow corner's backflow decays (−643 → −61 m/s, T′ 1077 → −1 K) |
+| trial: this branch with the wall ghost's ρ′ and Z mirrored (scratch only) | **finite to 7000** (300 iterations), max T′ falling 1059 → 979 K |
+
+- *Where it fails on the branch:* the core duct's outer-wall row beside the cell §16 named, core (509, 15) at x 2.52 m, r 0.43 m. The gas there leaves the wall (v −45 to −65 m/s), its Z falls 0.0063 → 0.0024 → −0.0011, and its T′ climbs 2322 → 4056 → 9117 → 31,740 K over 6758-6768: the wall scalar drain above, in its heating form. So the semi-discrete wall growth the critic asked about is **not** the step mechanism of L14's non-finite cases (the pairwise step delays it by 15 iterations), and not the backflow (which only brought the hot gas there). It is the wall drain of L14's failing rows, and the mirrored-scalar trial removes it here too. The app's own start (rest) never reaches this state (§16).
