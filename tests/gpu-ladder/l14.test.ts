@@ -3,7 +3,7 @@
 // oracle's f32-rounded state, and after every iteration the GPU's state (f32 copy plus low parts)
 // in the oracle shell, whose f64 primitives give max and min T' and the finiteness and rho > 0
 // checks, as the GPU ladder's other rows read their metrics.
-import { afterAll, afterEach, beforeAll, describe, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { SimDevice } from '../../src/gpu/device';
 import { ReferenceSolver } from '../../src/flow/reference/solver';
 import { NP } from '../../src/flow/reference/state';
@@ -21,6 +21,13 @@ import {
 import { GpuErrorLog, solverDevice } from '../gpu/helpers/solver';
 import { back, onGpu, report } from './helpers';
 
+const SLOW = new Set([
+  '900 K, -300 m/s, wall',
+  '900 K, -300 m/s, mid',
+  '1200 K, -300 m/s, wall',
+  '1200 K, -300 m/s, mid',
+]);
+
 describe('GPU ladder L14: the hot gas pocket', () => {
   const log = new GpuErrorLog();
   let sim: SimDevice;
@@ -37,7 +44,9 @@ describe('GPU ladder L14: the hot gas pocket', () => {
     sim.destroy();
   });
 
-  it('a hot gas pocket stays finite and bounded at the engine defaults (GPU)', async () => {
+  /** Every case on the GPU, once; the rows printed and written to reports/gpu-ladder/L14.json. */
+  let all: Promise<LadderRow[]> | undefined;
+  const runAll = async (): Promise<LadderRow[]> => {
     const rows: LadderRow[] = [];
     const traces: Record<string, unknown> = {};
     for (const c of HOT_POCKET_CASES) {
@@ -64,6 +73,44 @@ describe('GPU ladder L14: the hot gas pocket', () => {
         g.destroy();
       }
     }
-    report('L14', rows, { traces });
+    // printed and written, not asserted here (the tests below assert their rows)
+    report(
+      'L14',
+      rows.map((r) => ({ ...r, pass: r.pass === true ? true : 'reported' })),
+      { traces, gated: rows },
+    );
+    return rows;
+  };
+  const rows = () => (all ??= runAll());
+  const caseOf = (r: LadderRow) => r.metric.replace(/^GPU /, '').split(':')[0] ?? '';
+  const expectPass = (sel: readonly LadderRow[]) => {
+    for (const r of sel) expect(r.pass, `${r.metric} = ${r.value} (${r.threshold})`).toBe(true);
+  };
+
+  // the same gated rows and pin as the CPU ladder's tests/ladder/l14.test.ts (its comment has why)
+  it('every case: finite with rho > 0 to 2000 iterations (W2S-I1, SOLVER.md 17), GPU', async () => {
+    const sel = (await rows()).filter((r) => r.metric.includes('finite with rho > 0'));
+    expect(sel.length).toBe(10);
+    expectPass(sel);
   }, 1_800_000);
+
+  it("every case: max T' at 2000 <= its start; the peak row at |u0| <= 100 m/s, GPU", async () => {
+    const r = await rows();
+    const end = r.filter((x) => x.metric.includes('at 2000 / its start'));
+    const peak = r.filter((x) => x.metric.includes('peak max') && !SLOW.has(caseOf(x)));
+    expect(end.length).toBe(10);
+    expect(peak.length).toBe(6);
+    expectPass([...end, ...peak]);
+  }, 1_800_000);
+
+  // KNOWN-FAIL pending the orchestrator, as on the CPU; on the GPU the at-rest case fails the
+  // undershoot row too (-0.040 dT): its f32 start is not an exact rest state, the pocket moves off
+  // the wall, and the wall drain follows
+  it.fails(
+    'the pre-registered rule in full: every row of every case, GPU',
+    async () => {
+      expectPass(await rows());
+    },
+    1_800_000,
+  );
 });
