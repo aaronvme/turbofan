@@ -1,15 +1,22 @@
-realistic: 2880x1503 centre std 0.212 lit 0.911 · backing 1994x1039 · render 7.2 ms · flow 0.5 ms · 53 fps
-  realistic schlieren signature {"greyShare":0.313348245068196,"greyMean":0.47236681357306015,"silhouetteRatio":1.1885911463891465,"jetStd":0.11195204358257052,"pass":false}
+realistic: 2880x1503 centre std 0.212 lit 0.912 · backing 1994x1039 · render 6.8 ms · flow 0.5 ms · 50 fps
+  realistic schlieren signature {"greyShare":0.010258825112258455,"greyMean":0.49136082731553765,"silhouetteRatio":1.1280764969044281,"jetStd":0.11194731231041365,"pass":false}
+  realistic grey share by band half-width (W2A-N30) {"0.005":0,"0.01":0.01,"0.015":0.072,"0.02":0.119,"0.03":0.228,"0.05":0.264,"0.1":0.313}
   cutaway callouts shown (8): fan, combustor, hpt, lpt, exhaust, hpc, booster, bypassDuct
-cutaway: 2880x1503 centre std 0.196 lit 0.338 · backing 1994x1039 · render 6.1 ms · flow 0.2 ms · 61 fps
-  cutaway schlieren signature {"greyShare":0.4972917846306597,"greyMean":0.477947720016587,"silhouetteRatio":0.4045466177706233,"jetStd":0.08471895488308864,"pass":false}
-exploded: 2880x1503 centre std 0.200 lit 0.602 · backing 1994x1039 · render 6.2 ms · flow 0.0 ms · 61 fps
-  exploded schlieren signature {"greyShare":0.4831928065461,"greyMean":0.4818046296693778,"silhouetteRatio":0.6545882174710225,"jetStd":0.13216150783883246,"pass":false}
-schlieren: 2880x1503 centre std 0.145 lit 0.154 · backing 1994x1039 · render 6.4 ms · flow 1.0 ms · 61 fps
-  schlieren schlieren signature {"greyShare":0.9524393942169331,"greyMean":0.500744442716562,"silhouetteRatio":0.2523918028939983,"jetStd":0.1343136975980038,"pass":true}
-  schlieren S1 (knife edge off, control) schlieren signature {"greyShare":0.997105820719637,"greyMean":0.5019541107262804,"silhouetteRatio":0.25426062667049715,"jetStd":0.0028538709882966733,"pass":false}
+cutaway: 2880x1503 centre std 0.196 lit 0.342 · backing 1994x1039 · render 6.6 ms · flow 0.3 ms · 59 fps
+  cutaway schlieren signature {"greyShare":0.07872143685298237,"greyMean":0.4921135981856829,"silhouetteRatio":0.3950722581908713,"jetStd":0.08480861336034974,"pass":false}
+  cutaway grey share by band half-width (W2A-N30) {"0.005":0.001,"0.01":0.079,"0.015":0.216,"0.02":0.278,"0.03":0.403,"0.05":0.458,"0.1":0.497}
+  exploded framed content box {"x":358.52325944674726,"y":113.09268478691547,"w":1179.0303733916123,"h":667.7247005746964}
+exploded: 2880x1503 centre std 0.214 lit 0.616 · backing 1994x1039 · render 6.5 ms · flow 0.0 ms · 61 fps
+  exploded schlieren signature {"greyShare":0.14051078847554696,"greyMean":0.4926246538032716,"silhouetteRatio":0.6415083711345471,"jetStd":0.1394912002476515,"pass":false}
+  exploded grey share by band half-width (W2A-N30) {"0.005":0.003,"0.01":0.141,"0.015":0.276,"0.02":0.335,"0.03":0.413,"0.05":0.454,"0.1":0.519}
+  schlieren framed content box {"x":437.0444998531861,"y":93.25116921859664,"w":1022.4899023265125,"h":630.5564525615845}
+schlieren: 2880x1503 centre std 0.147 lit 0.157 · backing 1994x1039 · render 6.2 ms · flow 0.9 ms · 61 fps
+  schlieren schlieren signature {"greyShare":0.9125864234090664,"greyMean":0.5007305861802342,"silhouetteRatio":0.25291524491150685,"jetStd":0.13444805030230564,"pass":true}
+  schlieren grey share by band half-width (W2A-N30) {"0.005":0.902,"0.01":0.913,"0.015":0.916,"0.02":0.919,"0.03":0.926,"0.05":0.936,"0.1":0.952}
+  schlieren S1 (knife edge off, control) schlieren signature {"greyShare":0.9968493744542885,"greyMean":0.501959947564664,"silhouetteRatio":0.2514513471280712,"jetStd":0.0026036219441163155,"pass":false}
   data callouts shown (8): fan, combustor, hpt, lpt, exhaust, hpc, booster, bypassDuct
-data: 2880x1503 centre std 0.189 lit 0.323 · backing 1994x1039 · render 8.0 ms · flow 0.3 ms · 61 fps
-  data schlieren signature {"greyShare":0.49795634816785067,"greyMean":0.4778906967142584,"silhouetteRatio":0.41961060495953934,"jetStd":0.08198093289614453,"pass":false}
-realistic again (a full window): render 7.7 ms · flow 0.6 ms · 61 fps at dpr 1.5
+data: 2880x1503 centre std 0.190 lit 0.325 · backing 1994x1039 · render 9.5 ms · flow 0.4 ms · 60 fps
+  data schlieren signature {"greyShare":0.07705606283376872,"greyMean":0.49200021431861884,"silhouetteRatio":0.40393855850336924,"jetStd":0.0822997695147033,"pass":false}
+  data grey share by band half-width (W2A-N30) {"0.005":0.001,"0.01":0.077,"0.015":0.216,"0.02":0.278,"0.03":0.404,"0.05":0.459,"0.1":0.498}
+realistic again (a full window): render 6.9 ms · flow 0.6 ms · 61 fps at dpr 1.5
 ultra: backing 2880x1501 at dpr 1.5 (high: 1.0387112586860119)

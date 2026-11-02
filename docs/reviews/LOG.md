@@ -3562,6 +3562,20 @@ None.
     - **Next, top priority:** a builder reproduces it headless (Dawn, the 130k asset, the app's GpuFlowSolver config and FLOW_SOLVER_LIMITS, 10k+ iterations), bisects 0.003 against the 0.02 cut (D4-89's mirror) and anything else since solver-int, then finds the cause, fixes it TDD, and adds a long-run GPU test of the app's own configuration.
     - P4flow and P1's field health are re-measured after the fix, in the next quiet window.
   - **The merge gate on 469164a:** the browser suite timed out twice at 120 s, on `fanBlur` (W1L-I3) and `rotorMotion` (W1V-I1 b, made heavier by followups-2's per-pose controls), in the full suite on a quiet AC machine. Every assertion passed. The polish round gives both explicit longer timeouts or splits them (test plumbing, not a bar; D4-95's precedent). Main is pushed once the browser gate is green.
+- **D4-101 (critic pass 19's questions; w2/solver-diverge and w2/polish merged on main 2e262af, src and tests equal to the critic's trial19).**
+  1. **SOLVER.md §5's outflow backflow branch is ratified.** A backflow face (vn < 0) takes the inflow ghost at the ambient totals (p_out, T∞), with no swirl and Z = 0, at the speed set by the cell's outgoing characteristic. That's the standard pressure-outlet backflow.
+     - The oracle and the kernel are identical, and faces with vn ≥ 0 are bitwise unchanged (E-L5 2.67e-8 and E-L9a 2.46e-12, as of record).
+     - The critic reproduced W2S-B1 on the pre-fix main (non-finite first at iteration 6756, block 5 core). The long-run test fails without the fix, and the CPU outflow rows L4a, L4b, L5, L9a and L9b equal their records.
+     - **D4-63 decays faster on both** with it:
+       - CPU (a) 0.4450 / 0.009223 and (b) 0.1535 / 0.03063;
+       - GPU (a) 0.4450 / 0.008997 and (b) 0.1634 / 0.03253;
+       - the weighted residual now falls steadily over 15k-20k, so the slow late decay D4-89 recorded was this outflow feedback.
+     - W2S-N1 (the backflow at p_out ≠ p∞ is untested; mutant A3g survives), N2 (§5's continuity wording) and N3 (the backflow totals in flight) go to the next solver round, which is W3's flight conditions.
+  2. **W2S-I1 is pre-registered and goes to a scheme round before W3's coupling.** At the engine's cut (0.02) and the default preconditioned CFL 0.8, the f64 oracle goes non-finite within 5-100 iterations on a hot gas pocket (900-1200 K) moving at 100-300 m/s in a 960-cell duct, with or without a wall. The plain scheme and CFL 0.4 stay bounded. The case (`docs/reviews/probes/w2s-hot-pocket.probe.ts.txt`) becomes a ladder row that must stay finite and bounded. Its fix (a step limit or a positivity treatment, chosen with data) comes before the combustor puts hot gas into the field.
+  3. **`COLD_SWITCH_WAIT_FRAMES` = 0 is ratified, superseding D4-98's 30-frame wait.** The wait bought the viewer only ~0.5 s of smooth old-view animation, a quarter of U4's 2 s, and a snapshot is now posted every 3 frames or after 50 ms, so "Preparing" never freezes. D4-97 declined skipping the CPU rule outright; the per-frame cap (`PREPARE_FRAME_CPU_MS` 200) is the bound that keeps it. W2A-N33's wording (U4's check text names the cap and the snapshot rule as the stop conditions) and N32 (the snapshot rate at 25-50 ms frames) go to the next app-ui round.
+  4. **The screenshots are re-shot on merged main at the display's own DPR (1.5),** in the merge gate's browser run with the display held awake. The builder's ratio-1 set is not committed.
+  5. **Every detached browser run holds the display awake** with `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)`, for builders, critics and the orchestrator alike. It changes no setting and ends with the process. A slept display drops Chrome to DPR 1 and slows it about 10×, which voided critic 19's first browser run.
+  - **Next:** push main once the gates on 2e262af are green. Then the quiet window's official set on that main: U4 alone with the quiet flag, P4flow after a warm load, and P1 for the field health (D4-100's re-measures).
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
