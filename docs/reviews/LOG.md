@@ -3626,6 +3626,50 @@ None.
 
 **W3 (coupling: body forces, calibration, plume ν_t, the bake, physical time; audio; scenarios) waits for Aaron's review and go,** as W1 → W2 did (D3-2).
 
+## W3 orchestrator decisions: 2026-11-02 (Aaron: "continue" after the W2 report)
+
+- **D5-1 (W3 starts).** The W2 COMPLETE report asked for "go W3". Aaron answered "continue", which is taken as the go.
+  - **Scope (the plan's):**
+    - coupling: body forces, the calibration spike, L12, the plume eddy viscosity (L11), the bake and physical-time mode;
+    - the engine sound;
+    - the scenarios, with the cinematic tours.
+  - **Brakes (as in W2, D4-7):**
+    - usage cap 90 %; agents STOP-CLEAN at 84 %; no new agent at 78 % or more; a critic only below 60 %;
+    - at most 2 agents, 1 while RAM < 2.5 GB or on battery, and STOP-CLEAN at ≤ 15 % charge on battery;
+    - every detached browser run holds the display awake (D4-101 item 5).
+- **D5-2 (W2S-I1 first: hot-pocket ladder row L14).** It is pre-registered in PHYSICS.md 3.3 before any fix.
+  - **The fix is chosen with data** from D4-101 item 2's options:
+    - D4-44 (b): the scaled diffusion's eigenvalue in the local step;
+    - a local step from the hot cell's preconditioned eigenvalues;
+    - a per-stage positivity guard on T and ρ, as the last resort.
+  - **The global preconditioned CFL (0.8) may not be lowered** without a logged decision, because it sets how fast the engine field settles.
+  - **W2S-N1..N3 go in the same round,** since they are the next solver round's items.
+  - **Branch and review:** w3/scheme. The critic reviews it before w3/coupling starts, because coupling builds on the scheme.
+- **D5-3 (order).**
+  - **Slot A, the solver path:**
+    1. w3/scheme, then critic pass 20.
+    2. w3/coupling:
+       - Hall-Thollet body forces with blockage on the compressor rows, and follow-camber turbine rows;
+       - the combustor's heat and fuel source;
+       - the calibration spike, which must converge in < 300 iterations without a limit cycle;
+       - then L12.
+    3. w3/plume-bake: L11's ν_t, the feedforward bake, the warm-start snapshots, and physical-time mode.
+  - **Slot B, independent of the solver:**
+    1. w3/audio: the engine synth driven by the cycle state.
+    2. w3/scenarios:
+       - start, takeoff, surge, and flameout with relight, across the cycle, visuals and audio;
+       - D4-15's idle-floor settling, which the scenarios make visible;
+       - the Theatre.js tours.
+  - **The part-power backlog** (W2H-I1/I4/I5, and bounding the held spools from below) fills slot B after the scenarios, unless a scenario needs it first.
+  - **The valid P4flow record** is owed to the next quiet window with Aaron present.
+- **D5-4 (the engine sound's bars, A1-A6).** They are pre-registered in PHYSICS.md 3.6 before any audio code.
+  - **Physics or exact:** the frequencies, the buzz-saw onset, the Lighthill scaling, the event gating and the safety rows.
+  - **Synthesized on physical trends,** and labelled so in the fidelity ledger: the levels, the spectral shapes and the directivity patterns.
+  - **Code layout:**
+    - the pure parts live in pure modules under `src/audio` with ≥ 90 % line coverage: the source model from the cycle state, the oscillators, the spectra and the limiter;
+    - the AudioWorklet glue is covered by the browser suite.
+  - **Sound stays off until the viewer turns it on:** no AudioContext before a gesture.
+
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
 I reviewed `1eb1e62..2cfd469` in place (read-only) on 2026-10-29. Main moved only `docs/reviews/LOG.md` since 1eb1e62, so a trial merge would be the branch's tree plus the LOG. **Stopped on the coordinator's STOP-CLEAN** with the in-place coverage run under way. I stopped it, and no leftover processes remain. The flowviz worktree is clean at 2cfd469. No trial merge was started, and no dev server or Chrome page was opened.
