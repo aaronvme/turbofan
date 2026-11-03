@@ -22,6 +22,9 @@ import { createCycleModel } from '../../../src/cycle/model';
 import { factValue } from '../../../src/engine/facts';
 import { onsets, peakAbs, rms } from './lib/analysis';
 import { AMBIENT, DEF, runInputs } from './lib/states';
+import { recorder } from './lib/record';
+
+const record = recorder('A5');
 
 /** The cycle-model runs behind the checks take seconds; more under a parallel run. */
 const HOOK_TIMEOUT_MS = 120_000;
@@ -67,15 +70,15 @@ function render(fs: readonly SoundFrame[], keep: readonly VoiceGroup[]) {
 /** [from, to) sample spans over which a predicate of the posted states holds. */
 function spans(run: Run, on: (s: CycleState) => boolean): [number, number][] {
   const out: [number, number][] = [];
-  let start: number | null = null;
-  run.states.forEach((s, k) => {
-    if (on(s) && start === null) start = applied(k);
-    if (!on(s) && start !== null) {
-      out.push([start, applied(k)]);
-      start = null;
+  let from: number | null = null;
+  for (const [k, s] of run.states.entries()) {
+    if (on(s) && from === null) from = applied(k);
+    if (!on(s) && from !== null) {
+      out.push([from, applied(k)]);
+      from = null;
     }
-  });
-  if (start !== null) out.push([start, run.states.length * POST]);
+  }
+  if (from !== null) out.push([from, run.states.length * POST]);
   return out;
 }
 
@@ -150,9 +153,7 @@ describe('A5: events', { timeout: 60_000 }, () => {
       const expected = on.reduce((n, [a, b]) => n + Math.ceil((b - a) / period), 0);
       const amp = fs.find((f) => f.sparkAmp > 0)?.sparkAmp ?? 1;
       const hits = onsets(r.samples, 0.3 * amp, 0.03 * amp);
-      console.log(
-        `A5 sparks: ${hits.length} heard, ${expected} expected over ${on.length} on-spans`,
-      );
+      record(`A5 sparks: ${hits.length} heard, ${expected} expected over ${on.length} on-spans`);
       expect(r.synth.events.sparks).toBe(expected);
       expect(hits.length).toBe(expected);
       for (const h of hits) expect(on.some(([a, b]) => h >= a - 48 && h < b)).toBe(true);
@@ -189,7 +190,7 @@ describe('A5: events', { timeout: 60_000 }, () => {
     const r = render(fs, ['surge']);
     const cycles = surge.surgeCycles[surge.surgeCycles.length - 1] ?? 0;
     const amp = fs[0]?.bangAmp ?? 1;
-    console.log(`A5 surge: ${cycles} Greitzer cycles, ${r.synth.events.bangs} bangs`);
+    record(`A5 surge: ${cycles} Greitzer cycles, ${r.synth.events.bangs} bangs`);
     expect(r.synth.events.bangs).toBe(cycles);
     expect(onsets(r.samples, 0.4 * amp, 0.05 * amp).length).toBe(cycles);
     // and none in the runs without a surge

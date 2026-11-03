@@ -10,6 +10,9 @@ import { renderStream } from '../../../src/audio/render';
 import { createSoundModel, engineSoundFrame, fanTipRelativeMach } from '../../../src/audio/sources';
 import { bandPower, db, powerSpectrum } from './lib/analysis';
 import { AMBIENT, DEF, leverStates, withSpeeds } from './lib/states';
+import { recorder } from './lib/record';
+
+const record = recorder('A2');
 
 /** The cycle-model runs behind the checks take seconds; more under a parallel run. */
 const HOOK_TIMEOUT_MS = 120_000;
@@ -100,9 +103,7 @@ describe('A2: buzz-saw', { timeout: 60_000 }, () => {
     for (const s of states) {
       const mine = fanTipRelativeMach(s, DEF);
       const theirs = independentRelativeTipMach(s);
-      console.log(
-        `A2 N1 ${s.n1Percent.toFixed(1)} %: M_rel ${mine.toFixed(4)} vs ${theirs.toFixed(4)}`,
-      );
+      record(`A2 N1 ${s.n1Percent.toFixed(1)} %: M_rel ${mine.toFixed(4)} vs ${theirs.toFixed(4)}`);
       expect((100 * Math.abs(mine - theirs)) / theirs).toBeLessThanOrEqual(
         A2.machAgreementPercent.value,
       );
@@ -122,7 +123,7 @@ describe('A2: buzz-saw', { timeout: 60_000 }, () => {
     for (const s of sub) {
       expect(fanTipRelativeMach(s, DEF)).toBeLessThanOrEqual(A2.subsonicMach.value + 1e-9);
       const level = engineOrdersReBpfDb(s);
-      console.log(
+      record(
         `A2 M_rel ${fanTipRelativeMach(s, DEF).toFixed(3)}: engine orders ${level.toFixed(1)} dB re BPF`,
       );
       expect(level).toBeLessThanOrEqual(-A2.minSubsonicDbBelow.value);
@@ -138,7 +139,7 @@ describe('A2: buzz-saw', { timeout: 60_000 }, () => {
     for (const s of sup) {
       expect(fanTipRelativeMach(s, DEF)).toBeGreaterThanOrEqual(A2.supersonicMach.value);
       const level = engineOrdersReBpfDb(s);
-      console.log(
+      record(
         `A2 M_rel ${fanTipRelativeMach(s, DEF).toFixed(3)}: engine orders ${level.toFixed(1)} dB re BPF`,
       );
       expect(Math.abs(level)).toBeLessThanOrEqual(A2.maxSupersonicDbBelow.value);

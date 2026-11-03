@@ -9,6 +9,9 @@ import { renderStream } from '../../../src/audio/render';
 import { createSoundModel, engineSoundFrame } from '../../../src/audio/sources';
 import { bandPower, db, powerSpectrum, rms } from './lib/analysis';
 import { AMBIENT, DEF, leverStates } from './lib/states';
+import { recorder } from './lib/record';
+
+const record = recorder('A4');
 
 /** The cycle-model runs behind the checks take seconds; more under a parallel run. */
 const HOOK_TIMEOUT_MS = 120_000;
@@ -53,7 +56,7 @@ describe('A4: directivity', { timeout: 60_000 }, () => {
         bandPower(powerSpectrum(play(s, deg, ['fan'], N + 2400), N, 2400), bpf, FS, N, 4);
       const forward = level(A4.forwardDeg.value);
       const aft = level(A4.aftDeg.value);
-      console.log(
+      record(
         `A4 N1 ${s.n1Percent.toFixed(1)} %: fan BPF 45 - 150 deg = ${db(forward / aft).toFixed(1)} dB`,
       );
       expect(forward).toBeGreaterThan(0);
@@ -73,7 +76,7 @@ describe('A4: directivity', { timeout: 60_000 }, () => {
           best = deg;
         }
       }
-      console.log(`A4 N1 ${s.n1Percent.toFixed(1)} %: jet noise peaks at ${best} deg`);
+      record(`A4 N1 ${s.n1Percent.toFixed(1)} %: jet noise peaks at ${best} deg`);
       expect(best).toBeGreaterThanOrEqual(A4.jetPeakMinDeg.value);
       expect(best).toBeLessThanOrEqual(A4.jetPeakMaxDeg.value);
     }

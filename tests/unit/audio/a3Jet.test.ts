@@ -19,6 +19,9 @@ import {
 import { ENGINE_FACTS } from '../../../src/engine/facts';
 import { rms, smoothedPeakHz, welch } from './lib/analysis';
 import { AMBIENT, DEF, leverStates } from './lib/states';
+import { recorder } from './lib/record';
+
+const record = recorder('A3');
 
 /** The cycle-model runs behind the checks take seconds; more under a parallel run. */
 const HOOK_TIMEOUT_MS = 120_000;
@@ -113,7 +116,7 @@ describe('A3: jet mixing noise', { timeout: 60_000 }, () => {
         const y = render(jetOnly(j, stream), 4);
         return rms(y, FS / 2, y.length) ** 2;
       });
-      console.log(`A3 ${stream}: played power slope ${logSlope(SUBSONIC_U, played).toFixed(3)}`);
+      record(`A3 ${stream}: played power slope ${logSlope(SUBSONIC_U, played).toFixed(3)}`);
       expect(Math.abs(logSlope(SUBSONIC_U, played) - A3.slope.value)).toBeLessThanOrEqual(
         A3.slopeTolerance.value,
       );
@@ -150,7 +153,7 @@ describe('A3: jet mixing noise', { timeout: 60_000 }, () => {
       const psd = welch(y, n, FS / 2);
       const f = smoothedPeakHz(psd, FS, n, 10, 4000, 6);
       const strouhal = (f * j.diameterM) / j.velocity;
-      console.log(
+      record(
         `A3 ${stream}: U ${j.velocity.toFixed(0)} m/s, D ${j.diameterM.toFixed(3)} m, peak ${f.toFixed(1)} Hz, St ${strouhal.toFixed(3)}`,
       );
       expect(strouhal, `${stream}: peak ${f.toFixed(1)} Hz`).toBeGreaterThanOrEqual(

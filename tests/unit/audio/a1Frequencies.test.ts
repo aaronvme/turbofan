@@ -16,6 +16,9 @@ import { QUANTUM_FRAMES, renderStream } from '../../../src/audio/render';
 import { createSoundModel, engineSoundFrame } from '../../../src/audio/sources';
 import { instantaneousFrequency, peakNear, powerSpectrum } from './lib/analysis';
 import { AMBIENT, DEF, groundIdle, withSpeeds } from './lib/states';
+import { recorder } from './lib/record';
+
+const record = recorder('A1');
 
 const A1 = THRESHOLDS.A1.values;
 const FS = 48_000;
@@ -84,7 +87,7 @@ describe('A1: tone frequencies', { timeout: 60_000 }, () => {
         A1.maxFrequencyErrorPercent.value,
       );
     });
-    console.log(`A1 N1 ${n1} %, N2 ${n2} %: worst tone error ${worst.toFixed(4)} %`);
+    record(`A1 N1 ${n1} %, N2 ${n2} %: worst tone error ${worst.toFixed(4)} %`);
   });
 
   it('a 1 s linear N1 ramp at the snapshot rate: no frequency step over 0.5 % at a quantum boundary', () => {
@@ -120,7 +123,7 @@ describe('A1: tone frequencies', { timeout: 60_000 }, () => {
       const want = (24 * (n1At(b / FS - post / FS) / 100) * DEF.designPoint.n1Rpm) / 60;
       worstLag = Math.max(worstLag, (100 * Math.abs((fi[b] ?? 0) - want)) / want);
     }
-    console.log(
+    record(
       `A1 ramp: worst boundary step ${worstStep.toFixed(5)} %, lag error ${worstLag.toFixed(4)} %`,
     );
     expect(worstStep).toBeLessThanOrEqual(A1.maxQuantumStepPercent.value);

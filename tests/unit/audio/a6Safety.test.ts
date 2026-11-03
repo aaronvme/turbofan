@@ -14,6 +14,9 @@ import { createCycleModel } from '../../../src/cycle/model';
 import { factValue } from '../../../src/engine/facts';
 import { peakAbs } from './lib/analysis';
 import { AMBIENT, DEF, runInputs } from './lib/states';
+import { recorder } from './lib/record';
+
+const record = recorder('A6');
 
 /** The cycle-model runs behind the checks take seconds; more under a parallel run. */
 const HOOK_TIMEOUT_MS = 120_000;
@@ -27,7 +30,7 @@ const tones = toneVoices(DEF);
 const opts = { sampleRate: FS, toneCount: tones.length, noiseCount: NOISE_VOICES.length, seed: 6 };
 
 let stream: TimedFrame[] = [];
-let events = { lit: 0, unlit: 0, surge: 0, igniters: 0, starter: 0 };
+const events = { lit: 0, unlit: 0, surge: 0, igniters: 0, starter: 0 };
 
 beforeAll(() => {
   const frames: SoundFrame[] = [];
@@ -92,7 +95,7 @@ describe('A6: safety and cost (Node rows)', { timeout: 60_000 }, () => {
     expect(finite).toBe(true);
     expect(denormals).toBe(0);
     const peakDb = 20 * Math.log10(peakAbs(y));
-    console.log(
+    record(
       `A6 60 s transient: peak ${peakDb.toFixed(2)} dBFS, ${r.synth.events.bangs} bangs, ${r.synth.events.sparks} sparks`,
     );
     expect(peakDb).toBeLessThanOrEqual(-A6.peakDbBelowFullScale.value);
@@ -120,7 +123,7 @@ describe('A6: safety and cost (Node rows)', { timeout: 60_000 }, () => {
     }
     ms.sort((a, b) => a - b);
     const median = ms[Math.floor(ms.length / 2)] ?? Number.NaN;
-    console.log(
+    record(
       `A6 cost per quantum: median ${(1000 * median).toFixed(1)} us, p99 ${(1000 * (ms[Math.floor(0.99 * ms.length)] ?? 0)).toFixed(1)} us over ${ms.length} quanta`,
     );
     expect(median).toBeLessThanOrEqual(A6.maxQuantumMs.value);
