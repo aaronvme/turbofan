@@ -95,7 +95,7 @@ Each stage first converts every cell to primitives, then fills every ghost from 
 | code | BC | ghost primitives |
 |---|---|---|
 | 0 | interface | q_s (a plain copy; the neighbour's cell) |
-| 1 | slip wall | from the wall cell q₀ and the next cell inwards q₁ (the two layers' sources): ρ′, rw, p′, Z and the tangential velocity extrapolated linearly (layer 1: 2q₀ − q₁, layer 2: 3q₀ − 2q₁), the normal velocity mirrored (−vn₀, −vn₁); the wall face itself carries only the wall pressure (§7) |
+| 1 | slip wall | from the wall cell q₀ and the next cell inwards q₁ (the two layers' sources): ρ′ and Z mirrored (layer 1: q₀, layer 2: q₁; D5-5), rw, p′ and the tangential velocity extrapolated linearly (layer 1: 2q₀ − q₁, layer 2: 3q₀ − 2q₁), the normal velocity mirrored (−vn₀, −vn₁); the wall face itself carries only the wall pressure (§7) |
 | 2 | axis | v → −v; everything else copied (rw is even across the axis) |
 | 3 | far field | linearised characteristics about the free stream (below) |
 | 4 | inflow | total conditions (below) |
@@ -109,11 +109,15 @@ Each stage first converts every cell to primitives, then fills every ghost from 
 
 **Outflow (5)**, with vn = (u, v)_s·n the source cell's outward normal velocity: if 0 ≤ vn < c_s, p′_b = p_out − p∞ (default p_out = p∞) and everything else is copied; if vn ≥ c_s, everything is copied (supersonic outflow); **if vn < 0 (backflow: the flow enters through the face), the ghost is the inflow ghost (4) at the backflow totals (p0, T0) = (p_out, T∞)**: no swirl, Z = 0, along the inward normal, at the speed σ ≥ 0 for which the cell's outgoing characteristic reaches the ghost unchanged (the same 3 + 3 Newton steps). The supersonic free stream of (4) does not apply here. (The kernel: `outflow` and `subsonicInflow` in wgsl/boundary.ts, with the backflow totals from the uniforms pOut, pOutGauge, tInf and cpaInf.)
 
-*Why the backflow branch (W2S-B1, §16).* What enters through an outflow face comes from beyond the boundary, where the gas is the ambient at rest at p_out and T∞; so a backflow face is an inflow face at those total conditions (the standard pressure-outlet backflow treatment: the outlet's static pressure is the backflow's total pressure, with an ambient backflow total temperature and composition). The copy it replaces specified all four incoming characteristics of a subsonic inflow (u, v, s, Z) by extrapolation from the cell, so the face fed the cell's own state back in: its momentum, total enthalpy and fuel. With p_b fixed the inflowing total pressure is p_out + ½ρvn², so the faster the backflow, the more total pressure and total enthalpy the face supplies: a positive feedback with no physical source. On the engine mesh the look-dev page's start state (perfState) reversed the jet at the outflow in the preconditioned pseudo-time transient, the reversed jet reached 640 m/s on the axis, and the hot plume gas it recycled reached T′ 1070 K at the outflow corner and the core nozzle, where it diverged (§16). With the backflow branch the face draws ambient gas at a speed set by the pressure difference alone, and the same start comes to rest. A face with vn ≥ 0 is bitwise unchanged; at vn → 0⁻ the ghost's pressure and velocity are continuous with the outflow's (σ → 0, p′_b → p_out − p∞ for a cell at p_out), while its temperature and composition switch to the ambient's, the upwind value for an entering flow.
+*Why the backflow branch (W2S-B1, §16).* What enters through an outflow face comes from beyond the boundary, where the gas is the ambient at rest at p_out and T∞; so a backflow face is an inflow face at those total conditions (the standard pressure-outlet backflow treatment: the outlet's static pressure is the backflow's total pressure, with an ambient backflow total temperature and composition). The copy it replaces specified all four incoming characteristics of a subsonic inflow (u, v, s, Z) by extrapolation from the cell, so the face fed the cell's own state back in: its momentum, total enthalpy and fuel. With p_b fixed the inflowing total pressure is p_out + ½ρvn², so the faster the backflow, the more total pressure and total enthalpy the face supplies: a positive feedback with no physical source. On the engine mesh the look-dev page's start state (perfState) reversed the jet at the outflow in the preconditioned pseudo-time transient, the reversed jet reached 640 m/s on the axis, and the hot plume gas it recycled reached T′ 1070 K at the outflow corner and the core nozzle, where it diverged (§16). With the backflow branch the face draws ambient gas at a speed set by the pressure difference alone, and the same start comes to rest. A face with vn ≥ 0 is bitwise unchanged. At vn → 0⁻ the ghost's temperature and composition switch to the ambient's, the upwind value for an entering flow; its pressure and velocity are continuous with the outflow's **only for a cell at p_out** (σ → 0, p′_b → p_out − p∞). *For p_s ≠ p_out the face's response jumps across vn = 0 (W2S-N2, critic pass 19):* the outflow ghost (u_s, p_out) puts p_out at the face only halfway, so the face velocity is about u_s + (p_s − p_out)/(2ρc), while the backflow ghost is the boundary state itself and the face velocity is −σ, about (p_s − p_out)/(ρc). The face's mass flux doubles its response across vn = 0, on a switch a face can chatter across. Nothing shows it in the rows of record (D4-63's rest state decays faster with the branch), but a limit cycle in a D4-63-type residual at an outflow is the first suspect.
+
+*The backflow totals are the static-ambient form (W2S-N3).* (p_out, T∞) with no swirl and Z = 0 is the ambient at rest beyond the exit, in the engine's frame. In flight (u∞ ≠ 0) the gas beyond the exit moves at u∞ and its total pressure is p∞ + ½ρ∞u∞², not p_out, so the flight cases revisit the backflow totals.
 
 **Per-test BC remap.** `SolverOptions.bcRemap` maps a code to another before the table is applied (for example slip wall → far field for ladder L1's uniform flow, which has no wall solution). The default is the identity; the GPU kernel never needs it except for L1.
 
-**Why the wall ghost is extrapolated, not mirrored.** The W0 mirror ghost copies p, which imposes dp/dn = 0 at the wall. Wherever swirl or wall curvature sets a pressure gradient normal to the wall (ρw²/r behind every rotor, ρu²/R on every curved duct wall) that makes the wall pressure first order and leaves an odd-even wall mode: ladder L6 failed with it (radial-equilibrium error 1.3 % of q for the free vortex, 72 Pa at the inner wall), and the extrapolated ghost brings it to 3 Pa. Mirroring the Cartesian (u, v) also let mass leak through walls not aligned with x or r, because MUSCL limits u and v separately; the pressure-only wall flux makes the wall impermeable in any orientation.
+**Why the wall ghost's pressure is extrapolated, not mirrored.** The W0 mirror ghost copies p, which imposes dp/dn = 0 at the wall. Wherever swirl or wall curvature sets a pressure gradient normal to the wall (ρw²/r behind every rotor, ρu²/R on every curved duct wall) that makes the wall pressure first order and leaves an odd-even wall mode: ladder L6 failed with it (radial-equilibrium error 1.3 % of q for the free vortex, 72 Pa at the inner wall), and the extrapolated ghost brings it to 3 Pa. Mirroring the Cartesian (u, v) also let mass leak through walls not aligned with x or r, because MUSCL limits u and v separately; the pressure-only wall flux makes the wall impermeable in any orientation.
+
+**Why ρ′ and Z are mirrored (D5-5, w3/scheme round 2; SOLVER.md 17).** Extrapolated like p′ (round 1 and before), the scalars made a wall cell never a limiter extremum: its face value towards the interior was ½(q₀ + q₁), so when the flow left the wall the cell lost fuel and entropy at that value, faster than it held them (dρZ/dt = −ṁ(Z₀ + Z₁)/2 stays negative at Z₀ = 0). Ladder L14 showed it as ρZ < 0 and T′ below the ambient at the walls (5 cases under its undershoot row), and in its heating form (a wall cell losing gas colder than its mean) as the 1.39 overshoot and the f64 engine runaway's T′ of 31,740 K at the core duct's outer wall. A scalar at a slip wall is reflected (zero normal gradient), the standard reflective treatment; the extrapolated ghost could also leave ρ = 2ρ₀ − ρ₁ < 0 or Z < 0, a state without a sound speed. Only p′, rw and the tangential velocity keep the extrapolation, because those carry the wall-normal gradients that radial equilibrium needs (L6 above). The ghost's T′ follows from its extrapolated p′ over its mirrored ρ′, so where p′ has a wall-normal gradient the ghost is not a state of the gas (a wall cell at a higher pressure than the next cell has a hotter ghost); the local step's wall face keeps the cell's own radius for that reason (§10, §17).
 
 Blockage of a ghost: b of its source cell. Both ghost layers are filled the same way, each from its own source cell. **A ghost's T′ and c (record entries 6 and 7) are don't-care (W2R-N2):** the oracle copies them from the source cell, but nothing reads them, because SLAU2 recomputes T′ and c from each face state (§7) and the local step reads only real cells. The kernel need not fill them.
 
@@ -216,7 +220,7 @@ with f_a and M_ref as above (Liou, J. Comput. Phys. 214 (2006) 137-170: the AUSM
 
 p_u worsens L8 (the velocity row fails at both CFLs) and L7's Cd (fails), and it destabilises C-pre, where the pulse's Δp term holds β well above M_ref: the at-rest analysis assumes β = M_ref, and its higher limit does not carry over. By D4-32 the preconditioned CFL is therefore **0.8 without p_u** (§10).
 
-**Slip-wall faces** do not use SLAU2: F = |S| (0, p′_w n_x, p′_w n_r, 0, 0, 0), with p′_w the wall cell's reconstructed face value of p′ at the wall (q₀ ± ½σ₀, its slope taken with the extrapolated ghost). Mass, angular momentum, energy and fuel fluxes through a wall are exact zeros. Written this way, F(L, R, S) = −F(R, L, −S) **bitwise**, which makes the max/max interfaces (bitwise-negated face vectors) exactly conservative too. For equal states F reduces to the physical flux (ρ vn, ρu vn + p′n_x, ...), which the tests check.
+**Slip-wall faces** do not use SLAU2: F = |S| (0, p′_w n_x, p′_w n_r, 0, 0, 0), with p′_w the wall cell's reconstructed face value of p′ at the wall (q₀ ± ½σ₀, its slope taken with the extrapolated ghost p′). Mass, angular momentum, energy and fuel fluxes through a wall are exact zeros. Written this way, F(L, R, S) = −F(R, L, −S) **bitwise**, which makes the max/max interfaces (bitwise-negated face vectors) exactly conservative too. For equal states F reduces to the physical flux (ρ vn, ρu vn + p′n_x, ...), which the tests check.
 
 ## 8. Blockage and volume sources (`src/flow/reference/sources.ts`): the W3 interface
 
@@ -508,7 +512,7 @@ The local time step uses the preconditioned spectral radius of each face, in pla
 λ_f = b_f |s| ½((1 + β²)|vn| + sqrt((1 − β²)² vn² + 4 β² c²))        vn = u·s/|s|
 ```
 
-(β² = 1 gives |vn| + c). After the point-implicit division, the stage increment δU_c = U^(k) − Uⁿ of each cell is replaced by
+(β² = 1 gives |vn| + c). **Each face takes the larger of its two cells' (§17, W2S-I1):** λ_f = b_f |s| max(r(q_c, β_c), r(q_nb, β_nb)), with r the bracket above, the neighbour's own β (a ghost's: its source cell's) and its sound speed from its own (p′, ρ′, Z); a slip-wall face keeps the cell's own. Without preconditioning (and with minMach ≥ 1) the step is the cell's own, as before. After the point-implicit division, the stage increment δU_c = U^(k) − Uⁿ of each cell is replaced by
 
 ```
 δp = R T δρ′ + (R/c_v)(δη + (R∞T∞ + ½(q∞² + q²) − Δe) δρ′ − u δ(ρu) − v δ(ρv) − w δ(ρrw)/r_c)
@@ -581,7 +585,7 @@ r_flux is the density residual's L2 (§11) with every face's mass flux counted p
 | E-L5 (blockage duct, 10 iterations) | 2.67e-8 | **3e-7** | 3300 × tighter |
 | E-L9a (rotor disk sources, 10 iterations) | 2.46e-12 | **1e-10** (D4-71; was 3e-11) | 1e7 × tighter |
 
-Each row stays 10-16× above its measurement, D4-62's margin, except E-L9a. **D4-71:** E-L9a's 3e-11 sat inside the f32 rounding of the norm it compares (W2R-I17), so it is 1e-10 (40× its measurement), above that floor. A kernel change that moves the GPU's f32 arithmetic (operand order, a new f32 form) re-measures the three numbers and restates the rows through the orchestrator; a row is never loosened to pass. The residual-over-residual rows of the other cases (1e-3) are unchanged, and E-L5's extra 1e-6 over the flux scale (round 2) is subsumed by 3e-7. *Kernel side (the solver's tests follow §12, D4-62):* `tests/gpu/oracle.test.ts` (E-L5, E-L9a: `fluxScaleError` against these values in place of `TOL_RESIDUAL` and the 1e-6) and `tests/gpu-ladder/ladder.test.ts` (B's residual row).
+Each row stays 10-16× above its measurement, D4-62's margin, except E-L9a. **D4-71:** E-L9a's 3e-11 sat inside the f32 rounding of the norm it compares (W2R-I17), so it is 1e-10 (40× its measurement), above that floor. A kernel change that moves the GPU's f32 arithmetic (operand order, a new f32 form) re-measures the three numbers and restates the rows through the orchestrator; a row is never loosened to pass. The residual-over-residual rows of the other cases (1e-3) are unchanged, and E-L5's extra 1e-6 over the flux scale (round 2) is subsumed by 3e-7. *Kernel side (the solver's tests follow §12, D4-62):* `tests/gpu/oracle.test.ts` (E-L5, E-L9a: `fluxScaleError` against these values in place of `TOL_RESIDUAL` and the 1e-6) and `tests/gpu-ladder/ladder.test.ts` (B's residual row). **D5-6 (W3S-I1, w3/scheme round 3):** E-L9a's row compares r_GPU with the oracle's residual of the GPU's own U⁹, K2 = |r_GPU − L2 R_ref(U⁹_GPU)| / r_flux, at the same 1e-10; the form above is printed beside it (§17.1).
 
 Basis: f32 has a relative step of 6e-8; one iteration rounds each face flux and cell update a few dozen times, and the gauges keep that relative to the perturbation, so one iteration lands near 1e-6 and growth is at most linear over N for a stable smooth run. The f32-storage experiment in `tests/ladder/f32.test.ts` (the oracle with its state rounded to f32 after every stage) measures the storage part of this on the rows' own set-ups, and the table must sit ≥ 10× above it. Measured (2026-10-27, `tests/ladder/oracle.ts` set-ups, f32 metrics, after 1 / 10 / 100 iterations):
 
@@ -737,3 +741,180 @@ The kernel follows the oracle on the backflow branch: `tests/gpu/oracle.test.ts`
 | its log-linear trend over 15000-20000, per 1000 iterations | 0.994 | **0.820** |
 
 So part of what D4-89 recorded as the contract case's slow late decay was the outflow feeding its own state back in. The rows without an outflow face are unchanged in the same run (L1, B, L7: iteration ratio 1.779, L8: 0.754 %).
+
+## 17. W2S-I1: the hot gas pocket and the local step (w3/scheme; D5-2, ladder L14)
+
+The reference does not edit this section (like §14-16). The rule it adds is §10's pairwise face eigenvalue, in the oracle and the kernel alike.
+
+**The finding (critic pass 19, W2S-I1; pre-registered as L14, PHYSICS.md 3.3).** At the engine's defaults (preconditioned tracking, minMach = M_cut = 0.02, CFL 0.8, the sharp limiter) a hot pocket (T′ 900-1200 K, Z 0.015, pressure equilibrium) moving at 100-300 m/s through still cold gas in a 60 × 16 annular duct goes non-finite. Sampled after every iteration (`tests/ladder/hotPocket.ts`), the eight moving L14 cases are already non-finite at **iteration 1**, on the f64 oracle and on the kernel alike (the probe sampled every 100 and saw "within 5-100"). Of the two probe cases that stayed bounded, 900 K at −50 m/s fails L14's undershoot row (min T′ −0.217 ΔT), and 1200 K at rest passes on the CPU (an exact rest state: every flux is zero).
+
+**Diagnosis (scratch `reports/scratch/diag`: `jac.ts`, `jacsub.ts`, `eigsub.py`; the 1200 K, −100 m/s, wall case at its start).**
+- *The local step's estimate against the cell's neighbour.* The cold cells at rest have β = minMach = 0.02 and c = 340 m/s, so their own face radius is βc = 6.8 m/s: their step is 1/minMach = 50 times their acoustic one. The pocket's cells have c = 745 m/s (a 2.19× sound-speed jump) and β = M = 0.134. On the face between the cold cell ahead of the pocket and the pocket, the pocket's preconditioned radius (vn = −100 m/s) is **23.9×** the cold cell's own; on the face below the pocket (no normal velocity) it is still 14.7× (βc of the hot gas, 100 m/s). Over the cell's two directions the cold cell's λ is 12.0× (ahead) and 8.1× (below) too small for what arrives through its faces: a Courant number of about 10 at CFL 0.8.
+- *The true spectral radius.* The linearised one-stage operator A = −τ P ∂R/∂U (frozen τ and β, by finite differences on the oracle, the 126 cells within three of the pocket, 756 unknowns) has its leading eigenvalues at **z = 1.01 ± 4.87i**, |G(z)| = **16.4** per iteration (G the 3-stage polynomial of §10), all of them in the column of four cold cells just ahead of the pocket. The step meant |z| ≲ CFL; the true |z| is 6× that. The same operator at CFL 0.4 has |G| 3.27, with D4-44 (b) 9.49, and with the pairwise rule below 1.24, whose leading eigenvalue is real (z = 0.215) and does not scale with τ: the semi-discrete linearisation about a moving pocket, not a step limit.
+- *Face against cell β/M_ref (D4-44).* On that face β̄_f = 0.077 = M_ref, so β/M_ref is 0.26 for the cold cell and 1.74 for the hot one. The cold side sits where §10's uniform-state analysis already gives a 1D limit near 0.6, below 0.8, but the scaled diffusion is small next to what the neighbour brings (β_c² χ c²/(2c̄ f_a) ≈ 0.6 m/s against βc = 6.8 m/s), which is why D4-44 (b) cannot reach it.
+
+So the step was too long in the **cold** cells beside the hot gas, not in the hot cells: the local step took only the cell's own state, while what crosses a face is set by both of its states.
+
+**The rule (§10).** With preconditioning (minMach < 1), each face's eigenvalue in the local step is the larger of its two cells' preconditioned spectral radii. The neighbour's takes its own β (a ghost's: its source cell's, as β̄_f does) and its sound speed from its own (p′, ρ′, Z) by §3, as SLAU2 takes a face state's (a ghost's stored T′ and c are don't-care, W2R-N2). A slip-wall face keeps the cell's own: the wall flux is pressure only, and the wall ghost is a reflection built for the wall cell's slopes, not a neighbour's state. With round 1's extrapolated scalars a hot wall cell under cold gas had a ghost with ρ = 2ρ₀ − ρ₁ < 0, a state without a sound speed; with ρ′ and Z mirrored (D5-5, §5) the ghost's T′ comes from its extrapolated p′ over the cell's own ρ′, so a wall cell at a higher pressure than the next cell has a ghost hotter than any gas beside it (23 % in the unit test's wall row at p∞ + 30 kPa), which the exclusion keeps out of the step. This is the standard local wave-speed bound of a face (the Rusanov/LLF estimate) applied to the preconditioned system. It changes the iteration map, not the steady state (R = 0 does not depend on τ). The plain scheme, physical time and minMach ≥ 1 are unchanged; the kernel keeps its `cellLambda` call there, so those paths are bitwise as before (E-L5 2.67e-8 and E-L9a 2.46e-12 over the flux scale, as of record).
+- *Oracle:* `computeLocalDt` and `neighbourSpectralRadius` (`src/flow/reference/solver.ts`, `precondition.ts`).
+- *Kernel:* the stage kernel at stage 1 (`neighbourRadius` in `wgsl/kernels.ts`), from the halo's primitives (`wqa`, `wqb`), the slip-wall flag (`wb` < 0) and the ring's β (`wbeta`), which the stage kernel already holds for β̄_f. No workgroup memory is added (16272 of 16384 bytes at 16 × 8). The f32 order is the oracle's literal one (`temperatureFromPressure`, `soundSpeed`, `spectralRadius`), so §14 has no new form.
+- *Tests:* `tests/unit/flow/precondition.test.ts` ("section 17": the neighbour's radius, a cold cell's step against the recomputed rule, the plain step and the wall face, and since D5-5 a wall cell whose mirrored-ρ′ ghost would carry a 7 % larger radius on the wall face than the cell's whole j term; the two mutants, the rule off and the wall exclusion off, are killed), and L14 on the CPU and the GPU.
+
+**The candidates (D5-2's options in order).** L14 on the CPU oracle, every case sampled after every iteration; scratch `reports/scratch/trial`, a switchable copy of the oracle, which with the pairwise rule gives the branch's L14 values to the digits shown. "Every row" counts the cases that pass all four rows.
+
+| candidate | finite to 2000 (of 10) | cases passing every row | worst peak max T′ / start | worst min T′ / ΔT |
+|---|---|---|---|---|
+| the contract (before) | 2 (8 non-finite at iteration 1) | 1 | (non-finite) | −0.217 |
+| D4-44 (b): the scaled diffusion's eigenvalue added to λ | 2 (8 non-finite at iteration 1) | 1 | (non-finite) | −0.053 |
+| **each face's larger preconditioned radius (adopted)** | **10** | **3** | 1.393 (900 K, −300, wall, iteration 389) | −0.0765 |
+| a per-stage positivity guard alone (δU scaled so that ρ ≥ ½ρ and ½T ≤ T ≤ 2T of the stage start) | 10 | 2 | 2.645 | −0.188 |
+| the adopted rule with that guard | 10 (the guard never fires) | 3 | 1.393 | −0.0765 |
+| reference, not a candidate: CFL 0.4 (the contract) | 6 | 1 | 1.010 | −0.206 |
+| reference, not a candidate: the plain scheme (CFL 1.5) | 10 | 1 | 1.170 | −0.041 |
+
+- D4-44 (b) changes nothing that matters: the cold cell's scaled diffusion is 9 % of its own radius. The guard keeps every case finite but leaves the worst overshoot and undershoot of all (a scaled increment is still a step too long, only clipped). The pairwise rule makes every case finite with the guard never firing, so it is the one the data choose.
+- Variants of the rule, run only with the wall trial below: the neighbour's state at the cell's own β gives a worst peak of 1.049 and a worst undershoot of −0.0102 ΔT; a radius from the face-mean state with β̄_f, 1.043 and −0.0082. Neither changes which rows fail.
+
+**What the rule does not fix: two rows, for reasons a step cannot reach (decisions for the orchestrator).**
+1. *The undershoot row (min T′ ≥ −0.03 ΔT) on 5 cases (−0.045 to −0.077 ΔT), and the 1.39 overshoot at iteration 389:* a **slip-wall scalar drain**. The wall ghost extrapolates ρ′ and Z (§5, 2q₀ − q₁), so a wall cell is never a limiter extremum: its face value towards the interior is ½(q₀ + q₁), and when the flow leaves the wall the cell loses fuel and entropy at that value, faster than it holds them. In the 900 K, −100 m/s, mid case the inner-wall cell (16, 0) drains from Z 8e-4 to below zero at iteration 49 while every neighbour's Z is positive; by iteration 85 a row of wall cells has ρZ < 0 (Z −0.0039) and T′ −69 K. The same drain run the other way (a wall cell losing gas colder than its mean) heats diluted pocket gas (Z 0.008) to 1253 K at the inner wall of the 900 K, −300, wall case. It is semi-discrete: dρZ/dt = −ṁ(Z₀ + Z₁)/2 stays negative at Z₀ = 0.
+   - *A trial (scratch only, not one of D5-2's options):* the wall ghost mirrors ρ′ and Z (layer 1 q₀, layer 2 q₁), while p′, rw and the tangential velocity keep the extrapolation that L6 needs. With the pairwise rule it brings every undershoot to ≥ −0.0070 ΔT and removes the late overshoot: 6 of the 10 cases pass every row, and the other four fail only (2). Without the pairwise rule it changes nothing about finiteness (2 of 10).
+2. *The peak row (≤ 1.03 × the start) on the four −300 m/s cases (1.043-1.056 at iterations 7-8):* the **start's compression**. A slug of hot gas set moving at 300 m/s into still gas decelerates, and its leading edge compresses (p′ ≈ 11 kPa at iteration 10 in the 900 K wall case, whose isentropic compression alone gives 1.034 × ΔT). The plain scheme, closer to the physical transient, peaks at 1.14-1.17 in the same iterations; the probe's 100-iteration sampling missed that, so its "bounded, peak 1213-1215 K" was the value after the transient. No step limit removes a compression the scheme is meant to compute.
+
+On the GPU the at-rest case fails the undershoot row too (−0.040 ΔT): its f32 start is not an exact rest state, so the pocket moves off the wall and the drain follows.
+
+**J (D4-44 (c), W2R-I8) converges.** The low-Mach jet into dead air at its row's settings (minMach = M_cut = 0.003) had stalled at 0.2-0.6 of its peak since round 6, and D4-52 had located the stall in the dead-air cells at β = M_cut beside the jet. With the pairwise rule those cells take the jet's radius on their shared faces. J meets D4-44 (c)'s rule at **2415 iterations** and stays below 9.1e-6 of its peak through 30000 (1.6e-8 at 28000), so its `it.fails` pin is lifted. R (the blockage duct from rest) keeps its sharp-limiter floor and stays pinned.
+- *At the engine's cut 0.02*, J does not converge with the contract or with the rule alike (0.6-0.85 of its peak over 2000-30000 in both). D4-59's 5.8e-5 at 0.02 predates D4-101's backflow branch: J's outflow column now carries backflow on 9 of its 16 rows (the jet's entrainment), and the residual sits in the jet next to the outflow. That is W2S-N2's first suspect (§5), reported here, not changed.
+
+**The engine runaway re-run (D5-2, reported, not gated).** The f64 oracle on the 130k mesh from w2/solver-diverge's GPU state at 6700 iterations (`perf-lastfinite.bin`, the look-dev start before D4-101's backflow branch; scratch `reports/scratch/diverge`, the copied `oracle.ts` with the source trees `before` and `beforeStep`), minMach = M_cut = 0.02, CFL 0.8:
+
+| source | result from the 6700 state |
+|---|---|
+| before D4-101 (no backflow branch, the contract step) | non-finite at 6755 (16 cells), as §16 records |
+| before D4-101 with the pairwise step | non-finite by 6770 (63 cells) |
+| this branch (the backflow branch and the pairwise step) | non-finite by 6770 (63 cells); the outflow corner's backflow decays (−643 → −61 m/s, T′ 1077 → −1 K) |
+| trial: this branch with the wall ghost's ρ′ and Z mirrored (scratch only) | **finite to 7000** (300 iterations), max T′ falling 1059 → 979 K |
+
+- *Where it fails on the branch:* the core duct's outer-wall row beside the cell §16 named, core (509, 15) at x 2.52 m, r 0.43 m. The gas there leaves the wall (v −45 to −65 m/s), its Z falls 0.0063 → 0.0024 → −0.0011, and its T′ climbs 2322 → 4056 → 9117 → 31,740 K over 6758-6768: the wall scalar drain above, in its heating form. So the semi-discrete wall growth the critic asked about is **not** the step mechanism of L14's non-finite cases (the pairwise step delays it by 15 iterations), and not the backflow (which only brought the hot gas there). It is the wall drain of L14's failing rows, and the mirrored-scalar trial removes it here too. The app's own start (rest) never reaches this state (§16).
+
+**No regression (D5-2's pre-registered list; HEAD cd62658, 2026-11-02, on battery).** The rule touches only the preconditioned tracking rows; the plain and physical rows are bitwise the same code on both sides.
+
+| row | record | CPU oracle | GPU kernel |
+|---|---|---|---|
+| L1 quiescent (bitwise 0); uniform M 0.5 | 0; GPU 2.13e-5 m/s (the CPU's: plain path, code unchanged) | 0; 2.03e-13 | 0; 2.13e-5 |
+| L2 L1(ρ), shock offset | physical time, code unchanged | 0.002767, 0.2282 | 0.002768, 0.2282 |
+| L3 L1(ρ) | physical time, code unchanged | 0.002113 | 0.002113 |
+| L4a Mach, mass flow, iterations | 0.278 %, 0.0997 %, 915 | 0.2779 %, 0.0997 %, 915 | 0.2779 %, 0.0996 % (its D4-38 rows as before: plain, code unchanged) |
+| L4b shock, steadiness | 1.640 %, 2.58e-4 | 1.6397 %, 2.580e-4 | (not a GPU row) |
+| L5 mass flow, iterations | 0.0843 %, 948 | 0.0843 %, 948 | 0.0843 % |
+| L6 radial equilibrium, drift (free vortex; solid body) | plain tracking, code unchanged | 3.005e-4, 4.7e-15; 2.90e-5, 5.41e-8 | 3.007e-4, 4.9e-8; 2.89e-5, 8.6e-8 |
+| L7 M 0.01 (96 × 96) asymmetry; \|Cd\|; ratio M 0.01 / M 0.3 | 0.01093; 0.00131; 1.779 | **0.01110** (+1.6 %); 0.00129; 1.644 | **0.01110**; 0.00129; 1.644 (14781 / 8993 its) |
+| L8 velocity, steadiness | 0.754 %, 3.2e-5 | 0.7529 %, 2.40e-5 | 0.752 %, 3.22e-5 |
+| L9a Euler work, steadiness (D4-57 KNOWN-FAIL) | 8.86e-6, 1.062e-5 | 8.857e-6, 1.062e-5 | as of record (pinned) |
+| L9b momentum theory, steadiness | 0.80 %, 2.49e-5 | 0.8008 %, 2.487e-5 | pass, spread 3.43e-5 |
+| 12.2 floors (L4a, L5; f32 / f64) | 1.590e-4, 1.096e-3; 6.4e-13, 5.9e-12 | the same | |
+| 12.2 C-pre after 1 / 10 / 100 (f32 storage; GPU against the oracle) | CPU 1.43e-7 / 1.79e-7 / 1.06e-6; GPU 5.13e-7 / 3.77e-7 / 1.05e-6 | 1.35e-7 / 1.71e-7 / 4.65e-7 | 5.68e-7 / 3.54e-7 / 1.29e-6 |
+| 12.2 S after 1 / 10 / 100 | CPU 1.25e-7 / 1.11e-7 / 2.02e-6; GPU 5.32e-7 / 4.77e-7 / 7.67e-6 | 1.25e-7 / 1.09e-7 / 6.29e-7 | 5.32e-7 / 5.06e-7 / 9.72e-6 |
+| E-L5, E-L9a over the flux scale; B | 2.67e-8, 2.46e-12; 1.266e-11 | | 2.67e-8, 2.46e-12; 1.266e-11, 1.95e-5 m/s |
+| D4-63 (a) L2(p′) max over 1000-2000; at 20000 | CPU 0.4450 / 0.009223; GPU 0.4450 / 0.008997 | finite to 3000, then the 6 h timeout on battery: 0.428 at 1000, 0.270 at 2000 (not of record) | **0.4497** / 0.0077 |
+| D4-63 (b) weighted residual 20000/10000; 20000/100 | CPU 0.1535 / 0.03063; GPU 0.1634 / 0.03253 | | **0.2112** / 0.03125 (trend 0.858 per 1000 over 15000-20000, against 0.820) |
+| W2S-B1 long run (a); (b) | 0.659 / 5.09e-4; 0.108 / 7.28e-3 | | 0.629 / 1.55e-3; 0.186 / 0.0287 (max T′ 300.9 K, start 299.9) |
+| L14 | (new) | finite 10/10, 3 cases pass every row | finite 10/10, 2 cases pass every row |
+
+Every row passes its bar. Strictly against the record, a few values read on a pseudo-time path are worse: L7's asymmetry (+1.6 %, read at the 1e-4 stop), and on the GPU D4-63's 1000-2000 window (+1 %) and its residual ratio 20000/10000 (0.211 against 0.163, still ≤ 1), and the W2S-B1 long run's ratios at 20000 (still 35-500× inside). Those are values at a stop or a fixed iteration of a changed iteration map, not of the steady state (which the rule does not change); whether D5-2's "at or better than record" applies to them is the handoff's decision 3. The f32 agreement rows (C-pre, S) move both ways by up to 1.3× inside tolerances of 18-775×.
+
+**P1 (indicative only: on battery, `--quick`, D4-63's CPU run beside it).** In one session, the app scene's solver at 1.739 ms/it with the rule and 1.700 ms/it without it (the stage kernel patched off, then restored), so the rule costs about 2 % of the kernel's iteration; both runs report 120 it/s, the 2 iterations per frame at 60 Hz on battery. P1 of record stays 180 it/s (D4-100), to be re-measured in a quiet window on AC.
+
+### 17.1 Round 2 (D5-5): the mirrored wall ghost and the restated peak row
+
+**The wall (D5-5 item 1, §5).** The slip-wall ghost mirrors ρ′ and Z (layer 1 the wall cell's, layer 2 the next cell's); p′, ρw and the tangential velocity keep the extrapolation L6 needs. Oracle `wallGhost` (`boundary.ts`) and kernel `wallGhost` (`wgsl/boundary.ts`, two `select`s; the copy is exact in f32, so §14 has no new form). Tests: `tests/unit/flow/boundary.test.ts` (the mirror against round 1's extrapolation, and ρ > 0, Z ≥ 0 where extrapolating gave ρ = 2ρ₀ − ρ₁ < 0 or Z < 0), `tests/gpu/oracle.test.ts` (the kernel's wall ghosts: ρ′ and Z bitwise its own source cells', the rest within row C's one-iteration tolerance of the oracle's) and `tests/unit/flow/precondition.test.ts` (the wall face's step: with ρ′ mirrored and p′ extrapolated, a wall row at p∞ + 30 kPa has a ghost 23 % hotter than the cell, whose radius on the wall face would exceed the cell's whole j term by 7 %; the wall exclusion keeps it out, and the exclusion-off mutant, which round 1's test no longer kills with the mirrored ghost, is killed by this one).
+
+**The peak row (D5-5 item 2, PHYSICS.md 3.3 amended).** For every cell and iteration T′ ≤ 1.03 T′_s, T′_s = T_h (p/p∞)^((γ−1)/γ) − T∞ with γ = cp/(cp − R) of the thermally perfect gas at T_h = T∞ + ΔT and Z 0.015 (`isentropicPocketBound` in `tests/ladder/hotPocket.ts`; the row's value is the run's max over cells and iterations of T′/T′_s; `tests/unit/flow/hotPocket.test.ts`). `thresholds.ts` mirrors the restated text (`maxPeakOverIsentropicCompression`, 1.03).
+
+**L14 after the wall change** (HEAD d9e728e; values: peak T′/T′_s / max T′ at 2000 over its start / min T′/ΔT; the pre-registered "peak max T′ / start" of round 1 in brackets, reported):
+
+| case | CPU oracle | GPU kernel |
+|---|---|---|
+| 900 K, −100, wall | 1.0020 [1.005] / 0.061 / −0.0002: PASS | 1.0020 / 0.061 / −0.0002: PASS |
+| 900 K, −100, mid | 1.0020 [1.005] / 0.260 / −0.0003: PASS | 1.0020 / 0.260 / −0.0003: PASS |
+| 900 K, −300, wall | 1.0209 [1.056] / 0.000 / −0.0069: PASS | 1.0209 / 0.000 / −0.0069: PASS |
+| 900 K, −300, mid | 1.0209 [1.056] / 0.000 / −0.0070: PASS | 1.0209 / 0.000 / −0.0070: PASS |
+| 1200 K, −100, wall | 1.0016 [1.004] / 0.189 / −0.0001: PASS | 1.0016 / 0.188 / −0.0001: PASS |
+| 1200 K, −100, mid | 1.0016 [1.004] / 0.191 / −0.0001: PASS | 1.0016 / 0.191 / −0.0001: PASS |
+| 1200 K, −300, wall | 1.0160 [1.043] / 0.235 / −0.0040: PASS | 1.0160 / 0.235 / −0.0040: PASS |
+| 1200 K, −300, mid | 1.0161 [1.043] / 0.000 / −0.0040: PASS | 1.0161 / 0.000 / −0.0040: PASS |
+| 900 K, −50, wall | 1.0005 [1.001] / 0.313 / −0.0000: PASS | 1.0005 / 0.313 / −0.0000: PASS |
+| 1200 K, 0, wall | 1.0001 [1.000] / 1.000 (1 − 1e-15) / −0.0000: PASS | 1.0001 / 0.412 / −0.0000: PASS |
+
+All 10 cases pass every row on both, so round 1's KNOWN-FAIL pin is lifted (`tests/ladder/l14.test.ts`, `tests/gpu-ladder/l14.test.ts`: "every row of every case"). The worst peak sits at iteration 8 in the −300 m/s slug's leading edge (the start's compression, as D5-5 found), 2 % above its own isentrope; the at-rest case's 1.0001 is its start (the pocket's T′ is 1200.09 K at p∞, because the start sets ρ with the air's R). On the CPU the at-rest case stays a rest state to round-off (max T′ at 2000 is 1 − 1e-15 of its start; round 1's GOTCHA 3 still applies).
+
+**The control and the references under the restated row** (CPU, scratch `reports/scratch/trial`, `TRIAL_WALL=extrapolate` restoring round 1's wall where named; worst case in brackets):
+
+| scheme | worst peak T′/T′_s | cases passing every row | worst min T′/ΔT |
+|---|---|---|---|
+| **control: the positivity guard alone (contract step, round 1's wall), SOLVER.md 17's candidate** | **2.647** (1200 K, −300, wall, iteration 156): **FAILS**, as D5-5 requires | 2 | −0.188 |
+| the guard alone with the mirrored wall | 1.022 | 1 | −0.188 |
+| the pairwise step with round 1's wall (round 1's branch) | 1.394 (900 K, −300, wall, iteration 389: the wall drain's heating) | 5 | −0.0765 |
+| **the pairwise step with the mirrored wall (this branch)** | **1.021** | **10** | **−0.0070** |
+| reference: the plain scheme (CFL 1.5), round 1's wall | 1.0312 (900 K, −300, wall, iteration 5) | 7 | −0.041 |
+| reference: the plain scheme, the mirrored wall | 1.0312 (the same) | 7 | −0.041 |
+
+- The restated row separates what the data said it should: the guard's 2.647 is a temperature the scheme made (its pressure there gives T′_s near ΔT), while the pairwise step's 1.021 is the slug's own compression to within 2 %. The plain scheme, closer to the physical transient, sits at 1.031 on the two 900 K, −300 m/s cases, just over the bar, and passes it on the other eight (its 1.14-1.17 under the pre-registered row were mostly compression); its at-rest case fails "max T′ at 2000 ≤ its start" by round-off.
+- Without the pairwise step the mirrored wall changes nothing about finiteness (round 1's trial: 2 of 10); the guard with the mirrored wall still undershoots to −0.188 ΔT (the step, not the wall).
+
+**J at the engine's cut 0.02 (D5-5 item 4; diagnosed, nothing changed).** Scratch `reports/scratch/r2/jdiag.ts` (J's set-up from `precondition.test.ts`, 12000 iterations, the last 2000 sampled every iteration) with a switchable copy of `boundary.ts` (`reports/scratch/r2/boundary.ts`, `TRIAL_OUTFLOW`, loaded by `redirectB.mjs`); every row on the branch's oracle (the pairwise step and the mirrored wall).
+
+| outflow ghost (trial) | M_cut 0.02: residual / peak over the last 2000 | 0.02: outflow rows switching across vn = 0 | M_cut 0.003 |
+|---|---|---|---|
+| the branch (D4-101: backflow takes the inflow ghost at (p_out, T∞)) | **0.57-0.87 (stalled)** | rows 5-15, 30-63 sign changes each | converges (2415) |
+| W2S-N2 removed: the subsonic outflow ghost on the outgoing characteristic (p_out, u_n,s + (p′_s − p′_out)/(ρc)), the branch switched on that u_n, so p and u_n are continuous across the switch for any p_s | 0.57-0.87 (stalled) | the same rows, the same counts | converges (2416) |
+| the backflow ghost keeps the cell's tangential velocity | 0.55-0.83 (stalled) | rows 5-15, 30-62 | |
+| both of the above | 0.55-0.83 (stalled) | rows 5-15, 20-63 | |
+| the backflow ghost on the preconditioned characteristic (impedance ρ(λ₊ − β²vn), §5's far-field form) | 0.58-0.89 (stalled) | rows 5-15, 31-63 | converges (2353) |
+| the smooth limiter (the branch's BCs) | 0.59-0.92 (stalled) | rows 5-15, 31-63 | |
+| the backflow ghost at the **static** p_out on the outgoing characteristic, with T∞, Z = 0, no swirl | **converges (10581)** | none (steady backflow on rows 9-14) | **stalls** (0.09-0.82; rows 4-15 switch 8-36 times) |
+| before D4-101: a copy with p_out (no backflow branch) | **converges (11003)** | none (steady backflow on rows 10-14) | **stalls** (1e-3 to 1e-2; rows 8-10 switch) |
+
+- *What the stall is:* a limit cycle of period about 64 iterations (62-63 sign changes in 2000 on rows 5-9, 30 on rows 10-15) in which the outflow rows next to the jet alternate between outflow and backflow, the residual sitting in the last columns (shares 0.11 and 0.18 in i = 29 and 30). Backflow as such is not it: at 0.003 the branch holds steady backflow on rows 6-14 for all 2000 iterations and converges.
+- *W2S-N2's doubled response is not the cause:* removing it (p and u_n continuous across vn = 0 for any p_s) leaves the cycle unchanged to the sign-change count, and neither the tangential velocity, the limiter nor a preconditioned impedance changes it.
+- *What decides it is the backflow's pressure condition, and it decides it the opposite way at the two cuts:* a backflow at the total p_out (static p_out − ½ρσ²: the branch, and every variant built on the inflow ghost) cycles at 0.02 and converges at 0.003; a backflow at the static p_out (the old copy, or the characteristic ghost with ambient T and Z) converges at 0.02 and cycles at 0.003. The outflow rows' p′ are 0.3-5 Pa, the same size as ½ρσ² at the backflow speeds (1-2 m/s), so the two conditions are different boundary problems here, not a small change of one.
+- *Proposed fix (for w3/plume-bake, L11's jets; not made here, and not a one-line correction):* find the cycling mode before choosing a form. Linearise J at its limit cycle's mean state (scratch `reports/scratch/diag/jac.ts` and `eigsub.py` did this for L14) with each backflow pressure condition, at 0.02 and 0.003, and take the form whose leading eigenvalue of the 3-stage map is inside the unit circle at both cuts. A candidate to test first is a backflow at the total p_out with its dynamic head taken from the face's normal velocity rather than from the ghost's own σ (which removes the ghost's own ½ρσ² feedback while keeping W2S-B1's protection against the momentum feedback). The pre-registered test: J converges at both 0.003 and 0.02, D4-63 and the W2S-B1 long run pass, and the engine runaway stays finite.
+
+**No regression with the mirrored wall (D5-5 item 3; code of ea9c486, run 2026-11-02 on AC, each suite alone).** "Converged" values must be at or better than record; values read at a stop, a cap or a fixed iteration must pass their bar and are shown beside the record (D5-5 item 3).
+
+| row | record | CPU oracle | GPU kernel |
+|---|---|---|---|
+| L1 quiescent; uniform M 0.5 | 0; GPU 2.13e-5 m/s | 0; 2.03e-13 | 0; 2.13e-5 |
+| L2 L1(ρ), shock offset | 0.002767, 0.2282 | 0.002767, 0.2282 | 0.002768, 0.2282 |
+| L3 L1(ρ) | 0.002113 | 0.002113 | 0.002113 |
+| L4a Mach, mass flow, iterations | 0.278 %, 0.0997 %, 915 | 0.2779 %, 0.0997 %, 915 | 0.2779 %, 0.0996 % |
+| L4b shock, steadiness | 1.640 %, 2.58e-4 | 1.640 %, 2.580e-4 | (not a GPU row) |
+| L5 mass flow, iterations | 0.0843 %, 948 | 0.0843 %, 948 | 0.0843 % |
+| L6 free vortex; solid body (error, drift) | 3.005e-4, 4.7e-15; 2.90e-5, 5.41e-8 | 3.004e-4, 4.5e-15; 2.90e-5, 5.41e-8 | 3.000e-4, 4.9e-8; 2.87e-5, 8.6e-8 |
+| L7 asymmetry; \|Cd\|; ratio (at the 1e-4 stop) | 0.01093; 0.00131; 1.779 | 0.01110; 0.001287; 1.644 (as round 1) | 0.01110; 0.001287; 1.644 (14781 / 8993) |
+| L8 velocity, steadiness (at the cap) | 0.754 %, 3.2e-5 | 0.7526 %, 2.65e-5 | 0.7530 %, 3.26e-5 |
+| L9a Euler work, steadiness (at the cap) | 8.86e-6, 1.062e-5 (FAIL, D4-57) | 9.82e-6, **9.20e-6: PASSES D4-57's row** | 1.66e-6, 1.344e-5 (pinned as before; round 1 1.31e-5) |
+| L9b momentum theory, steadiness | 0.80 %, 2.49e-5 | 0.8008 %, 2.487e-5 | 0.7990 %, 3.43e-5 |
+| 12.2 floors (L4a, L5; f32 / f64) | 1.590e-4, 1.096e-3; 6.4e-13, 5.9e-12 | 1.595e-4, 1.096e-3; 6.43e-13, 5.43e-12 | |
+| 12.2 C-pre after 1 / 10 / 100 | CPU 1.43e-7 / 1.79e-7 / 1.06e-6; GPU 5.13e-7 / 3.77e-7 / 1.05e-6 | 1.35e-7 / 1.71e-7 / 4.99e-7 | 5.68e-7 / 3.72e-7 / 1.30e-6 |
+| 12.2 S after 1 / 10 / 100 | CPU 1.25e-7 / 1.11e-7 / 2.02e-6; GPU 5.32e-7 / 4.77e-7 / 7.67e-6 | 1.25e-7 / 1.34e-7 / 9.50e-7 | 5.32e-7 / 5.79e-7 / 1.30e-5 |
+| E-L5, E-L9a over the flux scale; B | 2.67e-8, 2.46e-12; 1.266e-11 | | 2.67e-8, 1.19e-9 in the old form, **K2 2.20e-11 ≤ 1e-10 (D5-6, below)**; 1.266e-11, 1.95e-5 m/s |
+| D4-63 (a) L2(p′) max over 1000-2000; at 20000 | CPU 0.4450 / 0.009223; GPU 0.4450 / 0.008997 | **the run of record on AC, alone, 85 min: finite**, 0.4497 / 0.008369 | 0.4497 / 0.008217 |
+| D4-63 (b) residual 20000/10000; 20000/100 | CPU 0.1535 / 0.03063; GPU 0.1634 / 0.03253 | 0.2156 / 0.03297 | 0.2158 / 0.03297 (trend 0.876 per 1000) |
+| W2S-B1 long run (a); (b) | 0.659 / 5.09e-4; 0.108 / 7.28e-3 | | 0.6286 / 2.06e-3; 0.1621 / 0.0262 (max T′ 300.9 K) |
+| L14 | (round 1: 3 of 10 CPU, 2 of 10 GPU) | 10 of 10 | 10 of 10 |
+
+- Every row passes its bar. E-L9a's flux-scale row failed it in its old form and is re-posed by D5-6 (below). The D4-63 and W2S-B1 values are read at fixed iterations of a pseudo-time decay (D5-5 item 3: their bars hold, ≤ 2 and ≤ 1 with margins of 4-30×); the L7, L8, L9a and L9b values at a stop or a cap. The changes from the record are round 1's step rule (SOLVER.md 17) to the digits shown, except L9a's (the steadiness now passes) and E-L9a.
+- **L7 converged to 1e-6 (D5-5 item 3):** 96 × 96, M 0.01 (scratch `reports/scratch/r2/l7t-*.txt`, three runs side by side on AC): the branch (pairwise step, mirrored wall) asymmetry 0.0110887, |Cd| 0.00112104 (35867 its); without the pairwise step (mirrored wall) 0.0110888, 0.00112116 (35838); without it and with round 1's wall (the scheme of record) 0.0110888, 0.00112116 (35838). The step rule moves the converged values by 1.6e-7 and 1.2e-7 (1e-5 relative, at the 1e-6 convergence level) and the wall by 2e-9: the steady state is unchanged, and the converged values are at (asymmetry) and better than (|Cd|) the record scheme's. The record's 0.01093 / 0.00131 and the branch's 0.01110 / 0.00129 are values at the 1e-4 stop.
+- **E-L9a (D5-6; W3S-I1 and W3S-N2, round 3).** The kernel and the oracle agree on the fields as before (e 6.05e-6 against 5.10e-6, tolerance 1e-4) and on the residual's own form (3.18e-6, tolerance 1e-3). The old flux-scale form |r_GPU − r_ref| / r_flux is 1.19e-9 against D4-71's 1e-10 (record 2.46e-12). Isolated (temporary edits, restored): mirroring only layer 1 gives 1.19e-9, only layer 2 gives 2.46e-12, so it is the wall cell's own ρ′ slope (zero with the mirrored ghost). The kernel's wall ghosts are right (the new test: ρ′ and Z bitwise their sources, all 48).
+  - *What the old form measures* (critic pass 20's probe `docs/reviews/probes/w3s-el9a-sensitivity.probe.ts.txt`; E-L9a's set-up; each over r_flux; the old wall / the mirror). The residual of record is R(U⁹), the first stage of iteration 10, so these are at U⁹, evaluated by the oracle's code in f64:
+
+    | quantity | what it measures | old wall | mirror |
+    |---|---|---|---|
+    | the old row, \|r_GPU − r_ref\| | the kernel's arithmetic plus the two states' drift | 2.46e-12 | 1.19e-9 |
+    | S1, \|L2 R(U⁹_GPU) − L2 R(U⁹_ref)\| (the GPU's state hi + lo) | the drift alone: the oracle's residual of the GPU's state against that of its own | 1.32e-10 | 1.17e-9 |
+    | S2, the same with the GPU's f32 part only | the drift, as the stage kernel reads the state | 3.59e-10 | 1.09e-9 |
+    | S3, \|L2 R(fround U⁹_ref) − L2 R(U⁹_ref)\| | the f32 floor: the oracle's own state rounded to f32, no GPU in it | 6.6e-12 | 1.94e-10 |
+    | **K2, \|r_GPU − L2 R(U⁹_GPU)\|** | the kernel's residual against the oracle's on the kernel's own state: the row's purpose | 1.35e-10 | **2.20e-11** |
+
+    So the record's 2.46e-12 was a cancellation of the drift and the kernel's arithmetic, each 50-150× larger; with the mirror, rounding the exact state to f32 alone (S3) exceeds 1e-10, so no f32 kernel meets the old form except by luck. Round 2's numbers here (2.0e-9 with the old wall, 4.3e-9 with the mirror, "800× below") were not these: the scratch `reports/scratch/r2/el9a.ts` compared the oracle's f64 run with its own f32-storage run at U¹⁰, not with the GPU's state at U⁹ (W3S-N2), and the restatement proposed from them (|r_GPU − r_ref| ≤ S1) fails at U⁹ (1.19e-9 > 1.17e-9).
+  - *The row since D5-6* (`tests/gpu/oracle.test.ts`, the E L9a row): both solvers run 9 iterations, the GPU's U⁹ is read back (`readConserved`), the oracle evaluates its density-residual L2 in f64 (checked on the oracle's own U⁹: equal to its residual of record), and both run the 10th; **K2 ≤ D4-71's 1e-10, unchanged**, with the old form and S3 printed. Round 3 (Dawn, Arc iGPU): K2 **2.202e-11**, the old form 1.187e-9, S3 1.944e-10. Mutant W1g (the kernel's ρ′ extrapolated at the wall, the oracle's mirrored), applied and restored: **K2 1.657e-10, fails**, while the old form passes it at 3.343e-11.

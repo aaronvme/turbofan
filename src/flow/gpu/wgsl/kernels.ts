@@ -407,6 +407,22 @@ var<workgroup> wbeta: array<f32, NR>;  // beta of the tile and its first ring (a
 
 ${HALO_PRIM_WGSL}
 
+// SOLVER.md 17 (W2S-I1), preconditioned tracking at stage 1: the preconditioned spectral radius of
+// the cell's face neighbour at halo position t along the unit normal n, with the neighbour's own
+// beta (a ghost: its source cell's) and its sound speed from its own p', rho' and Z (section 3, as
+// SLAU2's sideOf); 0 across a slip wall, whose face keeps the cell's own (the oracle's
+// neighbourSpectralRadius)
+fn neighbourRadius(t: u32, n: vec2f) -> f32 {
+  if (wb[t] < 0.0) { return 0.0; }
+  let a = wqa[t];
+  let b = wqb[t];
+  let phi = productsFraction(b.y);
+  let tP = temperatureFromPressure(a.x, b.x, phi);
+  let beta = wbeta[ringOf(t)];
+  return spectralRadius((P.uInf + a.y) * n.x + a.z * n.y, soundSpeed(P.tInf + tP, phi),
+                        beta * beta);
+}
+
 // the face states and flux of tile face f (i-faces first): the one call site of SLAU2
 fn tileFace(f: u32, i0: i32, j0: i32, d0: vec4u, d1: vec4u) -> Flux {
   let ni = i32(d0.y);
@@ -609,8 +625,21 @@ fn stageMain(@builtin(workgroup_id) wid: vec3u, @builtin(local_invocation_index)
                               bc + abs(wb[h - HX]), bc + abs(wb[h + HX]));
         let iw = d1.x + u32(gj * (ni + 1) + gi);
         let js = d1.y + u32(gj * ni + gi);
-        let lam = cellLambda(geo[FACE + iw], geo[FACE + iw + 1u], geo[FACE + js],
-                             geo[FACE + js + u32(ni)], bfs, uc, q.z, pz.w, beta2);
+        let fW = geo[FACE + iw];
+        let fE = geo[FACE + iw + 1u];
+        let fS = geo[FACE + js];
+        let fN = geo[FACE + js + u32(ni)];
+        var lam: f32;
+        if (P.precondition == 1u && P.minMach2 < 1.0) {
+          // section 17 (W2S-I1): each face's eigenvalue is the larger of its two cells'
+          let lW = max(spectralRadius(uc * fW.x + q.z * fW.y, pz.w, beta2), neighbourRadius(h - 1u, fW.xy));
+          let lE = max(spectralRadius(uc * fE.x + q.z * fE.y, pz.w, beta2), neighbourRadius(h + 1u, fE.xy));
+          let lS = max(spectralRadius(uc * fS.x + q.z * fS.y, pz.w, beta2), neighbourRadius(h - HX, fS.xy));
+          let lN = max(spectralRadius(uc * fN.x + q.z * fN.y, pz.w, beta2), neighbourRadius(h + HX, fN.xy));
+          lam = max(bfs.x * fW.z * lW, bfs.y * fE.z * lE) + max(bfs.z * fS.z * lS, bfs.w * fN.z * lN);
+        } else {
+          lam = cellLambda(fW, fE, fS, fN, bfs, uc, q.z, pz.w, beta2);
+        }
         tau = P.cfl / lam;
       } else {
         tau = ub.z;

@@ -105,20 +105,23 @@ fn outflow(s: Prim, n: vec2f) -> Prim {
   return o;
 }
 
-// slip-wall ghost of layer 1 or 2 from the wall cell q0 and the next cell inwards q1
+// slip-wall ghost of layer 1 or 2 from the wall cell q0 and the next cell inwards q1 (section 5):
+// rho' and Z mirrored (layer 1 q0's, layer 2 q1's; D5-5), p', rw and the tangential velocity
+// extrapolated, the normal velocity mirrored
 fn wallGhost(q0: Prim, q1: Prim, n: vec2f, layer: u32) -> Prim {
-  let a = select(3.0, 2.0, layer == 1u);
+  let one = layer == 1u;
+  let a = select(3.0, 2.0, one);
   let b = a - 1.0;
   let u0 = P.uInf + q0.a.y;
   let v0 = q0.a.z;
   let u1 = P.uInf + q1.a.y;
   let v1 = q1.a.z;
   let vt = a * (-u0 * n.y + v0 * n.x) - b * (-u1 * n.y + v1 * n.x);
-  let vn = -select(u1 * n.x + v1 * n.y, u0 * n.x + v0 * n.y, layer == 1u);
+  let vn = -select(u1 * n.x + v1 * n.y, u0 * n.x + v0 * n.y, one);
   return Prim(
-    vec4f(a * q0.a.x - b * q1.a.x, (vn * n.x - vt * n.y) - P.uInf, vn * n.y + vt * n.x,
+    vec4f(select(q1.a.x, q0.a.x, one), (vn * n.x - vt * n.y) - P.uInf, vn * n.y + vt * n.x,
           a * q0.a.w - b * q1.a.w),
-    vec4f(a * q0.b.x - b * q1.b.x, a * q0.b.y - b * q1.b.y, q0.b.z, q0.b.w));
+    vec4f(a * q0.b.x - b * q1.b.x, select(q1.b.y, q0.b.y, one), q0.b.z, q0.b.w));
 }
 
 // the ghost of record (r0, r1) (layout.ts GHOSTS: sources, BC code, layer; the normal's bits) from

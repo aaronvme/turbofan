@@ -19,7 +19,7 @@ import {
 import { ReferenceSolver, type SolverOptions } from '../../src/flow/reference/solver';
 import type { SolverMesh } from '../../src/flow/reference/solverMesh';
 import type { SourceModel } from '../../src/flow/reference/sources';
-import { NP, type PhysicalState } from '../../src/flow/reference/state';
+import { NP, NU, type PhysicalState } from '../../src/flow/reference/state';
 import {
   SINK,
   closedBoxMesh,
@@ -124,6 +124,28 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
   async function fluxScaleError(p: Pair): Promise<number> {
     const g = await p.gpu.readResidual();
     return Math.abs(g - p.ref.stats.residualDensityL2) / p.ref.residualFluxScale();
+  }
+
+  /**
+   * The oracle's density-residual L2, sqrt(mean_c (R_rho / (b V))^2) (section 11), of a given
+   * conserved state U, in f64: a fresh oracle with the case's options and blockage evaluates R(U).
+   */
+  function oracleResidualL2(
+    mesh: SolverMesh,
+    options: SolverOptions,
+    U: ArrayLike<number>,
+    blockage?: Float64Array,
+  ): number {
+    const s = new ReferenceSolver(mesh, options);
+    if (blockage !== undefined) s.setBlockage(blockage);
+    s.U.set(U);
+    const R = s.residual();
+    let sum = 0;
+    for (let c = 0; c < mesh.nCells; c++) {
+      const q = (R[NU * c] ?? NaN) / ((s.blockage[c] ?? NaN) * (mesh.cellVolR[c] ?? NaN));
+      sum += q * q;
+    }
+    return Math.sqrt(sum / mesh.nCells);
   }
 
   /** Tracking iterations to each checkpoint, comparing the fields and the residual. */
@@ -324,18 +346,7 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     p.ref.iterate(10);
     p.gpu.iterate(10);
     /** The f64 density-residual L2 of a state (the oracle's evaluation). */
-    const residualOf = (U: Float64Array) => {
-      const s = new ReferenceSolver(mesh, options);
-      s.setBlockage(blockage);
-      s.U.set(U);
-      const R = s.residual();
-      let sum = 0;
-      for (let c = 0; c < mesh.nCells; c++) {
-        const q = (R[6 * c] ?? NaN) / ((blockage[c] ?? NaN) * (mesh.cellVolR[c] ?? NaN));
-        sum += q * q;
-      }
-      return Math.sqrt(sum / mesh.nCells);
-    };
+    const residualOf = (U: Float64Array) => oracleResidualL2(mesh, options, U, blockage);
     return { p, residualOf };
   }
 
@@ -410,18 +421,42 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
       aRho[6 * c + 4] = OMEGA * (mesh.cellR[c] ?? NaN) * F_THETA;
     }
     p.gpu.setCellSource({ aRho });
-    p.ref.iterate(10);
-    p.gpu.iterate(10);
+    // The residual of record is the first stage's of iteration 10, i.e. R(U^9). Both solvers run 9
+    // iterations, the GPU's own U^9 is read back (f32 copy + low part) and the oracle's residual of
+    // it is evaluated in f64; then both run the 10th.
+    p.ref.iterate(9);
+    p.gpu.iterate(9);
+    const u9Ref = Float64Array.from(p.ref.U);
+    const ofGpuState = oracleResidualL2(mesh, options, await p.gpu.readConserved());
+    const ofRefState = oracleResidualL2(mesh, options, u9Ref);
+    const ofRoundedState = oracleResidualL2(mesh, options, u9Ref.map(Math.fround));
+    p.ref.iterate(1);
+    p.gpu.iterate(1);
     const e = await error(p);
     const own = await residualError(p);
-    const scaled = await fluxScaleError(p);
+    const rGpu = await p.gpu.readResidual();
+    const rRef = p.ref.stats.residualDensityL2;
+    const rFlux = p.ref.residualFluxScale();
+    // the evaluation is the oracle's residual of record: on the oracle's own U^9 it gives the
+    // stage-1 residual of its iteration 10 (measured: equal to the last bit; 1e-12 allows the f64
+    // summation of the norm in another order)
+    expect(Math.abs(ofRefState - rRef) / rRef).toBeLessThanOrEqual(1e-12);
+    // W3S-I1 (critic pass 20, D5-6): the row of record is K2 = |r_GPU - L2 R_ref(U^9_GPU)| / r_flux,
+    // the kernel's residual against the oracle's residual of the GPU's own state, at D4-71's 1e-10
+    // unchanged (W2R-I19; D4-62's 3e-11 sat inside the f32 rounding of the norm, W2R-I17). The old
+    // form |r_GPU - r_ref| / r_flux also holds the two states' drift: with the mirrored wall (D5-5)
+    // rounding the oracle's own U^9 to f32 moves it by 1.94e-10 with no kernel in it (S3), and it
+    // passes the critic's mutant W1g (the kernel's rho' extrapolated at the wall while the oracle
+    // mirrors it: 3.34e-11), which K2 fails (1.66e-10; the adopted kernel 2.20e-11). Both printed.
+    const kernel = Math.abs(rGpu - ofGpuState) / rFlux;
+    const oldForm = Math.abs(rGpu - rRef) / rFlux;
+    const floor = Math.abs(ofRoundedState - ofRefState) / rFlux;
     process.stdout.write(
-      `[12.2] E L9a source: ${e.toExponential(2)}; residual / residual ${own.toExponential(2)}, / flux scale ${scaled.toExponential(2)}\n`,
+      `[12.2] E L9a source: ${e.toExponential(2)}; residual / residual ${own.toExponential(2)}; / flux scale: K2 (the kernel against the oracle on the GPU's U^9) ${kernel.toExponential(3)}; reported: the old form |r_GPU - r_ref| ${oldForm.toExponential(3)}, S3 (the oracle's U^9 rounded to f32) ${floor.toExponential(3)}\n`,
     );
     expect(e).toBeLessThanOrEqual(TOL_E);
-    // the row of record over the flux scale at D4-71's 1e-10 (W2R-I19; D4-62's 3e-11 sat inside
-    // the f32 rounding of the norm, W2R-I17), and the residual form, which this case meets too
-    expect(scaled).toBeLessThanOrEqual(TOL_FLUX.E_L9a);
+    // K2 over the flux scale at D4-71's 1e-10, and the residual form, which this case meets too
+    expect(kernel).toBeLessThanOrEqual(TOL_FLUX.E_L9a);
     expect(own).toBeLessThanOrEqual(TOL_RESIDUAL);
     p.gpu.destroy();
   });
@@ -441,46 +476,173 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     await trackingRows(p, 'S sink');
   });
 
-  it('the outflow’s backflow (SOLVER.md 5, W2S-B1): the inflow ghost at (p_out, T_inf), and the kernel follows the oracle (row C’s tolerances)', async () => {
-    // hot, fuelled, swirling gas flowing back in through the outflow (imax), preconditioned at the
-    // engine's cut: every outflow ghost takes the backflow branch
-    const mesh = duct(40);
+  // D5-5 (SOLVER.md 5): the slip-wall ghost mirrors rho' and Z (layer 1 the wall cell's, layer 2
+  // the next cell's, i.e. each ghost's own source cell's) and keeps p', rw and the tangential
+  // velocity extrapolated; the kernel's copy is exact, so it is checked bitwise against its own cells
+  it("the slip-wall ghost mirrors rho' and Z and extrapolates p', rw and u, v as the oracle does", async () => {
+    const mesh = duct(12);
     const options: SolverOptions = {
       gas: THERMALLY_PERFECT,
       freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
       lowMachPreconditioning: ENGINE_PRECONDITIONING_CUT,
     };
+    // radial gradients in every primitive, so extrapolating and mirroring differ at both walls
     const p = await pair(mesh, options, {}, (s) => {
-      s.setState((x): PhysicalState => {
-        const k = 0.5 * (1 + x / 0.3);
-        // a 5 % wave: p' at the scale of the hot gas's terms rho R T' (a 0.5 % wave left e_q at 2.3e-5
-        // after 1 iteration, plain and preconditioned alike, in interior cells: the f32 state's
-        // rounding of a small p' among large thermal terms, not the boundary)
-        const pr = 101325 * (1 + 0.05 * Math.cos((Math.PI * x) / 0.3));
-        const T = 288.15 + 150 * k;
-        return { rho: pr / (287.05287 * T), u: -30 * k, v: 0, w: 10 * k, p: pr, z: 0.02 * k };
+      s.setState((x, r): PhysicalState => {
+        const k = (r - 0.5) / 0.1;
+        const pr = 101325 * (1 + 0.04 * k);
+        const T = 288.15 + 600 * k * k + 20 * x;
+        return {
+          rho: pr / (287.05287 * T),
+          u: 40 - 30 * k,
+          v: 8 * k,
+          w: 15 * k,
+          p: pr,
+          z: 0.015 * k,
+        };
       });
     });
     const P = await p.gpu.readPrimitives();
     const R = p.ref.primitives();
-    let outflowGhosts = 0;
+    // each field's largest cell error of the kernel against the oracle (the f32 state's rounding)
+    const cellErr = [0, 1, 2, 3, 4, 5].map((k) => {
+      let m = 0;
+      for (let c = 0; c < mesh.nCells; c++) {
+        m = Math.max(m, Math.abs((P[NP * c + k] ?? NaN) - (R[NP * c + k] ?? NaN)));
+      }
+      return m;
+    });
+    let walls = 0;
     for (let g = 0; g < mesh.nGhosts; g++) {
-      if (mesh.ghostBc[g] !== BC.OUTFLOW) continue;
-      outflowGhosts++;
+      if (mesh.ghostBc[g] !== BC.SLIP_WALL) continue;
+      walls++;
       const e = NP * (mesh.nCells + g);
-      // no swirl and no fuel come in: the ambient's, not the cell's
-      expect(P[e + 3] === 0 && P[e + 5] === 0, `ghost ${g}: rw ${P[e + 3]}, Z ${P[e + 5]}`).toBe(
-        true,
-      );
-      expect(R[e + 3] === 0 && R[e + 5] === 0).toBe(true);
-      for (const k of [0, 1, 2, 4]) {
-        expect(Math.abs((P[e + k] ?? NaN) - (R[e + k] ?? NaN))).toBeLessThan(
-          1e-5 * Math.max(1, Math.abs(R[e + k] ?? NaN)),
-        );
+      const src = NP * (mesh.ghostSrc[g] ?? 0);
+      for (const k of [0, 5]) {
+        expect(P[e + k], `ghost ${g} (layer ${mesh.ghostLayer[g]}) entry ${k}`).toBe(P[src + k]);
+        expect(R[e + k]).toBe(R[src + k]);
+      }
+      // an extrapolated entry is a q0 - b q1 with a + b <= 5 (layer 2: 3 q0 - 2 q1), so its error is
+      // at most 5 times its cells' plus the f32 rounding of the result
+      for (const k of [1, 2, 3, 4]) {
+        const d = Math.abs((P[e + k] ?? NaN) - (R[e + k] ?? NaN));
+        const tol = 5 * (cellErr[k] ?? NaN) + 2 ** -22 * Math.abs(R[e + k] ?? NaN);
+        expect(d, `ghost ${g} entry ${k}`).toBeLessThanOrEqual(tol);
       }
     }
-    expect(outflowGhosts).toBe(2 * 4);
-    await trackingRows(p, 'backflow');
+    expect(walls).toBe(2 * 2 * 12);
     p.gpu.destroy();
   });
+
+  // W3S-N4 (critic pass 20's mutant R2g): the kernel's slip-wall exclusion in the local step
+  // (SOLVER.md 17; neighbourRadius returns 0 for a wall ghost, wb < 0), on the unit row's wall state
+  // (precondition.test.ts, section 17): axial flow at 170 m/s (beta = M, 0.48-0.50, in every cell,
+  // above dp / (rho c^2)), both wall rows at p_inf + 30 kPa and the rest at p_inf, so each wall
+  // ghost (p' extrapolated, rho' mirrored) is 23 % hotter than its cell and its radius on the wall
+  // face would set the cell's j term. T rises axially from 288.15 K by 30 K, so that T' has a scale:
+  // at the unit row's uniform 288.15 K, T' stays within 1.8 K after one iteration and its e_q is the
+  // f32 rounding of T (8.5e-6 K, 4.7e-6 of that scale). The kernel's stage-1 tau (stored with U)
+  // is checked cell by cell against the oracle's, and the fields after the iteration, at row C's
+  // one-iteration 1e-5 (measured: tau 1.2e-7, e_q 2.7e-7; with R2g, tau 5.5e-2 in the wall rows and
+  // e_q 1.9e-2, where the moving duct's row was its only kill, at 1.45e-4 against 1e-4).
+  it("the local step keeps a slip-wall face at the cell's own radius when its ghost's is larger (SOLVER.md 17)", async () => {
+    const mesh = duct(12);
+    const options: SolverOptions = {
+      gas: THERMALLY_PERFECT,
+      freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
+      lowMachPreconditioning: ENGINE_PRECONDITIONING_CUT,
+      cfl: DEFAULT_CFL_PRECONDITIONED,
+    };
+    const wallRow = (r: number) => r < 0.525 || r > 0.575;
+    const p = await pair(mesh, options, {}, (s) => {
+      s.setState((x, r): PhysicalState => {
+        const pr = wallRow(r) ? 131325 : 101325;
+        const T = 288.15 + 30 * ((x + 0.3) / 0.6);
+        return { rho: pr / (287.05287 * T), u: 170, v: 0, w: 0, p: pr, z: 0 };
+      });
+    });
+    // the state has the property the exclusion is for: every wall ghost hotter than its cell by
+    // more than a fifth (T from its own p' and rho'; Z = 0, so the air's R in both)
+    const P0 = p.ref.primitives();
+    const tOf = (e: number) =>
+      (101325 + (P0[NP * e + 4] ?? NaN)) / (p.ref.ref.rho + (P0[NP * e] ?? NaN));
+    let walls = 0;
+    for (let g = 0; g < mesh.nGhosts; g++) {
+      if (mesh.ghostBc[g] !== BC.SLIP_WALL || mesh.ghostLayer[g] !== 1) continue;
+      walls++;
+      expect(tOf(mesh.nCells + g) / tOf(mesh.ghostSrc[g] ?? 0)).toBeGreaterThan(1.2);
+    }
+    expect(walls).toBe(2 * 12);
+    p.ref.iterate(1);
+    p.gpu.iterate(1);
+    const st = await p.gpu.readState();
+    const dt = p.ref.localDt();
+    let worstWall = 0;
+    let worstRest = 0;
+    for (let c = 0; c < mesh.nCells; c++) {
+      const tauRef = (dt[c] ?? NaN) / ((p.ref.blockage[c] ?? NaN) * (mesh.cellVolR[c] ?? NaN));
+      const d = Math.abs((st[8 * c + 6] ?? NaN) / tauRef - 1);
+      if (wallRow(mesh.cellR[c] ?? NaN)) worstWall = Math.max(worstWall, d);
+      else worstRest = Math.max(worstRest, d);
+    }
+    const e = await error(p);
+    process.stdout.write(
+      `[12.2] wall exclusion: tau kernel / oracle - 1, wall rows ${worstWall.toExponential(2)}, the rest ${worstRest.toExponential(2)}; e_q after 1 ${e.toExponential(2)}\n`,
+    );
+    // tau is the f32 evaluation of the same radii from the same f32 state and metrics (a few f32
+    // roundings, ~1e-7), held at row C's one-iteration 1e-5
+    expect(Math.max(worstWall, worstRest)).toBeLessThanOrEqual(TOL[1]);
+    expect(e).toBeLessThanOrEqual(TOL[1]);
+    p.gpu.destroy();
+  });
+
+  // W2S-N1: at p_out = p_inf the pOut uniform equals p_inf whatever the BC says (mutant A3g, `pOut:
+  // ref.p`, survived every GPU test), so the row also runs at 0.98 p_inf, where the kernel's pOut
+  // and pOutGauge both differ from the free stream's
+  it.each([1, 0.98])(
+    'the outflow’s backflow (SOLVER.md 5, W2S-B1) at p_out = %s p_inf: the inflow ghost at (p_out, T_inf), and the kernel follows the oracle (row C’s tolerances)',
+    async (pOutRatio) => {
+      // hot, fuelled, swirling gas flowing back in through the outflow (imax), preconditioned at the
+      // engine's cut: every outflow ghost takes the backflow branch
+      const mesh = duct(40);
+      const options: SolverOptions = {
+        gas: THERMALLY_PERFECT,
+        freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
+        lowMachPreconditioning: ENGINE_PRECONDITIONING_CUT,
+        ...(pOutRatio === 1 ? {} : { outflowPressure: pOutRatio * 101325 }),
+      };
+      const p = await pair(mesh, options, {}, (s) => {
+        s.setState((x): PhysicalState => {
+          const k = 0.5 * (1 + x / 0.3);
+          // a 5 % wave: p' at the scale of the hot gas's terms rho R T' (a 0.5 % wave left e_q at 2.3e-5
+          // after 1 iteration, plain and preconditioned alike, in interior cells: the f32 state's
+          // rounding of a small p' among large thermal terms, not the boundary)
+          const pr = 101325 * (1 + 0.05 * Math.cos((Math.PI * x) / 0.3));
+          const T = 288.15 + 150 * k;
+          return { rho: pr / (287.05287 * T), u: -30 * k, v: 0, w: 10 * k, p: pr, z: 0.02 * k };
+        });
+      });
+      const P = await p.gpu.readPrimitives();
+      const R = p.ref.primitives();
+      let outflowGhosts = 0;
+      for (let g = 0; g < mesh.nGhosts; g++) {
+        if (mesh.ghostBc[g] !== BC.OUTFLOW) continue;
+        outflowGhosts++;
+        const e = NP * (mesh.nCells + g);
+        // no swirl and no fuel come in: the ambient's, not the cell's
+        expect(P[e + 3] === 0 && P[e + 5] === 0, `ghost ${g}: rw ${P[e + 3]}, Z ${P[e + 5]}`).toBe(
+          true,
+        );
+        expect(R[e + 3] === 0 && R[e + 5] === 0).toBe(true);
+        for (const k of [0, 1, 2, 4]) {
+          expect(Math.abs((P[e + k] ?? NaN) - (R[e + k] ?? NaN))).toBeLessThan(
+            1e-5 * Math.max(1, Math.abs(R[e + k] ?? NaN)),
+          );
+        }
+      }
+      expect(outflowGhosts).toBe(2 * 4);
+      await trackingRows(p, `backflow at p_out ${pOutRatio} p_inf`);
+      p.gpu.destroy();
+    },
+  );
 });
