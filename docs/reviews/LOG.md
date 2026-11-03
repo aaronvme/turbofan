@@ -3709,6 +3709,26 @@ None.
        - **W3S-N2** (the builder's sensitivity numbers came from other states) is a SOLVER.md 17.1 wording fix.
      - **Then:** the critic re-verifies the fix, and w3/scheme merges with detached gates on the merged tree.
   2. **W3S-I2 goes to w3/plume-bake: J at the engine's cut 0.02 stalls in an outflow limit cycle** (on main since D4-101; before it, J met its rule at 9441). J's rows at both cuts (0.003 and 0.02) are pre-registered in PHYSICS.md before that round starts, and the backflow's pressure form is chosen there with a linearised-mode analysis.
+- **D5-7 (w3/scheme merged; coupling pre-registered; 2026-11-03).**
+  1. **w3/scheme is merged on main 1b7cdb2 (pushed),** on critic pass 20's MERGE after the round-3 re-verification. `src` and `tests` equal the critic's trial20b.
+     - **Gates on the merged tree** (detached, `tmp/merge_p20`):
+       - typecheck and lint clean; coverage 2411 passed + 10 expected fail, lines 99.55 %;
+       - mesh 29, gpu 75 (E-L9a's K2 included), gpu-ladder 17 + 1 expected fail.
+     - **The browser suite took three runs:**
+       - the first lost its Chrome connection at ~1 GB free RAM (6 files never ran);
+       - an on-battery rerun at 25 % was starved (240 s timeouts) and was stopped;
+       - the run on AC passed 54/55. Its only failure was U4's 8.4 ms case under load (shown 2.9 s, longest gap 1099 ms vs 1000), and `firstSwitch.test.tsx` alone then passed 6/6.
+     - **U4 is indicative on the shared machine** (PHYSICS.md 3.5), and the merge touches no UI code.
+  2. **L14's end row allows start × (1 + 2e-12)** for the at-rest case's f64 round-off (W3S-N1: 5.1 u per iteration × 2000, measured ≤ 9 u). This is now noted under L14. It is a round-off allowance, not a loosened bar.
+  3. **The coupling rows CP1-CP5 are pre-registered in PHYSICS.md 3.3** before any coupling code. They cover:
+     - body-force consistency per row;
+     - the combustor's sources;
+     - the feedforward sanity bar;
+     - the plan's calibration spike (< 300 iterations, no limit cycle);
+     - the coupled field through a cycle-driven throttle ramp, with its "coupled"/"calibrating" label.
+
+     L12 stays the outcome. J's rows at both cuts are pre-registered before w3/plume-bake (D5-6 item 2), not now.
+  4. **Housekeeping:** the local trial branches trial18, trial19, trial20 and trial20b are left by the hook for Aaron to delete.
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
