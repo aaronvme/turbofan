@@ -13,6 +13,8 @@
 import type { AmbientConditions } from '../contracts/ambient';
 import type { CycleState, StationState } from '../contracts/cycle';
 import type { EngineDefinition } from '../contracts/engine';
+import type { SimSnapshot } from '../contracts/sim';
+import type { AppDiagnostics } from '../shell/protocol';
 import { nozzle } from '../cycle/engine';
 import { factValue } from '../engine/facts';
 import { gamma, gasConstant } from '../thermo/gas';
@@ -418,5 +420,26 @@ export function engineSoundFrame(model: SoundModel, inputs: SoundInputs): SoundF
     surgeCycles: Math.max(0, Math.floor(inputs.surgeCycles)),
     bangAmp: BANG_AMP,
     master,
+  };
+}
+
+/**
+ * The sound inputs of a worker snapshot (D2-4's boundary: the main thread sees only messages):
+ * its cycle state and ambient, the listener's angle from the camera position the snapshot was
+ * drawn from (to the side before the first), the model's surge count from the diagnostics (0
+ * before the first). null before the first snapshot.
+ */
+export function soundInputsOf(
+  snapshot: SimSnapshot | null,
+  diagnostics: AppDiagnostics | null,
+  listener: readonly number[] | null,
+  def: EngineDefinition,
+): SoundInputs | null {
+  if (snapshot === null) return null;
+  return {
+    cycle: snapshot.cycle,
+    ambient: snapshot.inputs.ambient,
+    thetaRad: listener === null ? Math.PI / 2 : listenerAngle(listener, def),
+    surgeCycles: diagnostics?.surgeCycles ?? 0,
   };
 }

@@ -1,7 +1,8 @@
 // The view dock under the engine: the flow legend (the dataviz rules: a labelled continuous bar
 // from the very LUT the plane samples, round ticks, the unit, and the data's provenance on it,
 // D4-82), the camera presets, the tracers (D4-83: Realistic has none unless asked for) and the
-// Data view's cut-plane field (the contract's fields the plane can draw).
+// Data view's cut-plane field (the contract's fields the plane can draw), and the engine sound's
+// switch and volume (D5-4: off until the viewer turns it on).
 
 import { useMemo } from 'react';
 import type { SimSnapshot } from '../contracts/sim';
@@ -15,6 +16,7 @@ import {
   flowModeFor,
   tracersAvailable,
 } from '../shell/viewState';
+import { SoundControls } from './sound';
 import { useApp } from './store';
 
 const CAMERAS: readonly [CameraPresetId, string][] = [
@@ -143,6 +145,7 @@ export function ViewDock({
           <span className="knob" aria-hidden="true" />
           Tracers
         </button>
+        <SoundControls />
         {view.viewMode === 'data' && (
           <label className="compact">
             <span aria-hidden="true">Colour by</span>

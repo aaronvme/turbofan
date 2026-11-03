@@ -188,3 +188,37 @@ export function validateFrame(f: SoundFrame, toneCount: number, noiseCount: numb
     if (!(Number.isFinite(x) && x >= 0)) p.push(`${name} ${x} must be finite and >= 0`);
   return p;
 }
+
+// ---------------------------------------------------------------------------------------
+// The worklet's messages
+
+/** The AudioWorkletProcessor's registered name. */
+export const SYNTH_PROCESSOR_NAME = 'engine-synth';
+
+/** processorOptions of the AudioWorkletNode: the voice counts and the noise seed. */
+export interface SynthProcessorOptions {
+  readonly toneCount: number;
+  readonly noiseCount: number;
+  readonly seed: number;
+}
+
+export interface SynthMessage {
+  readonly type: 'frame';
+  readonly frame: SoundFrame;
+  readonly rampFrames: number;
+}
+
+/** A frame glides over the interval since the last posting, held to this range, s. */
+export const MIN_RAMP_S = 0.01;
+export const MAX_RAMP_S = 0.25;
+
+export function rampFramesFor(intervalMs: number, sampleRate: number): number {
+  const s = Number.isFinite(intervalMs) ? intervalMs / 1000 : 0;
+  return Math.round(Math.min(MAX_RAMP_S, Math.max(MIN_RAMP_S, s)) * sampleRate);
+}
+
+/** The volume control's gain: square law (a perceptual taper), 0 .. 1. */
+export function volumeGain(v: number): number {
+  if (!(v > 0)) return 0;
+  return Math.min(1, v) ** 2;
+}

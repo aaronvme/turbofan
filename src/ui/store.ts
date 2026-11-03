@@ -27,6 +27,20 @@ export type Connection =
 
 export type PanelId = 'maps' | 'ts' | 'stations' | 'fidelity' | 'diagnostics';
 
+/** The engine sound (D5-4): off until the viewer turns it on; the controller's state. */
+export type SoundStatus = 'off' | 'starting' | 'on' | 'failed';
+
+export interface SoundSettings {
+  readonly on: boolean;
+  /** The volume control, 0 .. 1 (the gain is its square, src/audio/params.ts volumeGain). */
+  readonly volume: number;
+  readonly status: SoundStatus;
+  /** Why the sound could not start (null: it did, or it was not asked to). */
+  readonly error: string | null;
+}
+
+export const DEFAULT_SOUND: SoundSettings = { on: false, volume: 0.5, status: 'off', error: null };
+
 export interface AppStore {
   connection: Connection;
   snapshot: SimSnapshot | null;
@@ -38,6 +52,9 @@ export interface AppStore {
   framedBox: Rect | null;
   /** Critic pass 18's visual note 2: Schlieren's jet box, which no label covers (null: none). */
   jetBox: Rect | null;
+  /** D5-4: the camera position of the last snapshot, the engine sound's listener (null: none). */
+  listener: readonly [number, number, number] | null;
+  sound: SoundSettings;
   trails: { fan: MapPoint[]; hpc: MapPoint[] };
   /** The last 8 GPU errors the worker posted, and how many it posted in all. */
   gpuErrors: string[];
@@ -57,11 +74,12 @@ export interface AppStore {
   setField: (f: FieldChoice) => void;
   setUnits: (u: UnitSystem) => void;
   togglePanel: (p: PanelId) => void;
+  setSound: (s: Partial<SoundSettings>) => void;
   openPanel: (p: PanelId) => void;
   /**
    * A new worker (W2A-N11): forgets the last one's connection, snapshot, diagnostics, trails,
    * faults and field choice, so nothing of it passes for the new one's. The viewer's own
-   * settings (units, panels) stay.
+   * settings (units, panels, sound) stay.
    */
   resetSession: () => void;
   receive: (m: FromWorker) => void;
@@ -78,6 +96,8 @@ export const useApp = create<AppStore>((set, get) => ({
   engineBox: null,
   framedBox: null,
   jetBox: null,
+  listener: null,
+  sound: DEFAULT_SOUND,
   trails: { fan: [], hpc: [] },
   gpuErrors: [],
   gpuErrorCount: 0,
@@ -105,6 +125,9 @@ export const useApp = create<AppStore>((set, get) => ({
   setUnits: (units) => {
     set({ units });
   },
+  setSound: (patch) => {
+    set((s) => ({ sound: { ...s.sound, ...patch } }));
+  },
   togglePanel: (p) => {
     set((s) => ({ panels: { ...s.panels, [p]: !s.panels[p] } }));
   },
@@ -120,6 +143,7 @@ export const useApp = create<AppStore>((set, get) => ({
       engineBox: null,
       framedBox: null,
       jetBox: null,
+      listener: null,
       trails: { fan: [], hpc: [] },
       gpuErrors: [],
       gpuErrorCount: 0,
@@ -145,6 +169,7 @@ export const useApp = create<AppStore>((set, get) => ({
           engineBox: m.engineBox,
           framedBox: m.framedBox,
           jetBox: m.jetBox,
+          listener: m.listener,
           trails: {
             fan: pushTrail(s.trails.fan, cycle.fan, TRAIL_POINTS),
             hpc: pushTrail(s.trails.hpc, cycle.hpc, TRAIL_POINTS),

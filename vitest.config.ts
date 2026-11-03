@@ -49,6 +49,9 @@ export default defineConfig({
         'src/flow/coupling/**': CORE,
         'src/geometry/**': CORE,
         'tools/mesh/**': { lines: 90 },
+        // D5-4: the engine sound's pure modules (the worklet glue, src/audio/worklet, is excluded
+        // above: the browser suite runs it)
+        'src/audio/**': { lines: 90 },
       },
     },
   },

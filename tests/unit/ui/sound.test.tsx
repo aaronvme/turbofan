@@ -15,27 +15,20 @@ const initial = useApp.getState();
 
 function fakeController() {
   return {
-    enable: vi.fn(async (_volume: number) => {}),
-    disable: vi.fn(() => {}),
-    setVolume: vi.fn((_v: number) => {}),
+    enable: vi.fn<(volume: number) => Promise<void>>(() => Promise.resolve()),
+    disable: vi.fn<() => void>(),
+    setVolume: vi.fn<(v: number) => void>(),
     analyser: null,
     context: null,
   } satisfies SoundController;
 }
 
-let audioContexts = 0;
+// any AudioContext built while the overlay renders would be a call of this
+let audioContext = vi.fn();
 beforeEach(() => {
   useApp.setState(initial, true);
-  audioContexts = 0;
-  // any AudioContext built while the overlay renders would count here
-  vi.stubGlobal(
-    'AudioContext',
-    class {
-      constructor() {
-        audioContexts++;
-      }
-    },
-  );
+  audioContext = vi.fn();
+  vi.stubGlobal('AudioContext', audioContext);
 });
 afterEach(() => {
   cleanup();
@@ -50,7 +43,7 @@ describe('the sound controls', { timeout: 120_000 }, () => {
     const sw = screen.getByRole('switch', { name: 'Sound' });
     expect(sw.getAttribute('aria-checked')).toBe('false');
     expect(screen.getByRole('slider', { name: 'Volume' })).toBeTruthy();
-    expect(audioContexts).toBe(0);
+    expect(audioContext).not.toHaveBeenCalled();
   });
 
   it('the switch starts and stops the controller; the state says so', async () => {

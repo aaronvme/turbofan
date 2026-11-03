@@ -565,6 +565,7 @@ function loop(a: App) {
         warmUpMs: a.warmUpMs,
         warmUpSteps: a.warmUpSteps,
         lostSolveCause: a.cycle.lostSolveCause(),
+        surgeCycles: a.cycle.surgeCycles(),
         fixedSteps: a.simSteps.state(),
         errors: [...a.errors],
         adapter: `${a.view.device.info.vendor} ${a.view.device.info.architecture}`.trim(),
@@ -589,6 +590,7 @@ function loop(a: App) {
               ? jetBox(vp, ENGINE_DEFINITION, FIELD_EXTENTS.near.xMax, a.size.width, a.size.height)
               : null,
           refused: a.refused.splice(0),
+          listener: pose.position,
         });
         postFaults.posted();
       } catch (e) {

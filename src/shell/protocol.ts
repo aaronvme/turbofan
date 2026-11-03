@@ -155,6 +155,11 @@ export interface AppDiagnostics {
   /** W2F-I1: why the last matched solve was lost (null: none lost since the reset). */
   readonly lostSolveCause: string | null;
   /**
+   * D5-4 (A5): the cycle model's surge cycles since the reset (CycleDiagnostics.surgeCycles, the
+   * Greitzer flow breakdowns); the engine sound bangs once per new one.
+   */
+  readonly surgeCycles: number;
+  /**
    * D4-98 item 2: the browser suite's fixed sim steps, the frames stepped so far and those left
    * (null: the sim steps the real frame time, as the app does).
    */
@@ -185,6 +190,11 @@ export type FromWorker =
       readonly jetBox: Rect | null;
       /** Problems of the commands refused since the last snapshot. */
       readonly refused: readonly string[];
+      /**
+       * D5-4: the camera position this frame was drawn from (world = engine frame, m), the
+       * engine sound's listener.
+       */
+      readonly listener: readonly [number, number, number];
     }
   | { readonly type: 'gpu-error'; readonly message: string }
   | { readonly type: 'device-lost'; readonly message: string }
