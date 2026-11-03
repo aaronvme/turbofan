@@ -40,8 +40,9 @@ function readPhysicsThresholds(): PhysicsRow[] {
     const cells = line.split('|').map((c) => c.trim());
     if (cells.length !== 5) continue;
     const [, id = '', check = '', pass = ''] = cells;
-    // an ID is a letter, a number and an optional sub-row letter (P5b by D4-94)
-    if (!/^[TCLP]\d+[a-z]?$/.test(id)) continue;
+    // an ID is a letter, a number and an optional sub-row letter (P5b by D4-94); A: the engine
+    // sound (3.6, D5-4)
+    if (!/^[TCLPA]\d+[a-z]?$/.test(id)) continue;
     rows.push({ id, section, check, pass });
   }
   return rows;
@@ -51,9 +52,9 @@ const physics = readPhysicsThresholds();
 
 describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
   it('finds the full pre-registered set in PHYSICS.md', () => {
-    // T1-T4, C1-C12 (C10 by D3-3, C11 by D3-11, C12 by D3-17), L1-L13, P1-P5 and P5b (P4 by D4-2,
-    // P5 by D4-90, P5b by D4-94)
-    expect(physics.length).toBe(4 + 12 + 13 + 6);
+    // T1-T4, C1-C12 (C10 by D3-3, C11 by D3-11, C12 by D3-17), L1-L14 (L14 by D5-2), P1-P5 and P5b (P4 by D4-2,
+    // P5 by D4-90, P5b by D4-94), A1-A6 (D5-4)
+    expect(physics.length).toBe(4 + 12 + 14 + 6 + 6);
   });
 
   it('has exactly the same IDs, in the same order', () => {
@@ -117,6 +118,33 @@ describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
     expect(THRESHOLDS.P5b.values.flameoutAtS.value).toBe(20);
     expect(THRESHOLDS.P5b.values.scenarioS.value).toBe(35);
     expect(THRESHOLDS.P5b.values.escalateAfterS.value).toBe(0.25);
+    // D5-4: the engine sound
+    expect(THRESHOLDS.A1.values.maxFrequencyErrorPercent.value).toBe(0.25);
+    expect(THRESHOLDS.A1.values.maxN1Percent.value).toBe(105);
+    expect(THRESHOLDS.A1.values.rampS.value).toBe(1);
+    expect(THRESHOLDS.A1.values.maxQuantumStepPercent.value).toBe(0.5);
+    expect(THRESHOLDS.A1.values.quantumFrames.value).toBe(128);
+    expect(THRESHOLDS.A1.values.maxPartialOfSampleRate.value).toBe(0.45);
+    expect(THRESHOLDS.A1.values.fanBlades.value).toBe(24);
+    expect(THRESHOLDS.A2.values.machAgreementPercent.value).toBe(0.5);
+    expect(THRESHOLDS.A2.values.minSubsonicDbBelow.value).toBe(30);
+    expect(THRESHOLDS.A2.values.subsonicMach.value).toBe(0.98);
+    expect(THRESHOLDS.A2.values.maxSupersonicDbBelow.value).toBe(20);
+    expect(THRESHOLDS.A2.values.supersonicMach.value).toBe(1.05);
+    expect(THRESHOLDS.A3.values.slope.value).toBe(8);
+    expect(THRESHOLDS.A3.values.slopeTolerance.value).toBe(0.2);
+    expect(THRESHOLDS.A3.values.minStrouhal.value).toBe(0.15);
+    expect(THRESHOLDS.A3.values.maxStrouhal.value).toBe(0.3);
+    expect(THRESHOLDS.A4.values.forwardDeg.value).toBe(45);
+    expect(THRESHOLDS.A4.values.aftDeg.value).toBe(150);
+    expect(THRESHOLDS.A4.values.minForwardDb.value).toBe(6);
+    expect(THRESHOLDS.A4.values.jetPeakMinDeg.value).toBe(140);
+    expect(THRESHOLDS.A4.values.jetPeakMaxDeg.value).toBe(160);
+    expect(thresholdNumbers('A5')).toEqual([]);
+    expect(THRESHOLDS.A6.values.transientS.value).toBe(60);
+    expect(THRESHOLDS.A6.values.peakDbBelowFullScale.value).toBe(1);
+    expect(THRESHOLDS.A6.values.maxQuantumMs.value).toBe(0.4);
+    expect(THRESHOLDS.A6.values.quantumFrames.value).toBe(128);
   });
 
   it("N3 (D4-96): P5's check text states the window it gates, and the window's numbers are typed", () => {
