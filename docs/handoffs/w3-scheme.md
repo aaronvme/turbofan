@@ -1,6 +1,59 @@
-w3/scheme round 2 (D5-5), STOP-CLEAN (usage brake; the runaway re-run and lint/typecheck of the last run still going): the slip-wall ghost mirrors ρ′ and Z (oracle and kernel); L14 passes every row of every case on the CPU and the GPU under the restated peak row, and its pin is lifted; the control fails the restated row; no regression in the CPU ladder, the CPU D4-63 of record (on AC) or the GPU ladder; test:gpu fails one row, E-L9a's flux-scale form (decision 1); J at 0.02 diagnosed: not W2S-N2 (from e552cc1; HEAD = the commit of this handoff)
+w3/scheme round 3 (D5-6 item 1), DONE: E-L9a's flux-scale row re-posed as K2 at D4-71's 1e-10 unchanged and shown killing mutant W1g (W3S-I1); N1, N3, N4 and W3S-N2 done; every gate green (from 2b4fdfc; HEAD = the commit of this handoff)
 
-ROUND 2 (D5-5)
+ROUND 3 (D5-6)
+
+DONE
+- 3644a64 (TDD), `tests/gpu/oracle.test.ts` E L9a: the gated row is **K2 = |r_GPU − L2 R_ref(U⁹_GPU)| / r_flux ≤ 1e-10** (both run 9 iterations, the GPU's U⁹ read back with `readConserved`, the oracle's density-residual L2 of it in f64, then the 10th iteration; a shared `oracleResidualL2`, which L5's row now uses too). Self-check: on the oracle's own U⁹ it equals the residual of record (≤ 1e-12 relative; measured equal). The old form and S3 are printed, not gated. The field row and the residual's own form are unchanged.
+
+  | kernel | K2 (gated, ≤ 1e-10) | the old form | S3 (f32 floor) | field e | residual form |
+  |---|---|---|---|---|---|
+  | adopted | **2.202e-11: PASS** (4.5×) | 1.187e-9 | 1.944e-10 | 6.05e-6 | 3.18e-6 |
+  | W1g (kernel ρ′ extrapolated at the wall, oracle mirrored; applied, restored) | **1.657e-10: FAIL** | 3.343e-11 (would pass) | 1.944e-10 | 5.10e-6 | 8.95e-8 |
+
+  The critic's probe numbers, to the digit.
+- 8f6827a, W3S-N4: a GPU row on section 17's wall state (`duct(12)`, axial 170 m/s, both wall rows at p∞ + 30 kPa, every layer-1 wall ghost checked > 1.2× its cell's T). It checks the kernel's stage-1 τ cell by cell against the oracle's (`readState` [6] against `localDt`/(bV)), and e_q after 1 iteration, both at row C's 1e-5. Adopted: τ 1.24e-7, e_q 2.72e-7. **R2g (applied, restored): τ 5.54e-2 in the wall rows (5500× the tolerance), e_q 1.92e-2 (1900×)**, where the moving duct's row was its only kill (1.45×). The state has T rising 30 K axially. At the unit row's uniform 288.15 K, T′ stays within 1.8 K, and its e_q is f32's rounding of T, 4.68e-6, so it would sit at half the tolerance.
+- 77ef095 (TDD), ca029d6, 0ce426b, f2e53ba, W3S-N1 and N3 (`tests/ladder/hotPocket.ts`, `tests/unit/flow/hotPocket.test.ts`, both L14 tests):
+  - **N1:** "max T′ at 2000 ≤ its start" now reads end ≤ start × (1 + `END_ROUND_OFF_ALLOWANCE` = 2e-12).
+    - Measured (scratch `reports/scratch/r3/kappa.ts`, u = 2⁻⁵³): the CPU at-rest case sits +4u, +2u, +6u and −9u from its start after 1, 10, 100 and 2000 iterations, so without an allowance it is a coin toss.
+    - The bound: one ulp of the pocket cell's ρ′ or η moves T′ by ≤ 6.8u or 3.4u. Rounding both by half an ulp moves it ≤ 5.1u per iteration, 1.0e4 u = 1.1e-12 over 2000. Rounded up to one figure, that is 2e-12, or 2.4e-9 K.
+    - On the GPU the f32 start moves (end 0.41), so no tie arises; the GPU's state is read as hi + lo in f64.
+  - **N3:** a fifth row per case reports the run's peak p′ (not gated; the L14 tests count 4 × 10 gated + 10 reported).
+- f4211f8, W3S-N2: SOLVER.md 17.1's E-L9a bullet now has the critic's U⁹ table (the old row, S1, S2, S3, K2 for both walls) with what each measures. It says why round 2's 2.0e-9 / 4.3e-9 were other states (the oracle's f64 run against its own f32-storage run at U¹⁰) and gives the row since D5-6 with W1g. SOLVER.md 12.2 and `FLUX_SCALE_TOLERANCE`'s comment point to K2 (the value is unchanged).
+
+N3: the peak p′ over cells and iterations, CPU / GPU (Pa; over ρ∞c∞|u0|; iteration and cell where it sits)
+
+| case | peak p′ | / ρ∞c∞\|u0\| | where |
+|---|---|---|---|
+| 900 K, −100, wall / mid | 1077 / 1078 (GPU the same) | 0.026 | iteration 6, the slug's leading edge |
+| 900 K, −300, wall | 11566 (GPU 11566) | 0.093 | iteration 7, leading edge (cell 924) |
+| 900 K, −300, mid | 16096 (GPU 16096) | 0.129 | **iteration 82 at the inflow column (cell 480, i 0)**, not the slug |
+| 1200 K, −100, wall / mid | 904 / 904 | 0.022 | iteration 5, leading edge |
+| 1200 K, −300, wall | 9864 (GPU 9864) | 0.079 | iteration 8, leading edge |
+| 1200 K, −300, mid | 13357 (GPU 13357) | 0.107 | **iteration 82, inflow column** |
+| 900 K, −50, wall | 358 | 0.017 | iteration 3 |
+| 1200 K, 0, wall | CPU 5.9e-9 (round-off); **GPU 446** (f32 start, iteration 1208) | | |
+
+L14 itself is unchanged on both (CPU `reports/scratch/run/r3l14cpu.log`, 195 s: every row of all 10 cases; the at-rest end is 1 − 9.99e-16, now inside the allowance).
+
+FOR THE ORCHESTRATOR (no threshold changed)
+1. **K2's margin depends on the wall.** The critic's K2 for the old, extrapolated wall is 1.348e-10, over 1e-10. The adopted mirror's 2.20e-11 passes 4.5×, but K2's floor is not far below the bar (W2R-I17's norm band 1.1e-11 to 8.8e-11). If a kernel or driver change ever moves K2 past 1e-10, the remedy is the critic's f64 norm from read-back per-cell residuals, not a looser bar.
+2. **N1's allowance is not in PHYSICS.md 3.3.** The row text there is unchanged; the allowance is stated in `hotPocket.ts` and the tests. The critic asked for a logged decision there, so log it if you want it recorded.
+3. **N3 does not match the critic's estimate.** The critic expected about 0.41 at 300 m/s; the measured leading-edge peak is 0.08-0.09 (0.11-0.13 in the mid cases, where the run's peak is at the inflow, not the slug). Tracking is pseudo-time, so its transient p′ is not the physical one. The report shows that, and no row bounds it.
+
+GOTCHAS
+1. Scratch (gitignored): `reports/scratch/r3/mut.mjs apply|restore W1g|R2g` (the critic's exact strings, with a backup), `kappa.ts` (N1's measurement, run with `node --import ./tools/mesh/ts-resolve.mjs`), `gates.cmd` and `l14cpu.cmd` (run through `reports/scratch/r2/run.sh`). Status and logs are in `reports/scratch/run/r3*.status|log`.
+2. All of round 3 ran on battery (68 %). No dev server, Chrome or detached job is left running. `src` is unchanged since round 2, and both mutants are restored (`git diff 2b4fdfc -- src` is empty).
+
+GATES @f4211f8 (code; the later commit is this handoff), on battery, run detached one at a time
+- npm run typecheck: clean (18 s). npm run lint (ESLint + Prettier): clean (72 s).
+- npm run test:gpu: 12 files, **75 passed** (E-L9a's K2 and the new wall-exclusion row included), 70 s. E-L5 2.67e-8; C 5.46e-7 / 2.30e-6 / 6.49e-6; C-pre 5.68e-7 / 3.72e-7 / 1.30e-6; S 5.32e-7 / 5.79e-7 / 1.30e-5; the backflow rows as round 2.
+- npm run test:gpu-ladder: 5 files, 17 passed + 1 expected fail (L9a's D4-57 pin, 1.344e-5), 340 s. L14: every gated row of all 10 cases.
+- npm test: 140 files, 2411 passed + 10 expected fail (125 s).
+- CPU ladder: only `tests/ladder/l14.test.ts` (touched): 2 passed, 195 s. Coverage was not re-run: `src` is unchanged since round 2's 99.55 % lines.
+
+ROUND 2 (D5-5) (kept for reference)
+
+w3/scheme round 2 (D5-5), STOP-CLEAN (usage brake; the runaway re-run and lint/typecheck of the last run still going): the slip-wall ghost mirrors ρ′ and Z (oracle and kernel); L14 passes every row of every case on the CPU and the GPU under the restated peak row, and its pin is lifted; the control fails the restated row; no regression in the CPU ladder, the CPU D4-63 of record (on AC) or the GPU ladder; test:gpu fails one row, E-L9a's flux-scale form (decision 1); J at 0.02 diagnosed: not W2S-N2 (from e552cc1; HEAD = the commit of this handoff)
 
 DONE
 - 61da405 (TDD): `tests/unit/flow/boundary.test.ts` (the wall ghost mirrors ρ′ and Z: layer 1 q₀, layer 2 q₁; p′, rw and v_t extrapolated; ρ > 0 and Z ≥ 0 where extrapolating gave neither), `tests/gpu/oracle.test.ts` (the kernel's 48 wall ghosts: ρ′ and Z bitwise their own source cells', the extrapolated entries within 5× their cells' error; cd88474 fixed that bound), `tests/unit/flow/precondition.test.ts` (the wall face's step when the mirrored-ρ′ ghost is 23 % hotter than the cell: the exclusion-off mutant, which round 1's test stops killing once ρ′ is mirrored, is killed by this one; checked by hand), `tests/unit/flow/hotPocket.test.ts` (the restated row), the contract test (`maxPeakOverIsentropicCompression`).
