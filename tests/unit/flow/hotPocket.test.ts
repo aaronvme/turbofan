@@ -13,6 +13,7 @@ import {
 } from '../../../src/flow/reference/gas';
 import { NP, NU } from '../../../src/flow/reference/state';
 import {
+  END_ROUND_OFF_ALLOWANCE,
   HOT_POCKET_ITERATIONS,
   POCKET_Z,
   hotPocketRows,
@@ -105,5 +106,50 @@ describe("L14's restated peak row: the isentropic compression bound (D5-5)", () 
     expect(samplePocket(hot.P, hot.U, 1.225, 1, bound).overBound).toBe(Infinity);
     const cold = field([[pLow, 1.04 * bound(pLow)]]);
     expect(samplePocket(cold.P, cold.U, 1.225, 1, bound).overBound).toBe(-Infinity);
+  });
+
+  it('reads "max T′ at 2000 ≤ its start" with the stated f64 round-off allowance (W3S-N1)', async () => {
+    // the CPU at-rest case is a rest state to round-off: its max T' at 2000 sits a few u (2^-53)
+    // from its start on either side, so the row allows the bound of that rounding, 2e-12
+    expect(END_ROUND_OFF_ALLOWANCE).toBe(2e-12);
+    const bound = isentropicPocketBound(WALL_900);
+    const endRow = async (ratio: number) => {
+      const start = samplePocket(field([[0, 1200]]).P, field([[0, 1200]]).U, 1.225, 1, bound);
+      const late = field([[0, 1200 * ratio]]);
+      const t = await tracePocket(start, () => samplePocket(late.P, late.U, 1.225, 1, bound));
+      return hotPocketRows(WALL_900, t).find((r) => r.metric.includes('its start'));
+    };
+    expect((await endRow(1 + 1e-15))?.pass).toBe(true);
+    expect((await endRow(1 + 1e-12))?.pass).toBe(true);
+    expect((await endRow(1 + 1e-11))?.pass).toBe(false);
+    expect((await endRow(0.5))?.pass).toBe(true);
+  });
+
+  it("reports the run's peak p′ beside the peak row, where it sat, and the acoustic scale (W3S-N3)", async () => {
+    const bound = isentropicPocketBound(WALL_900);
+    const start = samplePocket(field([[0, 900]]).P, field([[0, 900]]).U, 1.225, 1, bound);
+    expect(start.pMax).toBe(0);
+    let k = 0;
+    // p' rises to 40 kPa at iteration 3 (in cell 1), then falls back
+    const t = await tracePocket(start, () => {
+      k++;
+      const pk = k === 3 ? 40e3 : 5e3;
+      const f = field([
+        [-1e3, 0],
+        [pk, 900],
+      ]);
+      return samplePocket(f.P, f.U, 1.225, 2, bound);
+    });
+    expect(t.peakP).toBe(40e3);
+    expect(t.peakPAt).toEqual([3, 1]);
+    const rows = hotPocketRows(WALL_900, t);
+    const pRow = rows.find((r) => r.metric.includes("peak p'"));
+    expect(pRow?.pass).toBe('reported');
+    expect(pRow?.value).toBe(40e3);
+    // rho_inf c_inf |u0| at ISA SLS and 300 m/s: 1.2250 x 340.3 x 300 = 125 kPa
+    expect(pRow?.metric).toMatch(/rho_inf c_inf |u0| = 1.25e+5 Pa/);
+    // four gated rows and the reported one
+    expect(rows.filter((r) => r.pass !== 'reported').length).toBe(4);
+    expect(rows.length).toBe(5);
   });
 });
