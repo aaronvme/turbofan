@@ -548,6 +548,14 @@ describe('annunciators', () => {
     )[1];
     expect(coupled?.text).toBe('FIELD: SOLVER (coupled)');
     expect(coupled?.level).toBe('normal');
+    // CP5 (D5-7): forces and sources on, the trim outside L12's tolerances
+    const calibrating = provenanceBadges(
+      { cycle: 'model', flow: 'solver' },
+      { asked: 'solver', coupling: 'calibrating', fallback: null },
+    )[1];
+    expect(calibrating?.text).toBe('FIELD: solver (calibrating)');
+    expect(calibrating?.level).toBe('advisory');
+    expect(calibrating?.detail).toMatch(/not yet within L12/);
     const fellBack = {
       asked: 'solver',
       coupling: 'mock',
