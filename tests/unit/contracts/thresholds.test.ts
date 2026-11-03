@@ -40,8 +40,9 @@ function readPhysicsThresholds(): PhysicsRow[] {
     const cells = line.split('|').map((c) => c.trim());
     if (cells.length !== 5) continue;
     const [, id = '', check = '', pass = ''] = cells;
-    // an ID is a letter, a number and an optional sub-row letter (P5b by D4-94)
-    if (!/^[TCLP]\d+[a-z]?$/.test(id)) continue;
+    // an ID is a letter, a number and an optional sub-row letter (P5b by D4-94); the coupling
+    // rows CP1-CP5 (D5-7) are two letters
+    if (!/^(?:[TCLP]|CP)\d+[a-z]?$/.test(id)) continue;
     rows.push({ id, section, check, pass });
   }
   return rows;
@@ -51,9 +52,9 @@ const physics = readPhysicsThresholds();
 
 describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
   it('finds the full pre-registered set in PHYSICS.md', () => {
-    // T1-T4, C1-C12 (C10 by D3-3, C11 by D3-11, C12 by D3-17), L1-L14 (L14 by D5-2), P1-P5 and P5b
-    // (P4 by D4-2, P5 by D4-90, P5b by D4-94)
-    expect(physics.length).toBe(4 + 12 + 14 + 6);
+    // T1-T4, C1-C12 (C10 by D3-3, C11 by D3-11, C12 by D3-17), L1-L14 (L14 by D5-2), CP1-CP5
+    // (D5-7), P1-P5 and P5b (P4 by D4-2, P5 by D4-90, P5b by D4-94)
+    expect(physics.length).toBe(4 + 12 + 14 + 5 + 6);
   });
 
   it('has exactly the same IDs, in the same order', () => {
@@ -105,6 +106,16 @@ describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
     expect(THRESHOLDS.L14.values.cfl.value).toBe(0.8);
     expect(THRESHOLDS.L14.values.maxPeakOverIsentropicCompression.value).toBe(1.03);
     expect(THRESHOLDS.L14.values.maxUndershootFractionOfDeltaT.value).toBe(0.03);
+    expect(THRESHOLDS.CP1.values.maxEulerWorkRelativeError.value).toBe(1e-4);
+    expect(THRESHOLDS.CP1.values.maxMassFluxStep.value).toBe(1e-3);
+    expect(THRESHOLDS.CP1.values.cells.value).toBe(130_000);
+    expect(THRESHOLDS.CP2.values.maxRelativeError.value).toBe(0.001);
+    expect(THRESHOLDS.CP3.values.maxRelativeError.value).toBe(0.1);
+    expect(THRESHOLDS.CP4.values.maxIterations.value).toBe(300);
+    expect(THRESHOLDS.CP4.values.steadyIterations.value).toBe(2000);
+    expect(THRESHOLDS.CP5.values.minTemperatureFactor.value).toBe(0.95);
+    expect(THRESHOLDS.CP5.values.maxTemperatureFactor.value).toBe(1.05);
+    expect(THRESHOLDS.CP5.values.minIterationsPerS.value).toBe(150);
     expect(THRESHOLDS.P1.values.minIterationsPerS.value).toBe(150);
     expect(THRESHOLDS.P3.values.maxValidationErrors.value).toBe(0);
     expect(THRESHOLDS.P4.values.maxRenderGpuMs.value).toBe(8);
@@ -135,6 +146,12 @@ describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
     expect(THRESHOLDS.P5.values.leverRampS.value).toBe(1);
   });
 
+  it("CP4's spread bar is the text's \"a tenth\" of each tolerance (D4-45's form; no number to parse)", () => {
+    expect(THRESHOLDS.CP4.passText).toContain('with a spread ≤ a tenth of it');
+    // CP4 reaches L12's own tolerances, typed there
+    expect(THRESHOLDS.CP4.passText).toContain("L12's station-flow, T₄ and thrust tolerances");
+  });
+
   it('marks the thresholds whose numbers live in ENGINE_FACTS.md instead', () => {
     expect(thresholdNumbers('C4')).toEqual([]);
     expect(thresholdNumbers('C6')).toEqual([]);
@@ -149,6 +166,9 @@ describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
 describe('parseThresholdToken', () => {
   it.each([
     ['0.5%', 0.005],
+    // the coupling rows write a space before the percent sign (D5-7)
+    ['0.1 %', 0.001],
+    ['10 %', 0.1],
     ['1e-6', 1e-6],
     ['1e-4', 1e-4],
     ['20k', 20_000],
