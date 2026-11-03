@@ -5727,7 +5727,21 @@ My `w3s-j-outflow-cycle.probe` (J's set-up from `precondition.test.ts`, the last
 | trial20 | stalls at 0.57-0.87; rows 5-9 62-63, rows 10-15 30 | **converges at 2415** (1.7e-7-1.0e-6 over 10000-12000) |
 
 - **The finding is stated correctly.** The stall is a limit cycle at the outflow rows beside the jet, and it is not this branch's: main stalls the same way.
-- **The attribution can be sharper.** It came in with D4-101's backflow branch on main. Before it, J at 0.02 met its rule at 9441, SOLVER.md §10's recorded 9441 (D4-81's global-cut table). Critic pass 19 did not run J at 0.02, since it is not a row. W3S-I2 below.
+- **The attribution can be sharper.** It came in with D4-101's backflow branch on main. Before it, J at 0.02 met its rule at 9441, as SOLVER.md §10's M_cut 0.02 table records. Critic pass 19 did not run J at 0.02, since it is not a row. W3S-I2 below.
 - **The period, precisely.** "About 64 iterations" is right for rows 5-9 (a sign change every 31 iterations). Rows 10-15 switch at half that rate, and the residual's autocorrelation peaks at 122-129.
 
-(Gates, mutants, findings and the verdict follow.)
+### Gates (trial20 = main 493f72c + w3/scheme @97a2769; on battery throughout)
+
+| gate | result |
+|---|---|
+| `npm run typecheck` | clean, 21 s (1/100 %) |
+| `npm run lint` (ESLint + Prettier) | clean, 79 s |
+| `npm run test:mesh` | 2 files, 29 passed (3 s) |
+| `npm run test:gpu` | **12 files, 73 passed, 1 failed: E-L9a's flux-scale row, 1.187e-9 against D4-71's 1e-10** (W3S-I1), 82 s. E-L5 2.67e-8 (record). C 5.46e-7 / 2.30e-6 / 6.49e-6, C-pre 5.68e-7 / 3.72e-7 / 1.30e-6, C physical 2.34e-7 / 3.11e-7 / 3.02e-5, D Sod 3.66e-8 / 4.56e-8, E L5 6.19e-6, E L9a 6.05e-6 (residual form 3.18e-6), S 5.32e-7 / 5.79e-7 / 1.30e-5, backflow at p_out 1 / 0.98 p∞ 4.20e-6 / 4.07e-6 / 9.87e-6 and 4.90e-6 / 4.86e-6 / 8.37e-6 (W2S-N1's row) |
+| `npm run test:gpu-ladder` | **5 files, 17 passed + 1 expected fail** (L9a's D4-57 pin, 1.344e-5), 368 s (1/96 %). L14 every row of all 10 cases (worst peak T′/T′_s 1.021, worst min −0.00698 ΔT; at rest 1.000 / 0.4115 / −3.2e-5). L1 2.13e-5 m/s; B 1.266e-11; L2 0.002768 / 0.2282; L3 0.002113; L4 0.002779 / 0.0009964; L5 0.000843; L6 3.000e-4 / 4.93e-8, 2.873e-5; L7 0.01110 / 0.001287 / 1.644; L8 0.7530 % (3.26e-5); L9a 1.657e-6; L9b 0.7990 % (3.43e-5); D4-63 and W2S-B1 as item 6 |
+| `npm run coverage` (`--coverage.reportsDirectory=reports/scratch/c20/coverage`) | **140 files, 2409 passed + 10 expected fail**, exit 0, 344 s (1/91 %). Statements 98.54 %, branches 87.97 %, functions 99.56 %, lines 99.55 %. Core lines: thermo 100 %, cycle 99.62 %, flow/reference 100 %, geometry 99.59 %, flow/gpu 99.75 %. Changed files (lines / branches): reference/solver 100 / 85.3, precondition 100 / 100, reference/boundary 100 / 90.7, thresholds 100 / 100 |
+| `npm run test:ladder` without d463, first run | **void for 5 files**: the laptop entered Modern Standby at 08:21:45, 3 min in, and left it at 09:11:58 (Kernel-Power 506/507), despite the script's execution-state request, so L7, L8, L9b, floor and L14 hit their 30-min timeouts on waking (3212 s). Valid from it (they finished before the standby, or started after it): L1 0 / 2.03e-13; L2 0.002767 / 0.2282; L3 0.002113; L4a 0.2779 % / 0.0997 % / 915; **L4b 1.640 % / 2.580e-4** (started 09:12 after waking); L5 0.0843 % / 948; L6 3.004e-4 / 4.5e-15, 2.902e-5 / 5.41e-8; **L9a 9.824e-6, D4-57 steadiness 9.202e-6: PASSES** (convergence row known); f32 rows C 1.69e-7 / 4.09e-7 / 1.26e-6, C-pre 1.35e-7 / 1.71e-7 / 4.99e-7, C physical 8.0e-8 / 2.6e-7 / 7.2e-6, S 1.25e-7 / 1.34e-7 / 9.50e-7 |
+| `test:ladder`, the voided files re-run (L7, L8, L9b, floor, L14) | (running) |
+| `test:browser` | not run: no render, ui or app code in the diff |
+
+(Mutants, findings and the verdict follow.)
