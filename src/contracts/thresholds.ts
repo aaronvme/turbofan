@@ -397,6 +397,70 @@ export const THRESHOLDS = {
     },
   },
 
+  // D5-7 (pre-registered 2026-11-03, before any coupling code): the coupling rows of w3/coupling.
+  // CP4's spread bar is "a tenth" of each tolerance (D4-45's form), stated in words, so it has no
+  // typed number here; L12 types the tolerances CP4 reaches
+  CP1: {
+    id: 'CP1',
+    section: '3.3',
+    checkText:
+      'Body-force consistency per row (Hall-Thollet with blockage on the compressor rows, follow-camber turbine rows), on the real 130k mesh, oracle and kernel',
+    passText:
+      "each row's integrated energy source equals Ω × its integrated angular-momentum source to L9's 1e-4 relative; the blockage from the definition's metal thickness, with its mass flux continuous through the row's edges (no step > 1e-3 relative between neighbouring columns); the stall saturation and the reversed-flow loss continuous in the incidence (no jump at the switch)",
+    targetsFrom: 'PHYSICS',
+    values: {
+      maxEulerWorkRelativeError: pass(1e-4, '1', '1e-4 relative'),
+      maxMassFluxStep: pass(1e-3, '1', 'no step > 1e-3'),
+      cells: check(130_000, 'cells', '130k'),
+    },
+  },
+  CP2: {
+    id: 'CP2',
+    section: '3.3',
+    checkText: "The combustor's heat and fuel sources",
+    passText:
+      'integrated over the combustor cells: the heat equals η_b · W_f · LHV, and the fuel source equals W_f, each within 0.1 % at every fuel flow from idle to take-off',
+    targetsFrom: 'PHYSICS',
+    values: { maxRelativeError: pass(0.001, '1', '0.1 %') },
+  },
+  CP3: {
+    id: 'CP3',
+    section: '3.3',
+    checkText:
+      'The feedforward alone (the table K(N1c, N2c) with no trim), as a sanity bar on its job',
+    passText:
+      "at each table point the field's station flows and thrust are within 10 % of the cycle model, so the trim's job is small",
+    targetsFrom: 'PHYSICS',
+    values: { maxRelativeError: pass(0.1, '1', '10 %') },
+  },
+  CP4: {
+    id: 'CP4',
+    section: '3.3',
+    checkText:
+      "The calibration spike: the ~16 grouped knobs' log-space integral trim from a warm start on the working line",
+    passText:
+      "reaches L12's station-flow, T₄ and thrust tolerances in < 300 solver iterations; then, over the next 2000 iterations, every one of those errors stays inside its tolerance, with a spread ≤ a tenth of it (D4-45's steadiness form), so there is no limit cycle",
+    targetsFrom: 'PHYSICS',
+    values: {
+      maxIterations: pass(300, 'iterations', '< 300 solver iterations'),
+      steadyIterations: pass(2000, 'iterations', 'the next 2000 iterations'),
+    },
+  },
+  CP5: {
+    id: 'CP5',
+    section: '3.3',
+    checkText:
+      "The coupled field through a cycle-driven throttle ramp (idle → take-off → idle, the cycle model's own transient)",
+    passText:
+      'finite throughout with ρ > 0; every cell\'s T within [0.95 × the cycle\'s lowest station T, 1.05 × its highest]; the field labelled "coupled" only while L12\'s tolerances hold at the current point, else "calibrating" (the fidelity ledger and the legend say which); P1 ≥ 150 it/s with the forces and sources on (indicative in the gates, official in a quiet window)',
+    targetsFrom: 'PHYSICS',
+    values: {
+      minTemperatureFactor: pass(0.95, '1', '0.95 ×'),
+      maxTemperatureFactor: pass(1.05, '1', '1.05 ×'),
+      minIterationsPerS: pass(150, 'iterations/s', '≥ 150 it/s'),
+    },
+  },
+
   // 3.4 Performance
   P1: {
     id: 'P1',
@@ -507,15 +571,16 @@ export function thresholdNumbers(id: ThresholdId): readonly ThresholdNumber[] {
 
 /**
  * Reads the number in a threshold token: the first decimal or scientific literal, then an
- * immediately following suffix: "%" divides by 100, lower-case "k" multiplies by 1000 (so
+ * immediately following suffix: "%" (or " %") divides by 100, lower-case "k" multiplies by 1000 (so
  * "±10 K" stays 10 kelvin). "zero" is 0. Prefixes such as "≤", "±", "~", "M " are ignored.
  */
 export function parseThresholdToken(token: string): number {
   if (token.trim().toLowerCase() === 'zero') return 0;
-  const match = /(\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)(%|k)?/.exec(token);
+  // the coupling rows (D5-7) write a space before "%" ("0.1 %"); never before "k" (a unit then)
+  const match = /(\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)(?: ?(%)|(k))?/.exec(token);
   if (match?.[1] === undefined) throw new Error(`threshold token "${token}" has no number`);
   const n = Number(match[1]);
-  const suffix = match[2];
+  const suffix = match[2] ?? match[3];
   if (suffix === '%') return n / 100;
   if (suffix === 'k') return n * 1000;
   return n;
