@@ -1,0 +1,90 @@
+// Critic pass 20 probe (W3S, D5-5 item 4): precondition.test.ts's J (a M 0.05 jet into dead air,
+// 32 x 16, inflow nozzle, slip-wall base, outflow at imax, axis, far field) at minMach = M_cut = mc,
+// on the source tree this file is copied into (<root>/probe/jprobe.ts: main's or trial20's). Reports
+// D4-44 (c)'s convergence (1e-5 of the peak for 50 iterations), the residual over its peak over the
+// last 2000 iterations, the outflow column's iterations in backflow and its vn sign changes per row
+// over that window, and the residual's dominant period there (autocorrelation peak).
+// node --import ./tools/mesh/ts-resolve.mjs <root>/probe/jprobe.ts <iterations> <mc>
+import { caloricallyPerfectGas } from '../src/flow/reference/gas';
+import { ReferenceSolver } from '../src/flow/reference/solver';
+import { NP } from '../src/flow/reference/state';
+import { BC, facePatches, rectangle, solverMesh } from '../tests/unit/flow/helpers';
+
+const its = Number(process.argv[2] ?? '12000');
+const mc = Number(process.argv[3] ?? '0.02');
+const win = 2000;
+const gas = caloricallyPerfectGas(1.4, 287.05287);
+const b = rectangle('jet', 0, 0.8, 0, 0.4, 32, 16);
+const mesh = solverMesh({
+  blocks: [b],
+  patches: [
+    { block: 0, face: 'imin', start: 0, end: 4, bc: BC.INFLOW, label: 'nozzle' },
+    { block: 0, face: 'imin', start: 4, end: 16, bc: BC.SLIP_WALL, label: 'base' },
+    ...facePatches(b, 0, { imax: BC.OUTFLOW, jmin: BC.AXIS, jmax: BC.FARFIELD }),
+  ],
+});
+const M = 0.05;
+const s = new ReferenceSolver(mesh, {
+  gas,
+  freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
+  inflowTotal: { p0: 101325 * (1 + 0.2 * M * M) ** 3.5, t0: 288.15 * (1 + 0.2 * M * M) },
+  lowMachPreconditioning: { minMach: mc, machCut: mc },
+});
+s.setUniform({ rho: s.ref.rho, u: 0, v: 0, w: 0, p: 101325, z: 0 });
+let peak = 0;
+let start = 0;
+let conv = 0;
+const flips = new Array<number>(16).fill(0);
+const back = new Array<number>(16).fill(0);
+const prev = new Array<number>(16).fill(0);
+const tail: number[] = [];
+const t0 = Date.now();
+for (let it = 1; it <= its; it++) {
+  const r = s.iterate(1).residualDensityL2;
+  if (!Number.isFinite(r)) {
+    console.log(`non-finite at ${it}`);
+    break;
+  }
+  peak = Math.max(peak, r);
+  const q = r / peak;
+  if (conv === 0) {
+    if (q > 1e-5) start = 0;
+    else if (start === 0) start = it;
+    if (start > 0 && it - start + 1 >= 50) conv = start;
+  }
+  if (it > its - win) {
+    tail.push(q);
+    const P = s.primitives();
+    for (let j = 0; j < 16; j++) {
+      const sg = (P[NP * (j * 32 + 31) + 1] as number) < 0 ? -1 : 1;
+      if (sg < 0) back[j] = (back[j] ?? 0) + 1;
+      if (it > its - win + 1 && sg !== prev[j]) flips[j] = (flips[j] ?? 0) + 1;
+      prev[j] = sg;
+    }
+  }
+}
+const mean = tail.reduce((a, x) => a + x, 0) / Math.max(1, tail.length);
+let bestLag = 0;
+let best = -Infinity;
+for (let lag = 8; lag <= 400; lag++) {
+  let acc = 0;
+  for (let k = 0; k + lag < tail.length; k++)
+    acc += ((tail[k] ?? 0) - mean) * ((tail[k + lag] ?? 0) - mean);
+  if (acc > best) {
+    best = acc;
+    bestLag = lag;
+  }
+}
+console.log(
+  JSON.stringify({
+    mc,
+    its,
+    converged: conv,
+    tailMin: Math.min(...tail),
+    tailMax: Math.max(...tail),
+    period: bestLag,
+    backflow: back,
+    flips,
+    seconds: (Date.now() - t0) / 1000,
+  }),
+);

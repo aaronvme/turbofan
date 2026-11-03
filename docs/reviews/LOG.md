@@ -5548,10 +5548,186 @@ Power: **AC for every gate** (BatteryStatus 2, 100 %). The orchestrator's CPU d4
 4. **The shots:** commit the builder's DPR-1 set (shot with the display asleep), or re-shoot on the merged main with the display held on, so the set is at DPR 1.5 like round 7's? I prefer the re-shoot.
 5. **Keep-awake in detached browser runs:** make it system and display (`0x80000003`, ES_DISPLAY_REQUIRED added), for builders and critics alike? With the system flag alone, the display sleeps at its 5-minute AC timeout, Chrome drops to DPR 1 and is throttled, and Modern Standby can close the browser connection. My first browser gate failed that way (fanBlur about 10× slower, 2 timeouts at 240 s, warmStall's connection lost), and the builder's shots show the same DPR 1. D0-1 already asks for the display awake in official runs.
 
-## Critic pass 20: w3/scheme @97a2769 (rounds 1-2) (PARTIAL: in progress)
+## Critic pass 20: w3/scheme @97a2769 (rounds 1-2) (PARTIAL: gates and mutants in progress)
 
-**Scope.** w3/scheme `e6c48de..97a2769` (24 commits; e552cc1 is the orchestrator's merge of main's D5-5): W2S-I1's fix (SOLVER.md §10/§17's pairwise face radius in the local step, 2b87b39), D5-5 item 1's mirrored slip-wall ghost for ρ′ and Z (ea9c486), L14 on the CPU oracle and the GPU kernel with D5-5's restated peak row, W2S-N1..N3, J's pin lifted at 0.003, and SOLVER.md §5/§17/§17.1, PHYSICS.md 3.3's L14 result line.
+**Scope.** w3/scheme `e6c48de..97a2769` (24 commits; e552cc1 is the orchestrator's merge of main's D5-5):
+- W2S-I1's fix: SOLVER.md §10/§17's pairwise face radius in the local step (2b87b39), oracle and kernel;
+- D5-5 item 1: the slip-wall ghost mirrors ρ′ and Z (ea9c486), oracle and kernel;
+- L14 on the CPU oracle and the GPU kernel, with D5-5's restated peak row (the KNOWN-FAIL pin lifted, d9e728e);
+- W2S-N1..N3, J's pin lifted at 0.003, the wall-ghost GPU test's bound (cd88474);
+- SOLVER.md §5/§17/§17.1 and PHYSICS.md 3.3's L14 result line.
 
-**Setup** (2026-11-03, the critic worktree): a local branch `trial20` from main 493f72c took `--no-ff` w3/scheme (9458e5c), clean; its tree equals 97a2769's (w3/scheme already holds main). `git diff --stat main..w3/scheme` touches only docs, `src/contracts`, `src/flow` and tests, so test:browser is not run. Power: **on battery** (BatteryStatus 1) throughout so far; timing rows are indicative. Gates run detached one at a time (`reports/scratch/c20/gates.ps1`, display held, 0x80000003).
+**Setup** (2026-11-03, the critic worktree):
+- A local branch `trial20` from main 493f72c took `--no-ff` w3/scheme (9458e5c), clean. Its tree equals 97a2769's, because w3/scheme already holds main.
+- `git diff --stat main..w3/scheme` touches only docs, `src/contracts`, `src/flow` and tests, so test:browser is not run.
+- **Power: on battery for every gate and probe** (BatteryStatus 1, 100 % → 91 % so far), so the timing rows are indicative. Gates ran detached one at a time (`reports/scratch/c20/gates.ps1`, the display held with 0x80000003), and no probe ran beside a gate.
+- Probes ran on `git archive` copies of main (`reports/scratch/c20/main`), trial20 (`br`) and 9b5a6c2 (`pre`, main before D4-101). The E-L9a probe ran as a temporary GPU test file in the critic tree, deleted after.
+- The builder's worktree and its `reports/scratch` were only read.
+- New probes, committed with this pass:
+  - `docs/reviews/probes/w3s-el9a-sensitivity.probe.ts.txt`;
+  - `w3s-l14-controls.probe.ts.txt`, with `w3s-l14-guard-control.patch.txt` (the guard-only control re-implemented on main from SOLVER.md 17's text);
+  - `w3s-j-outflow-cycle.probe.ts.txt`.
 
-(in progress)
+### 1. The pairwise face radius (2b87b39): right, the same rule on both sides, plain and physical paths untouched
+
+- **The rule is the standard local wave-speed bound of a face (Rusanov/LLF), applied to the preconditioned system.** Each face's λ is b_f |S| max(r(q_c, β_c), r(q_nb, β_nb)), and the cell's τ is CFL over the sum of the two directions' larger face terms.
+  - What crosses a face is set by both of its states. The old τ took only the cell's own, so a cold cell at β = minMach (a step 50× its acoustic one) beside 100-300 m/s hot gas ran at a Courant number of about 10.
+  - The builder's linearisation (|G| 16.4 → 1.24) and my reading agree on that mechanism. The steady state cannot move, because R = 0 does not depend on τ. L7 converged to 1e-6 shows it (item 6).
+- **The slip-wall exclusion is right.** The wall flux is pressure only, and the wall ghost is a reflection, not a state of the gas. With ρ′ mirrored and p′ extrapolated, its T′ = p′_g/ρ′_g is hotter than any neighbour wherever p has a wall-normal gradient: 23 % in the unit row at p∞ + 30 kPa.
+- **The oracle and the kernel are the same rule, by reading.**
+
+  | part | oracle | kernel |
+  |---|---|---|
+  | the cell's own radius | `spectralRadius(u·n, c, β²)` (`solver.ts`) | the same call |
+  | the neighbour's radius | `neighbourSpectralRadius` (`precondition.ts`) | `neighbourRadius` (`kernels.ts`) |
+  | the neighbour's state | P of the extended index (a cell, or a ghost after its BC) | the halo's `wqa`/`wqb` (the same ghost, filled by the same BC code) |
+  | the neighbour's c | `temperatureFromPressure(ρ′, p′, φ(Z))`, then `soundSpeed`; never the stored T′ or c | the same, in the same order |
+  | the neighbour's β | `betaExt` (a ghost: its `ghostSrc`'s) | `wbeta` = sqrt(`cellBeta2[betaSource(e)]`) |
+  | the wall test | `wall[nb] === 1` | `wb[t] < 0` (EXT_B negative from the same `layout.wall`) |
+  | when it applies | `tracking && pre && minMach < 1` | `P.mode == 0`, `P.stage == 0`, `precondition == 1`, `minMach2 < 1` |
+
+  - A layer-1 ghost's β is its source cell's, i.e. the boundary cell's own, on both sides.
+  - An interface ghost (code 0) is the neighbour block's cell, so the face takes that cell's β and state on both sides. That is the block-interface case, which C-pre (three blocks, an axis and slip walls, at 0.02) checks kernel against oracle every run: 5.68e-7 / 3.72e-7 / 1.30e-6 against 1e-5 / 1e-4 / 1e-3 in my test:gpu.
+  - The face-neighbour halo positions all lie in the first ring that `wbeta` holds.
+- **Plain and physical-time paths are bitwise as before, by reading.**
+  - The oracle's non-pairwise branch does the same operations in the same order: `lf = spectralRadius(...)`, then `bf * area * lf`.
+  - `globalDt` (physical time) calls `computeLocalDt(false)`.
+  - The kernel's else branch is the old `cellLambda` call on the same four face reads.
+  - My test:gpu repeats E-L5 2.67e-8 and C (plain) 5.46e-7 / 2.30e-6 / 6.49e-6, and the GPU ladder's L2 0.002768 / 0.2282, L3 0.002113 and L4/L5 equal their records.
+- **CPU and GPU agree on the rule end to end:**
+  - L14 (below) to every digit shown;
+  - D4-63 on the 130k multi-block engine mesh: (a) 0.4497 on both, (b) 0.2156 / 0.2158.
+
+### 2. The mirrored wall ghost for ρ′ and Z (D5-5 item 1): the standard reflective treatment, conservative, L6 intact; one accuracy note
+
+- **It is the standard reflective ghost for a scalar at a slip wall.** It gives a zero normal gradient in the ghost, so the limiter makes the wall cell's ρ′ and Z first order in the wall-normal direction.
+  - A minmod-type limiter sees Δ− = 0, so the slope is 0, and the face value towards the interior is the cell's own q₀.
+  - An outgoing flow then carries out at most what the cell holds, which removes round 1's drain: dρZ/dt = −ṁ(Z₀ + Z₁)/2 < 0 at Z₀ = 0.
+  - The Euler slip wall does not itself require ∂s/∂n = 0. The mirror is a choice of the reconstruction, as in most codes, and it is the right one here.
+- **Conservation at the wall is untouched.** The wall face's flux is |S|(0, p′_w n, 0, 0, 0) from the extrapolated p′ (§7), independent of the ghost's ρ′ and Z, so mass, energy, fuel and angular momentum through walls stay exact zeros.
+- **L6 is untouched.** It needs p′ and ρw extrapolated, which they still are. My test:gpu-ladder gives free vortex 3.000e-4 / 4.93e-8 and solid body 2.87e-5, against the records 3.005e-4 (CPU) and 3.007e-4 (GPU). The CPU ladder's values are under Gates.
+- **The mix with extrapolated p′ is consistent where it matters.** Its one cost is first order, not a defect: the wall cell's face state towards the interior pairs a first-order ρ′ with a second-order p′, so its T′ is off by about ½ Δρ/ρ of the wall-normal step.
+  - In an isothermal pressure gradient that is a face T hotter than both cells by ½ Δp/p.
+  - It is O(Δ) at a limiter extremum, the same order the limiter already accepts there. It is the reason the wall face keeps the cell's radius (above).
+- **The oracle and the kernel are identical.**
+  - The oracle copies k 0 and 5 from the layer's own source and extrapolates k 3 and 4.
+  - The kernel does the same with two `select`s (exact in f32).
+  - The GPU test checks ρ′ and Z of all 48 wall ghosts bitwise against their source cells, on both sides.
+  - My mutants W1c, W1g and W2g (below) are killed.
+- **The engine runaway** (reported, not gated; the builder's `runaway-branch.txt`, read): finite to 8000 from the pre-fix 6700 state, max T′ 1042 → 851 K, no non-finite cell in any of the 26 samples. Round 1's branch went non-finite by 6770 at the core duct's outer wall.
+
+### 3. L14 as implemented, and the restated peak row
+
+- **The implementation matches PHYSICS.md 3.3 exactly** (`tests/ladder/hotPocket.ts`):
+  - the duct, the 10 cases (8 + the two probe cases) and the pocket at pressure equilibrium with Z 0.015;
+  - the engine defaults (thermally perfect, 0.02, CFL 0.8 by default, the sharp limiter);
+  - every case sampled after every iteration;
+  - the four rows, each NaN-safe (a run that does not hold fails all three value rows);
+  - T′_s = T_h (p/p∞)^(R/cp) − T∞ with R and cp of the mixture at T_h and Z 0.015;
+  - the CPU and GPU tests share the rows, and `thresholds.ts` mirrors 1.03 and 0.03.
+- **PHYSICS.md's row text is unchanged** (`git diff main..w3/scheme -- docs/PHYSICS.md` is one added line, the "Result (w3/scheme round 2)" bullet under the amended bullet, as L4's "Result (2026-10-27)" is recorded). The result line's numbers are right (1.021, −0.0070, 2.647, 1.031).
+- **The restatement is principled, not a loosening of what the row is for.**
+  - In an inviscid adiabatic flow a parcel's T at pressure p exceeds its isentrope only through shock entropy. For the slug's leading edge (a velocity jump of about 150 m/s into hot gas at c ≈ 700 m/s) the shock entropy is under 0.2 % of T. Mixing with cold gas only lowers T.
+  - So T′ ≤ 1.03 T′_s is a maximum principle that the physics obeys with about 2.8 % to spare, and a violation is a temperature the scheme made.
+  - It is looser than the pre-registered row in compression (T′_s 1.034 ΔT at 11 kPa) and **tighter** in expansion, where T′_s < ΔT (the slug's trailing edge).
+  - The constant cp at T_h makes the bound generous by under 0.01 % of T at these pressures, in both directions.
+  - Its limitation is W3S-N3: the bound moves with p, so a temperature that follows a spurious pressure is accepted.
+- **The controls hold, by my own runs** (`w3s-l14-controls.probe`, 10 cases each, every iteration sampled):
+
+  | scheme (tree) | worst peak T′/T′_s | its old row (peak/start) | cases passing every row | worst min T′/ΔT |
+  |---|---|---|---|---|
+  | **the guard-only control** (main + my re-implementation of SOLVER.md 17's guard: the increment halved until ρ ≥ ½ρⁿ and ½T ≤ T ≤ 2T) | **2.6469** (1200 K, −300, wall, iteration 156): **FAILS** | 2.6451 | 2 | −0.1883 |
+  | the guard's other moving cases | 1.1060 and 1.0421 also fail; the other five pass the peak row but fail the undershoot row | | | |
+  | the plain scheme, CFL 1.5 (trial20) | **1.0311 / 1.0312** (900 K, −300, wall / mid, iteration 5): fail | 1.1684 / 1.1697 | 7 (the at-rest case fails "end ≤ start" by round-off) | −0.0410 |
+  | main before the fix (contract step, extrapolated wall) | 8 cases non-finite at iteration 1 | | 1 | −0.2168 (900 K, −50) |
+  | trial20 (my test:ladder and test:gpu-ladder; Gates) | see Gates | | 10 | |
+
+  My guard re-implementation gives the builder's 2.647 to the digit, and every other value of the builder's `ctl-guard-extrap.txt`, so the trial copy's guard is the one SOLVER.md 17 describes.
+- **The plain scheme failing the restated row at 1.031 is itself evidence that the row has teeth.** It sits at iteration 5 in the leading edge, where shock entropy accounts for under 0.2 %. So the plain sharp-limiter transient overshoots its own isentrope by about 3 %. "Closer to the physical transient" (§17) is true of its old-row 1.17, which was mostly compression, but not of the 3 %.
+
+### 4. E-L9a's flux-scale row: measured; recommendation (1), restate it (form below)
+
+**My measurement** (`w3s-el9a-sensitivity.probe`, E-L9a's set-up exactly, Dawn on the Arc iGPU, run twice: trial20, and trial20 with main's two `wallGhost` files):
+- The row compares the residuals of U⁹, the first stage of iteration 10. Checked: the oracle's recomputed R(U⁹_ref) equals `stats.residualDensityL2` to 0.
+- So every sensitivity is evaluated at U⁹ by a third solver, the oracle's code in f64.
+
+| over r_flux (r_ref / r_flux = 3.735e-4 both) | main's wall (extrapolated) | trial20 (mirrored) |
+|---|---|---|
+| **the row** \|r_GPU − r_ref\| (D4-71's bar 1e-10) | **2.464e-12** (the record) | **1.187e-9: FAILS** (the builder's) |
+| S1: \|L2 R(U⁹_GPU, hi + lo) − L2 R(U⁹_ref)\| | 1.324e-10 | 1.165e-9 |
+| S2: the same with the GPU's f32 part only | 3.594e-10 | 1.094e-9 |
+| **S3: \|L2 R(fround U⁹_ref) − L2 R(U⁹_ref)\| (rounding the oracle's own state to f32: no GPU in it)** | **6.6e-12** | **1.944e-10** |
+| K: \|r_GPU − L2 R(U⁹_GPU, f32 part)\| (the kernel against the oracle on the kernel's own state) | 3.619e-10 | 9.289e-11 |
+| K2: the same against R(U⁹_GPU, hi + lo) | 1.348e-10 | 2.202e-11 |
+| per-cell rms \|R(U⁹_GPU) − R(U⁹_ref)\| (the norm of the difference) | 1.85e-7 | 1.60e-7 |
+
+**What the measurement shows:**
+- **The record passed by cancellation (the builder is right in kind).** With the old wall, the GPU's state moves the oracle's own residual by 1.3-3.6e-10, and the kernel's arithmetic on that state is off by 1.3-3.6e-10 the other way. The two cancel to 2.46e-12, 50-150× below either.
+  - That is the iteration's self-correction: each solver drives its own residual along the same pseudo-time path, so r_GPU tracks r_ref while U_GPU drifts.
+  - The builder's numbers (2.0e-9 old wall, 4.3e-9 mirror) are not the states the row compares (W3S-N2). Mine, at U⁹, are 5-15× smaller and give the same conclusion.
+- **With the mirror the cancellation is gone and the bar is below the f32 floor.**
+  - Rounding the oracle's own exact U⁹ to f32, with no kernel at all, moves the row's quantity by 1.94e-10, twice D4-71's 1e-10. The mirror makes the residual's L2 30× more sensitive to state rounding: the per-cell rms is unchanged, but the perturbation now projects onto the residual, presumably through the wall cells' zero-slope ρ′.
+  - So no f32 kernel can meet 1e-10 on this row with the mirrored wall, except by luck. That is W2R-I17's failure mode (a bar that correct arithmetic can fail), which D4-71 itself fixed by moving the bar above the norm's floor.
+- **The kernel is not worse.** K/K2 (its residual against the oracle's on the kernel's own state) is 4-6× **better** with the mirror (9.3e-11 / 2.2e-11) than with the old wall (3.6e-10 / 1.3e-10). The field row (6.05e-6 ≤ 1e-4) and the residual's own form (3.18e-6 ≤ 1e-3) pass as before.
+
+**Recommendation: (1), restate the row; neither (2) nor (3).**
+- **Not (3), rejecting the mirror.** The failure is the row's measurement, not the kernel. The mirror is what makes L14's undershoot rows, the GPU at-rest case and the engine runaway pass.
+- **Not (2), the pin.** A KNOWN-FAIL pin discards the row's power for good.
+- **Not the builder's form either.** "|r_GPU − r_ref| ≤ the oracle's |R(U_GPU) − R(U_ref)|" fails at U⁹ (1.187e-9 > 1.165e-9 and 1.094e-9). It is the triangle inequality's S + K with K dropped, so it sits on a knife edge.
+- **The form I recommend** (a test change; the threshold value is the orchestrator's):
+  - The row evaluates the oracle at the **GPU's own U⁹**: run 9 iterations on both, read the GPU's state back (`readConserved`, hi + lo), evaluate the oracle's density-residual L2 on it, then run the 10th iteration.
+  - The gated row becomes K2 = |r_GPU − L2 R_ref(U⁹_GPU)| / r_flux, with D4-62's rule: ten times the measured 2.2e-11, i.e. **3e-10**.
+  - That isolates what the row is for, the kernel's residual arithmetic. The state drift it used to include is the field row's business.
+  - 3e-10 is above W2R-I17's norm-reduction band (1.1e-11 to 8.8e-11 here), and both walls pass it (2.2e-11 and 1.35e-10).
+  - The old form is printed beside it as a reported row, with S3 (the f32 floor).
+- **That is a re-posed row, not a loosened one.** Its quantity excludes a term the kernel cannot control, and its bar sits 3× tighter than the old form's f32 floor with the mirror.
+- **If the orchestrator prefers to keep the old form,** the honest bar is above its floor: S1 ≈ 1.2e-9 → ten times it, 1e-8. That is a real loosening, which I do not recommend.
+
+### 5. Commit cd88474 (the wall-ghost GPU test's bound): justified, not a loosened bar
+
+- **The bar it replaced was the builder's own first draft** (61da405, same round): TOL[1] × max|q| over the cells. It was not a pre-registered threshold.
+- **The new bound is the exact error propagation of the extrapolation.** A ghost a q₀ − b q₁ with a + b ≤ 5 carries at most 5× its cells' error, plus the rounding of the result. 2⁻²² |R| is 4 u, which covers layer 2's rounding of 3q₀ plus the subtraction.
+- **Why the first draft failed with correct code.** The kernel's p′ comes from f32 conserved values, so its cell error is a few hundredths of a pascal. Five times that exceeds 1e-5 × 4 kPa = 0.04 Pa.
+- **It keeps its teeth.**
+  - The test's state has a 1 % per-cell p′ gradient (about 1 kPa), 10⁴-10⁵ × the tolerance. My mutant W3g (the kernel's p′ mirrored instead of extrapolated) is killed by this test (Mutants).
+  - ρ′ and Z are now checked bitwise (`toBe`), which is stricter than any tolerance.
+- **Weak spot (no finding).** Using the field's max cell error, not the ghost's own two cells', widens the bound for ghosts beside quiet cells. With the gradients the test sets, that leaves ample margin.
+
+### 6. D5-5 item 3: converged values at or better than record
+
+- **L7 converged to 1e-6** (the builder's `l7t-*.txt`, read, not re-run: about 32 min each on AC):
+
+  | scheme | asymmetry | Cd | iterations |
+  |---|---|---|---|
+  | the branch (pairwise step, mirrored wall) | 0.0110887 | 0.00112104 | 35867 |
+  | the contract step, mirrored wall | 0.0110888 | 0.00112116 | 35838 |
+  | the scheme of record (contract step, extrapolated wall) | 0.0110888 | 0.00112116 | 35838 |
+
+  - All three stopped at a residual of 8.8e-7-9.3e-7 of the first.
+  - So the steady state is unchanged: 1.6e-7 and 1.2e-7 between the rules, 2e-9 between the walls. The branch is at (asymmetry) and better than (Cd) the record scheme, both converged.
+  - The record's 0.01093 is a value at the 1e-4 stop. The converged value of the record scheme itself is 0.011089.
+- **CPU d463 of record** (the builder's `run/d463.log`, read; 5110 s, on AC per the handoff): every row passes.
+  - (a) 0.4497 / 0.008369, against the record 0.4450 / 0.009223;
+  - (b) 0.2156 / 0.03297, against 0.1535 / 0.03063.
+  - These are fixed-iteration values (item 3's second clause): their bars are ≤ 2 and ≤ 1, met by 4-30×.
+- **My GPU ladder, against the record:**
+  - D4-63: 0.4497 / 0.008217 (a), against 0.4450 / 0.008997; 0.2158 / 0.03297 (b), against 0.1634 / 0.03253; trend 0.876 per 1000, against 0.820.
+  - W2S-B1: 0.6286 / 2.057e-3 (a), against 0.6588 / 5.088e-4; 0.1621 / 0.0262 (b), against 0.1082 / 0.007278.
+  - Every bar holds by 4-500×. (b) 20000/10000 is the one value clearly worse (+32 % on the GPU, +40 % on the CPU). It is read at a fixed iteration of a changed map, so it is reported, as D5-5 says.
+- **L9a's D4-57 steadiness row: see Gates** (my CPU ladder).
+
+### 7. J at M_cut 0.02 (D5-5 item 4): stated correctly, and pre-existing since D4-101
+
+My `w3s-j-outflow-cycle.probe` (J's set-up from `precondition.test.ts`, the last 2000 iterations sampled):
+
+| tree | M_cut 0.02 | M_cut 0.003 |
+|---|---|---|
+| 9b5a6c2 (main before D4-101's backflow branch) | **meets D4-44 (c)'s rule at 9441**, residual 2.9e-6-9.9e-5 of its peak over 12000-14000; steady backflow on rows 10-14, no sign change | (not run) |
+| main 493f72c (D4-101, contract step, extrapolated wall) | **stalls at 0.60-0.88**; rows 5-9 switch sign 65-66 times and rows 10-15 33 times in 2000 | stalls at 0.28-0.45 (20000 its) |
+| trial20 | stalls at 0.57-0.87; rows 5-9 62-63, rows 10-15 30 | **converges at 2415** (1.7e-7-1.0e-6 over 10000-12000) |
+
+- **The finding is stated correctly.** The stall is a limit cycle at the outflow rows beside the jet, and it is not this branch's: main stalls the same way.
+- **The attribution can be sharper.** It came in with D4-101's backflow branch on main. Before it, J at 0.02 met its rule at 9441, SOLVER.md §10's recorded 9441 (D4-81's global-cut table). Critic pass 19 did not run J at 0.02, since it is not a row. W3S-I2 below.
+- **The period, precisely.** "About 64 iterations" is right for rows 5-9 (a sign change every 31 iterations). Rows 10-15 switch at half that rate, and the residual's autocorrelation peaks at 122-129.
+
+(Gates, mutants, findings and the verdict follow.)

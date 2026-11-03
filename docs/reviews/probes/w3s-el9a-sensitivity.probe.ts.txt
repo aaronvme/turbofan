@@ -1,0 +1,157 @@
+// Critic pass 20 probe (W3S, E-L9a's flux-scale row): how much of |r_GPU - r_ref| / r_flux is the
+// residual's own sensitivity to the state the kernel holds? E-L9a's set-up exactly as
+// tests/gpu/oracle.test.ts has it (duct(60), calorically perfect gas, the rotor-disk source, plain
+// tracking, 10 iterations). The residual of record (stats.residualDensityL2 and the kernel's
+// readResidual) is the first stage's of the 10th iteration, i.e. R(U^9); so the sensitivities are
+// evaluated at U^9 by a third solver (the oracle's code, f64) on:
+//   - the oracle's own U^9 (its row value, checked against stats);
+//   - the GPU's U^9 (hi + lo, readConserved) and its f32 part alone (fround: what the stage kernel's
+//     residual reads);
+//   - the oracle's U^9 rounded to f32 (the floor any f32 state carries, with no GPU in it).
+// Each over the flux scale r_flux of the oracle's state (the row's denominator). Run as a GPU test
+// (copied into tests/gpu/ for the run only), once on trial20 (the mirrored wall) and once with
+// main's two wallGhost files (the extrapolated wall); E-L9a is plain tracking, so the pairwise step
+// is not in it.
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { SimDevice } from '../../src/gpu/device';
+import { GpuSolver } from '../../src/flow/gpu/device/gpuSolver';
+import { caloricallyPerfectGas, type GasModel } from '../../src/flow/reference/gas';
+import { ReferenceSolver, type SolverOptions } from '../../src/flow/reference/solver';
+import type { SourceModel } from '../../src/flow/reference/sources';
+import { NP, NU } from '../../src/flow/reference/state';
+import { pOverP0, tOverT0 } from '../ladder/theory';
+import { BC, rectangle, singleBlock, solverMesh } from '../unit/flow/helpers';
+import { GpuErrorLog, solverDevice } from './helpers/solver';
+
+describe('critic 20 probe: E-L9a sensitivity', () => {
+  const log = new GpuErrorLog();
+  let sim: SimDevice;
+  beforeAll(async () => {
+    sim = await solverDevice(log);
+  });
+  afterAll(() => {
+    sim.destroy();
+  });
+
+  it('measures', async () => {
+    const GAMMA = 1.4;
+    const RGAS = 287.05287;
+    const OMEGA = 300;
+    const F_THETA = 3e4;
+    const mesh = solverMesh(
+      singleBlock(rectangle('duct', -0.3, 0.3, 0.5, 0.6, 60, 4), {
+        imin: BC.INFLOW,
+        imax: BC.OUTFLOW,
+        jmin: BC.SLIP_WALL,
+        jmax: BC.SLIP_WALL,
+      }),
+      'f32',
+    );
+    const disk = Array.from({ length: mesh.nCells }, (_, c) => c).filter(
+      (c) => Math.abs(mesh.cellX[c] ?? NaN) < 0.05,
+    );
+    const rotor: SourceModel = (ctx, out) => {
+      for (const c of disk) {
+        const rho = ctx.ref.rho + (ctx.prim[NP * c] ?? NaN);
+        const sL = rho * (mesh.cellR[c] ?? NaN) * F_THETA;
+        out.rate[6 * c + 3] = sL;
+        out.rate[6 * c + 4] = OMEGA * sL;
+      }
+    };
+    const gas: GasModel = caloricallyPerfectGas(GAMMA, RGAS);
+    const options: SolverOptions = {
+      gas,
+      freeStream: { pressure: 1e5, temperature: 288.15, velocity: 0 },
+      inflowTotal: { p0: 1e5, t0: 288.15 },
+      outflowPressure: 0.95e5,
+      sources: rotor,
+    };
+    const ref = new ReferenceSolver(mesh, options);
+    let M = 0.3;
+    for (let k = 0; k < 60; k++)
+      M -= (pOverP0(M, GAMMA) - 0.95) / ((pOverP0(M + 1e-7, GAMMA) - pOverP0(M, GAMMA)) / 1e-7);
+    const T = 288.15 * tOverT0(M, GAMMA);
+    ref.setUniform({
+      rho: 0.95e5 / (RGAS * T),
+      u: M * Math.sqrt(GAMMA * RGAS * T),
+      v: 0,
+      w: 0,
+      p: 0.95e5,
+      z: 0,
+    });
+    for (let k = 0; k < ref.U.length; k++) ref.U[k] = Math.fround(ref.U[k] ?? NaN);
+    const gpu = await GpuSolver.create(sim.device, mesh, {
+      gas,
+      freeStream: options.freeStream,
+      inflowTotal: { p0: 1e5, t0: 288.15 },
+      outflowPressure: 0.95e5,
+      cellSource: true,
+    });
+    gpu.setBlockage(ref.blockage);
+    gpu.setConserved(ref.U);
+    const aRho = new Float64Array(6 * mesh.nCells);
+    for (const c of disk) {
+      aRho[6 * c + 3] = (mesh.cellR[c] ?? NaN) * F_THETA;
+      aRho[6 * c + 4] = OMEGA * (mesh.cellR[c] ?? NaN) * F_THETA;
+    }
+    gpu.setCellSource({ aRho });
+
+    const ev = new ReferenceSolver(mesh, options);
+    const resid = (U: ArrayLike<number>) => {
+      ev.U.set(U);
+      const R = ev.residual();
+      const q = new Float64Array(mesh.nCells);
+      let sum = 0;
+      for (let c = 0; c < mesh.nCells; c++) {
+        q[c] = (R[NU * c] ?? NaN) / ((ev.blockage[c] ?? NaN) * (mesh.cellVolR[c] ?? NaN));
+        sum += (q[c] ?? 0) ** 2;
+      }
+      return { l2: Math.sqrt(sum / mesh.nCells), q };
+    };
+    const rmsDiff = (a: Float64Array, b: Float64Array) => {
+      let s = 0;
+      for (let c = 0; c < a.length; c++) s += ((a[c] ?? 0) - (b[c] ?? 0)) ** 2;
+      return Math.sqrt(s / a.length);
+    };
+
+    ref.iterate(9);
+    gpu.iterate(9);
+    const ur9 = Float64Array.from(ref.U);
+    const ug9 = await gpu.readConserved();
+    const ug9hi = ug9.map((x) => Math.fround(x));
+    const ur9f = ur9.map((x) => Math.fround(x));
+    const fs9 = (() => {
+      ev.U.set(ur9);
+      return ev.residualFluxScale();
+    })();
+    const rRef = resid(ur9);
+    const rG = resid(ug9);
+    const rGhi = resid(ug9hi);
+    const rRf = resid(ur9f);
+
+    ref.iterate(1);
+    gpu.iterate(1);
+    const rg = await gpu.readResidual();
+    const rr = ref.stats.residualDensityL2;
+    const fs10 = ref.residualFluxScale();
+    const row = Math.abs(rg - rr) / fs10;
+    const line = (k: string, v: number) => `  ${k}: ${v.toExponential(3)}\n`;
+    process.stdout.write(
+      `[c20 E-L9a] wall ${process.env.C20_WALL ?? 'trial20 (mirrored)'}\n` +
+        line('row |r_GPU - r_ref| / r_flux (the test row; D4-71 bar 1e-10)', row) +
+        line('row over the residual (|r_GPU - r_ref| / r_ref)', Math.abs(rg - rr) / rr) +
+        line('r_ref / r_flux', rr / fs10) +
+        line('check: oracle stats r_ref vs R(U^9_ref) recomputed (relative)', Math.abs(rRef.l2 - rr) / rr) +
+        line('S1 |L2 R(U^9_GPU hi+lo) - L2 R(U^9_ref)| / r_flux', Math.abs(rG.l2 - rRef.l2) / fs9) +
+        line('S2 |L2 R(U^9_GPU f32 hi) - L2 R(U^9_ref)| / r_flux', Math.abs(rGhi.l2 - rRef.l2) / fs9) +
+        line('S3 |L2 R(fround U^9_ref) - L2 R(U^9_ref)| / r_flux (f32 floor, no GPU)', Math.abs(rRf.l2 - rRef.l2) / fs9) +
+        line('V1 rms_c |R(U^9_GPU) - R(U^9_ref)| / r_flux (norm of the difference)', rmsDiff(rG.q, rRef.q) / fs9) +
+        line('V3 rms_c |R(fround U^9_ref) - R(U^9_ref)| / r_flux', rmsDiff(rRf.q, rRef.q) / fs9) +
+        line('K |r_GPU - L2 R(U^9_GPU f32 hi)| / r_flux (the kernel against the oracle on its own state)', Math.abs(rg - rGhi.l2) / fs10) +
+        line('K2 |r_GPU - L2 R(U^9_GPU hi+lo)| / r_flux', Math.abs(rg - rG.l2) / fs10),
+    );
+    log.assertNone('c20 probe');
+    expect(Number.isFinite(row)).toBe(true);
+    gpu.destroy();
+  });
+});

@@ -1,0 +1,42 @@
+--- a/src/flow/reference/solver.ts (main 493f72c)	2026-11-03 08:12:48.536252700 -0500
++++ b/src/flow/reference/solver.ts (the guard-only control, scratch)	2026-11-03 07:57:16.205561400 -0500
+@@ -371,6 +371,7 @@
+           const b2 = beta2[c] as number;
+           if (b2 < 1)
+             preconditionIncrement(this.ref, P, NP * c, this.mesh.cellR[c] as number, b2, dU, 0);
++          if (process.env.C20_GUARD === 'on') this.c20Guard(c, dU);
+           for (let m = 0; m < NU; m++) U[o + m] = (U0[o + m] as number) + (dU[m] as number);
+         }
+         this.roundStorage();
+@@ -702,6 +703,31 @@
+     }
+   }
+ 
++  // critic pass 20 (scratch only): the guard-only control of SOLVER.md 17, re-implemented from its
++  // text: the stage increment halved until rho >= rho_n / 2 and T_stage / 2 <= T <= 2 T_stage
++  private c20U = new Float64Array(NU);
++  private c20P = new Float64Array(NP);
++  c20Hits = 0;
++  private c20Guard(c: number, dU: Float64Array): void {
++    const o = NU * c;
++    const rc = this.mesh.cellR[c] as number;
++    const rho0 = this.ref.rho + (this.U0[o] as number);
++    const t0 = this.ref.t + (this.P[NP * c + 6] as number);
++    const ok = (th: number): boolean => {
++      for (let m = 0; m < NU; m++)
++        this.c20U[m] = (this.U0[o + m] as number) + th * (dU[m] as number);
++      if (!(this.ref.rho + (this.c20U[0] as number) >= 0.5 * rho0)) return false;
++      consToPrim(this.ref, this.c20U, 0, rc, this.c20P, 0);
++      const t = this.ref.t + (this.c20P[6] as number);
++      return Number.isFinite(t) && t >= 0.5 * t0 && t <= 2 * t0;
++    };
++    if (ok(1)) return;
++    let th = 1;
++    for (let k = 0; k < 30 && !ok(th); k++) th *= 0.5;
++    this.c20Hits++;
++    for (let m = 0; m < NU; m++) dU[m] = th * (dU[m] as number);
++  }
++
+   private recordResidual(): void {
+     const m = this.mesh;
+     let sum = 0;
