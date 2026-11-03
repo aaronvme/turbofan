@@ -1,4 +1,4 @@
-w3/scheme round 2 (D5-5): the slip-wall ghost mirrors ρ′ and Z (oracle and kernel); L14 passes every row of every case on the CPU and the GPU under the restated peak row, and its pin is lifted; the control fails the restated row; no regression in the CPU ladder, the CPU D4-63 of record (on AC) or the GPU ladder; test:gpu fails one row, E-L9a's flux-scale form (decision 1); J at 0.02 diagnosed: not W2S-N2 (from e552cc1; HEAD = the commit of this handoff)
+w3/scheme round 2 (D5-5), STOP-CLEAN (usage brake; the runaway re-run and lint/typecheck of the last run still going): the slip-wall ghost mirrors ρ′ and Z (oracle and kernel); L14 passes every row of every case on the CPU and the GPU under the restated peak row, and its pin is lifted; the control fails the restated row; no regression in the CPU ladder, the CPU D4-63 of record (on AC) or the GPU ladder; test:gpu fails one row, E-L9a's flux-scale form (decision 1); J at 0.02 diagnosed: not W2S-N2 (from e552cc1; HEAD = the commit of this handoff)
 
 ROUND 2 (D5-5)
 
@@ -25,7 +25,7 @@ Regression (SOLVER.md 17.1 has the full table): CPU ladder (`reports/scratch/run
 
 L7 converged to 1e-6 (96 × 96, M 0.01; scratch `reports/scratch/r2/l7t-*.txt`, the three runs side by side on AC): the branch (pairwise step, mirrored wall) asymmetry 0.0110887, |Cd| 0.00112104 (35867 its); without the pairwise step (mirrored wall) 0.0110888, 0.00112116 (35838); without it and with round 1's wall (the scheme of record) 0.0110888, 0.00112116 (35838). The step rule moves the converged values by 1.6e-7 and 1.2e-7 (1e-5 relative, at the 1e-6 convergence level) and the wall by 2e-9: the steady state is unchanged, and the converged values are at (asymmetry) and better than (|Cd|) the record scheme's. The record's 0.01093 / 0.00131 and the branch's 0.01110 / 0.00129 are values at the 1e-4 stop.
 
-The engine runaway re-run (from `perf-lastfinite.bin` at 6700, the branch: the pairwise step and the mirrored wall): PENDING
+The engine runaway re-run (from `perf-lastfinite.bin` at 6700, the branch: the pairwise step and the mirrored wall, 1300 iterations to 8000): **PENDING, running detached at STOP-CLEAN** as the last step of `reports/scratch/run/post.status` (log `reports/scratch/run/post.log`; output `reports/scratch/r2/runaway-branch.txt`, a line every 50 iterations with max T′ and where it sits). Round 1's trial of the same scheme was finite to 7000 (max T′ 1059 → 979 K). Read the file; if it is still running when the next agent starts, it is safe to stop (scratch only).
 
 J at M_cut 0.02 (SOLVER.md 17.1 has the table): a limit cycle of period ~64 iterations in which outflow rows 5-15 switch between outflow and backflow (30-63 sign changes per 2000 its), residual in the last columns. **Not W2S-N2:** removing the doubled response (the outflow ghost on the outgoing characteristic, the switch on its u_n, so p and u_n are continuous for any p_s) leaves the cycle unchanged to the sign-change count; so do the tangential velocity, the smooth limiter and a preconditioned impedance. What decides it is the backflow's pressure condition, and oppositely at the two cuts: at the total p_out (D4-101's branch and every inflow-ghost variant) it cycles at 0.02 and converges at 0.003 (2415); at the static p_out (the pre-D4-101 copy, or the characteristic ghost with ambient T, Z) it converges at 0.02 (11003, 10581) and cycles at 0.003. Proposed (w3/plume-bake, L11's jets): linearise J at the cycle's mean state for each backflow form at both cuts (scratch `reports/scratch/diag/jac.ts`, `eigsub.py`) and choose the form whose leading 3-stage eigenvalue is inside the unit circle at both; first candidate: the total-pressure backflow with its dynamic head from the face's normal velocity, not the ghost's own σ. Pre-registered test: J converges at 0.003 and 0.02, D4-63 and W2S-B1 pass, the runaway stays finite. No outflow change made (not a one-line correction).
 
@@ -43,7 +43,9 @@ GOTCHAS
 5. Dev-server port 5193 (P1 only; not used this round). No dev server or Chrome left running.
 
 GATES @HEAD (code of cd88474; the later commits are docs)
-- typecheck, lint, coverage: PENDING
+- npm test (in the coverage run, `reports/scratch/run/post.log`): 140 files, 2409 passed + 10 expected fail.
+- coverage: lines 99.55 % (statements 98.54, branches 87.97, functions 99.56); src/flow/reference 100 %, src/thermo 100 %, src/cycle 99.62 %, src/geometry 99.59 %, src/flow/gpu 99.75 % (`reports/scratch/coverage`).
+- npm run typecheck: clean at ea9c486 and after each later code commit (by hand); npm run lint: ESLint + Prettier on every touched file clean; the full `npm run lint` and `typecheck` of the post job were still running at STOP-CLEAN (`reports/scratch/run/post.status`).
 - test:ladder: as above (all files but d463 in one run, d463 alone); test:gpu-ladder: 5 files, 17 passed + 1 expected fail; test:gpu: 12 files, 73 passed, 1 failed (E-L9a, decision 1).
 
 ROUND 1 (kept for reference)
