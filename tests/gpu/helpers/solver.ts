@@ -54,7 +54,9 @@ export const ENGINE_PRECONDITIONING_CUT = enginePreconditioning();
  * SOLVER.md 12.2's flux-scale rows: |r_GPU - r_ref| / r_flux (D4-48) at D4-62's tolerances, ten
  * times the GPU's measured error rounded up to one figure (B 1.27e-11, E-L5 2.67e-8), with D4-71's
  * E-L9a (1e-10: D4-62's 3e-11 sat inside the f32 rounding of the norm, W2R-I17). Tightening only
- * (they were D4-48's 1e-3); a row is never loosened to pass (W2R-I19).
+ * (they were D4-48's 1e-3); a row is never loosened to pass (W2R-I19). Since D5-6 (W3S-I1) E-L9a's
+ * row reads r_GPU against the oracle's residual of the GPU's own U^9 (K2, SOLVER.md 17.1), at the
+ * same 1e-10.
  */
 export const FLUX_SCALE_TOLERANCE = { B: 2e-10, E_L5: 3e-7, E_L9a: 1e-10 } as const;
 
