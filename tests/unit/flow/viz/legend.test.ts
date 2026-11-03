@@ -82,6 +82,15 @@ describe('legendFor', () => {
     expect(provenanceLabel('coupled')).not.toEqual(provenanceLabel('uncoupled'));
   });
 
+  // CP5 (D5-7): "coupled" only while L12's tolerances hold, else "calibrating"
+  it('says a calibrating field is the solver driven toward the cycle, not yet its answer', () => {
+    expect(legendFor('data', 'calibrating')?.coupling).toBe('calibrating');
+    expect(provenanceLabel('calibrating')).toMatch(/solver/i);
+    expect(provenanceLabel('calibrating')).toMatch(/calibrating/);
+    expect(provenanceLabel('calibrating')).toMatch(/L12/);
+    expect(provenanceLabel('calibrating')).not.toMatch(/coupled/);
+  });
+
   // W2V-I6, D4-82: a runtime MOCK fallback is visible, with its reason, never silent
   it('labels a runtime MOCK fallback as MOCK, with the reason', () => {
     const l = provenanceLabel('mock', 'solver lost: device removed');

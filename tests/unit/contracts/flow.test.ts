@@ -291,14 +291,17 @@ describe('flowTargetsFromCycleState', () => {
 // D4-82 (flagged contract addition): a field carries its coupling state, so the badge and the
 // legend can say "solver (uncoupled until W3)" and W3's coupled field gets a badge of its own
 describe('D4-82: the flow field coupling state', () => {
-  it("is 'mock' | 'uncoupled' | 'coupled'", () => {
-    expect([...FLOW_COUPLINGS]).toEqual(['mock', 'uncoupled', 'coupled']);
+  // W3 (PHYSICS.md 3.3 CP5): 'calibrating' while the coupled field is outside L12's tolerances
+  it("is 'mock' | 'uncoupled' | 'calibrating' | 'coupled'", () => {
+    expect([...FLOW_COUPLINGS]).toEqual(['mock', 'uncoupled', 'calibrating', 'coupled']);
   });
 
   it('agrees with the source: a MOCK field is mock, a solver field uncoupled or coupled', () => {
     expect(flowCouplingProblems({ source: 'mock', coupling: 'mock' })).toEqual([]);
     expect(flowCouplingProblems({ source: 'solver', coupling: 'uncoupled' })).toEqual([]);
     expect(flowCouplingProblems({ source: 'solver', coupling: 'coupled' })).toEqual([]);
+    expect(flowCouplingProblems({ source: 'solver', coupling: 'calibrating' })).toEqual([]);
+    expect(flowCouplingProblems({ source: 'mock', coupling: 'calibrating' })).toHaveLength(1);
     expect(flowCouplingProblems({ source: 'mock', coupling: 'coupled' })).toHaveLength(1);
     expect(flowCouplingProblems({ source: 'mock', coupling: 'uncoupled' })).toHaveLength(1);
     expect(flowCouplingProblems({ source: 'solver', coupling: 'mock' })).toHaveLength(1);
