@@ -3694,6 +3694,21 @@ None.
      - **Round 2 must show the steady state is unchanged:** L7 converged to 1e-6 with and without the rule.
   4. **J at M_cut 0.02** (backflow on 9 of 16 outflow rows, stalling at 0.6-0.85 of its peak) is diagnosed and reported in round 2 as W2S-N2's first suspect. It gates nothing now, but it matters for L11 (w3/plume-bake).
   5. **Order:** w3/scheme round 2 (a fresh agent in the same worktree) does items 1-4 plus the owed CPU D4-63 on AC. Then critic pass 20 reviews w3/scheme as a whole, and w3/coupling waits for its MERGE. The audio builder resumes when a second slot is free (AC and RAM ≥ 2.5 GB).
+- **D5-6 (critic pass 20: w3/scheme @97a2769, FIX FIRST on W3S-I1 only).**
+  1. **E-L9a's flux-scale row is re-posed as the critic's K2, at D4-71's 1e-10 unchanged (W3S-I1).** The row becomes K2 = |r_GPU − L2 R_ref(U⁹_GPU)| / r_flux: the kernel's residual against the oracle's residual of the GPU's own state after 9 iterations.
+     - **Why the old form can't stand:**
+       - with the mirrored wall, rounding the oracle's own exact state to f32 already moves the old quantity by 1.94e-10, so no f32 kernel can meet 1e-10 except by luck;
+       - the record's 2.46e-12 was a cancellation of two terms each 50-150× larger;
+       - the old row passes the critic's mutant W1g (a kernel whose wall ghost disagrees with the oracle's) at 3.3e-11, while the correct kernel fails it.
+     - **K2 has teeth:** it gives the adopted kernel 2.20e-11 and W1g 1.66e-10, so W1g fails.
+     - **Neither of the rejected options:** this is not a loosening (the bar is unchanged and the row now catches a defect the old one missed), and the mirror is not rejected (the critic confirms it is right and identical in the oracle and the kernel).
+     - **The fix:** a test-only change in `tests/gpu/oracle.test.ts`, with W1g shown killed, plus N1, N3 and N4.
+       - **N1:** L14's at-rest "end ≤ start" row sits on a round-off tie; give it a stated round-off allowance.
+       - **N3:** report the peak p′ beside the restated peak row.
+       - **N4:** the kernel's wall exclusion (mutant R2g) is caught by only one row, at 1.45× its tolerance; give it a second, wider-margin row.
+       - **W3S-N2** (the builder's sensitivity numbers came from other states) is a SOLVER.md 17.1 wording fix.
+     - **Then:** the critic re-verifies the fix, and w3/scheme merges with detached gates on the merged tree.
+  2. **W3S-I2 goes to w3/plume-bake: J at the engine's cut 0.02 stalls in an outflow limit cycle** (on main since D4-101; before it, J met its rule at 9441). J's rows at both cuts (0.003 and 0.02) are pre-registered in PHYSICS.md before that round starts, and the backflow's pressure form is chosen there with a linearised-mode analysis.
 
 ## Critic pass 12: w2/flowviz @2cfd469 (PARTIAL: STOP-CLEAN)
 
