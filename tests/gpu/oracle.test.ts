@@ -19,7 +19,7 @@ import {
 import { ReferenceSolver, type SolverOptions } from '../../src/flow/reference/solver';
 import type { SolverMesh } from '../../src/flow/reference/solverMesh';
 import type { SourceModel } from '../../src/flow/reference/sources';
-import { NP, type PhysicalState } from '../../src/flow/reference/state';
+import { NP, NU, type PhysicalState } from '../../src/flow/reference/state';
 import {
   SINK,
   closedBoxMesh,
@@ -124,6 +124,28 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
   async function fluxScaleError(p: Pair): Promise<number> {
     const g = await p.gpu.readResidual();
     return Math.abs(g - p.ref.stats.residualDensityL2) / p.ref.residualFluxScale();
+  }
+
+  /**
+   * The oracle's density-residual L2, sqrt(mean_c (R_rho / (b V))^2) (section 11), of a given
+   * conserved state U, in f64: a fresh oracle with the case's options and blockage evaluates R(U).
+   */
+  function oracleResidualL2(
+    mesh: SolverMesh,
+    options: SolverOptions,
+    U: ArrayLike<number>,
+    blockage?: Float64Array,
+  ): number {
+    const s = new ReferenceSolver(mesh, options);
+    if (blockage !== undefined) s.setBlockage(blockage);
+    s.U.set(U);
+    const R = s.residual();
+    let sum = 0;
+    for (let c = 0; c < mesh.nCells; c++) {
+      const q = (R[NU * c] ?? NaN) / ((s.blockage[c] ?? NaN) * (mesh.cellVolR[c] ?? NaN));
+      sum += q * q;
+    }
+    return Math.sqrt(sum / mesh.nCells);
   }
 
   /** Tracking iterations to each checkpoint, comparing the fields and the residual. */
@@ -324,18 +346,7 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     p.ref.iterate(10);
     p.gpu.iterate(10);
     /** The f64 density-residual L2 of a state (the oracle's evaluation). */
-    const residualOf = (U: Float64Array) => {
-      const s = new ReferenceSolver(mesh, options);
-      s.setBlockage(blockage);
-      s.U.set(U);
-      const R = s.residual();
-      let sum = 0;
-      for (let c = 0; c < mesh.nCells; c++) {
-        const q = (R[6 * c] ?? NaN) / ((blockage[c] ?? NaN) * (mesh.cellVolR[c] ?? NaN));
-        sum += q * q;
-      }
-      return Math.sqrt(sum / mesh.nCells);
-    };
+    const residualOf = (U: Float64Array) => oracleResidualL2(mesh, options, U, blockage);
     return { p, residualOf };
   }
 
@@ -410,18 +421,42 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
       aRho[6 * c + 4] = OMEGA * (mesh.cellR[c] ?? NaN) * F_THETA;
     }
     p.gpu.setCellSource({ aRho });
-    p.ref.iterate(10);
-    p.gpu.iterate(10);
+    // The residual of record is the first stage's of iteration 10, i.e. R(U^9). Both solvers run 9
+    // iterations, the GPU's own U^9 is read back (f32 copy + low part) and the oracle's residual of
+    // it is evaluated in f64; then both run the 10th.
+    p.ref.iterate(9);
+    p.gpu.iterate(9);
+    const u9Ref = Float64Array.from(p.ref.U);
+    const ofGpuState = oracleResidualL2(mesh, options, await p.gpu.readConserved());
+    const ofRefState = oracleResidualL2(mesh, options, u9Ref);
+    const ofRoundedState = oracleResidualL2(mesh, options, u9Ref.map(Math.fround));
+    p.ref.iterate(1);
+    p.gpu.iterate(1);
     const e = await error(p);
     const own = await residualError(p);
-    const scaled = await fluxScaleError(p);
+    const rGpu = await p.gpu.readResidual();
+    const rRef = p.ref.stats.residualDensityL2;
+    const rFlux = p.ref.residualFluxScale();
+    // the evaluation is the oracle's residual of record: on the oracle's own U^9 it gives the
+    // stage-1 residual of its iteration 10 (measured: equal to the last bit; 1e-12 allows the f64
+    // summation of the norm in another order)
+    expect(Math.abs(ofRefState - rRef) / rRef).toBeLessThanOrEqual(1e-12);
+    // W3S-I1 (critic pass 20, D5-6): the row of record is K2 = |r_GPU - L2 R_ref(U^9_GPU)| / r_flux,
+    // the kernel's residual against the oracle's residual of the GPU's own state, at D4-71's 1e-10
+    // unchanged (W2R-I19; D4-62's 3e-11 sat inside the f32 rounding of the norm, W2R-I17). The old
+    // form |r_GPU - r_ref| / r_flux also holds the two states' drift: with the mirrored wall (D5-5)
+    // rounding the oracle's own U^9 to f32 moves it by 1.94e-10 with no kernel in it (S3), and it
+    // passes the critic's mutant W1g (the kernel's rho' extrapolated at the wall while the oracle
+    // mirrors it: 3.34e-11), which K2 fails (1.66e-10; the adopted kernel 2.20e-11). Both printed.
+    const kernel = Math.abs(rGpu - ofGpuState) / rFlux;
+    const oldForm = Math.abs(rGpu - rRef) / rFlux;
+    const floor = Math.abs(ofRoundedState - ofRefState) / rFlux;
     process.stdout.write(
-      `[12.2] E L9a source: ${e.toExponential(2)}; residual / residual ${own.toExponential(2)}, / flux scale ${scaled.toExponential(2)}\n`,
+      `[12.2] E L9a source: ${e.toExponential(2)}; residual / residual ${own.toExponential(2)}; / flux scale: K2 (the kernel against the oracle on the GPU's U^9) ${kernel.toExponential(3)}; reported: the old form |r_GPU - r_ref| ${oldForm.toExponential(3)}, S3 (the oracle's U^9 rounded to f32) ${floor.toExponential(3)}\n`,
     );
     expect(e).toBeLessThanOrEqual(TOL_E);
-    // the row of record over the flux scale at D4-71's 1e-10 (W2R-I19; D4-62's 3e-11 sat inside
-    // the f32 rounding of the norm, W2R-I17), and the residual form, which this case meets too
-    expect(scaled).toBeLessThanOrEqual(TOL_FLUX.E_L9a);
+    // K2 over the flux scale at D4-71's 1e-10, and the residual form, which this case meets too
+    expect(kernel).toBeLessThanOrEqual(TOL_FLUX.E_L9a);
     expect(own).toBeLessThanOrEqual(TOL_RESIDUAL);
     p.gpu.destroy();
   });
