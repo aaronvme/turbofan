@@ -161,13 +161,21 @@ export function smoothedPeakHz(
   return best;
 }
 
-/** Instantaneous frequency (Hz) per sample from the analytic signal (FFT Hilbert transform). */
-export function instantaneousFrequency(x: Samples, fs: number): Float64Array {
+/**
+ * Instantaneous frequency (Hz) per sample from the analytic signal (FFT Hilbert transform). The
+ * first and last `fade` samples are faded in and out (raised cosine) so the transform's wrap-round
+ * does not ripple the middle; read the middle only.
+ */
+export function instantaneousFrequency(x: Samples, fs: number, fade = 2048): Float64Array {
   let n = 1;
-  while (n < x.length) n <<= 1;
+  while (n < 2 * x.length) n <<= 1;
   const re = new Float64Array(n);
   const im = new Float64Array(n);
-  for (let i = 0; i < x.length; i++) re[i] = x[i] ?? 0;
+  for (let i = 0; i < x.length; i++) {
+    const e = Math.min(i, x.length - 1 - i);
+    const w = e >= fade ? 1 : 0.5 - 0.5 * Math.cos((Math.PI * e) / fade);
+    re[i] = (x[i] ?? 0) * w;
+  }
   fft(re, im);
   // analytic signal: keep DC and Nyquist, double the positive frequencies, drop the negative
   for (let k = 1; k < n / 2; k++) {

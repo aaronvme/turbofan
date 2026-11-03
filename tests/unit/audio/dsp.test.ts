@@ -44,12 +44,12 @@ describe('the analysis helpers', () => {
     }
   });
 
-  it('locates a pure tone within 0.02 % from a 2^16 Hann spectrum', () => {
+  it("locates a pure tone within 0.05 % (a fifth of A1's bar) from a 2^16 Hann spectrum", () => {
     for (const f of [41.3, 103.7, 1234.5, 9876.1]) {
       const n = 1 << 16;
       const x = Float64Array.from({ length: n }, (_, i) => Math.sin((2 * Math.PI * f * i) / FS));
       const pk = peakNear(powerSpectrum(x, n), f, FS, n, 20);
-      expect(Math.abs(pk.freqHz / f - 1)).toBeLessThan(2e-4);
+      expect(Math.abs(pk.freqHz / f - 1)).toBeLessThan(5e-4);
     }
   });
 
@@ -62,8 +62,9 @@ describe('the analysis helpers', () => {
       ph += (2 * Math.PI * (200 + (800 * i) / n)) / FS;
     }
     const f = instantaneousFrequency(x, FS);
+    // the phase step into sample i is taken at sample i - 1's frequency
     for (const i of [5000, 24_000, 40_000])
-      expect(f[i] ?? 0).toBeCloseTo(200 + (800 * (i - 0.5)) / n, 1);
+      expect(f[i] ?? 0).toBeCloseTo(200 + (800 * (i - 1)) / n, 1);
   });
 });
 
@@ -126,7 +127,7 @@ describe('biquads (RBJ Audio EQ Cookbook)', () => {
       const n = new Noise(11);
       let pin = 0;
       let pout = 0;
-      const N = 1 << 20;
+      const N = 1 << 22;
       for (let i = 0; i < N; i++) {
         const x = n.white();
         const y = bq.process(x);
