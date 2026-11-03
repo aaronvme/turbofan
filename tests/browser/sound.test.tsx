@@ -139,7 +139,9 @@ describe('the engine sound (real Chrome)', () => {
     expect(quiet.rms, 'the engine at ground idle is heard').toBeGreaterThan(0);
     expect(quiet.peak).toBeLessThanOrEqual(CEILING * volumeGain(0.1) * 1.001);
 
-    // louder: 30 % is 9 x the gain of 10 % (square law), within the noise of a steady idle
+    // louder: 30 % is 9 x the gain of 10 % (square law), within the noise of a steady idle; the
+    // click left the focus on the switch
+    (vol.element() as HTMLInputElement).focus();
     await userEvent.keyboard('{ArrowRight}{ArrowRight}{ArrowRight}{ArrowRight}');
     expect(useApp.getState().sound.volume).toBeCloseTo(0.3, 9);
     await sleep(400);
