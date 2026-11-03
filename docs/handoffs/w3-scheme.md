@@ -1,8 +1,50 @@
-w3/scheme round 2 (D5-5): WIP. The slip-wall ghost mirrors rho' and Z (oracle and kernel); L14's peak row restated; every L14 row passes on every case, CPU and GPU, and the pin is lifted; the control fails the restated row; J at 0.02 diagnosed (not W2S-N2). Regression ladders in progress (from e552cc1; HEAD = the commit of this handoff)
+w3/scheme round 2 (D5-5): the slip-wall ghost mirrors ρ′ and Z (oracle and kernel); L14 passes every row of every case on the CPU and the GPU under the restated peak row, and its pin is lifted; the control fails the restated row; no regression in the CPU ladder, the CPU D4-63 of record (on AC) or the GPU ladder; test:gpu fails one row, E-L9a's flux-scale form (decision 1); J at 0.02 diagnosed: not W2S-N2 (from e552cc1; HEAD = the commit of this handoff)
 
-ROUND 2 (D5-5), WIP
-- 61da405 (TDD) the boundary, kernel-ghost, wall-face-step, restated-row and contract tests; ea9c486 the oracle and kernel wallGhost, thresholds.ts, hotPocket.ts; 9791cd4, d83371e SOLVER.md 5, 17, 17.1 and PHYSICS.md 3.3's result line; d9e728e L14's pin lifted (CPU and GPU).
-- CPU ladder without d463 (reports/scratch/run/ladder.log): every row passes except the known convergence rows of L8, L9a, L9b; L9a now passes D4-57's steadiness row (9.20e-6). d463 (CPU, on AC, alone) running.
+ROUND 2 (D5-5)
+
+DONE
+- 61da405 (TDD): `tests/unit/flow/boundary.test.ts` (the wall ghost mirrors ρ′ and Z: layer 1 q₀, layer 2 q₁; p′, rw and v_t extrapolated; ρ > 0 and Z ≥ 0 where extrapolating gave neither), `tests/gpu/oracle.test.ts` (the kernel's 48 wall ghosts: ρ′ and Z bitwise their own source cells', the extrapolated entries within 5× their cells' error; cd88474 fixed that bound), `tests/unit/flow/precondition.test.ts` (the wall face's step when the mirrored-ρ′ ghost is 23 % hotter than the cell: the exclusion-off mutant, which round 1's test stops killing once ρ′ is mirrored, is killed by this one; checked by hand), `tests/unit/flow/hotPocket.test.ts` (the restated row), the contract test (`maxPeakOverIsentropicCompression`).
+- ea9c486: oracle `wallGhost` (`src/flow/reference/boundary.ts`) and kernel `wallGhost` (`src/flow/gpu/wgsl/boundary.ts`, two `select`s, exact in f32, no new §14 form); `src/contracts/thresholds.ts` mirrors PHYSICS.md's restated L14 row; `tests/ladder/hotPocket.ts`: `isentropicPocketBound` (T′_s = T_h (p/p∞)^(R/cp) − T∞ with cp, R at T_h and Z 0.015), the per-iteration max T′/T′_s and the row, shared by the CPU and GPU ladders.
+- d9e728e: L14's KNOWN-FAIL pin lifted on both ladders ("every row of every case").
+- 9791cd4, d83371e, de4b55c: SOLVER.md 5 (the wall row and why ρ′ and Z are mirrored), 17 (the wall face), **17.1** (round 2: L14 CPU and GPU, the control, J, the regression table, E-L9a); PHYSICS.md 3.3's L14 result line.
+
+L14 after the wall change (peak T′/T′_s / max T′ at 2000 over its start / min T′/ΔT; CPU and GPU agree to the digits shown except where two values are given)
+
+| case | CPU | GPU |
+|---|---|---|
+| 900 K, −100, wall / mid | 1.0020 / 0.061, 0.260 / −0.0002, −0.0003: PASS | the same: PASS |
+| 900 K, −300, wall / mid | 1.0209 / 0.000 / −0.0069, −0.0070: PASS | the same: PASS |
+| 1200 K, −100, wall / mid | 1.0016 / 0.189, 0.191 / −0.0001: PASS | the same: PASS |
+| 1200 K, −300, wall / mid | 1.0160, 1.0161 / 0.235, 0.000 / −0.0040: PASS | the same: PASS |
+| 900 K, −50, wall | 1.0005 / 0.313 / −0.0000: PASS | the same: PASS |
+| 1200 K, 0, wall | 1.0001 / 1.000 (1 − 1e-15) / −0.0000: PASS | 1.0001 / 0.412 / −0.0000: PASS |
+
+Control and references under the restated row (CPU, scratch `reports/scratch/trial`): **the guard-only candidate (round 1's wall) 2.647: FAILS**, as D5-5 requires (2 cases pass every row, undershoot −0.188); the plain scheme (CFL 1.5) 1.0312 on the two 900 K, −300 cases (either wall; 7 cases pass every row); the pairwise step with round 1's wall 1.394 (the wall drain); this branch 1.021.
+
+Regression (SOLVER.md 17.1 has the full table): CPU ladder (`reports/scratch/run/ladder.log`, 15 min alone, `--maxWorkers=6`): every row passes but the known convergence rows of L8, L9a, L9b; **L9a now passes D4-57's steadiness row (9.20e-6 against 1e-5; record 1.062e-5 FAIL)**. **CPU d463 of record (on AC, alone, AboveNormal, 85 min): passes**, (a) 0.4497 / 0.008369, (b) 0.2156 / 0.03297 (record 0.4450 / 0.009223, 0.1535 / 0.03063: fixed-iteration values, inside their bars ≤ 2, ≤ 1). GPU ladder (`reports/scratch/run/gpu.log`): 17 passed + 1 expected fail (L9a's D4-57 pin: 1.344e-5); L7 0.01110 / 0.001287 / 1.644, D4-63 0.4497 / 0.008217, 0.2158 / 0.03297, W2S-B1 0.6286 / 2.06e-3, 0.1621 / 0.0262. test:gpu (`testgpu.log`): 73 passed, **1 failed: E-L9a's flux-scale row 1.19e-9 against D4-71's 1e-10** (decision 1).
+
+L7 converged to 1e-6 (96 × 96, M 0.01; scratch `reports/scratch/r2/l7t-*.txt`): PENDING
+
+The engine runaway re-run (from `perf-lastfinite.bin` at 6700, the branch: the pairwise step and the mirrored wall): PENDING
+
+J at M_cut 0.02 (SOLVER.md 17.1 has the table): a limit cycle of period ~64 iterations in which outflow rows 5-15 switch between outflow and backflow (30-63 sign changes per 2000 its), residual in the last columns. **Not W2S-N2:** removing the doubled response (the outflow ghost on the outgoing characteristic, the switch on its u_n, so p and u_n are continuous for any p_s) leaves the cycle unchanged to the sign-change count; so do the tangential velocity, the smooth limiter and a preconditioned impedance. What decides it is the backflow's pressure condition, and oppositely at the two cuts: at the total p_out (D4-101's branch and every inflow-ghost variant) it cycles at 0.02 and converges at 0.003 (2415); at the static p_out (the pre-D4-101 copy, or the characteristic ghost with ambient T, Z) it converges at 0.02 (11003, 10581) and cycles at 0.003. Proposed (w3/plume-bake, L11's jets): linearise J at the cycle's mean state for each backflow form at both cuts (scratch `reports/scratch/diag/jac.ts`, `eigsub.py`) and choose the form whose leading 3-stage eigenvalue is inside the unit circle at both; first candidate: the total-pressure backflow with its dynamic head from the face's normal velocity, not the ghost's own σ. Pre-registered test: J converges at 0.003 and 0.02, D4-63 and W2S-B1 pass, the runaway stays finite. No outflow change made (not a one-line correction).
+
+NEXT (decisions for the orchestrator first)
+1. **Decision: E-L9a's flux-scale row (test:gpu).** 1.19e-9 against D4-71's 1e-10 (record 2.46e-12); the fields (6.05e-6 vs 1e-4) and the residual's own form (3.18e-6 vs 1e-3) agree as before. Isolated to the layer-1 mirror (the wall cell's zero ρ′ slope); the kernel's wall ghosts are bitwise right. The oracle's own residual of the GPU's state differs from that of its own state by 2.0e-9 (round 1's wall) and 4.3e-9 (mirror) of the flux scale: the row of record passed 800× below its state's sensitivity, and D4-71's 1e-10 is below that sensitivity with either wall. Options: restate the row against that sensitivity (e.g. |r_GPU − r_ref| ≤ the oracle's |R(U_GPU) − R(U_ref)|); or pin it KNOWN-FAIL; or reject the mirror. Not changed or pinned here.
+2. Critic pass 20 on w3/scheme as a whole (D5-5 item 5).
+3. J's backflow form (above) in w3/plume-bake, before L11's jets.
+4. P1 not re-measured this round (indicative run skipped for usage); P1 of record stays 180 it/s.
+
+GOTCHAS
+1. **A .cmd file run by `detach.ps1` must `call` npx/npm** (a batch file calling another batch file without `call` never returns: round 2's first gpu.cmd ran only the GPU ladder). `reports/scratch/r2/run.sh <name> <cmdfile>` wraps detach.ps1 (its `-Cmd` cannot take spaces through Start-Process).
+2. On AC and alone the CPU ladder takes 15 min with `--maxWorkers=6` (round 1's 30-min timeouts were load and battery); d463 85 min at AboveNormal.
+3. The CPU at-rest L14 case is still a rest state to round-off (max T′ at 2000 is 1 − 1e-15 of its start): a change that perturbs it at round-off can flip "≤ its start" (the plain-scheme trial does).
+4. Scratch (gitignored): `reports/scratch/r2/` (`jdiag.ts` + `boundary.ts` + `redirectB.mjs`: J with `TRIAL_OUTFLOW` branch|char|backv|charv|charall|prechar|copy; `el9a.ts`: E-L9a's set-up on the oracle; `par.mjs`: parallel node jobs; `l14sum.py`); `reports/scratch/trial/solver.ts` now has `TRIAL_WALL=extrapolate` restoring round 1's wall (src mirrors) and `TRIAL_EPS`.
+5. Dev-server port 5193 (P1 only; not used this round). No dev server or Chrome left running.
+
+GATES @HEAD (code of cd88474; the later commits are docs)
+- typecheck, lint, coverage: PENDING
+- test:ladder: as above (all files but d463 in one run, d463 alone); test:gpu-ladder: 5 files, 17 passed + 1 expected fail; test:gpu: 12 files, 73 passed, 1 failed (E-L9a, decision 1).
 
 ROUND 1 (kept for reference)
 
