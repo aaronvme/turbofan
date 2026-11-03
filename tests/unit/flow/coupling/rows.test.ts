@@ -1,5 +1,5 @@
 // Blade rows on the 130k mesh (CP1's row mapping and its blockage from the metal thickness).
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ENGINE_DEFINITION as DEF } from '../../../../src/engine/definition';
 import {
   MIN_COS_KAMBER,
@@ -13,6 +13,10 @@ import {
   vsvCamberShift,
 } from '../../../../src/flow/coupling/rows';
 import { engineSolverMesh } from './engineMesh';
+
+// the 130k mesh: each test walks every cell, a few seconds on a loaded laptop (vitest's default
+// 5 s timed out under coverage)
+vi.setConfig({ testTimeout: 120_000 });
 
 const mesh = engineSolverMesh();
 const rows = meshRows(mesh, DEF);

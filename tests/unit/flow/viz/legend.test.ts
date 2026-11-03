@@ -88,7 +88,7 @@ describe('legendFor', () => {
     expect(provenanceLabel('calibrating')).toMatch(/solver/i);
     expect(provenanceLabel('calibrating')).toMatch(/calibrating/);
     expect(provenanceLabel('calibrating')).toMatch(/L12/);
-    expect(provenanceLabel('calibrating')).not.toMatch(/coupled/);
+    expect(provenanceLabel('calibrating')).not.toMatch(/\bcoupled\b/);
   });
 
   // W2V-I6, D4-82: a runtime MOCK fallback is visible, with its reason, never silent

@@ -1,6 +1,6 @@
 // The coupling's station reduction on the 130k mesh: mass-averaged Pt and Tt, the mass flow and
 // the gross thrust, against the exact values of uniform fields.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SOLVER_REDUCTION_STATIONS } from '../../../../src/contracts/stations';
 import { ENGINE_DEFINITION as DEF } from '../../../../src/engine/definition';
 import { meshRows, rowBlockageField } from '../../../../src/flow/coupling/rows';
@@ -20,6 +20,10 @@ import {
 import { NP } from '../../../../src/flow/reference/state';
 import { isentropicTemperature } from '../../../../src/thermo/gas';
 import { engineSolverMesh } from './engineMesh';
+
+// the 130k mesh: each test walks every cell, a few seconds on a loaded laptop (vitest's default
+// 5 s timed out under coverage)
+vi.setConfig({ testTimeout: 120_000 });
 
 const mesh = engineSolverMesh();
 const ref = referenceState(THERMALLY_PERFECT, {

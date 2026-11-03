@@ -1,5 +1,5 @@
 // The combustor's heat and fuel sources (PHYSICS.md 3.3 CP2) on the 130k mesh.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { THRESHOLDS } from '../../../../src/contracts/thresholds';
 import { CYCLE_CALIBRATION, combustionEfficiency } from '../../../../src/cycle/engine';
 import { ENGINE_DEFINITION as DEF } from '../../../../src/engine/definition';
@@ -13,6 +13,10 @@ import { meshRows, rowBlockageField } from '../../../../src/flow/coupling/rows';
 import { THERMALLY_PERFECT, referenceState } from '../../../../src/flow/reference/gas';
 import { NU } from '../../../../src/flow/reference/state';
 import { engineSolverMesh } from './engineMesh';
+
+// the 130k mesh: each test walks every cell, a few seconds on a loaded laptop (vitest's default
+// 5 s timed out under coverage)
+vi.setConfig({ testTimeout: 120_000 });
 
 const CP2 = THRESHOLDS.CP2.values;
 const mesh = engineSolverMesh();

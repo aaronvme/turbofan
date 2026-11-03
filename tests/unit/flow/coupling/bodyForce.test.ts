@@ -1,6 +1,6 @@
 // The blade-row body forces (PHYSICS.md 3.3 CP1): Hall-Thollet with blockage on the compressor
 // rows, a stiff follow-camber relaxation on the turbine rows, point-implicit, Euler work exact.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { THRESHOLDS } from '../../../../src/contracts/thresholds';
 import { ENGINE_DEFINITION as DEF } from '../../../../src/engine/definition';
 import {
@@ -18,6 +18,10 @@ import { meshRows, rowBlockageField } from '../../../../src/flow/coupling/rows';
 import { THERMALLY_PERFECT, referenceState } from '../../../../src/flow/reference/gas';
 import { NP, NU } from '../../../../src/flow/reference/state';
 import { engineSolverMesh } from './engineMesh';
+
+// the 130k mesh: each test walks every cell, a few seconds on a loaded laptop (vitest's default
+// 5 s timed out under coverage)
+vi.setConfig({ testTimeout: 120_000 });
 
 const CP1 = THRESHOLDS.CP1.values;
 
