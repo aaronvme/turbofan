@@ -1,4 +1,4 @@
-w3/coupling session 1, STOP (partial: the brief's steps 1-3 in part; CP1 and CP2's sources in the oracle and the kernel, the coupling state and the station reduction; no calibrator yet, so no CP3-CP5 or L12) (from c8b9482; HEAD = the commit of this handoff)
+w3/coupling session 1, STOP-CLEAN (orchestrator, Aaron: "pause"). Done: CP1's and CP2's sources in the oracle and the kernel, the 'calibrating' coupling state, the station reduction. WIP: the calibrator's pure logic, 6 of 7 tests. Not started: CP3-CP5, L12 (from c8b9482; HEAD = the commit of this handoff)
 
 DONE
 - 3de589d (TDD), efc5100: `src/contracts/thresholds.ts` mirrors PHYSICS.md 3.3's CP1-CP5 verbatim (the contract test now reads two-letter IDs: 41 rows). The token parser reads "0.1 %" (a space before %, never before k). CP4's "a tenth" has no number; the test pins its text.
@@ -19,6 +19,14 @@ DONE
   - each station's grid line, with its cells (`stationCells` for a gather readback);
   - mass-averaged Pt and Tt (thermally perfect), W, area-averaged ps, swirl;
   - the gross thrust over stations 18 and 8, and `reduceStations` → the contract's `StationReduction`.
+- 4ed078d (TDD), 7137f9c **(WIP)**: `src/flow/coupling/calibrator.ts`:
+  - `PAIRINGS`: one target per knob, with its sensitivity sign;
+  - `pairingError`: log space for W, Pt and Tt, rad for the swirl;
+  - `trimFromErrors` and `trimStep`: gain 0.5 per reduction, clamped at ln 4;
+  - `knobsFrom`, the log-linear `feedforward` by N2c, `l12Check` against L12's typed tolerances, `couplingStateOf` and CP4's `steadyWithin`.
+  - **6 of 7 unit tests pass.** The model-plant test fails on its steadiness row: it reaches 1e-3 within 30 reductions (that assertion passes) but `steadyWithin` returns false. Unexamined at the stop. The likely cause is the test's own spread bar: errors of about 1e-3 that are still decaying spread by more than a tenth of the tolerance over the window. Check that first, then the function.
+  - Not wired anywhere. The pairings are untested on the field.
+- 7f5d892: lint (a regex written with literal backspaces) and a 120 s timeout for the 130k coupling tests.
 - f62af16: the PHYSICS.md 1 ledger has a W3 row: what is simulated, and every assumed constant. SOLVER.md 8 gets a short W3-sources paragraph.
 
 RESULTS (CP rows of PHYSICS.md 3.3; no threshold changed)
@@ -48,7 +56,7 @@ FOR THE ORCHESTRATOR
 NEXT (in order)
 1. **A stable path to a coupled field on the GPU.** Start from rest (or the look-dev start) and ramp the rows' speeds and the fuel to an idle point over N iterations, with `setCellSource` recomputed per step. Then go up the working line. Find the first stable ramp rate, and report P1 with the sources on (CP5's ≥ 150 it/s, indicative).
 2. **CP1's mass-flux row** on that converged field. Read back the GPU state, set the oracle's U, then sum `ReferenceSolver.faceFlux(block, 'i', i, j)[0]` × 2π over each column of each row, one column before its LE to one after its TE. Max relative step between neighbouring columns ≤ 1e-3.
-3. **Calibrator** (`src/flow/coupling/calibrator.ts`, pure, ≥ 90 %):
+3. **Calibrator** (`src/flow/coupling/calibrator.ts`; first fix its WIP test above, then keep it ≥ 90 % covered):
    - the trim log K_i += g_i e_i Δn, with knob → target pairings: fanTip → P13, fanHub → P25 (with the booster), hpcRotor/hpcStator → P3, hptNozzle → W25, lptNozzle → P45 or T45, the loss knobs → the Tts, bypassNozzle → W13, coreNozzle → W8;
    - the feedforward at the working-line points, computed in-process (the full table bake is w3/plume-bake's);
    - CP3 (the feedforward alone within 10 %), then CP4 (< 300 iterations, then 2000 with a spread ≤ a tenth). If CP4 can't be met, stop and report the data.
@@ -70,10 +78,16 @@ GOTCHAS
    - `npm run mesh:assets` before test:gpu (`public/mesh` is gitignored).
    - No dev server, Chrome or detached job is left running.
 
-GATES @b713aab (on battery, detached one at a time)
-- npm run typecheck: GATE_TYPECHECK
-- npm run lint: GATE_LINT
-- coverage: GATE_COVERAGE
-- npm run test:gpu: GATE_GPU
-- npm run test:gpu-ladder: GATE_GPULADDER
-- test:ladder (CPU): not run. `src/flow/reference` is unchanged since c8b9482 (`git diff c8b9482 -- src/flow/reference` is empty), and the coupling's oracle-side code is unit-tested. test:browser: not run (no render/ui/app change; the legend and HUD changes are unit-tested). test:mesh: not touched.
+GATES (on battery; one detached chain at b713aab, `reports/scratch/run/gates.status` and `gates.log`; no detached job is running now)
+- npm run typecheck: clean at b713aab and again at 7137f9c.
+- npm run lint: **1 error at b713aab** (`legend.test.ts`: a regex written with literal backspaces), fixed in 7f5d892. ESLint on every touched file is clean since; the full lint was not re-run.
+- coverage: **not obtained.** The run took 1 h 53 min (13:53 → 15:46, the machine starved) and failed on 3 timeouts, so it wrote no report:
+  - `heldRecovery.test.ts` (300 s) and `model.test.ts` (600 s), cycle tests whose code is unchanged in behaviour (the cycle suite passed alone in 73 s: 299 + 5 expected fail);
+  - `combustor.test.ts` at vitest's 5 s default, now raised to 120 s (7f5d892).
+  - Everything else: 2446 passed + 10 expected fail of 2459. **Re-run coverage first**, on AC, and report `src/flow/coupling`'s lines (core threshold 90 %).
+- npm run test:gpu: **13 files, 76 passed** (75 + `coupling.test.ts`). E-L5 2.67e-8 and E-L9a K2 2.202e-11, unchanged by the 10-vec4 coefficients.
+  - Its coupling row ran on cd6b8b1's kernel or later (the later damping change was saved mid-run). The standalone run at 0401aaf also passed.
+- npm run test:gpu-ladder: **5 files, 17 passed + 1 expected fail** (L9a's D4-57 pin), at b713aab.
+- test:ladder (CPU): not run. `src/flow/reference` is unchanged since c8b9482 (`git diff c8b9482 -- src/flow/reference` is empty).
+- test:browser: not run (no render/ui/app change; the legend and HUD changes are unit-tested). test:mesh: not touched.
+- Still owed: coverage, full lint, and the calibrator test at the current HEAD.
