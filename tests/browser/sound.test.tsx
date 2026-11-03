@@ -61,7 +61,14 @@ async function until(what: string, pred: () => boolean, timeoutMs = 60_000): Pro
     const c = useApp.getState().connection;
     if (c.state === 'failed' || c.state === 'lost' || c.state === 'unsupported')
       throw new Error(`${what}: the app stopped (${c.state}: ${c.message})`);
-    if (performance.now() - t0 > timeoutMs) throw new Error(`${what}: not within ${timeoutMs} ms`);
+    const sound = useApp.getState().sound;
+    if (sound.status === 'failed') throw new Error(`${what}: the sound failed: ${sound.error}`);
+    if (performance.now() - t0 > timeoutMs) {
+      const ctx = engineSound().context;
+      throw new Error(
+        `${what}: not within ${timeoutMs} ms (sound ${JSON.stringify(sound)}, context ${ctx?.state ?? 'none'}, errors ${JSON.stringify(errors)})`,
+      );
+    }
     await sleep(50);
   }
 }
@@ -98,6 +105,8 @@ afterEach(() => {
 
 describe('the engine sound (real Chrome)', () => {
   it('starts only on the switch; the output is finite and bounded; volume and mute work', async () => {
+    // the app's own layout (the default test viewport is a phone's: the dock would be off screen)
+    await page.viewport(1366, 768);
     useApp.setState(fresh, true);
     render(<App />);
     await until('ready and a snapshot', () => {
@@ -116,6 +125,7 @@ describe('the engine sound (real Chrome)', () => {
     expect(built).toBe(0);
 
     await sw.click();
+    expect(useApp.getState().sound.on, 'the click reached the switch').toBe(true);
     await until('the sound on', () => useApp.getState().sound.status === 'on', 15_000);
     await expect.element(sw).toHaveAttribute('aria-checked', 'true');
     expect(built).toBe(1);
