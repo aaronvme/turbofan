@@ -1,0 +1,46 @@
+// Critic pass 20 probe (W3S, L14's restated peak row and its controls): runs L14's cases
+// (tests/ladder/hotPocket.ts: the duct, the start, the engine defaults, the rows) on the oracle of
+// the tree this file is copied into (<root>/probe/l14probe.ts), sampled after every iteration, and
+// prints each case's four rows plus the pre-registered "peak max T' / start" beside the restated
+// "peak T' / T'_s". Modes: default (the engine defaults), plain (no preconditioning, CFL 1.5);
+// C20_GUARD=on adds the guard-only control (main's tree only, re-implemented from SOLVER.md 17).
+// node --import ./tools/mesh/ts-resolve.mjs <root>/probe/l14probe.ts <mode> [case index ...]
+import { ReferenceSolver } from '../src/flow/reference/solver';
+import {
+  HOT_POCKET_CASES,
+  HOT_POCKET_OPTIONS,
+  caseName,
+  hotPocketMesh,
+  hotPocketRows,
+  hotPocketState,
+  isentropicPocketBound,
+  samplePocket,
+  tracePocket,
+} from '../tests/ladder/hotPocket';
+
+const mode = process.argv[2] ?? 'default';
+const pick = process.argv.slice(3).map(Number);
+const cases = pick.length > 0 ? pick.map((k) => HOT_POCKET_CASES[k]!) : HOT_POCKET_CASES;
+const opts =
+  mode === 'plain'
+    ? { gas: HOT_POCKET_OPTIONS.gas, freeStream: HOT_POCKET_OPTIONS.freeStream }
+    : HOT_POCKET_OPTIONS;
+console.log(`mode ${mode} guard ${process.env.C20_GUARD ?? 'off'}`);
+for (const c of cases) {
+  const mesh = hotPocketMesh();
+  const bound = isentropicPocketBound(c);
+  const s = new ReferenceSolver(mesh, opts);
+  s.setState(hotPocketState(c));
+  const sample = () => samplePocket(s.primitives(), s.U, s.ref.rho, mesh.nCells, bound);
+  const t0 = Date.now();
+  const trace = await tracePocket(sample(), () => {
+    s.iterate(1);
+    return sample();
+  });
+  const rows = hotPocketRows(c, trace);
+  const v = rows.map((r) => (Number.isFinite(r.value) ? r.value.toFixed(4) : String(r.value)));
+  const hits = (s as unknown as { c20Hits?: number }).c20Hits ?? 0;
+  console.log(
+    `${caseName(c).padEnd(22)} its ${v[0]} | peak T'/T's ${v[1]} at [${trace.peakOverBoundAt.join(',')}] | old peak/start ${(trace.peak / trace.start.tMax).toFixed(4)} | end/start ${v[2]} | low/dT ${v[3]} | ${rows.every((r) => r.pass) ? 'PASS' : 'FAIL'} | guard hits ${hits} | ${((Date.now() - t0) / 1000).toFixed(0)} s`,
+  );
+}
