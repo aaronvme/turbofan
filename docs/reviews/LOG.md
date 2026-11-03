@@ -5548,7 +5548,7 @@ Power: **AC for every gate** (BatteryStatus 2, 100 %). The orchestrator's CPU d4
 4. **The shots:** commit the builder's DPR-1 set (shot with the display asleep), or re-shoot on the merged main with the display held on, so the set is at DPR 1.5 like round 7's? I prefer the re-shoot.
 5. **Keep-awake in detached browser runs:** make it system and display (`0x80000003`, ES_DISPLAY_REQUIRED added), for builders and critics alike? With the system flag alone, the display sleeps at its 5-minute AC timeout, Chrome drops to DPR 1 and is throttled, and Modern Standby can close the browser connection. My first browser gate failed that way (fanBlur about 10× slower, 2 timeouts at 240 s, warmStall's connection lost), and the builder's shots show the same DPR 1. D0-1 already asks for the display awake in official runs.
 
-## Critic pass 20: w3/scheme @97a2769 (rounds 1-2) (PARTIAL: mutants in progress)
+## Critic pass 20: w3/scheme @97a2769 (rounds 1-2)
 
 **Scope.** w3/scheme `e6c48de..97a2769` (24 commits; e552cc1 is the orchestrator's merge of main's D5-5):
 - W2S-I1's fix: SOLVER.md §10/§17's pairwise face radius in the local step (2b87b39), oracle and kernel;
@@ -5676,12 +5676,16 @@ Power: **AC for every gate** (BatteryStatus 2, 100 %). The orchestrator's CPU d4
 - **Not the builder's form either.** "|r_GPU − r_ref| ≤ the oracle's |R(U_GPU) − R(U_ref)|" fails at U⁹ (1.187e-9 > 1.165e-9 and 1.094e-9). It is the triangle inequality's S + K with K dropped, so it sits on a knife edge.
 - **The form I recommend** (a test change; the threshold value is the orchestrator's):
   - The row evaluates the oracle at the **GPU's own U⁹**: run 9 iterations on both, read the GPU's state back (`readConserved`, hi + lo), evaluate the oracle's density-residual L2 on it, then run the 10th iteration.
-  - The gated row becomes K2 = |r_GPU − L2 R_ref(U⁹_GPU)| / r_flux, with D4-62's rule: ten times the measured 2.2e-11, i.e. **3e-10**.
+  - The gated row becomes K2 = |r_GPU − L2 R_ref(U⁹_GPU)| / r_flux, **at D4-71's own 1e-10, unchanged.** The adopted kernel passes it 4.5× (2.20e-11).
   - That isolates what the row is for, the kernel's residual arithmetic. The state drift it used to include is the field row's business.
-  - 3e-10 is above W2R-I17's norm-reduction band (1.1e-11 to 8.8e-11 here), and both walls pass it (2.2e-11 and 1.35e-10).
+  - 1e-10 stays above W2R-I17's norm-reduction band (1.1e-11 to 8.8e-11 here), the reason D4-71 chose it.
   - The old form is printed beside it as a reported row, with S3 (the f32 floor).
-- **That is a re-posed row, not a loosened one.** Its quantity excludes a term the kernel cannot control, and its bar sits 3× tighter than the old form's f32 floor with the mirror.
-- **If the orchestrator prefers to keep the old form,** the honest bar is above its floor: S1 ≈ 1.2e-9 → ten times it, 1e-8. That is a real loosening, which I do not recommend.
+- **The re-posed row has the teeth the old one lacks.** My mutant W1g (the kernel's ρ′ extrapolated while the oracle mirrors it: a kernel whose wall disagrees with the oracle's) **passes the current row at 3.34e-11**, while the kernel that agrees fails it at 1.19e-9. K2 catches W1g: 1.66e-10 > 1e-10 (the probe re-run under W1g).
+  - So the current row's verdict on the wall is noise. It follows whichever wall the kernel uses, cancelling with the old one and not with the mirror, whatever the oracle does: W1c, the oracle's mirror off with the kernel's on, gives 1.22e-9.
+  - D4-62's "ten times the measured" (3e-10) would pass W1g, which is why I keep D4-71's 1e-10.
+  - If a driver or tile change ever moves K2 past 1e-10 within the norm band, W2R-I17's other option, the norm summed in f64 from read-back per-cell residuals, removes that term.
+- **That is a re-posed row, not a loosened one.** The same number, applied to a quantity that excludes what the kernel does not control, and it kills a mutant the current row passes.
+- **If the orchestrator prefers to keep the old form,** the honest bar is above its floor: S1 ≈ 1.2e-9 → ten times it, 1e-8. That is a real loosening, which I do not recommend: it would also pass W1g.
 
 ### 5. Commit cd88474 (the wall-ghost GPU test's bound): justified, not a loosened bar
 
@@ -5747,7 +5751,22 @@ My `w3s-j-outflow-cycle.probe` (J's set-up from `precondition.test.ts`, the last
 
 ### Mutants (by hand on trial20's tree after the gates; `reports/scratch/c20/mutants.mjs`; each file restored from a copy and `git diff --quiet` checked)
 
-MUTANTS_TABLE
+Each `test:gpu` count below excludes E-L9a's baseline failure (W3S-I1), which fails in every run.
+
+| set | killed (by) | survived |
+|---|---|---|
+| oracle (unit, CPU L14) | **R1c**, the rule off: the unit J row and section 17's recomputed step (19.5 against 0.8); CPU L14 non-finite at iteration 1. **R2c**, the wall exclusion off: section 17's wall row (0.779 against 0.8). **W1c**, the mirror off: both boundary unit rows, plus 10 test:gpu rows (the oracle and the kernel then disagree) | none |
+| kernel (Dawn: test:gpu, then GPU L14) | **W1g**, ρ′'s mirror off: the wall-ghost row and 8 others. **W2g**, Z's mirror off: the wall-ghost row and 7 others. **W3g**, p′ mirrored instead of extrapolated: the wall-ghost row (cd88474's bound) and 11 others. **R1g**, the rule off: C-pre, S, S at 20 m/s, the moving duct and both backflow rows; GPU L14 non-finite. **R2g**, the wall exclusion off: **only** the moving duct, preconditioned, at 1.45e-4 against 1e-4 after 10 iterations; GPU L14 passes (W3S-N4). **R3g**, the neighbour's radius at β = 1: 6 rows (the moving duct 0.068 after 1) and GPU L14's at-rest case. **R4g**, the neighbour's c taken at T∞: 5 rows; GPU L14 passes | none |
+
+**Totals:** 10/10 killed (oracle 3/3, kernel 7/7). One kill is thin: R2g, at 1.45× its tolerance.
+
+**E-L9a's flux-scale row under the wall mutants:**
+- W1g (the kernel's ρ′ extrapolated, the oracle's mirrored): **3.34e-11, a pass**;
+- W1c (the reverse): 1.22e-9;
+- W2g: 1.19e-9;
+- W3g: 1.46e-7.
+
+So the current row passes a kernel whose wall disagrees with the oracle's (item 4).
 
 ### Findings
 
@@ -5760,9 +5779,9 @@ None.
     - The merge needs green gates, and this row cannot be made green by any correct f32 kernel with the adopted wall. Rounding the oracle's own U⁹ to f32 already moves the row's quantity by 1.94e-10 (item 4's S3).
     - The record's 2.46e-12 was itself a cancellation of two terms 50-150× larger (S1/S2 against K). So the same row could also have failed with the old wall under any change to the kernel's reduction order, which is W2R-I17's warning, made concrete.
   - Fix (the orchestrator's decision; then a test-only change and one test:gpu run):
-    - restate the row as item 4's K2: the kernel's residual against the oracle's residual of the **GPU's own** U⁹ (`readConserved` after 9 iterations), at D4-62's ten times the measured, **3e-10**;
+    - restate the row as item 4's K2: the kernel's residual against the oracle's residual of the **GPU's own** U⁹ (`readConserved` after 9 iterations), at D4-71's **1e-10, unchanged** (the adopted kernel: 2.20e-11);
     - print the old form and S3 beside it as reported rows;
-    - show the new row's power with a mutant, e.g. the kernel's residual norm over a tile summed without one face's compensation, or a 1-ulp scaling of the stage residual.
+    - its power is already shown: W1g passes the current row (3.34e-11) and fails K2 (1.66e-10).
 - **W3S-I2 (pre-existing on main since D4-101; for w3/plume-bake): J at the engine's cut 0.02 stalls in an outflow limit cycle.** On 9b5a6c2 it met D4-44 (c)'s rule at 9441; on main 493f72c and on trial20 it stalls at 0.57-0.88 of its peak, with outflow rows 5-15 switching across vn = 0 every 31-66 iterations (item 7) (`src/flow/reference/boundary.ts` and `src/flow/gpu/wgsl/boundary.ts`, the backflow branch).
   - Scenario: the engine runs at M_cut 0.02 (D4-81), and a jet entraining through the far outflow is exactly the plume's state at W3 (L11). There the residual never settles, the field flickers at the exit, and D4-79-type residual rows cannot pass.
   - Pass 19 (my predecessor) ratified D4-101 without J at 0.02, which is not a row. The builder found and diagnosed it, correctly (not W2S-N2; the backflow's pressure condition decides it, oppositely at the two cuts).
@@ -5782,14 +5801,20 @@ None.
 - **W3S-N3: the restated peak row's bound moves with the cell's pressure, so a temperature that follows a spurious pressure overshoot passes it** (`isentropicPocketBound`). No L14 row bounds p′.
   - Fix: report the run's peak p′ beside the row (for instance over ρ∞ c∞ |u0|, the leading edge's acoustic estimate, about 0.41 at 300 m/s), so that a pressure overshoot shows.
 
+- **W3S-N4: the kernel's slip-wall exclusion is held by one row at 1.45× its tolerance** (`src/flow/gpu/wgsl/kernels.ts` `neighbourRadius`, `wb[t] < 0`; mutant R2g).
+  - The oracle's exclusion has a dedicated unit row (R2c is killed). The kernel's has none: only the moving-duct preconditioned row catches R2g (1.45e-4 against 1e-4 after 10 iterations), and GPU L14 passes with it.
+  - Fix: a GPU row on section 17's wall state (axial 170 m/s, the wall row at p∞ + 30 kPa, where the ghost's radius exceeds the cell's j term by 7 %), kernel against oracle after 1 iteration at row C's 1e-5.
+
 ### Answers (questions 3-6)
 - **3. L14's restated row is principled, not a loosening of what the row is for.**
   - It is the hot gas's own isentrope at the cell's pressure, a maximum principle that the physics obeys here to within 0.2 % (shock entropy). It is looser in compression and tighter in expansion.
   - Its controls hold in my runs: the guard-only control is 2.6469 (plus 1.106 and 1.042), fails, and matches the builder to the digit. The plain scheme is 1.0311 / 1.0312, just over, at its iteration-5 leading edge.
   - Its limitation is W3S-N3.
-- **4. E-L9a: (1), restate the row** (item 4's form, K2 ≤ 3e-10, the old form reported). Not the pin, and not rejecting the mirror.
+- **4. E-L9a: (1), restate the row** (item 4's form: K2 ≤ D4-71's 1e-10, unchanged, with the old form reported). Not the pin, and not rejecting the mirror.
   - The builder's cancellation argument holds in kind; its numbers do not (W3S-N2).
-  - The decisive measurement is S3: with the mirror, rounding the exact state to f32 alone exceeds 1e-10.
+  - The decisive measurements:
+    - S3: with the mirror, rounding the exact state to f32 alone exceeds 1e-10;
+    - W1g: the current row passes a kernel whose wall disagrees with the oracle's, and K2 fails it.
 - **5. cd88474 is justified.** It replaced the builder's own first-draft tolerance (not a pre-registered bar) with the exact error propagation of the extrapolation. The test kept its teeth (W3g killed) and gained bitwise checks on ρ′ and Z. PHYSICS.md's L14 row text is unchanged; the "Result" line is an added record line.
 - **6. Item 3 holds.**
   - L7 converged to 1e-6: 0.0110887 / 0.00112104 with the branch against 0.0110888 / 0.00112116 for the record scheme, so the steady state is unchanged.
@@ -5798,7 +5823,7 @@ None.
   - The GPU's D4-63 is 0.4497 / 0.008217 / 0.2158 / 0.03297, and W2S-B1 is 0.6286 / 2.06e-3 / 0.1621 / 0.0262. Every bar holds; the fixed-iteration (b) ratios are worse than record and are reported, as item 3 provides.
 
 ### Verdict: **FIX FIRST (one item, W3S-I1; everything else is ready to merge)**
-- B 0, I 2 (W3S-I1, the red E-L9a row; W3S-I2, pre-existing on main, for w3/plume-bake), N 3.
+- B 0, I 2 (W3S-I1, the red E-L9a row; W3S-I2, pre-existing on main, for w3/plume-bake), N 4. Mutants 10/10 killed.
 - **The scheme change is right.** The pairwise face radius is the standard local wave-speed bound, applied the same way in the oracle and the kernel, and the plain and physical paths are untouched. The mirrored wall ghost is the standard reflective treatment, conservative and L6-neutral. L14 passes every row of every case on the CPU and the GPU in my runs. Every other CPU and GPU row equals the builder's table, and L9a's steadiness row now passes.
 - **Ratify:** §10's pairwise radius, §5's mirrored ρ′ and Z (D5-5 item 1 as adopted), and the L14 result.
 - **The one thing between this branch and the merge is W3S-I1**, the orchestrator's decision on E-L9a's row and the test change it implies.
@@ -5807,7 +5832,7 @@ None.
   - Nothing else needs re-review, except a look at the new row's test.
 
 ### Questions for the orchestrator
-1. **E-L9a (W3S-I1):** restate the row as the kernel against the oracle on the GPU's own U⁹, at 3e-10 (ten times the measured 2.2e-11), with the old form and its f32 floor reported? That is my recommendation, over the pin and over rejecting the mirror.
+1. **E-L9a (W3S-I1):** restate the row as the kernel against the oracle on the GPU's own U⁹, (K2), at D4-71's 1e-10 unchanged (the adopted kernel 2.20e-11; mutant W1g 1.66e-10 fails it, while it passes the current row), with the old form and its f32 floor reported? That is my recommendation, over the pin and over rejecting the mirror.
 2. **W3S-I2:** record J at 0.02's stall as a D4-101 regression at the engine's cut (9441 before it, a limit cycle since), and have w3/plume-bake pre-register J at both cuts before L11?
 3. **W3S-N1:** read L14's at-rest "end ≤ start" with a round-off allowance (a logged decision), or leave it as is?
-4. **Housekeeping:** the local branch `trial20` (9458e5c) is left in the critic worktree (TRIAL20_NOTE). `critic` holds only this LOG section and the four probe files.
+4. **Housekeeping:** the local branch `trial20` (9458e5c) is left in the critic worktree: the PreToolUse hook blocked `git branch -D` (a fact-forcing gate), so the orchestrator can delete it. The critic worktree is back on `critic`, and no detached run of mine is left going. `critic` holds only this LOG section and the four probe files.
