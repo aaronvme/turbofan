@@ -677,8 +677,8 @@ describe('section 17: the local step takes both cells of every face (W2S-I1)', (
       DEFAULT_CFL,
       12,
     );
-    // a hot wall cell under cold gas: its wall ghost extrapolates rho' to 2 rho_0 - rho_1 < 0, a
-    // state with no sound speed, so the wall face keeps the cell's own radius (and stays finite)
+    // a hot wall cell under cold gas: the wall face keeps the cell's own radius (and stays finite;
+    // round 1's extrapolated ghost had rho = 2 rho_0 - rho_1 < 0 here, a state with no sound speed)
     const pre = new ReferenceSolver(mesh, {
       gas: THERMALLY_PERFECT,
       freeStream: AMBIENT,
@@ -698,5 +698,83 @@ describe('section 17: the local step takes both cells of every face (W2S-I1)', (
     });
     const d0 = pre.localDt();
     expect(d0.every((d) => Number.isFinite(d) && d > 0)).toBe(true);
+  });
+
+  it("keeps a slip wall face at the cell's own radius when its ghost's would be larger", () => {
+    // axial flow at 170 m/s (beta = M = 0.5 in every cell, above dp / (rho c^2)), the wall row at
+    // p_inf + 30 kPa and the rest at p_inf, all at 288.15 K: the ghost's extrapolated p' (2 p_0 -
+    // p_1) over its mirrored rho' (D5-5) is 23 % hotter than the wall cell, so the wall face's term
+    // would set the cell's j-direction if the wall exclusion were off
+    const mesh = pocketMesh();
+    const pre = new ReferenceSolver(mesh, {
+      gas: THERMALLY_PERFECT,
+      freeStream: AMBIENT,
+      lowMachPreconditioning: PRE,
+    });
+    pre.setState((_x, r) => {
+      const p = r < 0.31 ? 131325 : 101325;
+      return { rho: p / (287.05287 * 288.15), u: 170, v: 0, w: 0, p, z: 0 };
+    });
+    const dt = pre.localDt();
+    const P = pre.primitives();
+    const ref = pre.ref;
+    const cell = 3; // (3, 0), on the inner wall
+    const n = mesh.nCells;
+    const betaOf = (c: number) => {
+      const pc = P[NP * c + 4] as number;
+      const i = c % 8;
+      const j = Math.floor(c / 8);
+      let dp = 0;
+      for (const [ii, jj] of [
+        [i - 1, j],
+        [i + 1, j],
+        [i, j - 1],
+        [i, j + 1],
+      ] as const) {
+        // a wall ghost's p' is 2 p_0 - p_1, so |p_ghost - p_0| = |p_1 - p_0|: the same dp
+        const nb = jj < 0 ? c + 8 : jj > 2 ? c - 8 : jj * 8 + ii;
+        dp = Math.max(dp, Math.abs((P[NP * nb + 4] as number) - pc));
+      }
+      const rho = ref.rho + (P[NP * c] as number);
+      return Math.sqrt(lowMachBeta2(P, NP * c, mesh.cellR[c] as number, 0.02, dp, rho));
+    };
+    const vn = (c: number, nx: number, nr: number) =>
+      (P[NP * c + 1] as number) * nx + (P[NP * c + 2] as number) * nr;
+    const own = (c: number, nx: number, nr: number) =>
+      spectralRadius(vn(c, nx, nr), P[NP * c + 7] as number, betaOf(c) ** 2);
+    const term = (area: ArrayLike<number>, fx: ArrayLike<number>, fr: ArrayLike<number>) => {
+      return (face: number, nb: number | undefined) => {
+        const [nx, nr] = [fx[face] as number, fr[face] as number];
+        const lf =
+          nb === undefined
+            ? own(cell, nx, nr)
+            : Math.max(
+                own(cell, nx, nr),
+                neighbourSpectralRadius(ref, P, NP * nb, nx, nr, betaOf(nb)),
+              );
+        return (area[face] as number) * lf;
+      };
+    };
+    const iTerm = term(mesh.iArea, mesh.iNx, mesh.iNr);
+    const jTerm = term(mesh.jArea, mesh.jNx, mesh.jNr);
+    const f = mesh.blocks[0]?.iFaceOffset ?? 0;
+    const jf = mesh.blocks[0]?.jFaceOffset ?? 0;
+    const sWall = jf + 3;
+    const lamI = Math.max(iTerm(f + 3, cell - 1), iTerm(f + 4, cell + 1));
+    const lamJ = Math.max(jTerm(sWall, undefined), jTerm(jf + 8 + 3, cell + 8));
+    const tau = (dt[cell] as number) / (mesh.cellVolR[cell] as number);
+    expect(tau * (lamI + lamJ)).toBeCloseTo(DEFAULT_CFL_PRECONDITIONED, 12);
+    // the test has teeth: the wall ghost's radius on the wall face exceeds the cell's j term
+    let ghost = -1;
+    for (let g = 0; g < mesh.nGhosts; g++) {
+      if (mesh.ghostSrc[g] === cell && mesh.ghostLayer[g] === 1 && mesh.ghostBc[g] === BC.SLIP_WALL)
+        ghost = g;
+    }
+    expect(ghost).toBeGreaterThanOrEqual(0);
+    const [wx, wr] = [mesh.jNx[sWall] as number, mesh.jNr[sWall] as number];
+    const lamGhost =
+      (mesh.jArea[sWall] as number) *
+      neighbourSpectralRadius(ref, P, NP * (n + ghost), wx, wr, betaOf(cell));
+    expect(lamGhost / lamJ).toBeGreaterThan(1.05);
   });
 });

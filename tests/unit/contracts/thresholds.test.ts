@@ -103,7 +103,7 @@ describe('thresholds.ts mirrors docs/PHYSICS.md section 3', () => {
     expect(THRESHOLDS.L14.values.iterations.value).toBe(2000);
     expect(THRESHOLDS.L14.values.machCut.value).toBe(0.02);
     expect(THRESHOLDS.L14.values.cfl.value).toBe(0.8);
-    expect(THRESHOLDS.L14.values.maxPeakTemperatureRatio.value).toBe(1.03);
+    expect(THRESHOLDS.L14.values.maxPeakOverIsentropicCompression.value).toBe(1.03);
     expect(THRESHOLDS.L14.values.maxUndershootFractionOfDeltaT.value).toBe(0.03);
     expect(THRESHOLDS.P1.values.minIterationsPerS.value).toBe(150);
     expect(THRESHOLDS.P3.values.maxValidationErrors.value).toBe(0);

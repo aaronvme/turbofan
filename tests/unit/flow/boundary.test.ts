@@ -216,8 +216,8 @@ describe('boundary conditions', () => {
   });
 });
 
-describe('slip-wall ghosts (extrapolated, docs/SOLVER.md section 5)', () => {
-  it('extrapolate scalars and tangential velocity linearly and mirror the normal velocity', () => {
+describe('slip-wall ghosts (docs/SOLVER.md section 5)', () => {
+  it("mirror rho' and Z, extrapolate p', rw and the tangential velocity, mirror the normal velocity", () => {
     const q0 = physicalToPrim(ambient, { rho: 1.1, u: 30, v: 4, w: 9, p: 1.02e5, z: 0.01 }, 1);
     const q1 = physicalToPrim(ambient, { rho: 1.3, u: 20, v: -6, w: 12, p: 1.05e5, z: 0.02 }, 1.1);
     const P = new Float64Array(2 * NP);
@@ -230,11 +230,38 @@ describe('slip-wall ghosts (extrapolated, docs/SOLVER.md section 5)', () => {
       const g = new Float64Array(NP);
       wallGhost(P, 0, NP, nx, nr, layer, g, 0);
       const a = layer === 1 ? 2 : 3;
-      for (const k of [0, 3, 4, 5]) {
+      const mirror = layer === 1 ? q0 : q1;
+      // D5-5: rho' and Z reflected (layer 1 the wall cell's, layer 2 the next cell's), so the wall
+      // cell's scalar slope is limited like an interior extremum's and an outgoing flow cannot drain
+      // more fuel or entropy than the cell holds
+      for (const k of [0, 5]) expect(g[k]).toBe(mirror[k]);
+      // p' and rw keep the linear extrapolation radial equilibrium needs (ladder L6)
+      for (const k of [3, 4]) {
         expect(g[k]).toBeCloseTo(a * (q0[k] ?? NaN) - (a - 1) * (q1[k] ?? NaN), 9);
       }
-      expect(vn(g)).toBeCloseTo(-vn(layer === 1 ? q0 : q1), 12);
+      expect(vn(g)).toBeCloseTo(-vn(mirror), 12);
       expect(vt(g)).toBeCloseTo(a * vt(q0) - (a - 1) * vt(q1), 12);
+    }
+  });
+
+  it('keep rho > 0 and Z >= 0 in the ghost where extrapolating them would not', () => {
+    // a hot fuelled wall cell under cold gas (extrapolated: rho = 2 rho_0 - rho_1 < 0), and a clean
+    // wall cell beside fuelled gas (extrapolated: Z = 2 Z_0 - Z_1 < 0), both leaving the wall
+    const hot = { rho: 0.235, u: 0, v: -60, w: 0, p: 101325, z: 0.015 };
+    const cold = { rho: 1.225, u: 0, v: -60, w: 0, p: 101325, z: 0 };
+    for (const [wall, inner] of [
+      [hot, cold],
+      [cold, { ...hot, z: 0.015 }],
+    ] as const) {
+      const P = new Float64Array(2 * NP);
+      P.set(physicalToPrim(ambient, wall, 0.3), 0);
+      P.set(physicalToPrim(ambient, inner, 0.31), NP);
+      for (const layer of [1, 2] as const) {
+        const g = new Float64Array(NP);
+        wallGhost(P, 0, NP, 0, -1, layer, g, 0);
+        expect(ambient.rho + (g[0] ?? NaN)).toBeGreaterThan(0);
+        expect(g[5]).toBeGreaterThanOrEqual(0);
+      }
     }
   });
 });

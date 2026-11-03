@@ -441,6 +441,60 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     await trackingRows(p, 'S sink');
   });
 
+  // D5-5 (SOLVER.md 5): the slip-wall ghost mirrors rho' and Z (layer 1 the wall cell's, layer 2
+  // the next cell's, i.e. each ghost's own source cell's) and keeps p', rw and the tangential
+  // velocity extrapolated; the kernel's copy is exact, so it is checked bitwise against its own cells
+  it("the slip-wall ghost mirrors rho' and Z and extrapolates p', rw and u, v as the oracle does", async () => {
+    const mesh = duct(12);
+    const options: SolverOptions = {
+      gas: THERMALLY_PERFECT,
+      freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
+      lowMachPreconditioning: ENGINE_PRECONDITIONING_CUT,
+    };
+    // radial gradients in every primitive, so extrapolating and mirroring differ at both walls
+    const p = await pair(mesh, options, {}, (s) => {
+      s.setState((x, r): PhysicalState => {
+        const k = (r - 0.5) / 0.1;
+        const pr = 101325 * (1 + 0.04 * k);
+        const T = 288.15 + 600 * k * k + 20 * x;
+        return {
+          rho: pr / (287.05287 * T),
+          u: 40 - 30 * k,
+          v: 8 * k,
+          w: 15 * k,
+          p: pr,
+          z: 0.015 * k,
+        };
+      });
+    });
+    const P = await p.gpu.readPrimitives();
+    const R = p.ref.primitives();
+    // each field's scale over the cells (row C's S_q, tests/ladder/oracle.ts relativeError)
+    const scale = [0, 1, 2, 3, 4, 5].map((k) => {
+      let m = 0;
+      for (let c = 0; c < mesh.nCells; c++) m = Math.max(m, Math.abs(R[NP * c + k] ?? NaN));
+      return m;
+    });
+    let walls = 0;
+    for (let g = 0; g < mesh.nGhosts; g++) {
+      if (mesh.ghostBc[g] !== BC.SLIP_WALL) continue;
+      walls++;
+      const e = NP * (mesh.nCells + g);
+      const src = NP * (mesh.ghostSrc[g] ?? 0);
+      for (const k of [0, 5]) {
+        expect(P[e + k], `ghost ${g} (layer ${mesh.ghostLayer[g]}) entry ${k}`).toBe(P[src + k]);
+        expect(R[e + k]).toBe(R[src + k]);
+      }
+      // row C's one-iteration tolerance over each field's scale
+      for (const k of [0, 1, 2, 3, 4, 5]) {
+        const d = Math.abs((P[e + k] ?? NaN) - (R[e + k] ?? NaN));
+        expect(d, `ghost ${g} entry ${k}`).toBeLessThanOrEqual(TOL[1] * (scale[k] ?? NaN));
+      }
+    }
+    expect(walls).toBe(2 * 2 * 12);
+    p.gpu.destroy();
+  });
+
   // W2S-N1: at p_out = p_inf the pOut uniform equals p_inf whatever the BC says (mutant A3g, `pOut:
   // ref.p`, survived every GPU test), so the row also runs at 0.98 p_inf, where the kernel's pOut
   // and pOutGauge both differ from the free stream's
