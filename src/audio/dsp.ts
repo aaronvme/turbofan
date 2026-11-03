@@ -174,6 +174,13 @@ export class Ramp {
     }
     return this.value;
   }
+  /** `frames` steps at once (a once-per-quantum parameter). */
+  advance(frames: number): number {
+    const m = Math.min(this.remaining, Math.max(0, Math.round(frames)));
+    this.remaining -= m;
+    this.value = this.remaining === 0 ? this.target : this.value + this.step * m;
+    return this.value;
+  }
 }
 
 /** A partial's gain is 1 up to this fraction of the sample rate ... */
@@ -230,17 +237,24 @@ export class OscillatorBank {
   setTarget(i: number, freqHz: number, amp: number, frames: number): void {
     const n = Math.max(0, Math.round(frames));
     const f = Math.max(0, freqHz);
+    // a silent partial takes its new pitch at once: it fades in at it, never sweeping up from 0 Hz
+    const silent = (this.a[i] ?? 0) === 0 && (this.aLeft[i] ?? 0) === 0;
     this.fTarget[i] = f;
     this.aTarget[i] = amp;
-    this.fLeft[i] = n;
-    this.aLeft[i] = n;
-    if (n === 0) {
+    if (n === 0 || silent) {
       this.f[i] = f;
-      this.a[i] = amp;
-      return;
+      this.fLeft[i] = 0;
+    } else {
+      this.fLeft[i] = n;
+      this.fStep[i] = (f - (this.f[i] ?? 0)) / n;
     }
-    this.fStep[i] = (f - (this.f[i] ?? 0)) / n;
-    this.aStep[i] = (amp - (this.a[i] ?? 0)) / n;
+    if (n === 0) {
+      this.a[i] = amp;
+      this.aLeft[i] = 0;
+    } else {
+      this.aLeft[i] = n;
+      this.aStep[i] = (amp - (this.a[i] ?? 0)) / n;
+    }
   }
 
   /** Adds `frames` samples of every partial into out[0 .. frames). */

@@ -171,6 +171,11 @@ describe('Ramp', () => {
     r.jump(5);
     expect(r.value).toBe(5);
     expect(r.done).toBe(true);
+    r.set(9, 4);
+    expect(r.advance(2)).toBe(7);
+    expect(r.advance(5)).toBe(9);
+    expect(r.done).toBe(true);
+    expect(r.advance(3)).toBe(9);
   });
 });
 
