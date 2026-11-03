@@ -108,10 +108,37 @@ export function isentropicPocketBound(c: HotPocketCase): (pGauge: number) => num
   return (pGauge) => th * ((pInf + pGauge) / pInf) ** k - tInf;
 }
 
+/**
+ * W3S-N1 (critic pass 20): "max T' at 2000 <= its start" is read as end <= start x (1 + this), the
+ * f64 rounding of the CPU at-rest case, which is a rest state to round-off. Measured (w3/scheme
+ * round 3, scratch `reports/scratch/r3/kappa.ts`; u = 2^-53): its max T' sits +4u, +2u, +6u and -9u from its start
+ * after 1, 10, 100 and 2000 iterations, so the row's unallowed verdict there is a coin toss. The
+ * bound: one ulp of the pocket cell's rho' or eta moves its T' by at most 6.8u or 3.4u, so the
+ * half-ulp rounding of both in one iteration by at most 5.1u, and 2000 iterations by 1.0e4 u =
+ * 1.1e-12; rounded up to one figure, 2e-12 (2.4e-9 K at the pocket's 1200 K; any heating the row
+ * is for is many orders above it). On the GPU the start is f32-rounded and its pocket moves (end
+ * 0.41 of the start), so no tie arises there; the GPU's state is read as f32 + low part in f64 and
+ * the same allowance applies.
+ */
+export const END_ROUND_OFF_ALLOWANCE = 2e-12;
+
+const AMBIENT_GAMMA = (() => {
+  const cp = cpMix(THERMALLY_PERFECT, AMBIENT_AT_REST.temperature, 0);
+  return cp / (cp - gasConstantMix(THERMALLY_PERFECT, 0));
+})();
+/** rho_inf c_inf of the ambient at rest: the acoustic impedance W3S-N3's p' is read against. */
+const AMBIENT_IMPEDANCE =
+  (AMBIENT_AT_REST.pressure / (R_AIR * AMBIENT_AT_REST.temperature)) *
+  Math.sqrt(AMBIENT_GAMMA * R_AIR * AMBIENT_AT_REST.temperature);
+
 /** One sample of the field: max and min T' over the cells, and whether every cell is sound. */
 export interface PocketSample {
   readonly tMax: number;
   readonly tMin: number;
+  /** max p' over the cells (W3S-N3: reported beside the peak row, whose bound moves with p'). */
+  readonly pMax: number;
+  /** The cell of pMax. */
+  readonly pMaxAt: number;
   /**
    * max over the cells of T' / T'_s(p'), the restated peak row's measure (T' <= 1.03 T'_s). A
    * cell whose bound is not positive counts Infinity if it breaks T' <= 1.03 T'_s, else -Infinity.
@@ -134,6 +161,8 @@ export function samplePocket(
   const limit = L14.maxPeakOverIsentropicCompression.value;
   let tMax = -Infinity;
   let tMin = Infinity;
+  let pMax = -Infinity;
+  let pMaxAt = -1;
   let overBound = -Infinity;
   let overBoundAt = -1;
   let sound = true;
@@ -144,14 +173,19 @@ export function samplePocket(
     const t = P[NP * c + 6] as number;
     if (t > tMax) tMax = t;
     if (t < tMin) tMin = t;
-    const ts = bound(P[NP * c + 4] as number);
+    const pG = P[NP * c + 4] as number;
+    if (pG > pMax) {
+      pMax = pG;
+      pMaxAt = c;
+    }
+    const ts = bound(pG);
     const r = ts > 0 ? t / ts : t <= limit * ts ? -Infinity : Infinity;
     if (r > overBound) {
       overBound = r;
       overBoundAt = c;
     }
   }
-  return { tMax, tMin, overBound, overBoundAt, sound };
+  return { tMax, tMin, pMax, pMaxAt, overBound, overBoundAt, sound };
 }
 
 /** A run of one case: the start sample, then one per iteration until the first unsound one. */
@@ -171,6 +205,10 @@ export interface PocketTrace {
   readonly peakOverBound: number;
   /** Where it sat (iteration, then cell). */
   readonly peakOverBoundAt: readonly [number, number];
+  /** The largest max p' over the start and every sound iteration (W3S-N3, reported). */
+  readonly peakP: number;
+  /** Where it sat (iteration, then cell). */
+  readonly peakPAt: readonly [number, number];
 }
 
 /** Runs one case through `step` (one iteration, then the sample of the new state). */
@@ -184,6 +222,8 @@ export async function tracePocket(
   let peakAt: [number, number] = [0, -1];
   let peakOverBound = start.overBound;
   let peakOverBoundAt: [number, number] = [0, start.overBoundAt];
+  let peakP = start.pMax;
+  let peakPAt: [number, number] = [0, start.pMaxAt];
   let k = 0;
   while (k < HOT_POCKET_ITERATIONS) {
     const s = await step();
@@ -197,17 +237,34 @@ export async function tracePocket(
       peakOverBound = s.overBound;
       peakOverBoundAt = [k, s.overBoundAt];
     }
+    if (s.pMax > peakP) {
+      peakP = s.pMax;
+      peakPAt = [k, s.pMaxAt];
+    }
     low = Math.min(low, s.tMin);
     if (k === HOT_POCKET_ITERATIONS) end = s.tMax;
   }
-  return { start, soundIterations: k, peak, low, end, peakAt, peakOverBound, peakOverBoundAt };
+  return {
+    start,
+    soundIterations: k,
+    peak,
+    low,
+    end,
+    peakAt,
+    peakOverBound,
+    peakOverBoundAt,
+    peakP,
+    peakPAt,
+  };
 }
 
 /**
  * PHYSICS.md 3.3 L14's four rows of one case: finite to 2000 iterations with rho > 0; for every
  * cell and iteration T' <= 1.03 T'_s, the start's hot gas compressed isentropically to the cell's
- * own pressure (the peak row as amended by D5-5); max T' at 2000 <= its start; min T' >= -0.03 dT
- * (the run's minimum over every iteration and cell, the stricter reading).
+ * own pressure (the peak row as amended by D5-5); max T' at 2000 <= its start (to
+ * END_ROUND_OFF_ALLOWANCE, W3S-N1); min T' >= -0.03 dT (the run's minimum over every iteration and
+ * cell, the stricter reading). A fifth row reports the run's peak p' (W3S-N3, not gated): the
+ * peak row's bound moves with the cell's pressure, so a pressure overshoot shows here.
  */
 export function hotPocketRows(c: HotPocketCase, t: PocketTrace, tag = ''): LadderRow[] {
   const name = `${tag}${caseName(c)}`;
@@ -232,10 +289,17 @@ export function hotPocketRows(c: HotPocketCase, t: PocketTrace, tag = ''): Ladde
     },
     {
       id: 'L14',
+      metric: `${name}: peak p' over cells and iterations, Pa (beside the peak row; rho_inf c_inf |u0| = ${(AMBIENT_IMPEDANCE * Math.abs(c.u0)).toExponential(2)} Pa)`,
+      threshold: 'reported',
+      value: held ? t.peakP : NaN,
+      pass: 'reported',
+    },
+    {
+      id: 'L14',
       metric: `${name}: max T' at ${HOT_POCKET_ITERATIONS} / its start`,
-      threshold: '<= 1',
+      threshold: `<= 1 (+ ${END_ROUND_OFF_ALLOWANCE} round-off)`,
       value: end,
-      pass: end <= 1,
+      pass: end <= 1 + END_ROUND_OFF_ALLOWANCE,
     },
     {
       id: 'L14',

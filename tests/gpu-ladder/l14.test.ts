@@ -92,7 +92,10 @@ describe('GPU ladder L14: the hot gas pocket', () => {
 
   it('every row of every case (the rule as pre-registered, the peak row as restated by D5-5), GPU', async () => {
     const r = await rows();
-    expect(r.length).toBe(4 * 10);
-    expectPass(r);
+    // four gated rows per case and the reported peak p' (W3S-N3)
+    const gated = r.filter((row) => row.pass !== 'reported');
+    expect(gated.length).toBe(4 * 10);
+    expect(r.length).toBe(5 * 10);
+    expectPass(gated);
   }, 1_800_000);
 });
