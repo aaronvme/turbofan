@@ -534,6 +534,68 @@ describe('GPU kernel against the f64 oracle (SOLVER.md 12.2)', () => {
     p.gpu.destroy();
   });
 
+  // W3S-N4 (critic pass 20's mutant R2g): the kernel's slip-wall exclusion in the local step
+  // (SOLVER.md 17; neighbourRadius returns 0 for a wall ghost, wb < 0), on the unit row's wall state
+  // (precondition.test.ts, section 17): axial flow at 170 m/s (beta = M, 0.48-0.50, in every cell,
+  // above dp / (rho c^2)), both wall rows at p_inf + 30 kPa and the rest at p_inf, so each wall
+  // ghost (p' extrapolated, rho' mirrored) is 23 % hotter than its cell and its radius on the wall
+  // face would set the cell's j term. T rises axially from 288.15 K by 30 K, so that T' has a scale:
+  // at the unit row's uniform 288.15 K, T' stays within 1.8 K after one iteration and its e_q is the
+  // f32 rounding of T (8.5e-6 K, 4.7e-6 of that scale). The kernel's stage-1 tau (stored with U)
+  // is checked cell by cell against the oracle's, and the fields after the iteration, at row C's
+  // one-iteration 1e-5 (measured: tau 1.2e-7, e_q 2.7e-7; with R2g, tau 5.5e-2 in the wall rows and
+  // e_q 1.9e-2, where the moving duct's row was its only kill, at 1.45e-4 against 1e-4).
+  it("the local step keeps a slip-wall face at the cell's own radius when its ghost's is larger (SOLVER.md 17)", async () => {
+    const mesh = duct(12);
+    const options: SolverOptions = {
+      gas: THERMALLY_PERFECT,
+      freeStream: { pressure: 101325, temperature: 288.15, velocity: 0 },
+      lowMachPreconditioning: ENGINE_PRECONDITIONING_CUT,
+      cfl: DEFAULT_CFL_PRECONDITIONED,
+    };
+    const wallRow = (r: number) => r < 0.525 || r > 0.575;
+    const p = await pair(mesh, options, {}, (s) => {
+      s.setState((x, r): PhysicalState => {
+        const pr = wallRow(r) ? 131325 : 101325;
+        const T = 288.15 + 30 * ((x + 0.3) / 0.6);
+        return { rho: pr / (287.05287 * T), u: 170, v: 0, w: 0, p: pr, z: 0 };
+      });
+    });
+    // the state has the property the exclusion is for: every wall ghost hotter than its cell by
+    // more than a fifth (T from its own p' and rho'; Z = 0, so the air's R in both)
+    const P0 = p.ref.primitives();
+    const tOf = (e: number) =>
+      (101325 + (P0[NP * e + 4] ?? NaN)) / (p.ref.ref.rho + (P0[NP * e] ?? NaN));
+    let walls = 0;
+    for (let g = 0; g < mesh.nGhosts; g++) {
+      if (mesh.ghostBc[g] !== BC.SLIP_WALL || mesh.ghostLayer[g] !== 1) continue;
+      walls++;
+      expect(tOf(mesh.nCells + g) / tOf(mesh.ghostSrc[g] ?? 0)).toBeGreaterThan(1.2);
+    }
+    expect(walls).toBe(2 * 12);
+    p.ref.iterate(1);
+    p.gpu.iterate(1);
+    const st = await p.gpu.readState();
+    const dt = p.ref.localDt();
+    let worstWall = 0;
+    let worstRest = 0;
+    for (let c = 0; c < mesh.nCells; c++) {
+      const tauRef = (dt[c] ?? NaN) / ((p.ref.blockage[c] ?? NaN) * (mesh.cellVolR[c] ?? NaN));
+      const d = Math.abs((st[8 * c + 6] ?? NaN) / tauRef - 1);
+      if (wallRow(mesh.cellR[c] ?? NaN)) worstWall = Math.max(worstWall, d);
+      else worstRest = Math.max(worstRest, d);
+    }
+    const e = await error(p);
+    process.stdout.write(
+      `[12.2] wall exclusion: tau kernel / oracle - 1, wall rows ${worstWall.toExponential(2)}, the rest ${worstRest.toExponential(2)}; e_q after 1 ${e.toExponential(2)}\n`,
+    );
+    // tau is the f32 evaluation of the same radii from the same f32 state and metrics (a few f32
+    // roundings, ~1e-7), held at row C's one-iteration 1e-5
+    expect(Math.max(worstWall, worstRest)).toBeLessThanOrEqual(TOL[1]);
+    expect(e).toBeLessThanOrEqual(TOL[1]);
+    p.gpu.destroy();
+  });
+
   // W2S-N1: at p_out = p_inf the pOut uniform equals p_inf whatever the BC says (mutant A3g, `pOut:
   // ref.p`, survived every GPU test), so the row also runs at 0.98 p_inf, where the kernel's pOut
   // and pOutGauge both differ from the free stream's
