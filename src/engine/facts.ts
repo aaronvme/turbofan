@@ -146,6 +146,8 @@ export const ENGINE_FACTS = {
   vbvClosedAboveN2c: f(85, '%', 'unknown'),
   groundRunCustomerBleed: f(0, '', 'unknown'),
   groundRunAccessoryLoad: f(40000, 'W', 'unknown'),
+  starterSpeedRatio: f(5.557, '', 'unknown'),
+  igniterSparkRate: f(2, 'Hz', 'unknown'),
 } as const satisfies Readonly<Record<string, EngineFact>>;
 
 export type EngineFactId = keyof typeof ENGINE_FACTS;
