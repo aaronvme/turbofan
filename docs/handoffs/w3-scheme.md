@@ -45,7 +45,7 @@ GOTCHAS
 GATES @HEAD (code of cd88474; the later commits are docs)
 - npm test (in the coverage run, `reports/scratch/run/post.log`): 140 files, 2409 passed + 10 expected fail.
 - coverage: lines 99.55 % (statements 98.54, branches 87.97, functions 99.56); src/flow/reference 100 %, src/thermo 100 %, src/cycle 99.62 %, src/geometry 99.59 %, src/flow/gpu 99.75 % (`reports/scratch/coverage`).
-- npm run typecheck: clean at ea9c486 and after each later code commit (by hand); npm run lint: ESLint + Prettier on every touched file clean; the full `npm run lint` and `typecheck` of the post job were still running at STOP-CLEAN (`reports/scratch/run/post.status`).
+- npm run typecheck: clean by hand at ea9c486 and d9e728e (cd88474, a test-only edit, not re-checked); ESLint + Prettier clean on every touched file at d9e728e; the full `npm run lint` and `typecheck` of the post job were still running at STOP-CLEAN (`reports/scratch/run/post.status`).
 - test:ladder: as above (all files but d463 in one run, d463 alone); test:gpu-ladder: 5 files, 17 passed + 1 expected fail; test:gpu: 12 files, 73 passed, 1 failed (E-L9a, decision 1).
 
 ROUND 1 (kept for reference)
