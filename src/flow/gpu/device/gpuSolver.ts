@@ -72,6 +72,11 @@ export interface CellSourceCoefficients {
   /** 1 per cell: the factor of the force power u . (rate0 + rho aRho)_(1..3) added to s_eta. */
   readonly work?: ArrayLike<number>;
   readonly damping?: ArrayLike<number>;
+  /**
+   * W3's blade-row body force, BODY_FORCE_STRIDE (8) per cell (src/flow/coupling/bodyForce.ts):
+   * omega, kappa, cN, cP, deltaStall, cf2, kRev, kind.
+   */
+  readonly bodyForce?: ArrayLike<number>;
 }
 
 export async function compileWgsl(
@@ -464,7 +469,38 @@ export class GpuSolver {
       if (c.work.length !== n) throw new Error(`work needs ${n} values`);
       for (let k = 0; k < n; k++) data[4 * CELL_SOURCE_VEC4 * k + 7] = c.work[k] ?? NaN;
     }
+    if (c.bodyForce !== undefined) {
+      if (c.bodyForce.length !== 8 * n) throw new Error(`bodyForce needs ${8 * n} values`);
+      for (let k = 0; k < n; k++) {
+        for (let m = 0; m < 8; m++) {
+          data[4 * CELL_SOURCE_VEC4 * k + 32 + m] = c.bodyForce[8 * k + m] ?? NaN;
+        }
+      }
+    }
     this.device.queue.writeBuffer(this.coef, 0, data);
+  }
+
+  /**
+   * Test only: the source rates and damping of the last stage, NU each per cell (rate, damping;
+   * SOLVER.md 8's units), in f64, rho u's rate absolute as written.
+   */
+  async readSources(): Promise<{ rate: Float64Array; damping: Float64Array }> {
+    if (this.src === null) throw new Error('the solver was created without cellSource');
+    const n = this.layout.nCells;
+    const s = new Float32Array(await this.readBuffer(this.src, 0, 64 * n));
+    const rate = new Float64Array(NU * n);
+    const damping = new Float64Array(NU * n);
+    for (let c = 0; c < n; c++) {
+      for (let m = 0; m < 4; m++) {
+        rate[NU * c + m] = s[16 * c + m] ?? NaN;
+        damping[NU * c + m] = s[16 * c + 8 + m] ?? NaN;
+      }
+      for (let m = 0; m < 2; m++) {
+        rate[NU * c + 4 + m] = s[16 * c + 4 + m] ?? NaN;
+        damping[NU * c + 4 + m] = s[16 * c + 12 + m] ?? NaN;
+      }
+    }
+    return { rate, damping };
   }
 
   /**

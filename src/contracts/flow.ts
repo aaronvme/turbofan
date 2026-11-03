@@ -333,11 +333,14 @@ export const FLOW_FIELD_SOURCES = ['mock', 'solver'] as const satisfies readonly
  * coupling's body forces and combustor sources (W2: from a start state, so not this engine's
  * flow; the badge and the legend say "solver (uncoupled until W3)"). coupled: the solver driven
  * toward the cycle model by W3's coupling. It travels with the data, as `source` does.
+ * calibrating (W3, PHYSICS.md 3.3 CP5): the solver with the coupling's forces and sources on, its
+ * trim still outside L12's tolerances at the current point; it reads "coupled" only while they hold.
  */
-export type FlowCoupling = 'mock' | 'uncoupled' | 'coupled';
+export type FlowCoupling = 'mock' | 'uncoupled' | 'calibrating' | 'coupled';
 export const FLOW_COUPLINGS = [
   'mock',
   'uncoupled',
+  'calibrating',
   'coupled',
 ] as const satisfies readonly FlowCoupling[];
 
@@ -350,8 +353,8 @@ export function flowCouplingProblems(f: {
   if (mock === (f.coupling === 'mock')) return [];
   return [
     mock
-      ? `a MOCK field cannot be '${f.coupling}' (only the solver is coupled or uncoupled)`
-      : "a solver field cannot be 'mock' (it is 'uncoupled' or 'coupled')",
+      ? `a MOCK field cannot be '${f.coupling}' (only the solver is uncoupled, calibrating or coupled)`
+      : "a solver field cannot be 'mock' (it is 'uncoupled', 'calibrating' or 'coupled')",
   ];
 }
 

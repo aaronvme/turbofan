@@ -146,6 +146,8 @@ export function provenanceLabel(coupling: FlowCoupling, fallback: string | null 
   switch (coupling) {
     case 'coupled':
       return 'Live flow solver (GPU, 2D axisymmetric + swirl), coupled to the cycle';
+    case 'calibrating':
+      return "Flow solver calibrating to the cycle (GPU, 2D axisymmetric + swirl): blade and combustor forces on, not yet within L12's tolerances";
     case 'uncoupled':
       return 'Flow solver (uncoupled until W3): GPU, 2D axisymmetric + swirl; no blade or combustor forces';
     case 'mock':

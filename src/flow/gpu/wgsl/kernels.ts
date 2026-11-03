@@ -27,6 +27,7 @@
 // j-faces) and every slope by one call site, from primitives that every tile computes with the same
 // code from the same U (an interface ghost is its neighbour block's cell, consToPrim of the same
 // bits at the same call site, haloPrim), so both blocks of an interface see the same face states.
+import { BODY_FORCE_WGSL } from './bodyForce';
 import { GHOST_LAYERS } from '../../reference/solverMesh';
 import type { GasModel } from '../../reference/gas';
 import type { GpuLayout, Tile } from '../layout';
@@ -804,7 +805,7 @@ fn advanceTime() {
 }
 
 /** vec4 records per cell of the built-in source model's coefficients. */
-export const CELL_SOURCE_VEC4 = 8;
+export const CELL_SOURCE_VEC4 = 10;
 
 /**
  * The built-in cell source model (section 8), per cell and component, from the stage's state:
@@ -814,11 +815,13 @@ export const CELL_SOURCE_VEC4 = 8;
  * (the last term is massSourceRates: a mass source at the local state, carrying its h0). This
  * covers a constant source, a force density proportional to rho (ladder L9) and a point-implicit
  * sink at the local state (ladder L8), and an axial force with its power (ladder L9b). Coefficients,
- * 8 vec4 per cell: rate0 (4), (rate0 (2), kMass, work), aRho (4), (aRho (2), 0, 0), kU (4), (kU (2), 0, 0), d (4), (d (2), 0, 0).
+ * 10 vec4 per cell: rate0 (4), (rate0 (2), kMass, work), aRho (4), (aRho (2), 0, 0), kU (4), (kU (2), 0, 0), d (4), (d (2), 0, 0),
+ * and W3's blade-row body force (bodyForce.ts): (omega, kappa, cN, cP), (deltaStall, cf2, kRev, kind).
  * Bindings: 1 U_stage, 2 coefficients, 3 sources (rw), 4 prim, 5 geo.
  */
 export function cellSourceKernelWgsl(o: KernelOptions): string {
   return `${header(o)}
+${BODY_FORCE_WGSL}
 @group(0) @binding(1) var<storage, read> U: array<vec4f>;
 @group(0) @binding(2) var<storage, read> coef: array<vec4f>;
 @group(0) @binding(3) var<storage, read_write> src: array<vec4f>;
@@ -852,9 +855,21 @@ fn sourceMain(@builtin(global_invocation_id) gid: vec3u) {
     ra += vec4f(sm, sm * (P.uInf + qa.y), sm * qa.z, sm * qa.w);
     rb += vec2f(sm * dh0, sm * qb.y);
   }
+  // the blade-row body force (W3, PHYSICS.md 3.3 CP1): rho f, rho r f_theta, Omega x the latter
+  let k1 = coef[o + 9u];
+  var dBody = vec3f(0.0);
+  if (k1.w != 0.0) {
+    let k0 = coef[o + 8u];
+    let rcb = geo[CELL_GEO + c].x;
+    let bf = bodyForce(P.uInf + qa.y, qa.z, qa.w / rcb, rcb, qb.w, k0, k1);
+    let torque = rho * rcb * bf.f.z;
+    ra += vec4f(0.0, rho * bf.f.x, rho * bf.f.y, torque);
+    if (k0.x != 0.0) { rb.x += k0.x * torque; }
+    dBody = bf.d;
+  }
   src[4u * c] = ra;
   src[4u * c + 1u] = vec4f(rb, 0.0, 0.0);
-  src[4u * c + 2u] = coef[o + 6u];
+  src[4u * c + 2u] = coef[o + 6u] + vec4f(0.0, dBody);
   src[4u * c + 3u] = vec4f(coef[o + 7u].xy, 0.0, 0.0);
 }
 `;
