@@ -5547,3 +5547,11 @@ Power: **AC for every gate** (BatteryStatus 2, 100 %). The orchestrator's CPU d4
 3. **U4 (B):** ratify `COLD_SWITCH_WAIT_FRAMES` = 0 (the asked view warms from its first frame of preparing), against D4-97/D4-98's wait? I recommend it. Also, U4's check text as amended by W2A-N33?
 4. **The shots:** commit the builder's DPR-1 set (shot with the display asleep), or re-shoot on the merged main with the display held on, so the set is at DPR 1.5 like round 7's? I prefer the re-shoot.
 5. **Keep-awake in detached browser runs:** make it system and display (`0x80000003`, ES_DISPLAY_REQUIRED added), for builders and critics alike? With the system flag alone, the display sleeps at its 5-minute AC timeout, Chrome drops to DPR 1 and is throttled, and Modern Standby can close the browser connection. My first browser gate failed that way (fanBlur about 10× slower, 2 timeouts at 240 s, warmStall's connection lost), and the builder's shots show the same DPR 1. D0-1 already asks for the display awake in official runs.
+
+## Critic pass 20: w3/scheme @97a2769 (rounds 1-2) (PARTIAL: in progress)
+
+**Scope.** w3/scheme `e6c48de..97a2769` (24 commits; e552cc1 is the orchestrator's merge of main's D5-5): W2S-I1's fix (SOLVER.md §10/§17's pairwise face radius in the local step, 2b87b39), D5-5 item 1's mirrored slip-wall ghost for ρ′ and Z (ea9c486), L14 on the CPU oracle and the GPU kernel with D5-5's restated peak row, W2S-N1..N3, J's pin lifted at 0.003, and SOLVER.md §5/§17/§17.1, PHYSICS.md 3.3's L14 result line.
+
+**Setup** (2026-11-03, the critic worktree): a local branch `trial20` from main 493f72c took `--no-ff` w3/scheme (9458e5c), clean; its tree equals 97a2769's (w3/scheme already holds main). `git diff --stat main..w3/scheme` touches only docs, `src/contracts`, `src/flow` and tests, so test:browser is not run. Power: **on battery** (BatteryStatus 1) throughout so far; timing rows are indicative. Gates run detached one at a time (`reports/scratch/c20/gates.ps1`, display held, 0x80000003).
+
+(in progress)
