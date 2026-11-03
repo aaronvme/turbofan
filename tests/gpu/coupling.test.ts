@@ -87,7 +87,8 @@ describe('the coupling sources on the kernel against the oracle (CP1, CP2; 130k 
     // a smooth through-flow in the engine (axial 120 m/s in its ducts, fading outside), at rest
     // in the far field, with a swirl that puts the rotors off their camber
     ref.setState((x, r) => {
-      const env = Math.exp(-(((x - 1.2) / 1.6) ** 4)) * Math.exp(-(Math.max(0, r - 0.9) / 0.3) ** 2);
+      const env =
+        Math.exp(-(((x - 1.2) / 1.6) ** 4)) * Math.exp(-((Math.max(0, r - 0.9) / 0.3) ** 2));
       const p = 101325 * (1 + 0.02 * env);
       return { rho: p / (287.05 * (288.15 + 40 * env)), p, u: 120 * env, v: 0, w: -30 * env, z: 0 };
     });
@@ -133,7 +134,9 @@ describe('the coupling sources on the kernel against the oracle (CP1, CP2; 130k 
       }
       const err = Math.abs(energy - omega * torque) / Math.abs(omega * torque);
       worst = Math.max(worst, err);
-      expect(err, r.row.id).toBeLessThanOrEqual(THRESHOLDS.CP1.values.maxEulerWorkRelativeError.value);
+      expect(err, r.row.id).toBeLessThanOrEqual(
+        THRESHOLDS.CP1.values.maxEulerWorkRelativeError.value,
+      );
     }
     process.stdout.write(
       `[CP1/CP2 kernel] e_q after 1 / 10: ${seen.join(' / ')}; worst rotor Euler work ${worst.toExponential(2)}\n`,

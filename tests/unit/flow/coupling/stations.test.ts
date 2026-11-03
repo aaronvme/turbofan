@@ -102,7 +102,8 @@ describe('the reduction of a uniform stream', () => {
     }
     const all = reduceStations(mesh, ref, lines, P, blockage, 40, { lp: 1, hp: 2 });
     expect(all.iteration).toBe(40);
-    expect(Object.keys(all.stations)).toEqual([...SOLVER_REDUCTION_STATIONS]);
+    // integer-like keys enumerate first in JS, so compare the sets
+    expect(Object.keys(all.stations).sort()).toEqual([...SOLVER_REDUCTION_STATIONS].sort());
     expect(all.grossThrustN).toBeGreaterThan(0);
     expect(all.lpTorqueNm).toBe(1);
     expect(all.hpTorqueNm).toBe(2);

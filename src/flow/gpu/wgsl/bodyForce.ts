@@ -48,8 +48,8 @@ fn bodyForce(u: f32, v: f32, w: f32, r: f32, c: f32, k0: vec4f, k1: vec4f) -> Bo
       fx = (fnm * wt) / a;
       ft = (-fnm * u) / a;
       let dn = (k0.z * km * w2) / a;
-      dx = (dn * wt * wt) / (a * a);
-      dt = (dn * u * u) / (a * a);
+      dx = dn;
+      dt = dn;
     }
   } else {
     let sk = sin(k0.y);
@@ -58,8 +58,8 @@ fn bodyForce(u: f32, v: f32, w: f32, r: f32, c: f32, k0: vec4f, k1: vec4f) -> Bo
     let wn = -u * sk + wt * ck;
     fx = rate * wn * sk;
     ft = -rate * wn * ck;
-    dx = rate * sk * sk;
-    dt = rate * ck * ck;
+    dx = rate;
+    dt = rate;
   }
   let fp = k0.w * w2 * loss;
   let dp = 2.0 * k0.w * wm * loss;

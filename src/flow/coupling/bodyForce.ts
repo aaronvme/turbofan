@@ -21,9 +21,9 @@
 // plus the friction loss. Every force is dissipative in the relative frame (W . f <= 0).
 //
 // Energy: a rotor's blade does work only by turning, so s_eta = Omega s_(rho r w) exactly (Euler
-// work, SOLVER.md 1; ladder L9's identity). The point-implicit damping (SOLVER.md 10) is a bound on
-// the diagonal of -ds/dU of the momentum components; it changes the iteration, not the steady
-// state.
+// work, SOLVER.md 1; ladder L9's identity). The point-implicit damping (SOLVER.md 10) bounds the
+// eigenvalue of -ds/dU of the momentum components (each force's Jacobian is about rank one, along
+// its normal), applied to each component; it changes the iteration, not the steady state.
 import { sutherlandViscosity } from '../../cycle/engine';
 import type { EngineDefinition } from '../../contracts/engine';
 import { ENGINE_MEANLINE } from '../../engine/definition';
@@ -115,9 +115,12 @@ export function cellForce(
       const fn = cN * km * w2 * stallSaturation(delta, ds);
       fx = (fn * wt) / a;
       ft = (-fn * u) / a;
+      // the normal force's Jacobian is about rank one along n with the eigenvalue dn; the full dn
+      // on both components keeps the point-implicit step contractive along n at any dt (dn n_i^2
+      // would let the n component overshoot by up to 2x at large dt dn: neutral, not damped)
       const dn = (cN * km * w2) / a;
-      dx = (dn * wt * wt) / (a * a);
-      dt = (dn * u * u) / (a * a);
+      dx = dn;
+      dt = dn;
     }
   } else {
     // follow-camber: -rate W_n n_c, n_c = (-sin kappa, 0, cos kappa)
@@ -127,8 +130,9 @@ export function cellForce(
     const wn = -u * sk + wt * ck;
     fx = rate * wn * sk;
     ft = -rate * wn * ck;
-    dx = rate * sk * sk;
-    dt = rate * ck * ck;
+    // rank one along n_c with the eigenvalue rate: the full rate on both (as dn above)
+    dx = rate;
+    dt = rate;
   }
   const fp = cP * w2 * loss;
   const dp = 2 * cP * wm * loss;
