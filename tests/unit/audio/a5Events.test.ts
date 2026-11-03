@@ -23,6 +23,9 @@ import { factValue } from '../../../src/engine/facts';
 import { onsets, peakAbs, rms } from './lib/analysis';
 import { AMBIENT, DEF, runInputs } from './lib/states';
 
+/** The cycle-model runs behind the checks take seconds; more under a parallel run. */
+const HOOK_TIMEOUT_MS = 120_000;
+
 const FS = 48_000;
 const DT = 0.05;
 const POST = Math.round(DT * FS);
@@ -111,9 +114,9 @@ beforeAll(() => {
     surge.states.push(g.step(DT, runInputs(0.6)));
     surge.surgeCycles.push(g.surgeCycles());
   }
-});
+}, HOOK_TIMEOUT_MS);
 
-describe('A5: events', () => {
+describe('A5: events', { timeout: 60_000 }, () => {
   it('the scripted runs contain each event (a check of the script)', () => {
     expect(start.states.some((s) => s.starterEngaged)).toBe(true);
     expect(start.states.some((s) => !s.starterEngaged)).toBe(true);
@@ -147,6 +150,9 @@ describe('A5: events', () => {
       const expected = on.reduce((n, [a, b]) => n + Math.ceil((b - a) / period), 0);
       const amp = fs.find((f) => f.sparkAmp > 0)?.sparkAmp ?? 1;
       const hits = onsets(r.samples, 0.3 * amp, 0.03 * amp);
+      console.log(
+        `A5 sparks: ${hits.length} heard, ${expected} expected over ${on.length} on-spans`,
+      );
       expect(r.synth.events.sparks).toBe(expected);
       expect(hits.length).toBe(expected);
       for (const h of hits) expect(on.some(([a, b]) => h >= a - 48 && h < b)).toBe(true);
@@ -183,6 +189,7 @@ describe('A5: events', () => {
     const r = render(fs, ['surge']);
     const cycles = surge.surgeCycles[surge.surgeCycles.length - 1] ?? 0;
     const amp = fs[0]?.bangAmp ?? 1;
+    console.log(`A5 surge: ${cycles} Greitzer cycles, ${r.synth.events.bangs} bangs`);
     expect(r.synth.events.bangs).toBe(cycles);
     expect(onsets(r.samples, 0.4 * amp, 0.05 * amp).length).toBe(cycles);
     // and none in the runs without a surge

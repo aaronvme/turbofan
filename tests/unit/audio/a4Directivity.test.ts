@@ -10,6 +10,9 @@ import { createSoundModel, engineSoundFrame } from '../../../src/audio/sources';
 import { bandPower, db, powerSpectrum, rms } from './lib/analysis';
 import { AMBIENT, DEF, leverStates } from './lib/states';
 
+/** The cycle-model runs behind the checks take seconds; more under a parallel run. */
+const HOOK_TIMEOUT_MS = 120_000;
+
 const A4 = THRESHOLDS.A4.values;
 const FS = 48_000;
 const N = 1 << 15;
@@ -25,7 +28,8 @@ function play(s: CycleState, deg: number, keep: readonly VoiceGroup[], frames: n
     surgeCycles: 0,
   });
   return renderStream(
-    [{ atFrame: 0, frame: { ...maskFrame(f, tones, keep), master: 1 }, rampFrames: 0 }],
+    // a fixed master well under the limiter's ceiling: the levels compared are the sources'
+    [{ atFrame: 0, frame: { ...maskFrame(f, tones, keep), master: 0.01 }, rampFrames: 0 }],
     frames,
     {
       sampleRate: FS,
@@ -39,9 +43,9 @@ function play(s: CycleState, deg: number, keep: readonly VoiceGroup[], frames: n
 let points: CycleState[] = [];
 beforeAll(() => {
   points = leverStates([0.6, 1]);
-});
+}, HOOK_TIMEOUT_MS);
 
-describe('A4: directivity', () => {
+describe('A4: directivity', { timeout: 60_000 }, () => {
   it('the fan tones are at least 6 dB louder at 45 deg than at 150 deg', () => {
     for (const s of points) {
       const bpf = (24 * s.n1Rpm) / 60;
@@ -49,6 +53,9 @@ describe('A4: directivity', () => {
         bandPower(powerSpectrum(play(s, deg, ['fan'], N + 2400), N, 2400), bpf, FS, N, 4);
       const forward = level(A4.forwardDeg.value);
       const aft = level(A4.aftDeg.value);
+      console.log(
+        `A4 N1 ${s.n1Percent.toFixed(1)} %: fan BPF 45 - 150 deg = ${db(forward / aft).toFixed(1)} dB`,
+      );
       expect(forward).toBeGreaterThan(0);
       expect(db(forward / aft)).toBeGreaterThanOrEqual(A4.minForwardDb.value);
     }
@@ -66,6 +73,7 @@ describe('A4: directivity', () => {
           best = deg;
         }
       }
+      console.log(`A4 N1 ${s.n1Percent.toFixed(1)} %: jet noise peaks at ${best} deg`);
       expect(best).toBeGreaterThanOrEqual(A4.jetPeakMinDeg.value);
       expect(best).toBeLessThanOrEqual(A4.jetPeakMaxDeg.value);
     }

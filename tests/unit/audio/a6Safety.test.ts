@@ -15,6 +15,9 @@ import { factValue } from '../../../src/engine/facts';
 import { peakAbs } from './lib/analysis';
 import { AMBIENT, DEF, runInputs } from './lib/states';
 
+/** The cycle-model runs behind the checks take seconds; more under a parallel run. */
+const HOOK_TIMEOUT_MS = 120_000;
+
 const A6 = THRESHOLDS.A6.values;
 const FS = 48_000;
 const DT = 0.05;
@@ -65,9 +68,9 @@ beforeAll(() => {
     push(k);
   }
   stream = frames.map((frame, j) => ({ atFrame: j * POST, frame, rampFrames: POST }));
-});
+}, HOOK_TIMEOUT_MS);
 
-describe('A6: safety and cost (Node rows)', () => {
+describe('A6: safety and cost (Node rows)', { timeout: 60_000 }, () => {
   it('the script is 60 s and holds each event', () => {
     expect(stream.length * DT).toBeCloseTo(A6.transientS.value, 9);
     expect(events.lit).toBeGreaterThan(0);
@@ -89,6 +92,9 @@ describe('A6: safety and cost (Node rows)', () => {
     expect(finite).toBe(true);
     expect(denormals).toBe(0);
     const peakDb = 20 * Math.log10(peakAbs(y));
+    console.log(
+      `A6 60 s transient: peak ${peakDb.toFixed(2)} dBFS, ${r.synth.events.bangs} bangs, ${r.synth.events.sparks} sparks`,
+    );
     expect(peakDb).toBeLessThanOrEqual(-A6.peakDbBelowFullScale.value);
     // it is not silence: the take-off and the bang are loud
     expect(peakDb).toBeGreaterThan(-20);

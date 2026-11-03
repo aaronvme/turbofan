@@ -55,7 +55,7 @@ const STEPS: readonly (readonly [number, number])[] = [
   [A1.maxN1Percent.value, 105],
 ];
 
-describe('A1: tone frequencies', () => {
+describe('A1: tone frequencies', { timeout: 60_000 }, () => {
   it('the fan blade-pass tone is B_fan N1 / 60 with the published 24 blades', () => {
     expect(A1.fanBlades.value).toBe(24);
     const bpf = tones.find((t) => t.id === 'fan-h1');
@@ -84,7 +84,7 @@ describe('A1: tone frequencies', () => {
         A1.maxFrequencyErrorPercent.value,
       );
     });
-    expect(worst).toBeGreaterThanOrEqual(0);
+    console.log(`A1 N1 ${n1} %, N2 ${n2} %: worst tone error ${worst.toFixed(4)} %`);
   });
 
   it('a 1 s linear N1 ramp at the snapshot rate: no frequency step over 0.5 % at a quantum boundary', () => {
@@ -120,6 +120,9 @@ describe('A1: tone frequencies', () => {
       const want = (24 * (n1At(b / FS - post / FS) / 100) * DEF.designPoint.n1Rpm) / 60;
       worstLag = Math.max(worstLag, (100 * Math.abs((fi[b] ?? 0) - want)) / want);
     }
+    console.log(
+      `A1 ramp: worst boundary step ${worstStep.toFixed(5)} %, lag error ${worstLag.toFixed(4)} %`,
+    );
     expect(worstStep).toBeLessThanOrEqual(A1.maxQuantumStepPercent.value);
     expect(worstLag).toBeLessThanOrEqual(A1.maxFrequencyErrorPercent.value);
   });

@@ -20,6 +20,9 @@ import { ENGINE_FACTS } from '../../../src/engine/facts';
 import { rms, smoothedPeakHz, welch } from './lib/analysis';
 import { AMBIENT, DEF, leverStates } from './lib/states';
 
+/** The cycle-model runs behind the checks take seconds; more under a parallel run. */
+const HOOK_TIMEOUT_MS = 120_000;
+
 const A3 = THRESHOLDS.A3.values;
 const FS = 48_000;
 const model = createSoundModel(DEF);
@@ -45,7 +48,7 @@ function logSlope(xs: readonly number[], ys: readonly number[]): number {
 
 const ids = NOISE_VOICES.map((v) => v.id);
 
-/** A frame playing only one jet stream's two noise voices (large- and fine-scale), master 1. */
+/** A frame playing only one jet stream's two noise voices (large- and fine-scale). */
 function jetOnly(j: JetStream, stream: 'core' | 'bypass'): SoundFrame {
   const n = jetNoise(j, AMBIENT, AFT);
   const f = silentFrame(tones.length, NOISE_VOICES.length);
@@ -62,7 +65,8 @@ function jetOnly(j: JetStream, stream: 'core' | 'bypass'): SoundFrame {
     q[i] = part.q;
     amp[i] = part.amp;
   }
-  return { ...f, noiseHz: hz, noiseQ: q, noiseAmp: amp, master: 1 };
+  // a fixed master well under the limiter's ceiling, so the power played is the source's
+  return { ...f, noiseHz: hz, noiseQ: q, noiseAmp: amp, master: 0.01 };
 }
 
 function render(f: SoundFrame, seconds: number): Float32Array {
@@ -79,11 +83,11 @@ beforeAll(() => {
   const [s] = leverStates([1], 8);
   if (s === undefined) throw new Error('no state');
   takeoff = s;
-});
+}, HOOK_TIMEOUT_MS);
 
 const SUBSONIC_U = [100, 140, 180, 220, 260, 300, 330];
 
-describe('A3: jet mixing noise', () => {
+describe('A3: jet mixing noise', { timeout: 60_000 }, () => {
   it("the source power's log-log slope against U_j is 8 +- 0.2 at fixed rho_j / rho_inf and area", () => {
     for (const ratio of [0.45, 1]) {
       const p = SUBSONIC_U.map((u) => lighthillPower(u, ratio * rhoAmb, rhoAmb, aAmb, 0.9));
@@ -109,6 +113,7 @@ describe('A3: jet mixing noise', () => {
         const y = render(jetOnly(j, stream), 4);
         return rms(y, FS / 2, y.length) ** 2;
       });
+      console.log(`A3 ${stream}: played power slope ${logSlope(SUBSONIC_U, played).toFixed(3)}`);
       expect(Math.abs(logSlope(SUBSONIC_U, played) - A3.slope.value)).toBeLessThanOrEqual(
         A3.slopeTolerance.value,
       );
@@ -144,9 +149,16 @@ describe('A3: jet mixing noise', () => {
       const n = 1 << 16;
       const psd = welch(y, n, FS / 2);
       const f = smoothedPeakHz(psd, FS, n, 10, 4000, 6);
-      const st = (f * j.diameterM) / j.velocity;
-      expect(st, `${stream}: peak ${f.toFixed(1)} Hz`).toBeGreaterThanOrEqual(A3.minStrouhal.value);
-      expect(st, `${stream}: peak ${f.toFixed(1)} Hz`).toBeLessThanOrEqual(A3.maxStrouhal.value);
+      const strouhal = (f * j.diameterM) / j.velocity;
+      console.log(
+        `A3 ${stream}: U ${j.velocity.toFixed(0)} m/s, D ${j.diameterM.toFixed(3)} m, peak ${f.toFixed(1)} Hz, St ${strouhal.toFixed(3)}`,
+      );
+      expect(strouhal, `${stream}: peak ${f.toFixed(1)} Hz`).toBeGreaterThanOrEqual(
+        A3.minStrouhal.value,
+      );
+      expect(strouhal, `${stream}: peak ${f.toFixed(1)} Hz`).toBeLessThanOrEqual(
+        A3.maxStrouhal.value,
+      );
     }
   });
 });

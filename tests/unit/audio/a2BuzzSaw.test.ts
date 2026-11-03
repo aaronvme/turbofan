@@ -11,6 +11,9 @@ import { createSoundModel, engineSoundFrame, fanTipRelativeMach } from '../../..
 import { bandPower, db, powerSpectrum } from './lib/analysis';
 import { AMBIENT, DEF, leverStates, withSpeeds } from './lib/states';
 
+/** The cycle-model runs behind the checks take seconds; more under a parallel run. */
+const HOOK_TIMEOUT_MS = 120_000;
+
 const A2 = THRESHOLDS.A2.values;
 const FS = 48_000;
 const N = 1 << 16;
@@ -65,7 +68,8 @@ function engineOrdersReBpfDb(s: CycleState): number {
     thetaRad: Math.PI / 4,
     surgeCycles: 0,
   });
-  const fan = { ...maskFrame(f, tones, ['fan', 'buzzSaw']), master: 1 };
+  // a fixed master well under the limiter's ceiling: the levels compared are the sources'
+  const fan = { ...maskFrame(f, tones, ['fan', 'buzzSaw']), master: 0.01 };
   const y = renderStream([{ atFrame: 0, frame: fan, rampFrames: 0 }], N + 2400, {
     sampleRate: FS,
     toneCount: tones.length,
@@ -83,9 +87,9 @@ function engineOrdersReBpfDb(s: CycleState): number {
 let states: CycleState[] = [];
 beforeAll(() => {
   states = leverStates([0.5, 0.6, 0.8, 1]);
-});
+}, HOOK_TIMEOUT_MS);
 
-describe('A2: buzz-saw', () => {
+describe('A2: buzz-saw', { timeout: 60_000 }, () => {
   it('voices the engine orders k = 1 .. B_fan - 1', () => {
     const eo = tones.filter((t) => t.group === 'buzzSaw').map((t) => t.order);
     expect(eo).toEqual(Array.from({ length: B - 1 }, (_, k) => k + 1));
@@ -96,6 +100,9 @@ describe('A2: buzz-saw', () => {
     for (const s of states) {
       const mine = fanTipRelativeMach(s, DEF);
       const theirs = independentRelativeTipMach(s);
+      console.log(
+        `A2 N1 ${s.n1Percent.toFixed(1)} %: M_rel ${mine.toFixed(4)} vs ${theirs.toFixed(4)}`,
+      );
       expect((100 * Math.abs(mine - theirs)) / theirs).toBeLessThanOrEqual(
         A2.machAgreementPercent.value,
       );
@@ -114,7 +121,11 @@ describe('A2: buzz-saw', () => {
     expect(sub.length).toBeGreaterThanOrEqual(3);
     for (const s of sub) {
       expect(fanTipRelativeMach(s, DEF)).toBeLessThanOrEqual(A2.subsonicMach.value + 1e-9);
-      expect(engineOrdersReBpfDb(s)).toBeLessThanOrEqual(-A2.minSubsonicDbBelow.value);
+      const level = engineOrdersReBpfDb(s);
+      console.log(
+        `A2 M_rel ${fanTipRelativeMach(s, DEF).toFixed(3)}: engine orders ${level.toFixed(1)} dB re BPF`,
+      );
+      expect(level).toBeLessThanOrEqual(-A2.minSubsonicDbBelow.value);
     }
   });
 
@@ -127,6 +138,9 @@ describe('A2: buzz-saw', () => {
     for (const s of sup) {
       expect(fanTipRelativeMach(s, DEF)).toBeGreaterThanOrEqual(A2.supersonicMach.value);
       const level = engineOrdersReBpfDb(s);
+      console.log(
+        `A2 M_rel ${fanTipRelativeMach(s, DEF).toFixed(3)}: engine orders ${level.toFixed(1)} dB re BPF`,
+      );
       expect(Math.abs(level)).toBeLessThanOrEqual(A2.maxSupersonicDbBelow.value);
     }
   });
