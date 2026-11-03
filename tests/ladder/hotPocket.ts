@@ -7,7 +7,12 @@
 // pressure equilibrium over |x| < 0.06 m, at the outer wall (r > 0.41 m) or mid-channel
 // (|r - 0.375| < 0.035 m), moving axially at u0.
 import { THRESHOLDS } from '../../src/contracts/thresholds';
-import { THERMALLY_PERFECT } from '../../src/flow/reference/gas';
+import {
+  THERMALLY_PERFECT,
+  cpMix,
+  gasConstantMix,
+  productsFraction,
+} from '../../src/flow/reference/gas';
 import type { SolverOptions } from '../../src/flow/reference/solver';
 import type { SolverMesh } from '../../src/flow/reference/solverMesh';
 import { NP, NU, type PhysicalState } from '../../src/flow/reference/state';
@@ -68,6 +73,8 @@ export const HOT_POCKET_OPTIONS: SolverOptions = {
 };
 
 const R_AIR = 287.05287;
+/** The pocket's fuel (mixture fraction Z), PHYSICS.md 3.3 L14. */
+export const POCKET_Z = 0.015;
 
 export function inPocket(c: HotPocketCase, x: number, r: number): boolean {
   return Math.abs(x) < 0.06 && (c.where === 'wall' ? r > 0.41 : Math.abs(r - 0.375) < 0.035);
@@ -79,14 +86,39 @@ export function hotPocketState(c: HotPocketCase): (x: number, r: number) => Phys
   return (x, r) => {
     const hot = inPocket(c, x, r);
     const T = AMBIENT_AT_REST.temperature + (hot ? c.dT : 0);
-    return { rho: p / (R_AIR * T), u: hot ? c.u0 : 0, v: 0, w: 0, p, z: hot ? 0.015 : 0 };
+    return { rho: p / (R_AIR * T), u: hot ? c.u0 : 0, v: 0, w: 0, p, z: hot ? POCKET_Z : 0 };
   };
+}
+
+/**
+ * L14's restated peak row (PHYSICS.md 3.3, amended by D5-5): the bound T'_s(p') = T_h (p /
+ * p_inf)^((gamma - 1) / gamma) - T_inf, the start's hot gas (T_h = T_inf + dT, Z 0.015) compressed
+ * isentropically to a cell's own pressure p = p_inf + p', with gamma = cp / (cp - R) of the
+ * thermally perfect gas at T_h and Z 0.015 (SOLVER.md 3's mixture). It is the temperature the
+ * physics makes from the start's hot gas at that pressure, so a cell above 1.03 x it is one the
+ * scheme made.
+ */
+export function isentropicPocketBound(c: HotPocketCase): (pGauge: number) => number {
+  const pInf = AMBIENT_AT_REST.pressure;
+  const tInf = AMBIENT_AT_REST.temperature;
+  const th = tInf + c.dT;
+  const phi = productsFraction(THERMALLY_PERFECT, POCKET_Z);
+  // (gamma - 1) / gamma = R / cp
+  const k = gasConstantMix(THERMALLY_PERFECT, phi) / cpMix(THERMALLY_PERFECT, th, phi);
+  return (pGauge) => th * ((pInf + pGauge) / pInf) ** k - tInf;
 }
 
 /** One sample of the field: max and min T' over the cells, and whether every cell is sound. */
 export interface PocketSample {
   readonly tMax: number;
   readonly tMin: number;
+  /**
+   * max over the cells of T' / T'_s(p'), the restated peak row's measure (T' <= 1.03 T'_s). A
+   * cell whose bound is not positive counts Infinity if it breaks T' <= 1.03 T'_s, else -Infinity.
+   */
+  readonly overBound: number;
+  /** The cell of overBound. */
+  readonly overBoundAt: number;
   /** Every conserved value and primitive is finite, and rho > 0 in every cell. */
   readonly sound: boolean;
 }
@@ -97,9 +129,13 @@ export function samplePocket(
   U: ArrayLike<number>,
   rhoInf: number,
   n: number,
+  bound: (pGauge: number) => number,
 ): PocketSample {
+  const limit = L14.maxPeakOverIsentropicCompression.value;
   let tMax = -Infinity;
   let tMin = Infinity;
+  let overBound = -Infinity;
+  let overBoundAt = -1;
   let sound = true;
   for (let c = 0; c < n; c++) {
     for (let k = 0; k < NU; k++) if (!Number.isFinite(U[NU * c + k])) sound = false;
@@ -108,8 +144,14 @@ export function samplePocket(
     const t = P[NP * c + 6] as number;
     if (t > tMax) tMax = t;
     if (t < tMin) tMin = t;
+    const ts = bound(P[NP * c + 4] as number);
+    const r = ts > 0 ? t / ts : t <= limit * ts ? -Infinity : Infinity;
+    if (r > overBound) {
+      overBound = r;
+      overBoundAt = c;
+    }
   }
-  return { tMax, tMin, sound };
+  return { tMax, tMin, overBound, overBoundAt, sound };
 }
 
 /** A run of one case: the start sample, then one per iteration until the first unsound one. */
@@ -117,7 +159,7 @@ export interface PocketTrace {
   readonly start: PocketSample;
   /** Iterations completed with a sound state (HOT_POCKET_ITERATIONS when the run held). */
   readonly soundIterations: number;
-  /** The largest max T' over the start and every sound iteration. */
+  /** The largest max T' over the start and every sound iteration (reported; no row since D5-5). */
   readonly peak: number;
   /** The smallest min T' over the start and every sound iteration. */
   readonly low: number;
@@ -125,6 +167,10 @@ export interface PocketTrace {
   readonly end: number;
   /** Where the run's peak sat (iteration, then cell), for the evidence. */
   readonly peakAt: readonly [number, number];
+  /** The largest overBound over the start and every sound iteration: the restated peak row. */
+  readonly peakOverBound: number;
+  /** Where it sat (iteration, then cell). */
+  readonly peakOverBoundAt: readonly [number, number];
 }
 
 /** Runs one case through `step` (one iteration, then the sample of the new state). */
@@ -136,6 +182,8 @@ export async function tracePocket(
   let low = start.tMin;
   let end = NaN;
   let peakAt: [number, number] = [0, -1];
+  let peakOverBound = start.overBound;
+  let peakOverBoundAt: [number, number] = [0, start.overBoundAt];
   let k = 0;
   while (k < HOT_POCKET_ITERATIONS) {
     const s = await step();
@@ -145,21 +193,26 @@ export async function tracePocket(
       peak = s.tMax;
       peakAt = [k, s.at ?? -1];
     }
+    if (s.overBound > peakOverBound) {
+      peakOverBound = s.overBound;
+      peakOverBoundAt = [k, s.overBoundAt];
+    }
     low = Math.min(low, s.tMin);
     if (k === HOT_POCKET_ITERATIONS) end = s.tMax;
   }
-  return { start, soundIterations: k, peak, low, end, peakAt };
+  return { start, soundIterations: k, peak, low, end, peakAt, peakOverBound, peakOverBoundAt };
 }
 
 /**
- * PHYSICS.md 3.3 L14's four rows of one case: finite to 2000 iterations with rho > 0; the run's
- * peak max T' <= 1.03 x its start; max T' at 2000 <= its start; min T' >= -0.03 dT (the run's
- * minimum over every iteration and cell, the stricter reading).
+ * PHYSICS.md 3.3 L14's four rows of one case: finite to 2000 iterations with rho > 0; for every
+ * cell and iteration T' <= 1.03 T'_s, the start's hot gas compressed isentropically to the cell's
+ * own pressure (the peak row as amended by D5-5); max T' at 2000 <= its start; min T' >= -0.03 dT
+ * (the run's minimum over every iteration and cell, the stricter reading).
  */
 export function hotPocketRows(c: HotPocketCase, t: PocketTrace, tag = ''): LadderRow[] {
   const name = `${tag}${caseName(c)}`;
   const held = t.soundIterations === HOT_POCKET_ITERATIONS;
-  const peak = held ? t.peak / t.start.tMax : NaN;
+  const peak = held ? t.peakOverBound : NaN;
   const end = held ? t.end / t.start.tMax : NaN;
   const low = held ? t.low / c.dT : NaN;
   return [
@@ -172,10 +225,10 @@ export function hotPocketRows(c: HotPocketCase, t: PocketTrace, tag = ''): Ladde
     },
     {
       id: 'L14',
-      metric: `${name}: peak max T' / its start`,
-      threshold: `<= ${L14.maxPeakTemperatureRatio.value}`,
+      metric: `${name}: peak T' / T'_s, the start's hot gas compressed isentropically to the cell's pressure`,
+      threshold: `<= ${L14.maxPeakOverIsentropicCompression.value}`,
       value: peak,
-      pass: peak <= L14.maxPeakTemperatureRatio.value,
+      pass: peak <= L14.maxPeakOverIsentropicCompression.value,
     },
     {
       id: 'L14',

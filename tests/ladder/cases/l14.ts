@@ -11,6 +11,7 @@ import {
   hotPocketMesh,
   hotPocketRows,
   hotPocketState,
+  isentropicPocketBound,
   samplePocket,
   tracePocket,
 } from '../hotPocket';
@@ -20,11 +21,12 @@ export async function run() {
   const traces: Record<string, unknown> = {};
   for (const c of HOT_POCKET_CASES) {
     const mesh = hotPocketMesh();
+    const bound = isentropicPocketBound(c);
     const s = new ReferenceSolver(mesh, HOT_POCKET_OPTIONS);
     s.setState(hotPocketState(c));
     const sample = () => {
       const P = s.primitives();
-      const out = samplePocket(P, s.U, s.ref.rho, mesh.nCells);
+      const out = samplePocket(P, s.U, s.ref.rho, mesh.nCells, bound);
       let at = -1;
       for (let k = 0; k < mesh.nCells; k++) if (P[NP * k + 6] === out.tMax) at = k;
       return { ...out, at };

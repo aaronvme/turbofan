@@ -58,7 +58,8 @@ describe("L14's restated peak row: the isentropic compression bound (D5-5)", () 
   });
 
   it('gives the 1.034 x dT that PHYSICS.md 3.3 quotes for 900 K at p′ = 11 kPa', () => {
-    expect(isentropicPocketBound(WALL_900)(11e3) / 900).toBeCloseTo(1.034, 3);
+    // the quoted p' is "about 11 kPa" (1.033 at 11.0 kPa), so two digits
+    expect(isentropicPocketBound(WALL_900)(11e3) / 900).toBeCloseTo(1.034, 2);
   });
 
   it("samples max over cells of T' / T'_s and the cell it sits in", () => {

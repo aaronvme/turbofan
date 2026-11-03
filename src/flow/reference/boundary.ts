@@ -184,11 +184,15 @@ function inflow(
 
 /**
  * Slip-wall ghost of layer 1 or 2 from the wall cell P[s0..] and the next cell inwards P[s1..]
- * (section 5): the scalars, rw and the tangential velocity are extrapolated linearly (layer 1:
- * 2 q0 - q1, layer 2: 3 q0 - 2 q1), the normal velocity is mirrored (-vn0, -vn1). The mirror ghost
- * of W0 imposed dp/dn = 0, which is wrong wherever swirl or wall curvature sets a pressure gradient
- * normal to the wall (it left an odd-even wall mode in ladder L6). The wall face itself carries
- * only the wall pressure (solver.ts), so these values only shape the wall cell's slope.
+ * (section 5): rho' and Z are mirrored (layer 1 the wall cell's, layer 2 the next cell's), p', rw
+ * and the tangential velocity are extrapolated linearly (layer 1: 2 q0 - q1, layer 2: 3 q0 - 2 q1),
+ * the normal velocity is mirrored (-vn0, -vn1). The mirror ghost of W0 imposed dp/dn = 0, which is
+ * wrong wherever swirl or wall curvature sets a pressure gradient normal to the wall (it left an
+ * odd-even wall mode in ladder L6). Extrapolated scalars, in turn, made a wall cell never a limiter
+ * extremum, so a flow leaving the wall drained its fuel and entropy at (q0 + q1)/2, faster than the
+ * cell held them (rho Z < 0, T' below the ambient; SOLVER.md 17, D5-5): a scalar at a slip wall is
+ * reflected (zero normal gradient). The wall face itself carries only the wall pressure
+ * (solver.ts), so these values only shape the wall cell's slope.
  */
 export function wallGhost(
   P: ArrayLike<number>,
@@ -202,7 +206,10 @@ export function wallGhost(
 ): void {
   const a = layer === 1 ? 2 : 3;
   const b = a - 1;
-  for (const k of [0, 3, 4, 5]) out[o + k] = a * (P[s0 + k] as number) - b * (P[s1 + k] as number);
+  const sm = layer === 1 ? s0 : s1;
+  out[o] = P[sm] as number;
+  out[o + 5] = P[sm + 5] as number;
+  for (const k of [3, 4]) out[o + k] = a * (P[s0 + k] as number) - b * (P[s1 + k] as number);
   const u0 = P[s0 + 1] as number;
   const v0 = P[s0 + 2] as number;
   const u1 = P[s1 + 1] as number;

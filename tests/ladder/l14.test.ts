@@ -53,7 +53,7 @@ describe('L14: the hot gas pocket at the engine defaults (CPU oracle)', () => {
   it("every case: max T' at 2000 <= its start; the peak row at |u0| <= 100 m/s", async () => {
     const all = await rows();
     const end = all.filter((r) => r.metric.includes('at 2000 / its start'));
-    const peak = all.filter((r) => r.metric.includes('peak max') && !SLOW.has(caseOf(r)));
+    const peak = all.filter((r) => r.metric.includes('isentropically') && !SLOW.has(caseOf(r)));
     expect(end.length).toBe(10);
     expect(peak.length).toBe(6);
     expectPass([...end, ...peak]);

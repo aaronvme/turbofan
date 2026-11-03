@@ -15,6 +15,7 @@ import {
   hotPocketMesh,
   hotPocketRows,
   hotPocketState,
+  isentropicPocketBound,
   samplePocket,
   tracePocket,
 } from '../ladder/hotPocket';
@@ -51,6 +52,7 @@ describe('GPU ladder L14: the hot gas pocket', () => {
     const traces: Record<string, unknown> = {};
     for (const c of HOT_POCKET_CASES) {
       const mesh = hotPocketMesh();
+      const bound = isentropicPocketBound(c);
       const s = new ReferenceSolver(mesh, HOT_POCKET_OPTIONS);
       s.setState(hotPocketState(c));
       const g = await onGpu(sim.device, s, HOT_POCKET_OPTIONS);
@@ -58,7 +60,7 @@ describe('GPU ladder L14: the hot gas pocket', () => {
         const sample = async () => {
           await back(g, s);
           const P = s.primitives();
-          const out = samplePocket(P, s.U, s.ref.rho, mesh.nCells);
+          const out = samplePocket(P, s.U, s.ref.rho, mesh.nCells, bound);
           let at = -1;
           for (let k = 0; k < mesh.nCells; k++) if (P[NP * k + 6] === out.tMax) at = k;
           return { ...out, at };
@@ -97,7 +99,7 @@ describe('GPU ladder L14: the hot gas pocket', () => {
   it("every case: max T' at 2000 <= its start; the peak row at |u0| <= 100 m/s, GPU", async () => {
     const r = await rows();
     const end = r.filter((x) => x.metric.includes('at 2000 / its start'));
-    const peak = r.filter((x) => x.metric.includes('peak max') && !SLOW.has(caseOf(x)));
+    const peak = r.filter((x) => x.metric.includes('isentropically') && !SLOW.has(caseOf(x)));
     expect(end.length).toBe(10);
     expect(peak.length).toBe(6);
     expectPass([...end, ...peak]);

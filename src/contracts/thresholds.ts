@@ -381,13 +381,17 @@ export const THRESHOLDS = {
     section: '3.3',
     checkText: 'Hot gas pocket (W2S-I1; D5-2)',
     passText:
-      "at the engine's defaults (preconditioned, minMach = M_cut = 0.02, CFL 0.8, the production limiter), on the CPU oracle and the GPU kernel: finite to 2000 iterations, ρ > 0; peak max T′ ≤ 1.03 × its start; max T′ at 2000 ≤ its start; min T′ ≥ −0.03 ΔT",
+      "at the engine's defaults (preconditioned, minMach = M_cut = 0.02, CFL 0.8, the production limiter), on the CPU oracle and the GPU kernel: finite to 2000 iterations, ρ > 0; peak T′ ≤ 1.03 × the start's hot gas compressed isentropically to the cell's own pressure (D5-5); max T′ at 2000 ≤ its start; min T′ ≥ −0.03 ΔT",
     targetsFrom: 'PHYSICS',
     values: {
       machCut: pass(0.02, '1', 'M_cut = 0.02'),
       cfl: pass(0.8, '1', 'CFL 0.8'),
       iterations: pass(2000, 'iterations', '2000 iterations'),
-      maxPeakTemperatureRatio: pass(1.03, '1', '1.03 ×'),
+      /**
+       * T' <= this x T'_s in every cell and iteration, T'_s the start's hot gas compressed
+       * isentropically to the cell's own pressure (D5-5's restated peak row).
+       */
+      maxPeakOverIsentropicCompression: pass(1.03, '1', '1.03 ×'),
       /** min T' >= -this x dT (the token's sign is the text's; the parser reads magnitudes). */
       maxUndershootFractionOfDeltaT: pass(0.03, '1', '−0.03 ΔT'),
     },
