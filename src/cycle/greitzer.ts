@@ -121,6 +121,32 @@ export function simulateSurge(
   return { minPhi, maxPhi, periodXi, final: s };
 }
 
+/**
+ * A surge cycle's flow breakdown (A5, D5-4: the engine sound bangs once per modelled cycle): Phi
+ * falls below Phi_eq - SURGE_BREAKDOWN_DROP W, a quarter of the cubic's peak flow 2W, and the
+ * counter re-arms once Phi is back at Phi_eq or above. The hysteresis keeps a small oscillation
+ * about the equilibrium (a decaying transient) from counting; a deep surge's flow reversal and a
+ * classic surge's breakdown count once per cycle.
+ */
+export const SURGE_BREAKDOWN_DROP = 0.5;
+
+export interface BreakdownCounter {
+  readonly armed: boolean;
+  readonly cycles: number;
+}
+
+export function countBreakdown(
+  c: BreakdownCounter,
+  p: GreitzerParams,
+  eqPhi: number,
+  phi: number,
+): BreakdownCounter {
+  if (c.armed && phi < eqPhi - SURGE_BREAKDOWN_DROP * p.w)
+    return { armed: false, cycles: c.cycles + 1 };
+  if (!c.armed && phi >= eqPhi) return { armed: true, cycles: c.cycles };
+  return c;
+}
+
 /** Helmholtz resonator frequency of the compression system, rad/s. */
 export function helmholtzFrequency(
   soundSpeed: number,

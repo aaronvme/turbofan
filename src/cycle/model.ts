@@ -80,9 +80,11 @@ import {
   type SteadySolution,
 } from './engine';
 import {
+  countBreakdown,
   criticalB,
   equilibrium,
   greitzerStep,
+  type BreakdownCounter,
   type GreitzerParams,
   type GreitzerState,
 } from './greitzer';
@@ -308,6 +310,11 @@ export interface CycleDiagnostics {
    * unbudgeted snapshot, the exception beside P5.
    */
   heldRetryEscalations(): number;
+  /**
+   * Surge cycles since the reset (A5, D5-4): the Greitzer episodes' flow breakdowns
+   * (greitzer.ts countBreakdown), one bang each in the engine sound.
+   */
+  surgeCycles(): number;
 }
 
 class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
@@ -356,6 +363,8 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
   };
   private pending: CycleFault | null = null;
   private surge: SurgeEpisode | null = null;
+  /** The surge cycles counted since the reset, and whether the next breakdown counts (A5). */
+  private breakdowns: BreakdownCounter = { armed: true, cycles: 0 };
   /** The FADEC's surge detector on the sensed P3 (D3-17). */
   private p3Detector: P3DecayDetector = P3_DETECTOR_START;
   /** Simulation time of the last surge detection while the recovery sequence runs, else null. */
@@ -424,6 +433,7 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
     this.dn1 = 0;
     this.dn2 = 0;
     this.surge = null;
+    this.breakdowns = { armed: true, cycles: 0 };
     this.pending = null;
     this.p3Detector = P3_DETECTOR_START;
     this.recoverySinceS = null;
@@ -500,6 +510,10 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
 
   heldRetryEscalations(): number {
     return this.escalations;
+  }
+
+  surgeCycles(): number {
+    return this.breakdowns.cycles;
   }
 
   step(dtS: number, inputs: CycleInputs): CycleState {
@@ -767,6 +781,7 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
       let g = ep.g;
       for (let k = 0; k < steps; k++) {
         g = greitzerStep(sys.params, g, (sys.omegaH * dt) / steps);
+        this.breakdowns = countBreakdown(this.breakdowns, sys.params, eq.phi, g.phi);
         // the P3 sensor follows the plenum pressure through the surge cycle (compose's P3)
         detected =
           sense(snap.stations['3'].ptPa * surgePressureFactor(g, eq), dt / steps) || detected;
@@ -855,6 +870,8 @@ class TurbofanCycleModel implements CycleModel, CycleDiagnostics {
     const forcedUntilS = injected ? this.t + SURGE_FAULT_S : this.t;
     const sys = this.surgeAt(snap, injected);
     const eq = equilibrium(sys.params);
+    // a new episode's first breakdown counts, wherever the last one left off
+    this.breakdowns = { ...this.breakdowns, armed: true };
     this.surge = {
       g: { phi: eq.phi * 0.95, psi: eq.psi },
       params: sys.params,
