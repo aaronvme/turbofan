@@ -232,10 +232,14 @@ describe('CP1 on the 130k mesh: the Euler work of every row (oracle)', () => {
           r.row.id,
         ).toBeLessThanOrEqual(CP1.maxEulerWorkRelativeError.value);
     }
-    // the point-implicit damping is non-negative everywhere, and 0 for the energy and the fuel
+    // the point-implicit damping is non-negative everywhere; a rotor's energy takes its torque's
+    // (so the Euler work holds through a stiff stage too: the energy's increment is Omega x the
+    // angular momentum's, both divided by the same factor), a stator's energy and the fuel none
     for (let c = 0; c < mesh.nCells; c++) {
       for (let m = 0; m < NU; m++) expect(damping[NU * c + m] ?? NaN).toBeGreaterThanOrEqual(0);
-      expect(damping[NU * c + 4]).toBe(0);
+      const omega = k[BODY_FORCE_STRIDE * c] ?? NaN;
+      expect(damping[NU * c + 4]).toBe(omega === 0 ? 0 : damping[NU * c + 3]);
+      expect(damping[NU * c + 5]).toBe(0);
     }
   });
 });
