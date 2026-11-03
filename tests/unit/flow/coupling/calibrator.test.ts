@@ -20,7 +20,7 @@ import {
   trimFromErrors,
   trimStep,
 } from '../../../../src/flow/coupling/calibrator';
-import { KNOB_IDS, UNIT_KNOBS, type KnobId } from '../../../../src/flow/coupling/knobs';
+import { KNOB_IDS, UNIT_KNOBS } from '../../../../src/flow/coupling/knobs';
 
 const L12 = THRESHOLDS.L12.values;
 
