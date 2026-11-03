@@ -15,7 +15,7 @@ export interface ThresholdNumber {
 
 export interface ThresholdSpec {
   readonly id: string;
-  readonly section: '3.1' | '3.2' | '3.3' | '3.4';
+  readonly section: '3.1' | '3.2' | '3.3' | '3.4' | '3.6';
   readonly checkText: string;
   readonly passText: string;
   /** Where the comparison target comes from: these numbers, or cited figures in ENGINE_FACTS.md. */
@@ -464,6 +464,97 @@ export const THRESHOLDS = {
       minStepRateHz: check(30, 'Hz', '30 Hz'),
       maxHeldEpisodeS: pass(0.5, 's', '≤ 0.5 s'),
       escalateAfterS: pass(0.25, 's', 'held for 0.25 s'),
+    },
+  },
+  // 3.6 Engine sound (D5-4, pre-registered before any audio code): levels are relative (dB against
+  // the blade-pass tone at the same operating point); src/audio and tests/unit/audio check them
+  A1: {
+    id: 'A1',
+    section: '3.6',
+    checkText:
+      "Tone frequencies: the fan blade-pass tone B_fan·N1/60 (B_fan = 24, the definition's published count) and its harmonics; the HPC rotor tones B_row·N2/60 for the rows the synth voices (counts from the definition, estimates labelled); any turbine tones likewise",
+    passText:
+      "each tone's measured peak within 0.25 % of its formula at every N1 (and N2) step from sub-idle to 105 %; in a 1 s linear N1 ramp, no step in instantaneous frequency > 0.5 % between 128-sample quanta; no partial above 0.45 f_s (no aliasing)",
+    targetsFrom: 'PHYSICS',
+    values: {
+      maxFrequencyErrorPercent: pass(0.25, '%', '0.25 %'),
+      maxN1Percent: pass(105, '%', '105 %'),
+      rampS: pass(1, 's', '1 s linear'),
+      maxQuantumStepPercent: pass(0.5, '%', '> 0.5 %'),
+      quantumFrames: pass(128, 'frames', '128-sample'),
+      maxPartialOfSampleRate: pass(0.45, '1', '0.45 f_s'),
+      fanBlades: check(24, 'blades', 'B_fan = 24'),
+    },
+  },
+  A2: {
+    id: 'A2',
+    section: '3.6',
+    checkText:
+      "Buzz-saw: the multiple pure tones at engine orders k·N1/60, k = 1 … B_fan − 1, with onset at the fan's relative tip Mach 1",
+    passText:
+      "M_rel,tip from the cycle state (N1, the definition's fan tip radius, the fan-face total temperature and axial Mach) agrees with an independent computation in the test within 0.5 %; the summed engine-order level is ≥ 30 dB below the blade-pass tone at M_rel ≤ 0.98 and within 20 dB of it at M_rel ≥ 1.05",
+    targetsFrom: 'PHYSICS',
+    values: {
+      machAgreementPercent: pass(0.5, '%', 'within 0.5 %'),
+      minSubsonicDbBelow: pass(30, 'dB', '≥ 30 dB'),
+      subsonicMach: pass(0.98, '1', 'M_rel ≤ 0.98'),
+      maxSupersonicDbBelow: pass(20, 'dB', 'within 20 dB'),
+      supersonicMach: pass(1.05, '1', 'M_rel ≥ 1.05'),
+      onsetMach: check(1, '1', 'Mach 1'),
+    },
+  },
+  A3: {
+    id: 'A3',
+    section: '3.6',
+    checkText:
+      "Jet mixing noise from each stream (core, bypass), from the cycle model's nozzle exit velocity, density and area",
+    passText:
+      "the source power follows Lighthill's U_j⁸ law: its log-log slope against U_j at fixed ρ_j/ρ∞ and area is 8 ± 0.2 over the subsonic operating range; the spectral peak at the aft peak angle sits at a Strouhal number f·D_j/U_j in 0.15-0.3",
+    targetsFrom: 'PHYSICS',
+    values: {
+      slope: pass(8, '1', '8 ± 0.2'),
+      slopeTolerance: pass(0.2, '1', '± 0.2'),
+      minStrouhal: pass(0.15, '1', '0.15-0.3'),
+      maxStrouhal: pass(0.3, '1', '-0.3'),
+    },
+  },
+  A4: {
+    id: 'A4',
+    section: '3.6',
+    checkText: "Directivity, from the listener's angle θ to the inlet axis (the camera position)",
+    passText:
+      'the fan tones are louder forward, with the level at θ = 45° at least 6 dB above that at θ = 150°; jet mixing noise peaks at θ in 140-160° (20-40° from the jet axis)',
+    targetsFrom: 'PHYSICS',
+    values: {
+      forwardDeg: pass(45, 'deg', 'θ = 45°'),
+      aftDeg: pass(150, 'deg', 'θ = 150°'),
+      minForwardDb: pass(6, 'dB', '6 dB'),
+      jetPeakMinDeg: pass(140, 'deg', '140-160°'),
+      jetPeakMaxDeg: pass(160, 'deg', '-160°'),
+    },
+  },
+  A5: {
+    id: 'A5',
+    section: '3.6',
+    checkText:
+      "Events from the cycle state: the starter's whine (speed ∝ N2 through the starter gear ratio, an estimate labelled), the igniters' clicks, the combustion rumble (∝ fuel flow), and a surge bang per surge cycle",
+    passText:
+      "exact gating: no igniter click while the igniters are off and none missing while they are on; no rumble while unlit; one bang per modelled surge cycle (the Greitzer model's cycle count)",
+    targetsFrom: 'PHYSICS',
+    values: {},
+  },
+  A6: {
+    id: 'A6',
+    section: '3.6',
+    checkText: 'Safety and cost',
+    passText:
+      "over 60 s of a scripted transient (start, take-off, surge, flameout, relight), the output stays finite with no denormals and peaks ≤ −1 dBFS through a final limiter; sound is off until the viewer turns it on, with mute and volume controls in the HUD; the DSP's median cost per 128-frame quantum is ≤ 0.4 ms (15 % of 2.67 ms) in Node, indicative; P1 and P4 do not change beyond their noise (the worklet runs on the audio thread)",
+    targetsFrom: 'PHYSICS',
+    values: {
+      transientS: pass(60, 's', '60 s'),
+      peakDbBelowFullScale: pass(1, 'dB', '≤ −1 dBFS'),
+      maxQuantumMs: pass(0.4, 'ms', '≤ 0.4 ms'),
+      quantumFrames: pass(128, 'frames', '128-frame'),
     },
   },
 } as const satisfies Record<string, ThresholdSpec>;
