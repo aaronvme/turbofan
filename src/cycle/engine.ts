@@ -377,6 +377,28 @@ export function combustionEfficiencyTable(
   };
 }
 
+/**
+ * The combustion efficiency eta_b of the gas path at a fuel flow (D3-14: the design efficiency times
+ * the EEDB emission-index table at the fuel flow corrected to the fan face; 0 unlit). The flow
+ * solver's combustor source takes its heat eta_b W_f LHV from here (PHYSICS.md 3.3 CP2).
+ */
+export function combustionEfficiency(
+  cal: CycleCalibration,
+  wfKgPerS: number,
+  p2Pa: number,
+  t2K: number,
+  lit: boolean,
+): number {
+  if (!lit) return 0;
+  const comb = cal.partPower.combustion;
+  const wfCorrected = wfKgPerS / (p2Pa / P_STD) / Math.sqrt(t2K / T_STD);
+  const etaRel =
+    comb.correctedFuelFlowKgPerS.length === 0
+      ? 1
+      : piecewiseLinear(comb.correctedFuelFlowKgPerS, comb.relativeEfficiency, wfCorrected);
+  return cal.efficiencies.combustor * etaRel;
+}
+
 /** Part-speed loss ramp: 1 at or below the knee, 0 at or above design speed, linear between. */
 function partSpeedRamp(knee: number, speedFraction: number): number {
   return Math.min(1, Math.max(0, (1 - speedFraction) / (1 - knee)));
@@ -688,14 +710,7 @@ function gasPath(
   const h3 = enthalpy(s3.tt, 0);
   const far4 = wf / wComb;
   const w4 = wComb + wf;
-  // D3-14: combustion efficiency vs power from the EEDB emission indices (1 at design)
-  const comb = pp.combustion;
-  const wfCorrected = wf / (s2.pt / P_STD) / theta(s2.tt);
-  const etaRel =
-    comb.correctedFuelFlowKgPerS.length === 0
-      ? 1
-      : piecewiseLinear(comb.correctedFuelFlowKgPerS, comb.relativeEfficiency, wfCorrected);
-  const etaB = inp.lit ? cal.efficiencies.combustor * etaRel : 0;
+  const etaB = combustionEfficiency(cal, wf, s2.pt, s2.tt, inp.lit);
   const h4 = (wComb * h3 + etaB * wf * cal.fuelLhvJPerKg) / w4;
   const tt4 = temperatureFromEnthalpy(h4, far4);
   // cold (friction and dump) losses go with the dynamic head, i.e. (W sqrt(Tt) / Pt)^2 (Walsh &
