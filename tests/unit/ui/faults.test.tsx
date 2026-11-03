@@ -84,6 +84,7 @@ describe('the worker messages in the store (W2A-I1)', { timeout: TIMEOUT_MS }, (
       engineBox: null,
       framedBox: null,
       jetBox: null,
+      listener: [-3.7, 0.75, 3.35],
     } as const;
     receive({ ...msg, refused: ['seq 3 is not after the last applied seq 4'] });
     receive({ ...msg, refused: [] });
@@ -92,6 +93,12 @@ describe('the worker messages in the store (W2A-I1)', { timeout: TIMEOUT_MS }, (
     expect(s.diagnostics).toBe(diagnostics);
     expect(s.trails.fan).toHaveLength(1);
     expect(s.refused).toEqual(['seq 3 is not after the last applied seq 4']);
+    // the engine sound's listener (D5-4): the camera position each snapshot was drawn from
+    expect(s.listener).toEqual([-3.7, 0.75, 3.35]);
+    act(() => {
+      useApp.getState().resetSession();
+    });
+    expect(useApp.getState().listener).toBeNull();
   });
 });
 

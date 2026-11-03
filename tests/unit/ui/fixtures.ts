@@ -75,6 +75,7 @@ export function diagnosticsOf(o: Partial<AppDiagnostics> = {}): AppDiagnostics {
     warmUpMs: 2100,
     warmUpSteps: [],
     lostSolveCause: null,
+    surgeCycles: 0,
     fixedSteps: null,
     errors: [],
     adapter: 'intel arc',
