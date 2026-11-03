@@ -5851,3 +5851,43 @@ None.
 2. **W3S-I2:** record J at 0.02's stall as a D4-101 regression at the engine's cut (9441 before it, a limit cycle since), and have w3/plume-bake pre-register J at both cuts before L11?
 3. **W3S-N1:** read L14's at-rest "end ≤ start" with a round-off allowance (a logged decision), or leave it as is?
 4. **Housekeeping:** the local branch `trial20` (9458e5c) is left in the critic worktree: the PreToolUse hook blocked `git branch -D` (a fact-forcing gate), so the orchestrator can delete it. The critic worktree is back on `critic`, and no detached run of mine is left going. `critic` holds only this LOG section and the four probe files.
+
+### Re-verification @6362232 (round 3, D5-6's test-only fix; 2026-11-03, on battery)
+
+**Setup.**
+- A new local branch `trial20b` from main d54148a took `--no-ff` w3/scheme 6362232 (7ea8f70), clean. Its tree equals 6362232's.
+- `git diff --stat 97a2769 6362232` touches no `src` file: only tests, SOLVER.md, the handoff, and main's LOG.
+- Gates ran detached, one at a time (`reports/scratch/c20/gates3.ps1`, the display held).
+
+**Gates and mutants (all match round 3's report):**
+- **test:gpu: 12 files, 75 passed**, 64 s.
+  - **E-L9a, K2 2.202e-11 ≤ 1e-10.** The old form 1.187e-9 and S3 1.944e-10 are printed, and the oracle's own U⁹ check is ≤ 1e-12.
+  - **The new wall-exclusion row:** τ kernel/oracle − 1 is 1.24e-7 in the wall rows and 1.21e-7 elsewhere; e_q after 1 iteration is 2.72e-7 (bar 1e-5).
+- **test:gpu-ladder: 5 files, 17 passed + 1 expected fail** (L9a's D4-57 pin), 348 s.
+- **CPU L14** (`tests/ladder/l14.test.ts`): 2 passed, 189 s. Every gated row of all 10 cases passes, with the same values as pass 20.
+- **Mutant W1g** (the kernel's ρ′ extrapolated): **K2 1.657e-10 fails it**, while the old form passes it at 3.343e-11. It also fails 7 other oracle rows.
+- **Mutant R2g** (the kernel's wall exclusion off): **the new row fails it at 5.54e-2 against 1e-5 (5500×)**. GPU L14 still passes with it, as before.
+- Both files were restored, and `git status` is clean.
+
+**The nits:**
+- **W3S-N1: done, and the derivation holds.**
+  - `END_ROUND_OFF_ALLOWANCE` = 2e-12 is a worst-case linear bound: at most 5.1 u per iteration from the half-ulp rounding of the pocket cell's ρ′ and η, times 2000 iterations, is 1.0e4 u = 1.1e-12, rounded up to 2e-12.
+  - The measured excursions are +4u..−9u, so the bound is about 1000× above them. 2.4e-9 K is far below any heating the row is for.
+  - Residual: PHYSICS.md 3.3's L14 row still reads "max T′ at 2000 ≤ its start" with no allowance. D5-6 is the logged decision. A one-line note there, at the merge or in the next round, would make the contract text match the test (not blocking).
+- **W3S-N3: done.** The run's peak p′ is reported per case (see the table below).
+  - My 0.41 was a 1D two-impedance estimate. The short, partial-height pocket relieves in 2D, so the measured values are what the row needed.
+  - No pressure overshoot shows.
+
+  | cases | peak p′ | over ρ∞c∞\|u0\| |
+  |---|---|---|
+  | −300 m/s | 9.86-16.1 kPa | 0.08-0.13 |
+  | −100 m/s | 0.90-1.08 kPa | about 0.02-0.03 |
+  | −50 m/s | 358 Pa | |
+  | at rest | 5.9e-9 Pa | |
+
+- **W3S-N4: done.** R2g is now killed by a dedicated row at 5500× its tolerance.
+- **W3S-N2: done.** SOLVER.md §17.1 carries the U⁹ table and says what each term measures.
+
+**Verdict: MERGE** (w3/scheme @6362232). W3S-I1 is closed. N1, N3, N4 and N2 are done, with N1's PHYSICS.md wording as a remaining one-liner. W3S-I2 stays with w3/plume-bake (D5-6 item 2).
+
+The local branches `trial20` and `trial20b` are left for the orchestrator to delete (the hook blocks `git branch -D`).
