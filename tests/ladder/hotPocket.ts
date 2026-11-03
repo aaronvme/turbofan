@@ -111,7 +111,7 @@ export function isentropicPocketBound(c: HotPocketCase): (pGauge: number) => num
 /**
  * W3S-N1 (critic pass 20): "max T' at 2000 <= its start" is read as end <= start x (1 + this), the
  * f64 rounding of the CPU at-rest case, which is a rest state to round-off. Measured (w3/scheme
- * round 3, scratch ; u = 2^-53): its max T' sits +4u, +2u, +6u and -9u
+ * round 3, scratch `reports/scratch/r3/kappa.ts`; u = 2^-53): its max T' sits +4u, +2u, +6u and -9u
  * from its start after 1, 10, 100 and 2000 iterations, so the unallowed row's verdict there is a
  * coin toss. The bound: one ulp of the pocket cell's rho' or eta moves its T' by at most 6.8u or
  * 3.4u, so the half-ulp rounding of both in one iteration by at most 5.1u, and 2000 iterations by
