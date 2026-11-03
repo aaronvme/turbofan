@@ -24,7 +24,7 @@ import { GpuSolver } from '../../src/flow/gpu/device/gpuSolver';
 import { THERMALLY_PERFECT } from '../../src/flow/reference/gas';
 import { ReferenceSolver, type SolverOptions } from '../../src/flow/reference/solver';
 import type { SourceModel } from '../../src/flow/reference/sources';
-import { NU } from '../../src/flow/reference/state';
+import { NP, NU } from '../../src/flow/reference/state';
 import type { SimDevice } from '../../src/gpu/device';
 import { relativeError } from '../ladder/oracle';
 import {
@@ -113,8 +113,27 @@ describe('the coupling sources on the kernel against the oracle (CP1, CP2; 130k 
       ref.iterate(n - done);
       gpu.iterate(n - done);
       done = n;
-      const e = relativeError(await gpu.readPrimitives(), ref.primitives(), mesh.cellR, ref.ref.u);
-      seen.push(e.toExponential(2));
+      const A = await gpu.readPrimitives();
+      const B = ref.primitives();
+      const e = relativeError(A, B, mesh.cellR, ref.ref.u);
+      // reported: each field's share (rho', velocity, p', Z, T'), relativeError's groups
+      const groups: [string, number[]][] = [
+        ['rho', [0]],
+        ['vel', [1, 2, 3]],
+        ['p', [4]],
+        ['Z', [5]],
+        ['T', [6]],
+      ];
+      const parts = groups.map(([name, g]) => {
+        const pick = (P: Float64Array) => {
+          const q = new Float64Array(NP * mesh.nCells);
+          for (let c = 0; c < mesh.nCells; c++)
+            for (const m of g) q[NP * c + m] = P[NP * c + m] ?? NaN;
+          return q;
+        };
+        return `${name} ${relativeError(pick(A), pick(B), mesh.cellR, 0).toExponential(2)}`;
+      });
+      seen.push(`${e.toExponential(2)} (${parts.join(', ')})`);
       expect(e, `e_q after ${n}`).toBeLessThanOrEqual(TOL[n]);
     }
 

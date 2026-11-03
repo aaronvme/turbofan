@@ -118,6 +118,13 @@ function fieldBadge(flow: SnapshotSources['flow'], link: FieldLinkView | null): 
         text: 'FIELD: SOLVER (coupled)',
         detail: provenanceLabel('coupled'),
       };
+    if (link?.coupling === 'calibrating')
+      return {
+        id: 'field',
+        level: 'advisory',
+        text: 'FIELD: solver (calibrating)',
+        detail: provenanceLabel('calibrating'),
+      };
     return {
       id: 'field',
       level: 'advisory',
