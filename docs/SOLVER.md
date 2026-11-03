@@ -878,3 +878,30 @@ All 10 cases pass every row on both, so round 1's KNOWN-FAIL pin is lifted (`tes
 - *W2S-N2's doubled response is not the cause:* removing it (p and u_n continuous across vn = 0 for any p_s) leaves the cycle unchanged to the sign-change count, and neither the tangential velocity, the limiter nor a preconditioned impedance changes it.
 - *What decides it is the backflow's pressure condition, and it decides it the opposite way at the two cuts:* a backflow at the total p_out (static p_out − ½ρσ²: the branch, and every variant built on the inflow ghost) cycles at 0.02 and converges at 0.003; a backflow at the static p_out (the old copy, or the characteristic ghost with ambient T and Z) converges at 0.02 and cycles at 0.003. The outflow rows' p′ are 0.3-5 Pa, the same size as ½ρσ² at the backflow speeds (1-2 m/s), so the two conditions are different boundary problems here, not a small change of one.
 - *Proposed fix (for w3/plume-bake, L11's jets; not made here, and not a one-line correction):* find the cycling mode before choosing a form. Linearise J at its limit cycle's mean state (scratch `reports/scratch/diag/jac.ts` and `eigsub.py` did this for L14) with each backflow pressure condition, at 0.02 and 0.003, and take the form whose leading eigenvalue of the 3-stage map is inside the unit circle at both cuts. A candidate to test first is a backflow at the total p_out with its dynamic head taken from the face's normal velocity rather than from the ghost's own σ (which removes the ghost's own ½ρσ² feedback while keeping W2S-B1's protection against the momentum feedback). The pre-registered test: J converges at both 0.003 and 0.02, D4-63 and the W2S-B1 long run pass, and the engine runaway stays finite.
+
+**No regression with the mirrored wall (D5-5 item 3; code of ea9c486, run 2026-11-02 on AC, each suite alone).** "Converged" values must be at or better than record; values read at a stop, a cap or a fixed iteration must pass their bar and are shown beside the record (D5-5 item 3).
+
+| row | record | CPU oracle | GPU kernel |
+|---|---|---|---|
+| L1 quiescent; uniform M 0.5 | 0; GPU 2.13e-5 m/s | 0; 2.03e-13 | 0; 2.13e-5 |
+| L2 L1(ρ), shock offset | 0.002767, 0.2282 | 0.002767, 0.2282 | 0.002768, 0.2282 |
+| L3 L1(ρ) | 0.002113 | 0.002113 | 0.002113 |
+| L4a Mach, mass flow, iterations | 0.278 %, 0.0997 %, 915 | 0.2779 %, 0.0997 %, 915 | 0.2779 %, 0.0996 % |
+| L4b shock, steadiness | 1.640 %, 2.58e-4 | 1.640 %, 2.580e-4 | (not a GPU row) |
+| L5 mass flow, iterations | 0.0843 %, 948 | 0.0843 %, 948 | 0.0843 % |
+| L6 free vortex; solid body (error, drift) | 3.005e-4, 4.7e-15; 2.90e-5, 5.41e-8 | 3.004e-4, 4.5e-15; 2.90e-5, 5.41e-8 | 3.000e-4, 4.9e-8; 2.87e-5, 8.6e-8 |
+| L7 asymmetry; \|Cd\|; ratio (at the 1e-4 stop) | 0.01093; 0.00131; 1.779 | 0.01110; 0.001287; 1.644 (as round 1) | 0.01110; 0.001287; 1.644 (14781 / 8993) |
+| L8 velocity, steadiness (at the cap) | 0.754 %, 3.2e-5 | 0.7526 %, 2.65e-5 | 0.7530 %, 3.26e-5 |
+| L9a Euler work, steadiness (at the cap) | 8.86e-6, 1.062e-5 (FAIL, D4-57) | 9.82e-6, **9.20e-6: PASSES D4-57's row** | 1.66e-6, 1.344e-5 (pinned as before; round 1 1.31e-5) |
+| L9b momentum theory, steadiness | 0.80 %, 2.49e-5 | 0.8008 %, 2.487e-5 | 0.7990 %, 3.43e-5 |
+| 12.2 floors (L4a, L5; f32 / f64) | 1.590e-4, 1.096e-3; 6.4e-13, 5.9e-12 | 1.595e-4, 1.096e-3; 6.43e-13, 5.43e-12 | |
+| 12.2 C-pre after 1 / 10 / 100 | CPU 1.43e-7 / 1.79e-7 / 1.06e-6; GPU 5.13e-7 / 3.77e-7 / 1.05e-6 | 1.35e-7 / 1.71e-7 / 4.99e-7 | 5.68e-7 / 3.72e-7 / 1.30e-6 |
+| 12.2 S after 1 / 10 / 100 | CPU 1.25e-7 / 1.11e-7 / 2.02e-6; GPU 5.32e-7 / 4.77e-7 / 7.67e-6 | 1.25e-7 / 1.34e-7 / 9.50e-7 | 5.32e-7 / 5.79e-7 / 1.30e-5 |
+| E-L5, E-L9a over the flux scale; B | 2.67e-8, 2.46e-12; 1.266e-11 | | 2.67e-8, **1.19e-9 (FAILS D4-71's 1e-10, below)**; 1.266e-11, 1.95e-5 m/s |
+| D4-63 (a) L2(p′) max over 1000-2000; at 20000 | CPU 0.4450 / 0.009223; GPU 0.4450 / 0.008997 | **the run of record on AC, alone, 85 min: finite**, 0.4497 / 0.008369 | 0.4497 / 0.008217 |
+| D4-63 (b) residual 20000/10000; 20000/100 | CPU 0.1535 / 0.03063; GPU 0.1634 / 0.03253 | 0.2156 / 0.03297 | 0.2158 / 0.03297 (trend 0.876 per 1000) |
+| W2S-B1 long run (a); (b) | 0.659 / 5.09e-4; 0.108 / 7.28e-3 | | 0.6286 / 2.06e-3; 0.1621 / 0.0262 (max T′ 300.9 K) |
+| L14 | (round 1: 3 of 10 CPU, 2 of 10 GPU) | 10 of 10 | 10 of 10 |
+
+- Every row passes its bar except E-L9a's flux-scale row (decision below). The D4-63 and W2S-B1 values are read at fixed iterations of a pseudo-time decay (D5-5 item 3: their bars hold, ≤ 2 and ≤ 1 with margins of 4-30×); the L7, L8, L9a and L9b values at a stop or a cap. The changes from the record are round 1's step rule (SOLVER.md 17) to the digits shown, except L9a's (the steadiness now passes) and E-L9a.
+- **E-L9a (decision).** The kernel and the oracle agree on the fields as before (e 6.05e-6 against 5.10e-6, tolerance 1e-4) and on the residual's own form (3.18e-6, tolerance 1e-3), but the residual difference over the flux scale is 1.19e-9 against D4-71's 1e-10 (record 2.46e-12). Isolated (temporary edits, restored): mirroring only layer 1 gives 1.19e-9, only layer 2 gives 2.46e-12, so it is the wall cell's own ρ′ slope (zero with the mirrored ghost). The kernel's wall ghosts are right (the new test: ρ′ and Z bitwise their sources, all 48). What the row measures: the oracle's residual of the GPU's state against the oracle's residual of its own state (both U¹⁰) differs by 4.2e-5 with round 1's wall (2.0e-9 of the flux scale) and 9.2e-5 with the mirror (4.3e-9), so the record's 2.46e-12 sat 800× below the residual's own sensitivity to the kernel's f32 state, and the mirror's 1.19e-9 is inside it. D4-71's 1e-10 is below that sensitivity with either wall; the threshold is not changed here.
