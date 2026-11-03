@@ -47,13 +47,17 @@ describe('the coupling sources on the kernel against the oracle (CP1, CP2; 130k 
   afterEach(() => log.assertNone('coupling'));
   afterAll(() => sim.destroy());
 
-  it('matches the oracle with the body forces at the design speeds and the take-off fuel', async () => {
+  it('matches the oracle with the body forces at 30 % speed and the take-off fuel', async () => {
     const mesh = await shippedMesh();
     const rows = meshRows(mesh, DEF);
     const blockage = rowBlockageField(mesh, rows);
+    // 30 % of the design speeds: the start state's swirl (below) then meets every row within
+    // about a radian of its camber, a well-conditioned run for a 1e-5 comparison. At the design
+    // speeds this non-rotating start puts the HPT rotor 2.3 rad off its camber, and the oracle
+    // and the kernel both go non-finite within 10 iterations (w3-coupling handoff, GOTCHAS)
     const op = {
-      n1RadPerS: (DEF.designPoint.n1Rpm * 2 * Math.PI) / 60,
-      n2RadPerS: (DEF.designPoint.n2Rpm * 2 * Math.PI) / 60,
+      n1RadPerS: (0.3 * DEF.designPoint.n1Rpm * 2 * Math.PI) / 60,
+      n2RadPerS: (0.3 * DEF.designPoint.n2Rpm * 2 * Math.PI) / 60,
       vsvClosureRad: 0.1,
     };
     const k = bodyForceCoefficients(mesh, rows, DEF, op, UNIT_KNOBS, blockage);

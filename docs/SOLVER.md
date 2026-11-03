@@ -274,6 +274,8 @@ with S_f the cell's **outward** face vectors. For b ≡ 1 this is (0, p′A + ρ
 
 The cell integral of a source is b_c V_c s_c. Body forces of a blade row (W3, Hall–Thollet) enter as s_1 = ρf_x, s_2 = ρf_r, s_3 = ρ r f_θ and s_4 = ρ(u f_x + v f_r + w f_θ) (or Ω s_3 for the Euler-work form); the combustor as s_4 = heat release per volume and s_5 = fuel per volume.
 
+**The W3 sources (w3/coupling; PHYSICS.md 3.3 CP1, CP2).** The blade rows' forces and the combustor plug in here, through `SourceModel` in the oracle and the cell-source kernel on the GPU (its coefficients grow to 10 vec4 per cell: the last two are the body force's, `(Ω, κ, c_N, c_P)`, `(δ_s, 2C_f, K_rev, kind)`). The formulas are in `src/flow/coupling/bodyForce.ts` (the f64 form of record, its header gives them) and `src/flow/gpu/wgsl/bodyForce.ts` (the same order in f32). Per cell: s_1 = ρf_x, s_2 = ρf_r, s_3 = ρ r f_θ and s_4 = Ω s_3 (the energy as the Euler work of the row's torque; 0 for a stator). The point-implicit damping of the momentum components is each force's rank-one eigenvalue (the normal force's c_N K_M W²/|W_xθ|, the follow-camber rate), applied to every component: the diagonal bound d n_i² lets the normal component overshoot by up to 2× at a large dt·d, a neutral, undamped step. The combustor is a constant rate0: s_0 = s_5 = s_m (the fuel's mass) and s_4 = q − h0∞ s_m (the fuel's enthalpy is 0 at the src/thermo datum, as in the cycle's balance), with no damping. The blockage is the metal's (`src/flow/coupling/rows.ts`), 1 at the rows' edges.
+
 ## 9. Residual
 
 For each cell, with outward face fluxes F_f (§7, times b_f):
