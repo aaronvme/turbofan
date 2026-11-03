@@ -111,14 +111,14 @@ export function isentropicPocketBound(c: HotPocketCase): (pGauge: number) => num
 /**
  * W3S-N1 (critic pass 20): "max T' at 2000 <= its start" is read as end <= start x (1 + this), the
  * f64 rounding of the CPU at-rest case, which is a rest state to round-off. Measured (w3/scheme
- * round 3, scratch `reports/scratch/r3/kappa.ts`; u = 2^-53): its max T' sits +4u, +2u, +6u and -9u from its start
- * after 1, 10, 100 and 2000 iterations, so the row's unallowed verdict there is a coin toss. The
- * bound: one ulp of the pocket cell's rho' or eta moves its T' by at most 6.8u or 3.4u, so the
- * half-ulp rounding of both in one iteration by at most 5.1u, and 2000 iterations by 1.0e4 u =
- * 1.1e-12; rounded up to one figure, 2e-12 (2.4e-9 K at the pocket's 1200 K; any heating the row
- * is for is many orders above it). On the GPU the start is f32-rounded and its pocket moves (end
- * 0.41 of the start), so no tie arises there; the GPU's state is read as f32 + low part in f64 and
- * the same allowance applies.
+ * round 3, scratch ; u = 2^-53): its max T' sits +4u, +2u, +6u and -9u
+ * from its start after 1, 10, 100 and 2000 iterations, so the unallowed row's verdict there is a
+ * coin toss. The bound: one ulp of the pocket cell's rho' or eta moves its T' by at most 6.8u or
+ * 3.4u, so the half-ulp rounding of both in one iteration by at most 5.1u, and 2000 iterations by
+ * 1.0e4 u = 1.1e-12; rounded up to one figure, 2e-12 (2.4e-9 K at the pocket's 1200 K; any heating
+ * the row is for is many orders above it). On the GPU the start is f32-rounded and its pocket moves
+ * (end 0.41 of the start), so no tie arises there; the GPU's state is read as f32 + low part in
+ * f64 and the same allowance applies.
  */
 export const END_ROUND_OFF_ALLOWANCE = 2e-12;
 
