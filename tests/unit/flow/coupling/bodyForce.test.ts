@@ -241,5 +241,6 @@ describe('CP1 on the 130k mesh: the Euler work of every row (oracle)', () => {
       expect(damping[NU * c + 4]).toBe(omega === 0 ? 0 : damping[NU * c + 3]);
       expect(damping[NU * c + 5]).toBe(0);
     }
-  });
+    // 130k cells x (sources + 6 checks): a few seconds, over vitest's 5 s default on a loaded laptop
+  }, 60_000);
 });

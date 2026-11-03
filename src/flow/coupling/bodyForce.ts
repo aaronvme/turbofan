@@ -179,7 +179,13 @@ export function addBodyForceRates(
     rate[q + 2] = (rate[q + 2] as number) + rho * (f[1] as number);
     rate[q + 3] = (rate[q + 3] as number) + torque;
     const omega = k[o] as number;
-    if (omega !== 0) rate[q + 4] = (rate[q + 4] as number) + omega * torque;
+    if (omega !== 0) {
+      // the Euler work point-implicit like its torque: the energy's increment stays Omega x the
+      // angular momentum's in a stiff stage (an undamped energy took Omega x the undamped torque
+      // and overheated a rotor started 2.3 rad off its camber)
+      rate[q + 4] = (rate[q + 4] as number) + omega * torque;
+      damping[q + 4] = (damping[q + 4] as number) + (f[5] as number);
+    }
     damping[q + 1] = (damping[q + 1] as number) + (f[3] as number);
     damping[q + 2] = (damping[q + 2] as number) + (f[4] as number);
     damping[q + 3] = (damping[q + 3] as number) + (f[5] as number);

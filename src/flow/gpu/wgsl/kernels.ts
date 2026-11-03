@@ -858,19 +858,23 @@ fn sourceMain(@builtin(global_invocation_id) gid: vec3u) {
   // the blade-row body force (W3, PHYSICS.md 3.3 CP1): rho f, rho r f_theta, Omega x the latter
   let k1 = coef[o + 9u];
   var dBody = vec3f(0.0);
+  var dWork = 0.0;
   if (k1.w != 0.0) {
     let k0 = coef[o + 8u];
     let rcb = geo[CELL_GEO + c].x;
     let bf = bodyForce(P.uInf + qa.y, qa.z, qa.w / rcb, rcb, qb.w, k0, k1);
     let torque = rho * rcb * bf.f.z;
     ra += vec4f(0.0, rho * bf.f.x, rho * bf.f.y, torque);
-    if (k0.x != 0.0) { rb.x += k0.x * torque; }
+    if (k0.x != 0.0) {
+      rb.x += k0.x * torque;
+      dWork = bf.d.z;
+    }
     dBody = bf.d;
   }
   src[4u * c] = ra;
   src[4u * c + 1u] = vec4f(rb, 0.0, 0.0);
   src[4u * c + 2u] = coef[o + 6u] + vec4f(0.0, dBody);
-  src[4u * c + 3u] = vec4f(coef[o + 7u].xy, 0.0, 0.0);
+  src[4u * c + 3u] = vec4f(coef[o + 7u].x + dWork, coef[o + 7u].y, 0.0, 0.0);
 }
 `;
 }
