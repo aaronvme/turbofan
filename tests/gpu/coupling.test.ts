@@ -44,8 +44,12 @@ describe('the coupling sources on the kernel against the oracle (CP1, CP2; 130k 
   beforeAll(async () => {
     sim = await solverDevice(log);
   });
-  afterEach(() => log.assertNone('coupling'));
-  afterAll(() => sim.destroy());
+  afterEach(() => {
+    log.assertNone('coupling');
+  });
+  afterAll(() => {
+    sim.destroy();
+  });
 
   it('matches the oracle with the body forces at 30 % speed and the take-off fuel', async () => {
     const mesh = await shippedMesh();

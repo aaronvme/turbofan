@@ -194,7 +194,9 @@ export function addBodyForceRates(
 
 /** The oracle's source model of the body forces with coefficients k (BODY_FORCE_STRIDE per cell). */
 export function bodyForceSource(k: ArrayLike<number>): SourceModel {
-  return (ctx, out) => addBodyForceRates(k, ctx.mesh, ctx.ref.rho, ctx.prim, out.rate, out.damping);
+  return (ctx, out) => {
+    addBodyForceRates(k, ctx.mesh, ctx.ref.rho, ctx.prim, out.rate, out.damping);
+  };
 }
 
 /**
